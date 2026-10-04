@@ -22,7 +22,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Bluetooth); the panel says so too. A device that is off or out of range
   shows "Not in range?" after about 15 seconds.
 - **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
-  ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
+  ⌃⌥ Esc may have handed the trackpad to macOS (press it again). Check the
   Accessibility and Input Monitoring permissions of *OmacVM Gestures*. A VM
   OmacVM did not set up may need `omacvm update --vm NAME` once: the Mac lets in
   only VMs whose trackpad daemon says the Bridge's token.
@@ -288,7 +288,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Symptom:** the VM is gone after Cmd+W; the guest journal of that boot
   just ends, without a shutdown.
 - **Cause:** when OmacVM Gestures does not take the key (VM not full screen,
-  trackpad handed back with ⌃⌥⌘Esc, or a key posted by a script below the
+  trackpad handed back with ⌃⌥Esc, or a key posted by a script below the
   keyboard, such as System Events' `keystroke`), UTM gets Cmd+W and closes
   the VM window. With UTM's "don't ask before quitting" setting
   (`NoQuitConfirmation`), closing the window stops the VM at once.

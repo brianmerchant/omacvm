@@ -5,7 +5,7 @@ The short version is the grid at the top of the [README](../README.md).
 | Feature | What it does |
 |---|---|
 | **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
@@ -37,7 +37,7 @@ Put the VM in full screen for the trackpad gestures, the scroll momentum and
 the media keys. While it is full screen and in front, the Mac's trackpad
 gestures and ⌘ shortcuts go to Omarchy, and macOS's own Spaces swipe is off.
 
-**⌃⌥⌘ Esc** (Control + Option + Command + Escape) hands the trackpad back to
+**⌃⌥ Esc** (Control + Option + Escape) hands the trackpad back to
 macOS (Omarchy shows a notification), so you can swipe to your other Spaces.
 Press it again, or come back to the full-screen VM, to hand it to Omarchy
 again. Volume and brightness keys always change the Mac, with Omarchy's popup

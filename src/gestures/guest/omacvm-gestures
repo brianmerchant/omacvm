@@ -669,7 +669,7 @@ def handle(p, pad, keys, glide):
             pad.release()
             keys.release()
         if state == "esc":
-            notify("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)")
+            notify("Trackpad gestures → macOS (⌃⌥ Esc to take them back)")
 
 
 def main():

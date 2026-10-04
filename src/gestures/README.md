@@ -22,7 +22,7 @@ trackpad. Then:
   Omanotch strip, the Dock, menus, another display);
 - on UTM, Cmd shortcuts reach the guest as Super (a virtual keyboard).
 
-**⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification); it
+**⌃⌥ Esc** releases the trackpad to macOS (Omarchy shows a notification); it
 re-arms when you come back to the full-screen VM, or press the combo again.
 If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
@@ -64,5 +64,5 @@ app does.
 
 Verified on macOS 15.7.4, Parallels 27.0.2, MacBook Pro M4 Max: 4-finger and
 3-finger swipes switch workspaces, pinch zooms in Chrome, macOS Spaces swipes
-blocked while captured, ⌃⌥⌘ Esc releases and re-arms; the scroll momentum's glide distance
+blocked while captured, ⌃⌥ Esc releases and re-arms; the scroll momentum's glide distance
 within 5-10 % of macOS's, with the same decay.

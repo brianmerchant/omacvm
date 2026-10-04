@@ -15,7 +15,7 @@
 // While the VM is full screen, the macOS pointer is hidden wherever the VM window
 // is what lies under it (the guest draws its own pointer); over anything else
 // (the Omanotch strip, the Dock, menus, another display) it shows.
-// Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
+// Ctrl+Option+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
 // Each VM says on connect what it wants (the handshake below). Capture
@@ -573,7 +573,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
     int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
-    int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
+    int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate);
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
@@ -958,7 +958,7 @@ int main(int argc, char **argv) {
     if (!listenAddrs[i][0] && i != NET_FUSION) continue;
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
-  logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
+  logf_(trackpad ? "running (escape: Ctrl+Option+Esc)" : "running, keys only: trackpad gestures stay with macOS");
   CFRunLoopRun();
   return 0;
 }
