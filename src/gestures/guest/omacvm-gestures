@@ -669,7 +669,11 @@ def handle(p, pad, keys, glide):
             pad.release()
             keys.release()
         if state == "esc":
-            notify("Trackpad gestures → macOS (⌃⌥ Esc to take them back)")
+            shortcut = p[2].decode() if len(p) > 2 else "ctrl-opt"
+            if shortcut == "ctrl-opt-cmd":
+                notify("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)")
+            else:
+                notify("Trackpad gestures → macOS (⌃⌥ Esc to take them back)")
 
 
 def main():

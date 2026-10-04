@@ -605,7 +605,14 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     escaped = !escaped;
     capturing = frontIsVM && !escaped;
     logf_("escape combo: capture %s", capturing ? "ON" : "off");
-    sendState(capturing ? "on" : "esc");
+    if (capturing) {
+      sendState("on");
+    } else {
+      const char *which = (f & kCGEventFlagMaskCommand) ? "ctrl-opt-cmd" : "ctrl-opt";
+      char b[40];
+      int n = snprintf(b, sizeof b, "S esc %s\n", which);
+      sendLine(b, (size_t)n);
+    }
     swallowEscUp = 1;
     return NULL;
   }
