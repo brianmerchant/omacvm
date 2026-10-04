@@ -164,6 +164,10 @@ static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
+static CFRunLoopSourceRef tapSource;
+static CGEventMask tapMask;
+static int tapRearmPending;
+static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u);
 static int verbose;
 int ns_event_type(CGEventRef e);  // scroll_ns.m
 void ns_on_app_activate(void (*f)(void));
@@ -394,8 +398,50 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
   if (win) CFRelease(win);
 }
 
+static int installTap(void) {
+  CFMachPortRef newTap = CGEventTapCreate(
+      kCGHIDEventTap, kCGHeadInsertEventTap,
+      kCGEventTapOptionDefault, tapMask, tapCb, NULL);
+  if (!newTap) return 0;
+
+  CFRunLoopSourceRef newSource =
+      CFMachPortCreateRunLoopSource(NULL, newTap, 0);
+  if (!newSource) {
+    CFRelease(newTap);
+    return 0;
+  }
+
+  CFRunLoopRef loop = CFRunLoopGetMain();
+  CFRunLoopAddSource(loop, newSource, kCFRunLoopCommonModes);
+
+  if (tapSource) {
+    CFRunLoopRemoveSource(loop, tapSource, kCFRunLoopCommonModes);
+    CFRunLoopSourceInvalidate(tapSource);
+    CFRelease(tapSource);
+  }
+
+  if (tapPort) {
+    CFMachPortInvalidate(tapPort);
+    CFRelease(tapPort);
+  }
+
+  tapPort = newTap;
+  tapSource = newSource;
+  return 1;
+}
+
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)info;
+
+  if (tapRearmPending && CFRunLoopGetCurrent() == CFRunLoopGetMain()) {
+    if (installTap()) {
+      tapRearmPending = 0;
+      logf_("event tap rearmed for OmacVM");
+    } else {
+      logf_("event tap rearm failed for OmacVM");
+    }
+  }
+
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   // Parallels' VM window, UTM's, or VMware Fusion's.
@@ -403,6 +449,10 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
           : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
           : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
   int front = net >= 0 && vmFullScreen(pid);
+
+  if (front && net == NET_APP && (!frontIsVM || frontNet != NET_APP))
+    tapRearmPending = 1;
+
   if (front) {
     // Which of the app's VMs: its window title, on this check (every 0.2 s
     // while a VM app is full screen in front) and on every app switch.
@@ -638,7 +688,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn() && ns_event_type(e) == 30) {
+  if (!pinchSent && capturing && glideOn() &&
+      (type == 30 || (type == 29 && ns_event_type(e) == 30))) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
@@ -953,16 +1004,16 @@ int main(int argc, char **argv) {
   }
   signal(SIGPIPE, SIG_IGN);
 
-  CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
+  tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
-  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) m |= (CGEventMask)1 << gestureTypes[i];
+  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) tapMask |= (CGEventMask)1 << gestureTypes[i];
   // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
   // combo). Ask once, then wait for the grant instead of exiting, so launchd
   // does not restart us into a loop of prompts.
   CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
   CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   int asked = 0;
-  while (!(tapPort = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, m, tapCb, NULL))) {
+  while (!installTap()) {
     if (!asked) {
       logf_("waiting for Accessibility and Input Monitoring permission");
       AXIsProcessTrustedWithOptions(opts);
@@ -973,7 +1024,6 @@ int main(int argc, char **argv) {
   }
   CFRelease(opts);
   if (asked) logf_("permissions granted");
-  CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(NULL, tapPort, 0), kCFRunLoopCommonModes);
 
   // The trackpad only now, with the permissions granted and the run loop about
   // to run: opened while still waiting, its frames were never taken, and on a
