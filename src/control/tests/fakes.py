@@ -54,6 +54,8 @@ class FakeMac:
         self.stale_looking = True         # False: the Mac is not looking (a key that is really wrong)
         self.nonces: set = set()
         self.graphics: dict | None = None   # an OmacVM.app VM's Graphics (omacvm graphics --json)
+        self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
+        self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -124,9 +126,12 @@ class FakeMac:
                     time.sleep(fake.hello_delay)
                     names = [l.split("\t")[0] for l in open(os.path.join(SRC, "features.tsv"), encoding="utf-8")
                              if l.strip() and not l.startswith("#")]
+                    reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else [])
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
-                                           "requests": ["hello", "status", "updates", "jobs"], "macos": "15.7.4",
-                                           "chip": "Apple M4 Max"})
+                                           "requests": reqs, "macos": "15.7.4", "chip": "Apple M4 Max"})
+                if p == "/omacvm/gpu-memory" and fake.gpu_memory is not None:
+                    fake.gpu_memory_at.append(time.monotonic())
+                    return self.send(200, fake.gpu_memory)
                 if p == "/omacvm/status" and fake.unknown_for > 0:
                     fake.unknown_for -= 1
                     return self.send(409, {"error": "no running VM that OmacVM set up has this address (the Mac is "

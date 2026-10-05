@@ -758,3 +758,95 @@ def test_live_refresh_while_open(world, monkeypatch):
             os.utime(path, (time.time() + 5, time.time() + 5))
             assert await settle(pilot, lambda: a.c.local is not before, 5)
     asyncio.run(go())
+
+
+def gpu_world(tmp_path, monkeypatch, vm_type="app", gpu=True):
+    mac, checks = FakeMac(version="3.0.0"), FakeChecks()
+    if gpu:
+        mac.gpu_memory = {"measured": True, "in_use_mb": 1126, "peak_mb": 1638, "budget_mb": 49152,
+                          "pressure": "normal", "refused": 0, "lost": 0}
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path, f"OMACVM_VM_TYPE={vm_type}\n").items():
+        monkeypatch.setenv(k, v)
+    return mac, checks
+
+
+def test_gpu_memory_row_live(tmp_path, monkeypatch):
+    """An OmacVM.app VM shows its graphics memory, asked at most every 2 s
+    while open (a warning when macOS is short of memory), and nothing once
+    the control centre is closed."""
+    from omacvm_cc.state import Status
+    mac, checks = gpu_world(tmp_path, monkeypatch)
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "gpu-memory" in rows(a)
+                                and rows(a)["gpu-memory"].status is Status.WORKS)
+            r = rows(a)["gpu-memory"]
+            assert r.feature.title == "Graphics memory" and r.note == "1.1 GB (peak 1.6 GB)"
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            t.move_cursor(row=[x.feature.name for x in a.rows].index("gpu-memory"))
+            await pilot.pause(0.1)
+            hint = str(a.screen.query_one("#hint").render())
+            assert "VM memory is the Mac memory you gave the VM" in hint
+            # macOS gets short of memory: the row warns at the next look.
+            mac.gpu_memory = dict(mac.gpu_memory, pressure="critical", in_use_mb=3000, peak_mb=3100)
+            assert await settle(pilot, lambda: rows(a)["gpu-memory"].status is Status.NEEDS_PERSON, seconds=5)
+            assert rows(a)["gpu-memory"].note.startswith("2.9 GB (peak 3.0 GB); macOS is short of memory")
+            # At most one look every 2 s (and no more than one at a time).
+            n0, t0 = len(mac.gpu_memory_at), time.monotonic()
+            await pilot.pause(4.5)
+            n = len(mac.gpu_memory_at) - n0
+            assert 1 <= n <= 3, f"{n} looks in {time.monotonic() - t0:.1f} s"
+            gaps = [b - a_ for a_, b in zip(mac.gpu_memory_at, mac.gpu_memory_at[1:])]
+            assert min(gaps[1:] or [2.0]) > 1.5, gaps   # the first two: ask_mac's look, then the timer's
+            # Space explains instead of switching.
+            await pilot.press("space")
+            await pilot.pause(0.1)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in mac.requests)
+        closed = len(mac.gpu_memory_at)
+        await asyncio.sleep(2.5)
+        assert len(mac.gpu_memory_at) == closed, "asked after the control centre closed"
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()
+
+
+def test_gpu_memory_not_asked_on_other_routes(tmp_path, monkeypatch):
+    mac, checks = gpu_world(tmp_path, monkeypatch, vm_type="parallels")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            await pilot.pause(2.5)
+            assert "gpu-memory" not in rows(a)
+            assert mac.gpu_memory_at == []
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()
+
+
+def test_gpu_memory_on_an_older_mac(tmp_path, monkeypatch):
+    """A Mac whose hello does not list gpu-memory: the row says so, nothing is asked."""
+    from omacvm_cc.state import Status
+    mac, checks = gpu_world(tmp_path, monkeypatch, gpu=False)
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "gpu-memory" in rows(a)
+                                and "older" in rows(a)["gpu-memory"].note)
+            assert rows(a)["gpu-memory"].status is Status.UNKNOWN
+            await pilot.pause(2.5)
+            assert not any(p == "/omacvm/gpu-memory" for _, p, _ in mac.requests)
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()

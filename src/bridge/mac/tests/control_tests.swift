@@ -199,6 +199,36 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     if case .failure(let e) = vmForApp("A", [a, appA]) { expect(e.code == "unknown-vm", "a Parallels VM is no app VM") } else { expect(false, "type") }
     if case .failure(let e) = vmForApp("Off", [appOff]) { expect(e.code == "unknown-vm", "stopped app VM") } else { expect(false, "stopped") }
 
+    // ---- graphics memory (GET /omacvm/gpu-memory) ----
+    expect(ok(route("GET", "/omacvm/gpu-memory")) == .gpuMemory, "gpu-memory")
+    expect(err(route("GET", "/omacvm/gpu-memory", "{}"))?.code == "body", "gpu-memory: no body")
+    expect(err(route("POST", "/omacvm/gpu-memory"))?.status == 405, "gpu-memory: GET only")
+    expect(err(route("GET", "/omacvm/gpu-memory/../status"))?.code == "not-found", "gpu-memory: nothing under it")
+    expect(err(route("GET", "/omacvm/gpu-memory?vm=Other"))?.code == "not-found", "gpu-memory: no VM named")
+    let appDir = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "127.0.0.1:2222", omacvm: "3.0.0", setup: true,
+                         dir: "/Users/x/OmacVM/Omarchy")
+    expect(gpuMemoryFile(dir: appDir.dir) == "/Users/x/OmacVM/Omarchy/logs/gpu-memory", "file in the VM folder")
+    expect(gpuMemoryFile(dir: "") == nil && gpuMemoryFile(dir: "OmacVM/x") == nil, "no folder, relative: none")
+    expect(gpuMemoryFile(dir: "/Users/x/../../etc") == nil && gpuMemoryFile(dir: "/Users/x/..") == nil, "no ..")
+    expect(gpuMemoryFile(dir: "/Users/x\u{0}/y") == nil, "no NUL")
+    let full = "in_use_mb=1126\npeak_mb=1638\nbudget_mb=49152\npressure=normal\nrefused=0\nlost=0\nlost_last=\nlost_recent=\n"
+    let g = gpuMemoryAnswer(full)
+    expect(g["measured"] as? Bool == true && g["in_use_mb"] as? Int == 1126 && g["peak_mb"] as? Int == 1638
+           && g["budget_mb"] as? Int == 49152 && g["pressure"] as? String == "normal" && g["refused"] as? Int == 0
+           && g["lost"] as? Int == 0, "gpu memory: all numbers")
+    let short = gpuMemoryAnswer("in_use_mb=4096\npeak_mb=4500\npressure=critical\nrefused=12\nlost=2\nlost_last=Hyprland\n")
+    expect(short["pressure"] as? String == "critical" && short["refused"] as? Int == 12 && short["lost"] as? Int == 2, "pressure, refusals")
+    expect(short["lost_last"] == nil && short["lost_recent"] == nil, "no guest app names go back")
+    expect(gpuMemoryAnswer(nil)["measured"] as? Bool == false, "no file: not measured")
+    expect(gpuMemoryAnswer("")["measured"] as? Bool == false, "empty: not measured")
+    expect(gpuMemoryAnswer("peak_mb=100\n")["measured"] as? Bool == false, "no in_use: not measured")
+    let bad = gpuMemoryAnswer("in_use_mb=-5\npeak_mb=1e9\npressure=$(id)\nrefused=99999999999999999999\n")
+    expect(bad["measured"] as? Bool == false, "a sign is no number: not measured")
+    let odd = gpuMemoryAnswer("in_use_mb=200\npeak_mb=1e9\npressure=panic\nrefused=99999999999999999999\nlost= 3\n")
+    expect(odd["peak_mb"] as? Int == 200 && odd["pressure"] as? String == "unknown" && odd["refused"] as? Int == 0
+           && odd["lost"] as? Int == 0, "odd values: dropped, peak at least now")
+    expect(gpuMemoryAnswer(String(repeating: "x", count: gpuMemoryFileMax + 1))["measured"] as? Bool == false, "too long")
+
     // ---- job state: the exit code alone ----
     expect(jobState(rc: nil, alive: true) == "running" && jobState(rc: nil, alive: false) == "failed", "running / gone")
     expect(jobState(rc: 0, alive: false) == "done" && jobState(rc: 4, alive: false) == "rolled-back", "done / rolled back")

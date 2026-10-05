@@ -30,6 +30,9 @@ from .local import log_tail
 # Job polls (one a second) that may fail in a row before the job counts as
 # lost: an update restarts the Bridge, which takes a while.
 LOST_AFTER = 120
+# Graphics memory (OmacVM.app VMs): looked at this often while the control
+# centre is open, never while it is closed.
+GPU_MEMORY_EVERY = 2.0
 # A VM the Mac does not list yet (it just started, or the Bridge did), or
 # one whose address the list still gives a stopped VM (a key that does not
 # match, "looking"): the Mac looks at its VMs again in the background (at
@@ -308,7 +311,7 @@ class DetailsScreen(Screen):
         else:
             field("Version", version)
         t.append("\n")
-        if r.status in (S.Status.UNAVAILABLE, S.Status.BUSY) and r.note:
+        if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY) or f.name == "gpu-memory") and r.note:
             t.append("\n")
             field("Now", r.note)
             t.append("\n")
@@ -572,6 +575,7 @@ class ControlCentre(App):
         self.tick = 0
         self.watching: str | None = None
         self.last_result = ""   # the last job's outcome and what to do next (the banner)
+        self.gpu_asking = False  # a look at graphics memory is under way
 
     def on_mount(self) -> None:
         self.register_theme(THEME)
@@ -582,6 +586,7 @@ class ControlCentre(App):
         self.set_interval(0.12, self.spin)
         self.stamp = self.c.local_stamp()
         self.set_interval(LIVE_EVERY, self.live)
+        self.set_interval(GPU_MEMORY_EVERY, self.look_gpu_memory)
 
     # ---- data ----
     def live(self) -> None:
@@ -615,7 +620,28 @@ class ControlCentre(App):
             time.sleep(UNKNOWN_WAIT)
         if self.c.linked:
             self.c.refresh_updates()
+            self.c.refresh_gpu_memory()
         self.call_from_thread(self.refresh_all)
+
+    def look_gpu_memory(self) -> None:
+        """Every 2 s while open: one look at a time, only on OmacVM.app VMs the Mac answers for."""
+        if self.gpu_asking or not self.c.wants_gpu_memory():
+            return
+        self.gpu_asking = True
+        self.ask_gpu_memory()
+
+    @work(thread=True, group="gpu-memory")
+    def ask_gpu_memory(self) -> None:
+        before = self.c.gpu_memory
+        try:
+            self.c.refresh_gpu_memory()
+        finally:
+            self.call_from_thread(self.gpu_memory_done, before != self.c.gpu_memory)
+
+    def gpu_memory_done(self, changed: bool) -> None:
+        self.gpu_asking = False
+        if changed:
+            self.refresh_all()
 
     @work(thread=True, exclusive=True, group="checks")
     def run_checks(self) -> None:
@@ -756,6 +782,9 @@ class ControlCentre(App):
         if r.feature.name == "graphics":
             self.choose_graphics()
             return
+        if r.feature.name == "gpu-memory":
+            self.notify(f"Graphics memory is measured, not switched. {S.GPU_MEMORY_EXPLAINER}")
+            return
         if r.status is S.Status.UNAVAILABLE:
             self.notify(f"{r.feature.title}: {r.note}", severity="warning")
             return
@@ -808,6 +837,9 @@ class ControlCentre(App):
                          lambda yes: yes and self.run_job("graphics", [nxt]))
 
     def repair(self, r: S.Row) -> None:
+        if r.feature.name == "gpu-memory":
+            self.notify(f"Graphics memory is measured, not switched. {S.GPU_MEMORY_EXPLAINER}")
+            return
         if r.feature.name == "graphics":
             if self.can_ask() and self.c.graphics():
                 self.run_job("graphics", [self.c.graphics()])   # its Vulkan driver again, if it gets Vulkan

@@ -272,6 +272,11 @@ class Bridge:
     def updates(self) -> dict:
         return self.call("GET", "/omacvm/updates", timeout=5.0)
 
+    def gpu_memory(self) -> dict:
+        """An OmacVM.app VM's graphics memory on the Mac (asked every 2 s while
+        the control centre is open, so a short timeout)."""
+        return self.call("GET", "/omacvm/gpu-memory", timeout=3.0)
+
     def check_updates(self) -> dict:
         return self.call("POST", "/omacvm/updates/check", {}, timeout=30.0)
 
