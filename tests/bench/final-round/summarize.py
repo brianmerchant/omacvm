@@ -48,6 +48,7 @@ KEYS = [  # key, label, higher is better
     ("glmark2", "glmark2 (VMs only)", True),
     ("basemark", "Basemark Web 3.0", True),
     ("aquarium", "WebGL Aquarium 30k (fps)", True),
+    ("webgpu", "WebGPU matmul f32 2048 (GFLOPS)", True),
     ("idle-power", "Idle power (W)", False),
 ]
 BASE = {"geekbench-gpu-vulkan": "geekbench-gpu-metal"}   # the Mac has no Vulkan in Geekbench: Metal is its number
@@ -55,7 +56,7 @@ PAGE = {"throughput": "gpu-throughput", "alu": "gpu-alu", "fill": "gpu-fill"}
 TIMER_TARGET_MS = 40
 TIMER_OK = (0.98, 1.10)   # timer score / wall score
 MIN_WIDTH = int(os.environ.get("FINAL_ROUND_MIN_GUEST_WIDTH", 3000))
-VIEWPORT = os.environ.get("FINAL_ROUND_VIEWPORT", "1728x1080 at 2x")
+VIEWPORT = os.environ.get("FINAL_ROUND_VIEWPORT", "1728x1080 at 2x").split("|")   # agreed page sizes
 
 
 def not_available(reason):
@@ -89,7 +90,8 @@ def line_problems(line, round_mode):
     widths = (r.get("vm") or {}).get("monitor_widths")
     if widths and min(widths) < MIN_WIDTH:
         why.append(f"guest {min(widths)} px wide")
-    if line.get("test") == "browser" and "viewport" in r and r["viewport"] != VIEWPORT:
+    # WebGPU compute draws nothing: its page size does not count.
+    if line.get("test") == "browser" and r.get("test") != "webgpu" and "viewport" in r and r["viewport"] not in VIEWPORT:
         why.append(f"Chrome page {r['viewport'] or 'unknown'}")
     return why
 
@@ -229,11 +231,11 @@ def main():
             elif r.get("not_available") or r.get("error"):
                 missing[tg][t] = not_available(r.get("not_available")) if r.get("not_available") else r["error"]
         elif t == "browser":
-            if r.get("test") in ("aquarium", "basemark"):
+            if r.get("test") in ("aquarium", "basemark", "webgpu"):
                 if r.get("value") is not None:
                     runs[tg][r["test"]].append(r["value"])
                 else:
-                    missing[tg].setdefault(r["test"], r.get("error") or "no result")
+                    missing[tg].setdefault(r["test"], not_available(r["error"]) if r.get("error") else "no result")
         elif t == "idle-power":
             if r.get("valid"):
                 runs[tg]["idle-power"].append(r["watts_mean"])

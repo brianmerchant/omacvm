@@ -1,6 +1,6 @@
 #!/bin/bash
 # The final round on macOS itself: the baseline (100 %).
-#   mac.sh [--runs 3] [--only throughput,vkpeak,geekbench,browser] [--headless] OUT.jsonl
+#   mac.sh [--runs 3] [--only throughput,vkpeak,geekbench,browser,webgpu] [--headless] OUT.jsonl
 # Same tests as vm.sh, on the bare Mac: the GPU throughput page (timer and
 # wall method), Aquarium 30k + Basemark Web 3.0 in Google Chrome (full
 # screen, 1728x1080 at 2x as in the VMs: checked first), vkpeak through
@@ -9,7 +9,7 @@
 # draws offscreen, so the score is the same; for checks only).
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/common.sh"
-RUNS=3; ONLY=throughput,vkpeak,geekbench,browser; HEADLESS=
+RUNS=3; ONLY=throughput,vkpeak,geekbench,browser,webgpu; HEADLESS=
 while [ "${1:-}" != "${1#--}" ]; do
   case $1 in
     --runs) RUNS=$2; shift 2 ;;
@@ -26,7 +26,7 @@ want() { case ,$ONLY, in *,$1,*) return 0 ;; esac; return 1; }
 preflight
 if want browser; then   # Chrome's page as agreed, before the tests that depend on the window
   vp=$(python3 "$REPO/tests/bench/gpu-throughput/run.py" --viewport-only 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("viewport", ""))' 2>/dev/null)
-  if [ "$vp" != "$VIEWPORT" ]; then
+  if ! viewport_ok "$vp"; then
     [ "${FINAL_ROUND_ALLOW_BUSY:-0}" = 1 ] || die "Chrome's page is ${vp:-unknown}, the round needs $VIEWPORT (built-in display, full screen)"
     PRELIM=true PRELIM_WHY="${PRELIM_WHY:+$PRELIM_WHY; }Chrome page ${vp:-unknown}"
   fi
@@ -51,9 +51,15 @@ if want geekbench; then
   each geekbench < "$tmp"
 fi
 if want browser; then
-  say "mac: Aquarium 30k + Basemark Web 3.0 x$RUNS"
+  say "mac: ${FINAL_ROUND_BROWSER:-aquarium,basemark} x$RUNS"
   tmp=$FR_TMP/browser.jsonl
-  bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only aquarium,basemark "$tmp" >/dev/null 2>&1
+  bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only "${FINAL_ROUND_BROWSER:-aquarium,basemark}" "$tmp" >/dev/null 2>&1
+  each browser < "$tmp"
+fi
+if want webgpu; then
+  say "mac: WebGPU matmul x$RUNS"
+  tmp=$FR_TMP/webgpu.jsonl
+  bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only webgpu "$tmp" >/dev/null 2>&1
   each browser < "$tmp"
 fi
 say "mac: done, $OUT"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Benchmarks, the same way on the Mac and in a VM, so the routes compare.
-#   bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,gpu,glmark2] [OUT.jsonl]
+#   bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,webgpu,gpu,glmark2] [OUT.jsonl]
 # Google Chrome everywhere (in a VM: install-chrome.sh first), run as the
 # desktop user in the session. Each test runs N times (default 3); every result is a
 # JSON line in OUT (default ./bench-<host>-<date>.jsonl).
@@ -26,7 +26,7 @@ rec() {   # test run value [extra json]
 
 # ---- Geekbench 7 ----
 if [[ $OS == Darwin ]]; then
-  GB="/Applications/Geekbench 7.app/Contents/Resources/geekbench7"
+  GB=${GEEKBENCH_MAC:-/Applications/Geekbench 7.app}/Contents/Resources/geekbench7   # GEEKBENCH_MAC: the app elsewhere
 else
   GB=$HOME/.cache/omacvm-bench/Geekbench-7.0.0-LinuxARMPreview/geekbench7
   if [[ ! -x $GB ]]; then
@@ -105,7 +105,15 @@ browser_start() {
     for f in /etc/chrome-flags.conf "$HOME/.config/chrome-flags.conf"; do
       if [[ -f $f ]]; then mapfile -t -O "${#flags[@]}" flags < <(grep -v -e '^#' -e '^$' -e '--load-extension' "$f"); fi
     done
-    /opt/google/chrome/google-chrome "${flags[@]}" --ozone-platform=wayland --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
+    # WebGPU: Chrome on Linux hands pages a Vulkan adapter only with its compositor on Vulkan (Skia
+    # Graphite on Dawn), which it allows only on X11 (Xwayland): OmacVM's omacvm-chrome-webgpu flags,
+    # the same in every VM. MESA_VK_WSI_DEBUG=sw as there (Venus presents through the software path).
+    local plat=(--ozone-platform=wayland) envs=()
+    if [[ ${CHROME_WEBGPU:-0} == 1 ]]; then
+      plat=(--ozone-platform=x11 --enable-skia-graphite --skia-graphite-dawn-backend=vulkan)
+      envs=(MESA_VK_WSI_DEBUG=sw DISPLAY="${DISPLAY:-:0}")
+    fi
+    env ${envs[@]+"${envs[@]}"} /opt/google/chrome/google-chrome "${flags[@]}" "${plat[@]}" --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
       --no-first-run --no-default-browser-check --start-fullscreen about:blank >/dev/null 2>&1 &
   fi
   BROWSER=$!
@@ -113,18 +121,23 @@ browser_start() {
   echo "the browser did not start" >&2; return 1
 }
 browser_stop() { kill "$BROWSER" 2>/dev/null; wait "$BROWSER" 2>/dev/null; rm -rf "$PROFILE" "$PROFILE.err"; }
-if want speedometer || want motionmark || want aquarium || want basemark; then
+if want speedometer || want motionmark || want aquarium || want basemark || want webgpu; then
   browser_start || exit 1
   version=$(curl -fs http://127.0.0.1:9222/json/version | python3 -c 'import json,sys; print(json.load(sys.stdin)["Browser"])')
-  for t in speedometer motionmark aquarium basemark; do
+  for t in speedometer motionmark aquarium basemark webgpu; do
     want $t || continue
     for ((i = 1; i <= RUNS; i++)); do
       say "$t, run $i/$RUNS ($version)"
       v=$(python3 "$here/browser-bench.py" "$t" 2>"$PROFILE.err")
+      extra=""
+      if [[ $t == webgpu ]]; then   # the adapter (a CPU one is no GPU number), or the page's error
+        extra=$(python3 "$here/webgpu-result.py" "$v" "$PROFILE.err")
+        [[ $extra == *'"error"'* ]] && v=""
+      fi
       [[ $v =~ ^[0-9.]+$ ]] || v=null
       # The page size Chrome gave the test (it must be the same everywhere).
       vp=$(sed -n 's/^viewport //p' "$PROFILE.err" | head -1)
-      rec "$t" "$i" "$v" "\"browser\":\"$version\",\"viewport\":\"$vp\""
+      rec "$t" "$i" "$v" "\"browser\":\"$version\",\"viewport\":\"$vp\"${extra:+,$extra}"
       [[ $v == null ]] && break   # no result: the next runs would end the same way
     done
   done

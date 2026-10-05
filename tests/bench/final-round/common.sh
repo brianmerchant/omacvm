@@ -12,6 +12,8 @@ GLMARK2_VERSION=${GLMARK2_VERSION:-2023.01}   # the same glmark2 in every VM
 # full screen gives every page 1728x1080 at 2x.
 MIN_GUEST_WIDTH=${FINAL_ROUND_MIN_GUEST_WIDTH:-3000}
 VIEWPORT=${FINAL_ROUND_VIEWPORT:-1728x1080 at 2x}
+# Several sizes may be agreed, "|"-separated (the Mac mini: apps that keep the menu bar in full screen are 30 points short).
+viewport_ok() { case "|$VIEWPORT|" in *"|$1|"*) [ -n "$1" ] ;; *) return 1 ;; esac; }
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 jstr() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
@@ -50,9 +52,16 @@ VM_PROCS='qemu-system-aarch64|/runtime/bin/OmacVM$|/prl_vm_app$|/vmware-vmx$|/QE
 busy_check() {   # [pattern of the target's processes, kept out of "other"]
   local keep=${1:-NONE} procs other same agents lock load busy=false
   procs=$(ps -axo comm=)
-  other=$(echo "$procs" | grep -E "$HV_PROCS" | grep -Ev -- "$keep" | grep -c .)
+  # FINAL_ROUND_NOT_VM: processes under a VM app's name that are no VM (e.g. the user's installed
+  # OmacVM Bridge and Gestures helpers on the Mac mini): not counted.
+  other=$(echo "$procs" | grep -E "$HV_PROCS" | grep -Ev -- "$keep" | grep -Ev -- "${FINAL_ROUND_NOT_VM:-^$}" | grep -c .)
   same=$(echo "$procs" | grep -E "$VM_PROCS" | grep -E -- "$keep" | grep -c .)
   agents=$(echo "$procs" | grep -Ec '(^|/)claude$')
+  # FINAL_ROUND_IDLE_AGENTS_OK=1: Claude sessions that sit idle (under 10 % CPU, e.g. the user's open
+  # terminals on the Mac mini) do not count; only working ones do (and the round's own, one).
+  if [ "${FINAL_ROUND_IDLE_AGENTS_OK:-0}" = 1 ]; then
+    agents=$(( $(ps -axo %cpu=,comm= | awk '$2 ~ /(^|\/)claude$/ && $1 >= 10' | grep -c .) + 1 ))
+  fi
   lock=$(cat "$HOME/.omacvm-bench.lock/owner" 2>/dev/null)
   load=$(sysctl -n vm.loadavg | tr -d '{}' | awk '{print $1}')
   # round.sh holds the lock for the whole round ("final-round ..."): that one is ours.

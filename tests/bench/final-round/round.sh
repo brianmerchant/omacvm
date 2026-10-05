@@ -301,7 +301,7 @@ run_step() {   # step
     mac-idle) hide_apps; bash "$FR/idle-power.sh" mac --seconds "$IDLE_S" --settle 30 \
                 --desktop "macOS desktop, $(basename "$PIC") (the same picture as in the VMs), apps hidden" "$out" ;;
     *-gpu|rc2-vulkan|rc2-gl)
-      local only=throughput,vkpeak,geekbench,vkmark,glmark2,browser
+      local only=${FINAL_ROUND_VM_TESTS:-throughput,vkpeak,geekbench,vkmark,glmark2,browser,webgpu}
       [ "$s" = rc2-vulkan ] && only=vkpeak,geekbench,vkmark
       [ "$s" = rc2-gl ] && only=throughput,glmark2
       OMACVM_APP=$(app_of "$t") bash "$FR/vm.sh" "$t" --vm "$(name_of "$t")" "root@$HOST" --only "$only" "$out" ;;

@@ -7,7 +7,7 @@
 #   guest.sh check MIN_WIDTH           the VM is as prepared (Mesa and the rest unchanged), wide enough
 #   guest.sh info                      facts about the VM (one JSON line)
 #   guest.sh viewport                  Chrome's page size in full screen (one JSON line)
-#   guest.sh throughput|vkpeak|geekbench|vkmark|glmark2|browser RUNS
+#   guest.sh throughput|vkpeak|geekbench|vkmark|glmark2|browser|webgpu RUNS
 #   guest.sh desktop [SHA256]          the idle desktop: notifications dismissed, Chrome closed, the wallpaper's
 #                                      hash checked against the Mac's (one JSON line)
 #   guest.sh wallpaper FILE            FILE (the Mac's own wallpaper, copied in) as Omarchy's background
@@ -130,8 +130,10 @@ vkpeak)
 geekbench)   # Geekbench GPU, Vulkan and OpenCL, only on a real GPU device (bench.sh checks)
   # OpenCL is rusticl on zink, so on Vulkan: a GPU only where Vulkan has one
   # (OmacVM.app with Venus); on lavapipe it is a CPU device and bench.sh says so.
+  # From the user's home: rusticl's clang looks for its headers in the working directory first, and
+  # sudo keeps root's (/root, not readable): every workload after Super Resolution then fails.
   out=$(mktemp); chmod 666 "$out"
-  as_user env RUSTICL_ENABLE="${RUSTICL_ENABLE:-zink}" bash "$B/src/bench/bench.sh" --runs "$RUNS" --only gpu "$out" >/dev/null 2>&1
+  (cd "/home/$U" && as_user env RUSTICL_ENABLE="${RUSTICL_ENABLE:-zink}" bash "$B/src/bench/bench.sh" --runs "$RUNS" --only gpu "$out" >/dev/null 2>&1)
   cat "$out"; rm -f "$out" ;;
 vkmark)
   v=$(pkgver vkmark)
@@ -162,10 +164,16 @@ glmark2)
     s=$(as_user glmark2-es2-wayland --fullscreen "${opt[@]}" 2>&1 | sed -n 's/.*glmark2 Score: *\([0-9]*\).*/\1/p')
     echo "{\"run\":$i,\"value\":${s:-null},\"glmark2\":\"$v\",\"scene_seconds\":${d:-10}}"
   done ;;
-browser)   # Basemark Web 3.0 and WebGL Aquarium 30k, bench.sh's way (full-screen Chrome)
+browser)   # Basemark Web 3.0 and WebGL Aquarium 30k, bench.sh's way (full-screen Chrome); FINAL_ROUND_BROWSER picks
   out=$(mktemp)
   chmod 666 "$out"
-  as_user bash "$B/src/bench/bench.sh" --runs "$RUNS" --only aquarium,basemark "$out" >/dev/null 2>&1
+  (cd "/home/$U" && as_user bash "$B/src/bench/bench.sh" --runs "$RUNS" --only "${FINAL_ROUND_BROWSER:-aquarium,basemark}" "$out" >/dev/null 2>&1)
+  cat "$out"; rm -f "$out" ;;
+webgpu)   # WebGPU compute (f32 matmul 2048) in Chrome with OmacVM's WebGPU flags (X11 + Graphite on Dawn Vulkan), every VM alike
+  out=$(mktemp)
+  chmod 666 "$out"
+  x=$(ls /tmp/.X11-unix 2>/dev/null | sed -n 's/^X\([0-9]*\)$/:\1/p' | head -1)
+  (cd "/home/$U" && as_user env CHROME_WEBGPU=1 DISPLAY="${x:-:0}" bash "$B/src/bench/bench.sh" --runs "$RUNS" --only webgpu "$out" >/dev/null 2>&1)
   cat "$out"; rm -f "$out" ;;
 desktop)   # before the GPU tests and the idle window: the same quiet desktop in every VM
   pkill -f /opt/google/chrome/chrome 2>/dev/null; sleep 1

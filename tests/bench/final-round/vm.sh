@@ -10,7 +10,8 @@
 # own; it must be the one VM that runs on that hypervisor. --desktop: Chrome
 # closed, notifications dismissed, and PICTURE (the Mac's wallpaper) as the
 # background unless the VM already shows the same image (by hash).
-# LIST: throughput,vkpeak,geekbench,vkmark,glmark2,browser (all by default).
+# LIST: throughput,vkpeak,geekbench,vkmark,glmark2,browser,webgpu (all by default). FINAL_ROUND_BROWSER: the
+# browser tests (default aquarium,basemark).
 # The VM runs alone, in full screen on the built-in display (see README.md):
 # the round refuses a guest narrower than 3000 px or a Chrome page other than
 # 1728x1080 at 2x, and a VM that changed since --prepare (Mesa stays fixed).
@@ -18,7 +19,7 @@ set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/common.sh"
 usage() { sed -n '2,17p' "$0" >&2; exit 2; }
 TARGET=${1:-}; shift 2>/dev/null
-NAME="" DEST="" OUT="" PICTURE="" MODE=round PKG="" RUNS=3 ONLY=throughput,vkpeak,geekbench,vkmark,glmark2,browser
+NAME="" DEST="" OUT="" PICTURE="" MODE=round PKG="" RUNS=3 ONLY=throughput,vkpeak,geekbench,vkmark,glmark2,browser,webgpu
 while [ $# -gt 0 ]; do
   case $1 in
     --vm) NAME=$2; shift 2 ;;
@@ -58,7 +59,7 @@ vm_running "${TARGET%-rc2}" "$NAME" "$PORT" || die "start \"$NAME\" (and only it
 K=(-i "$HOME/.ssh/omacvm" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30
    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 G=/opt/omacvm-final-round
-in_vm() { ssh "${K[@]}" "$DEST" "GLMARK2_VERSION=$GLMARK2_VERSION GLMARK2_DURATION=${GLMARK2_DURATION:-} bash $G/tests/bench/final-round/guest.sh $*"; }
+in_vm() { ssh "${K[@]}" "$DEST" "GLMARK2_VERSION=$GLMARK2_VERSION GLMARK2_DURATION=${GLMARK2_DURATION:-} FINAL_ROUND_BROWSER=${FINAL_ROUND_BROWSER:-aquarium,basemark} bash $G/tests/bench/final-round/guest.sh $*"; }
 ssh "${K[@]}" "$DEST" true </dev/null || die "no SSH to $DEST"
 copy_tools() {   # the scripts only; $G/state (what prepare found) stays
   COPYFILE_DISABLE=1 tar -C "$REPO" --no-xattrs -cf - src/bench tests/bench |
@@ -107,7 +108,7 @@ fi
 # Chrome's page as agreed, before the tests that depend on the window.
 if want browser; then
   vp=$(in_vm viewport </dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("viewport", ""))' 2>/dev/null)
-  if [ "$vp" != "$VIEWPORT" ]; then
+  if ! viewport_ok "$vp"; then
     [ "${FINAL_ROUND_ALLOW_BUSY:-0}" = 1 ] || die "Chrome's page in $NAME is ${vp:-unknown}, the round needs $VIEWPORT (full screen on the built-in display)"
     PRELIM=true PRELIM_WHY="${PRELIM_WHY:+$PRELIM_WHY; }Chrome page ${vp:-unknown}"
   fi
@@ -129,6 +130,7 @@ want vkpeak && { say "$TARGET: vkpeak x$RUNS"; in_vm vkpeak "$RUNS" </dev/null |
 want geekbench && { say "$TARGET: Geekbench GPU x$RUNS"; in_vm geekbench "$RUNS" </dev/null | each geekbench; }
 want vkmark && { say "$TARGET: vkmark x$RUNS"; in_vm vkmark "$RUNS" </dev/null | each vkmark; }
 want glmark2 && { say "$TARGET: glmark2 x$RUNS"; in_vm glmark2 "$RUNS" </dev/null | each glmark2; }
-want browser && { say "$TARGET: Aquarium 30k + Basemark Web 3.0 x$RUNS"; in_vm browser "$RUNS" </dev/null | each browser; }
+want browser && { say "$TARGET: ${FINAL_ROUND_BROWSER:-aquarium,basemark} x$RUNS"; in_vm browser "$RUNS" </dev/null | each browser; }
+want webgpu && { say "$TARGET: WebGPU matmul x$RUNS"; in_vm webgpu "$RUNS" </dev/null | each browser; }
 in_vm check "$MIN_GUEST_WIDTH" </dev/null >/dev/null || say "warning: $NAME changed during the round (see guest.sh check)"
 say "$TARGET: done, $OUT"
