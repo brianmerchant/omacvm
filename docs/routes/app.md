@@ -84,9 +84,10 @@ VM runs, and goes back by itself when a new version does not start
   as up to 2.9. Vulkan: the same, plus Vulkan on the Mac's GPU (Venus) for
   Vulkan apps: on KosmicKrisp on macOS 26 and newer (in the app since 3.0.0),
   on MoltenVK before (fewer Vulkan features). OpenGL stays on virgl either
-  way. Automatic picks Vulkan where it is the faster path on this Mac
-  ([numbers](../benchmarks/README.md#graphics-automatic-2026-10-05)): macOS
-  26 and newer with KosmicKrisp, OpenGL on macOS 15. A change applies at the
+  way, so Vulkan only adds Vulkan apps; Vulkan windows are copied through
+  the CPU (slow in full screen). Automatic is OpenGL on every Mac in 3.0.0
+  ([numbers and why](../benchmarks/README.md#graphics-automatic-2026-10-05)).
+  A change applies at the
   VM's next start; `omacvm check` shows what the start got ("Graphics" row)
   and which Vulkan driver the Mac used ("Vulkan (Venus)": KosmicKrisp, or
   MoltenVK when KosmicKrisp cannot run on that Mac, logged).
@@ -95,16 +96,20 @@ VM runs, and goes back by itself when a new version does not start
   fails with `ERROR_OUT_OF_HOST_MEMORY`). While Arch Linux ARM has 26.2.3,
   apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
   package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
-  minutes the first time) when the setting gives the VM Vulkan, and the VM
-  builds it at its next start when Vulkan was picked in the app since
-  (`omacvm-venus-driver.service`). Arch's 26.2.4 replaces it on an update.
-  Automatic waits for that driver: until it is there it gives OpenGL.
+  minutes the first time) when the setting gives the VM Vulkan (also
+  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's 26.2.4
+  replaces it on an update. Until the driver is there the VM starts with
+  OpenGL only, and the app, `omacvm graphics` and the control centre say
+  "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the
+  VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
+  desktop, never in the boot's critical chain. Automatic is OpenGL on every
+  Mac in 3.0.0 (CHANGELOG, known issue).
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
   allocates counts against the VM's GPU memory budget.
-  For development `defaults write org.omacvm.app venus -bool true` gives
-  every VM Vulkan whatever its setting.
+  The hidden `venus` switch of 2.9 is gone: the app's first 3.0.0 launch
+  moves it into the setting (Vulkan for each VM without its own choice).
 - WebGPU and GPU compute (experimental, off by default):
   `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
   The VM gets OpenCL (rusticl on Zink), WebGPU in Firefox, and a
