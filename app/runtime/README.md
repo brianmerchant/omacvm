@@ -127,6 +127,14 @@ commit 82927e9. Changes here:
   The charge goes with the storage: it lasts until the last holder is gone
   (the memory, memory imported from it, the guest's blob), so a kept dma-buf
   fd or mapping still counts. Checked by `Tests/virgl/test-venus-budget-storage.c`
+- `patches/qemu-cocoa-idle-refresh.patch`: QEMU's refresh tick (every 8 ms on
+  a 120 Hz display, for every output) slows to 500 ms after a second without
+  work for it (2D updates, new scanouts, the extra outputs' windows) and comes
+  back with the next. The main window's GL frames are pushed and never needed
+  it, so an idle desktop (or a blinking cursor) no longer wakes QEMU 60-120
+  times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. The build
+  tests the rate logic, taken from the patched `ui/cocoa.m`
+  (`Tests/display/test-idle-refresh.c`). Numbers: the idle-power PR
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

@@ -201,8 +201,10 @@ final class Runner {
         }
         p.standardOutput = log
         p.standardError = log
+        let agentPath = c.agentSocket.path
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
+            GuestAgent.release(socketPath: agentPath)
             Task { @MainActor in
                 self?.stopObserving()
                 self?.clipboard?.stop()
@@ -223,11 +225,14 @@ final class Runner {
         process = p
         if network.vmnet { watchFastNetwork() }
         observeSleep()
+        observeActivation()
         startClipboard()
         // A feature that is off: nothing of the Mac on its port.
         if links.battery { startBattery() }
         if links.camera { startCamera() }
         startControl()
+        // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
+        Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
     }
 
     /// What of the Mac this start of the VM may use (its features).
@@ -426,7 +431,10 @@ final class Runner {
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
                    let bridge = try? NativeClipboardBridge(socketPath: path) {
-                    DispatchQueue.main.sync { self?.clipboard = bridge }
+                    DispatchQueue.main.sync {
+                        self?.clipboard = bridge
+                        bridge.setVMActive(self?.qemuIsActive ?? true)
+                    }
                     try? bridge.run()
                     bridge.stop()
                 }
@@ -493,6 +501,25 @@ final class Runner {
                 }
                 Thread.sleep(forTimeInterval: 1)
             }
+        }
+    }
+
+    /// QEMU's window is the active app (the clipboard polls only then).
+    private var qemuIsActive: Bool {
+        guard let pid = process?.processIdentifier else { return false }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    }
+
+    /// The clipboard polls fast only while QEMU's window is the active app.
+    private func observeActivation() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.clipboard?.setVMActive(self.qemuIsActive)
+                }
+            })
         }
     }
 

@@ -701,6 +701,18 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-start
 "$native_dir/Tests/display/test-pointer-start.sh"
 grep -q 'omacvmTakePointer:event why:"motion over the VM"' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not take the pointer on motion (pointer-start patch)"
+# Idle power: the refresh tick slows to 500 ms while it has nothing to do.
+# Its rate logic, taken from the patched ui/cocoa.m, is tested on its own.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-idle-refresh.patch"
+awk '/^#define COCOA_REFRESH_SLOW_MS/{f=1} f{print}
+     f&&/^static void cocoa_refresh_tick\(bool pending\)$/{t=1} t&&/^}$/{exit}' \
+  "$source_dir/ui/cocoa.m" > "$display_tests/idle-refresh.inc"
+grep -q '^static void cocoa_refresh_tick(bool pending)$' "$display_tests/idle-refresh.inc" || \
+  die "ui/cocoa.m has no cocoa_refresh_tick() (idle refresh patch)"
+cc -Wall -Werror -I"$display_tests" "$native_dir/Tests/display/test-idle-refresh.c" \
+  -o "$display_tests/test-idle-refresh"
+"$display_tests/test-idle-refresh"
+OMACVM_IDLE_REFRESH=0 "$display_tests/test-idle-refresh" off
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

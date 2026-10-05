@@ -460,6 +460,7 @@ falls back and logs once.
 | `OMACVM_GL_VSYNC=0` | on | show frames when drawn instead of on the display's refresh | built (`pacing-hdr`) |
 | `OMACVM_GL_LEAD_MS` | 3 | how long before the vsync a frame goes on the layer | built (`pacing-hdr`) |
 | `OMACVM_GL_REFRESH=fixed` | follows the guest | display link at the screen's full rate while frames come | built (`pacing-hdr`) |
+| `OMACVM_IDLE_REFRESH=0` | on | QEMU's refresh tick stays at the display's rate; by default it slows to 500 ms while it has nothing to do | built (`idle-power`) |
 | `OMACVM_GL_COLOR=native` | sRGB | untagged surfaces (old colours, oversaturated on P3) | built (`pacing-hdr`) |
 | `OMACVM_GL_HDR=1` | off (the app sets it only with an EDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
 | `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
@@ -617,6 +618,13 @@ bench lock and are indications only):
   itself stays at the EDID rate: virtio-gpu has no adaptive-sync property,
   so Hyprland's VRR stays off. `OMACVM_GL_REFRESH=fixed` keeps the full
   rate. ADR 0023.
+- **Idle**: QEMU's own refresh tick (`gui_update`, every listener's
+  `dpy_refresh`) runs at the display's rate too. The main window's GL frames
+  never need it (they are pushed) and virtio-gpu's `gfx_update` does
+  nothing; only 2D updates, new scanouts, the extra outputs' windows (drawn
+  on the tick) and a frame not shown yet do. A second without those and it
+  slows to 500 ms; the next one re-arms it at once
+  (`qemu-cocoa-idle-refresh.patch`, `OMACVM_IDLE_REFRESH=0` to keep it).
 - **Latency**: Core Animation shows a commit at the next vsync if it lands
   about 3 ms before it; committing earlier does not show it sooner. So the
   delay from a finished guest frame to the glass is set by the guest's vblank

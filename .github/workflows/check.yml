@@ -144,3 +144,6 @@ jobs:
 
       - name: Benchmark chart and the pages that quote it agree
         run: src/tests/bench-docs.sh
+
+      - name: OmacVM.app while the VM idles (guest agent connection, clipboard poll)
+        run: src/tests/app-idle.sh
