@@ -351,4 +351,10 @@ grep -q 'env\["OMACVM_SLIRP_HOST_PORTS"\] = links.hostPorts' "$R/app/app/Sources
   grep -q 'if links.camera { startCamera() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   echo "ok   Runner.swift follows MacLinks" || { echo "FAIL Runner.swift does not follow MacLinks"; fail=1; }
 
+# off_lines under set -e: taking out the file's last lines is no failure
+# (grep then finds nothing; the control centre's "bridge off" stopped there).
+printf 'omacvm.wifi\nomacvm.audio\n' > "$T/pending"
+got=$(set -e; ROOT=""; source "$R/src/guest/off.sh" 2>/dev/null; off_lines "$T/pending" omacvm.wifi omacvm.audio; echo "rc=0 left=$(wc -c < "$T/pending" | tr -d ' ')")
+expect "off_lines: every line taken out, under set -e" "rc=0 left=0" "$got"
+
 exit $fail
