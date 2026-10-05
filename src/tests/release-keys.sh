@@ -6,8 +6,9 @@
 # empty or another team: refused), a named spare is trusted from then on,
 # a revoked one is not, junk in the kept folder changes nothing, test keys
 # count nowhere inside a release app, and the fast network's root service
-# trusts a Developer ID team only when a signed feed lists it. No network
-# beyond 127.0.0.1, no root.
+# trusts a Developer ID team only when a signed feed lists it, and runs an
+# app's own daemon as root only then (or from the app's own copy of the
+# script). No network beyond 127.0.0.1, no root.
 #   src/tests/release-keys.sh
 # OMACVM_TEST_DEVID_APP: a Developer ID signed org.omacvm.app (a release
 # build) for the download that passes; OMACVM_TEST_DEVID_SIGN: a Developer ID
@@ -231,13 +232,23 @@ tree() {   # DIR: src/ under DIR
   cp "$KEYS" "$1/src/release/"
   sed "s|^APP_DOWNLOADS=.*|APP_DOWNLOADS=$APP_DOWNLOADS|" "$R/src/lib/app.sh" > "$1/src/lib/app.sh"
 }
-fakeapp() {   # APP SIGN-ID: an org.omacvm.app 9.9.9 whose QEMU is signed with SIGN-ID ("-": ad hoc)
-  mkdir -p "$1/Contents/Resources/runtime/bin"
+fakeapp() {   # APP SIGN-ID: an org.omacvm.app 9.9.9 whose QEMU and daemon are signed with SIGN-ID ("-": ad hoc)
+  mkdir -p "$1/Contents/Resources/runtime/bin" "$1/Contents/Library/LaunchServices"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string org.omacvm.app" -c "Add :CFBundleShortVersionString string 9.9.9" "$1/Contents/Info.plist" >/dev/null
   echo 'int main(void) { return 0; }' | xcrun clang -x c -o "$1/Contents/Resources/runtime/bin/OmacVM" -
+  cp "$1/Contents/Resources/runtime/bin/OmacVM" "$1/Contents/Library/LaunchServices/org.omacvm.netd"
   codesign --force --timestamp=none --sign "$2" --identifier org.omacvm.app.qemu "$1/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null
+  codesign --force --timestamp=none --sign "$2" --identifier org.omacvm.netd "$1/Contents/Library/LaunchServices/org.omacvm.netd" 2>/dev/null
 }
-trust() { "$T/cli/src/net/mac/install.sh" --trust --app "$1" 2>/dev/null; }   # APP
+# APP: whose QEMU an install would trust; then where its root daemon would come from.
+trusts() { "$T/cli/src/net/mac/install.sh" --trust --app "$1" 2>/dev/null; }
+trust() { trusts "$1" | head -1; }
+daemon() { trusts "$1" | sed -n 2p; }
+# A Mac without Xcode's Command Line Tools, and a sudo that only notes it was asked.
+mkdir -p "$T/noclt"
+printf '#!/bin/sh\nexit 1\n' > "$T/noclt/xcode-select"
+printf '#!/bin/sh\ntouch "%s"\nexit 1\n' "$T/sudo-asked" > "$T/noclt/sudo"
+chmod +x "$T/noclt/xcode-select" "$T/noclt/sudo"
 tree "$T/cli"
 feed99() {   # TEAMS [KEY]: the signed feed of release 9.9.9
   mkdir -p "$T/www/v9.9.9"
@@ -248,6 +259,15 @@ feed99() {   # TEAMS [KEY]: the signed feed of release 9.9.9
 fakeapp "$T/adhoc-net/OmacVM.app" -
 feed99 '"722686Y34B"'
 expect "fast network, an ad hoc app: its exact build only" "exact build" "$(trust "$T/adhoc-net/OmacVM.app")"
+expect "fast network, an ad hoc app from the command line: the daemon is built from this source, not taken from the app" \
+  "daemon: source" "$(daemon "$T/adhoc-net/OmacVM.app")"
+expect "... and without Xcode's tools: refused" "daemon: refused" "$(PATH=$T/noclt:$PATH daemon "$T/adhoc-net/OmacVM.app")"
+out=$(PATH=$T/noclt:$PATH "$T/cli/src/net/mac/install.sh" --app "$T/adhoc-net/OmacVM.app" 2>&1); rc=$?
+expect "... an install says why and stops before asking for root" "3 yes no" \
+  "$rc $([[ $out == *"is not run as root"*"Fast Network button"* ]] && echo yes || echo no) $([[ -e $T/sudo-asked ]] && echo yes || echo no)"
+tree "$T/adhoc-net/OmacVM.app/Contents/Resources/omacvm"
+expect "fast network, an ad hoc app's own copy of the script (its button): the app's daemon, its exact build" "exact build daemon: app" \
+  "$("$T/adhoc-net/OmacVM.app/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$T/adhoc-net/OmacVM.app" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 if [[ -n ${OMACVM_TEST_DEVID_SIGN:-} ]]; then
   N=$T/devid-net/OmacVM.app
   fakeapp "$N" "$OMACVM_TEST_DEVID_SIGN"
@@ -258,14 +278,16 @@ if [[ -n ${OMACVM_TEST_DEVID_SIGN:-} ]]; then
   expect "fast network, a team the signed feed does not list (a fake app of another team): refused, exact build only" "exact build" "$(trust "$N")"
   feed99 "\"$NT\"" stranger-key
   expect "fast network, the team in a feed signed by another key: refused" "exact build" "$(trust "$N")"
+  expect "... and its daemon is built from this source, not taken from the app" "daemon: source" "$(daemon "$N")"
   feed99 "\"0000000000\", \"$NT\"" spare-key
   expect "fast network, the team in the signed feed (spare key): the team" "team $NT" "$(trust "$N")"
+  expect "... and the app's own daemon" "daemon: app" "$(daemon "$N")"
   rm -rf "$T/www/v9.9.9"
   tree "$N/Contents/Resources/omacvm"
   expect "fast network, the app's own copy of the script (its button): the team, no feed needed" "team $NT" \
-    "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$N" 2>/dev/null)"
-  expect "fast network, another app's copy of the script: no feed, exact build only" "exact build" \
-    "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$T/adhoc-net/OmacVM.app" 2>/dev/null)"
+    "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$N" 2>/dev/null | head -1)"
+  expect "fast network, another app's copy of the script: no feed, exact build only, daemon from source" "exact build daemon: source" \
+    "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$T/adhoc-net/OmacVM.app" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 else
   echo "skip the fast network's Developer ID checks (set OMACVM_TEST_DEVID_SIGN to a Developer ID Application identity)"
 fi

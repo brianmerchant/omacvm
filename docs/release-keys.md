@@ -121,8 +121,16 @@ for it: the signed update feed of that app's release lists the team, or the
 script is the app's own copy (its Fast Network button). Otherwise, for
 example an app that is not a published release, or a fake app signed with
 someone else's Developer ID, it trusts only that exact build of the QEMU
-(its cdhash), as for an app built from source. `install.sh --trust` shows
-what an install would trust.
+(its cdhash), as for an app built from source.
+
+The root daemon itself comes from the app (signed and built with it) only
+in the same two cases: a team the signed feed lists, or the app's own copy
+of the script. For any other app the script builds the daemon from its own
+source (Xcode's Command Line Tools needed, as for a source build); without
+the tools it refuses and points to the app's Fast Network button. So a fake
+app plus an administrator's password never gets its own file run as root.
+`install.sh --trust` shows what an install would trust and where the daemon
+would come from.
 
 ## When the Developer ID team changes
 
