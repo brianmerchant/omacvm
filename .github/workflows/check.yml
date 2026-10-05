@@ -66,6 +66,10 @@ jobs:
         working-directory: app/app
         run: swift build
 
+      - name: OmacVM.app network switch tests (fast network <-> user network)
+        working-directory: app/app
+        run: swift run net-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
@@ -136,6 +140,9 @@ jobs:
       - name: Graphics setting (OpenGL, Vulkan, Automatic; app and omacvm agree)
         run: src/tests/graphics-setting.sh
 
+      - name: App VMs skip routes of a card without a link (network moves without a gap)
+        run: src/tests/net-linkdown.sh
+
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
@@ -173,6 +180,9 @@ jobs:
 
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh
+
+      - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
+        run: src/tests/audio-timing.sh
 
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.

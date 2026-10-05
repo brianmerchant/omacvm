@@ -397,6 +397,10 @@ enum Settings {
     /// ever misbehaves on a Mac. Everything else of the GPU stays as it is.
     /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
     static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
+    /// QEMU's sound timing as up to 2.9.1 (main loop at the default QoS, the
+    /// HDA catching up after a stall), if the new one ever misbehaves.
+    /// Hidden: defaults write org.omacvm.app audioClassic -bool true
+    static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
     /// Vulkan (Venus) in every VM whatever its Graphics setting, for
     /// development. Users choose per VM: Graphics (Graphics.swift) in the
     /// setup, the VM window, `omacvm graphics` and the control centre.
