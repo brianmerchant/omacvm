@@ -185,6 +185,12 @@ step_merge() {
   if (( DRY )); then note "dry run: M = $(get M) (local); real run: gh pr merge $PR --merge"; return; fi
   local bumped; bumped=$(get BUMPED); [[ -n $bumped ]] || die "run bump first"
   log "waiting for CI on #$PR"
+  # The PR must show the release commit first, else --watch reads the last run.
+  local i
+  for ((i = 0; i < 60; i++)); do
+    [[ $(gh pr view "$PR" -R "$GH_REPO" --json headRefOid -q .headRefOid) == "$bumped" ]] && break; sleep 5
+  done
+  sleep 20
   gh pr checks "$PR" -R "$GH_REPO" --watch --fail-fast >/dev/null || die "CI failed on #$PR"
   ask "merge #$PR into main (a merge commit)?"
   gh pr ready "$PR" -R "$GH_REPO" >/dev/null 2>&1 || true
