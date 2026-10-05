@@ -28,9 +28,10 @@ FFPREF=/usr/lib/firefox/defaults/pref/omacvm-webgpu.js
 LAUNCH=/usr/local/bin/omacvm-chromium-webgpu
 LAUNCH2=/usr/local/bin/omacvm-chrome-webgpu
 DESK=/usr/share/applications/omacvm-chromium-webgpu.desktop
+LOG=/var/log/omacvm-mesa-build.log      # the last failed build's log
 
 remove() {
-  rm -rf "$PREFIX" "$ICD" "$CLICD" "$ENVF" "$FFPREF" "$LAUNCH" "$LAUNCH2" "$DESK" \
+  rm -rf "$PREFIX" "$ICD" "$CLICD" "$ENVF" "$FFPREF" "$LAUNCH" "$LAUNCH2" "$DESK" "$LOG" \
     /var/cache/omacvm/mesa-build
   echo "OmacVM Venus extras removed"
 }
@@ -62,11 +63,24 @@ pacman -S --needed --noconfirm vulkan-icd-loader vulkan-tools ocl-icd clinfo >/d
 llvm=$(pacman -Q llvm-libs 2>/dev/null | awk '{ split($2, v, "."); print v[1] }')
 STAMP="$MESA_VERSION $(cat patches/*.patch | sha256sum | cut -c1-16) llvm-${llvm:-none}"
 if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
-  pacman -S --needed --noconfirm meson ninja pkgconf python-mako python-yaml python-packaging \
-    glslang spirv-tools spirv-llvm-translator llvm clang libclc rust rust-bindgen cbindgen \
-    libdrm wayland wayland-protocols libx11 libxext libxrandr libxshmfence libxxf86vm \
-    ocl-icd zstd expat >/dev/null 2>&1 || { echo "OmacVM Venus extras: pacman could not install Mesa's build tools"; exit 1; }
-  B=/var/cache/omacvm/mesa-build; rm -rf "$B"; mkdir -p "$B"
+  # What the built Mesa links stays; build tools this VM lacks (on a stock
+  # Omarchy: Rust, meson, ninja, bindgen) come for the build and go after it.
+  # A rebuild (an LLVM update) downloads them again.
+  pacman -S --needed --noconfirm spirv-tools spirv-llvm-translator llvm-libs clang libclc \
+    libdrm wayland libx11 libxext libxrandr libxshmfence libxxf86vm ocl-icd zstd expat >/dev/null 2>&1 ||
+    { echo "OmacVM Venus extras: pacman could not install Mesa's libraries"; exit 1; }
+  BUILD_TOOLS=$(pacman -T meson ninja pkgconf python-mako python-yaml python-packaging glslang \
+    wayland-protocols llvm rust rust-bindgen cbindgen || true)
+  B=/var/cache/omacvm/mesa-build
+  # shellcheck disable=SC2086 # one package per word
+  trap 'rm -rf "$B"; [[ -z $BUILD_TOOLS ]] || pacman -Rns --noconfirm $BUILD_TOOLS >/dev/null 2>&1 ||
+    echo "OmacVM Venus extras: build tools left installed (pacman -Rns did not take them all)"' EXIT
+  if [[ -n $BUILD_TOOLS ]]; then
+    # shellcheck disable=SC2086
+    pacman -S --needed --noconfirm --asdeps $BUILD_TOOLS >/dev/null 2>&1 ||
+      { echo "OmacVM Venus extras: pacman could not install Mesa's build tools"; exit 1; }
+  fi
+  rm -rf "$B"; mkdir -p "$B"
   curl -fsSL -o "$B/mesa.tar.xz" "https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz"
   echo "$MESA_SHA256  $B/mesa.tar.xz" | sha256sum -c --quiet
   tar -C "$B" -xf "$B/mesa.tar.xz"
@@ -77,10 +91,9 @@ if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
     -Dvulkan-drivers=virtio -Dgallium-drivers=zink -Dgallium-rusticl=true -Dllvm=enabled \
     -Dplatforms=wayland,x11 -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Degl=disabled \
     -Dglx=disabled -Dgbm=disabled -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled \
-    > "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; exit 1; }
-  ninja -C "$S/build" install >> "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; exit 1; }
+    > "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; cp "$B/build.log" "$LOG"; exit 1; }
+  ninja -C "$S/build" install >> "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; cp "$B/build.log" "$LOG"; exit 1; }
   echo "$STAMP" > "$PREFIX/omacvm-mesa-version"
-  rm -rf "$B"
 fi
 
 mkdir -p /etc/vulkan/icd.d /etc/OpenCL/vendors /etc/environment.d
