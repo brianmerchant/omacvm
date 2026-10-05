@@ -77,13 +77,49 @@ VM runs, and goes back by itself when a new version does not start
   If the picture or the GPU misbehaves on a Mac: `defaults write
   org.omacvm.app gpuSafeMode -bool true` and restart the VM goes back to the
   2.8.0 fence and frame path; `omacvm check` shows which path a VM took.
-- Vulkan in the VM (Venus on MoltenVK), hidden and experimental:
-  `defaults write org.omacvm.app venus -bool true`, then restart the VM. The
-  VM's Mesa must round GPU memory to the Mac's 16 KiB pages (Mesa 26.2.4 or
-  newer; Arch Linux ARM has 26.2.3, so
-  [`app/scripts/dev/guest-mesa-venus.sh`](../../app/scripts/dev/guest-mesa-venus.sh)
-  builds the Venus driver into `/opt/mesa-venus`); otherwise Vulkan apps fail
-  to get memory. vkmark about 5,200. OpenGL stays on virgl.
+- Graphics, per VM: **OpenGL**, **Vulkan** or **Automatic** (the default),
+  in the app's setup and VM window, with `omacvm graphics --vm NAME
+  opengl|vulkan|auto`, or on the control centre's Graphics row. OpenGL:
+  Omarchy, its apps and browsers draw with OpenGL on the Mac's GPU (virgl),
+  as up to 2.9. Vulkan: the same, plus Vulkan on the Mac's GPU (Venus) for
+  Vulkan apps: on KosmicKrisp on macOS 26 and newer (in the app since 3.0.0),
+  on MoltenVK before (fewer Vulkan features). OpenGL stays on virgl either
+  way. Automatic picks Vulkan where it is the faster path on this Mac
+  ([numbers](../benchmarks/README.md#graphics-automatic-2026-10-05)): macOS
+  26 and newer with KosmicKrisp, OpenGL on macOS 15. A change applies at the
+  VM's next start; `omacvm check` shows what the start got ("Graphics" row)
+  and which Vulkan driver the Mac used ("Vulkan (Venus)": KosmicKrisp, or
+  MoltenVK when KosmicKrisp cannot run on that Mac, logged).
+  The VM needs a Venus driver that sizes GPU memory to the Mac's 16 KiB
+  pages (Mesa 26.2.4 or newer; with Arch Linux ARM's 26.2.3 every Vulkan app
+  fails with `ERROR_OUT_OF_HOST_MEMORY`). While Arch Linux ARM has 26.2.3,
+  apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
+  package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
+  minutes the first time) when the setting gives the VM Vulkan, and the VM
+  builds it at its next start when Vulkan was picked in the app since
+  (`omacvm-venus-driver.service`). Arch's 26.2.4 replaces it on an update.
+  Automatic waits for that driver: until it is there it gives OpenGL.
+  Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
+  plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
+  to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
+  allocates counts against the VM's GPU memory budget.
+  For development `defaults write org.omacvm.app venus -bool true` gives
+  every VM Vulkan whatever its setting.
+- WebGPU and GPU compute (experimental, off by default):
+  `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
+  The VM gets OpenCL (rusticl on Zink), WebGPU in Firefox, and a
+  "Chromium (WebGPU)" menu entry that starts Chromium with WebGPU on the
+  Mac's GPU (the normal Chromium keeps its software WebGPU: its Vulkan mode
+  costs WebGL about a fifth), with OmacVM's own Mesa (pinned 26.2.4 with
+  five patches) in `/opt/omacvm-mesa`, and Vulkan whatever the Graphics
+  setting. The first time the VM builds that Mesa: about 3 minutes on an M4
+  Max and a 140 MB download (Mesa's source and Rust; Omarchy has LLVM and
+  Clang already). The build tools it adds (Rust, meson, ninja, bindgen) are
+  removed after the build. If the build fails, the feature stays off and
+  apply says so (log: `/var/log/omacvm-mesa-build.log` in the VM).
+  `omacvm disable vulkan` removes it. Numbers:
+  [benchmarks](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04),
+  how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

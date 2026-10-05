@@ -95,6 +95,9 @@ jobs:
       - name: Release keys on the command line (either key, Developer ID teams, a named spare)
         run: src/tests/release-keys.sh
 
+      - name: Vulkan (Venus) driver step for app VMs (when it builds Mesa's vulkan-virtio)
+        run: src/tests/venus-driver.sh
+
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 
@@ -123,6 +126,15 @@ jobs:
 
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
+
+      - name: The vulkan feature (VM folder file, guest Mesa step)
+        run: src/tests/vulkan-feature.sh
+
+      - name: The vulkan feature's Mesa build (build tools come and go)
+        run: src/tests/venus-build-tools.sh
+
+      - name: Graphics setting (OpenGL, Vulkan, Automatic; app and omacvm agree)
+        run: src/tests/graphics-setting.sh
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
@@ -158,6 +170,9 @@ jobs:
         run: |
           python3 src/app/guest/tests/test_omacvm_displays.py
           python3 src/app/guest/tests/test_idle_waits.py
+
+      - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
+        run: tests/bench/final-round/test.sh
 
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.

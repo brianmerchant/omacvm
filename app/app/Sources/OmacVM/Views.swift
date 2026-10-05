@@ -104,6 +104,7 @@ struct SetupView: View {
     @State private var locationProblem: String?
     @State private var prebuilt = PrebuiltImage.Lookup.checking
     @State private var usePrebuilt = true
+    @State private var graphics = GraphicsChoice.auto
 
     private var userOK: Bool {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
@@ -162,6 +163,7 @@ struct SetupView: View {
                 Toggle("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar", isOn: $bridge)
                 Toggle("Trackpad gestures in full screen", isOn: $gestures)
                 Toggle("Log in automatically (the Mac's own lock protects Omarchy)", isOn: $autologin)
+                GraphicsPicker(choice: $graphics)
                 Picker("Disk", selection: $state.config.diskGB) {
                     ForEach([64, 128, 256, 512], id: \.self) { Text("\($0) GB (grows as it fills)").tag($0) }
                 }
@@ -217,7 +219,7 @@ struct SetupView: View {
         state.screen = .building
         var download = false
         if case .found = prebuilt { download = usePrebuilt }
-        state.creator.start(config: state.config, password: password, prebuilt: download)
+        state.creator.start(config: state.config, password: password, prebuilt: download, graphics: graphics)
         password = ""; password2 = ""
     }
 }
@@ -290,6 +292,8 @@ struct ReadyView: View {
     @State private var fastNetBusy = false
     @State private var fastNetNote: String?
     @State private var fastNetStatus = ""
+    @State private var graphics = GraphicsChoice.auto
+    @State private var graphicsNote: String?
 
     /// The create screen's tiers; resources set some other way show as Custom.
     private var tier: Binding<Int> {
@@ -344,6 +348,11 @@ struct ReadyView: View {
                     .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
+            GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
+                .onChange(of: graphics) { _, v in setGraphics(v) }
+            if let n = graphicsNote {
+                Text(n).font(.caption).foregroundStyle(n.hasPrefix("Could not") ? .red : .secondary)
+            }
             fastNetwork
             Divider()
             StorageSection(storage: state.storage)
@@ -362,8 +371,23 @@ struct ReadyView: View {
                     .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
             }
         }
-        .onAppear { refreshFastNetwork() }
-        .onChange(of: state.config) { _, _ in refreshFastNetwork() }
+        .onAppear { refreshFastNetwork(); graphics = Graphics.read(folder: state.config.folder) }
+        .onChange(of: state.config) { _, c in refreshFastNetwork(); graphics = Graphics.read(folder: c.folder); graphicsNote = nil }
+    }
+
+    private func setGraphics(_ g: GraphicsChoice) {
+        let folder = state.config.folder
+        guard g != Graphics.read(folder: folder) else { return }
+        do {
+            try Graphics.write(g, folder: folder)
+            let plan = Runner.graphicsPlan(state.config)
+            graphicsNote = "Applies on the next start."
+            if plan.venus && !Graphics.driverReady(folder: folder) {
+                graphicsNote = "Applies on the next start. The first time, the VM builds its Vulkan driver at that start (a few minutes; Vulkan apps wait for it)."
+            }
+        } catch {
+            graphicsNote = "Could not save: \(error.localizedDescription)"
+        }
     }
 
     /// The fast network (experimental): a button, never automatic. Turning it
@@ -462,6 +486,36 @@ struct UpdateSection: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
+        }
+    }
+}
+
+/// The Graphics choice (Graphics.swift), in the setup and the VM window.
+struct GraphicsPicker: View {
+    @Binding var choice: GraphicsChoice
+    /// The VM's plan now (the VM window); the setup has none yet.
+    var plan: GraphicsPlan? = nil
+
+    private var autoText: String {
+        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
+        let kk = FileManager.default.fileExists(atPath: lib.path)
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        return Graphics.autoPicksVulkan(macOSMajor: major, kosmicKrisp: kk) ? "Vulkan on this Mac" : "OpenGL on this Mac"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Graphics", selection: $choice) {
+                Text("Automatic (\(autoText))").tag(GraphicsChoice.auto)
+                Text("OpenGL").tag(GraphicsChoice.opengl)
+                Text("Vulkan (experimental)").tag(GraphicsChoice.vulkan)
+            }
+            .help("OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before). Automatic picks what is faster on this Mac.")
+            if let p = plan {
+                Text("Next start: \(p.venus ? "OpenGL and Vulkan" : "OpenGL") (\(p.why)).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

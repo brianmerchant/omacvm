@@ -195,3 +195,35 @@ def test_checks_off_hides_marks_but_not_a_running_update():
                                                     jobs=[job], show_updates=False)}
     assert rows["gestures"].status is S.Status.BUSY and rows["gestures"].note == "the VM side (5/6)"
     assert not rows["gestures"].update and rows["bridge"].status is not S.Status.BUSY
+
+
+def test_graphics_row_only_for_app_vms():
+    st = {"graphics": {"graphics": "auto", "next_start": "vulkan", "this_start": "auto -> vulkan (macOS 27, KosmicKrisp)"}}
+    assert S.graphics_row(st, "parallels") is None
+    r = S.graphics_row(st, "app")
+    assert r.feature.name == "graphics" and r.status is S.Status.WORKS
+    assert r.note == "Automatic: OpenGL and Vulkan"
+
+
+def test_graphics_row_says_next_start():
+    st = {"graphics": {"graphics": "opengl", "next_start": "opengl", "this_start": "auto -> vulkan (macOS 27, KosmicKrisp)"}}
+    assert S.graphics_row(st, "app").note == "OpenGL: OpenGL from the next start"
+
+
+def test_graphics_row_unknown_and_busy():
+    assert S.graphics_row({}, "app").status is S.Status.UNKNOWN
+    assert S.graphics_row({"graphics": {"graphics": "metal"}}, "app").status is S.Status.UNKNOWN
+    j = S.Job(id="1", action="graphics", features=("vulkan",), state="running")
+    r = S.graphics_row({"graphics": {"graphics": "auto"}}, "app", [j])
+    assert r.status is S.Status.BUSY and "Vulkan" in r.note
+
+
+def test_graphics_row_failing_check():
+    st = {"graphics": {"graphics": "vulkan", "next_start": "vulkan", "this_start": "vulkan -> vulkan (chosen, MoltenVK)"}}
+    c = chk("fail", "graphics", name="Vulkan (Venus)", detail="needed: omacvm apply")
+    r = S.graphics_row(st, "app", [], [c, chk("fail", "bridge")])
+    assert r.status is S.Status.FAILING and "omacvm apply" in r.note and len(r.checks) == 1
+
+
+def test_next_graphics_cycles():
+    assert [S.next_graphics(x) for x in ("auto", "opengl", "vulkan", "")] == ["opengl", "vulkan", "auto", "auto"]

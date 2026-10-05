@@ -17,4 +17,5 @@ thp-kernel	kernel/build-thp-kernel.sh kernel/thp-pkgbuild.py
 control-centre	control/**
 fast-network	net/**
 chromium-video	vdec/**
+vulkan	app/guest/venus/**
 core	**

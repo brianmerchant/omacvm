@@ -5,10 +5,10 @@
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME] [--only F,...] [--strict F,...|all]
-#                    (--vm-type app: OmacVM.app)
+#                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -20,10 +20,13 @@
 # system steps are skipped. --strict F,...|all: a part of these features that
 # could not be set up fails the run (exit 1, after the other parts); without
 # it, such a part is only logged.
+# --graphics (OmacVM.app): what the VM's Graphics setting gives it on this Mac
+# (the Mac decides Automatic); vulkan builds its Venus driver ahead of the
+# start that gets Vulkan. Kept in /etc/omacvm/env.
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=()
+U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=(); GRAPHICS=""
 FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
@@ -41,6 +44,8 @@ while (( $# )); do
     --vm-name-b64) NAME64=$2; shift 2 ;;
     --feature) SET[${2%%=*}]=${2#*=}; shift 2 ;;
     --only) ONLY=",$2,"; shift 2 ;;
+    --graphics) [[ $2 == opengl || $2 == vulkan ]] || { echo "guest/install.sh: --graphics opengl|vulkan" >&2; exit 2; }
+                GRAPHICS=$2; shift 2 ;;
     --strict) STRICT=",$2,"; shift 2 ;;
     *) sed -n '5,7s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
@@ -87,6 +92,7 @@ AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
 [[ $NAME64 =~ ^[A-Za-z0-9+/=]*$ ]] || { echo "guest/install.sh: --vm-name-b64: not base64" >&2; exit 2; }
 if [[ -r $ENV ]]; then
   [[ -n $NAME64 ]] || NAME64=$(sed -n 's/^OMACVM_VM_NAME_B64=//p' "$ENV" | tail -1)
+  [[ -n $GRAPHICS ]] || GRAPHICS=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENV" | tail -1)
   # scroll-momentum was called glide in the experiment: keep an old VM's choice.
   v=$(sed -n "s/^OMACVM_FEATURE_glide=//p" "$ENV" | tail -1); [[ -n $v ]] && F[scroll-momentum]=$v
   for f in "${FEATURES[@]}"; do
@@ -133,12 +139,14 @@ esac
 [[ $TYPE == app ]] || F[fast-network]=off
 # Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
 [[ $TYPE == app ]] || F[chromium-video]=off
+[[ $TYPE == app ]] || F[vulkan]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 [[ $TYPE == fusion ]] && FUSION_DNS=1
 {
   printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\nOMACVM_USER=%s\n' "$TYPE" "$HOST" "$U"
   [[ -z $NAME64 ]] || printf 'OMACVM_VM_NAME_B64=%s\n' "$NAME64"
+  [[ $TYPE != app || -z $GRAPHICS ]] || printf 'OMACVM_GRAPHICS=%s\n' "$GRAPHICS"
   for f in "${FEATURES[@]}"; do printf 'OMACVM_FEATURE_%s=%s\n' "${f//-/_}" "${F[$f]}"; done
 } | install -Dm644 /dev/stdin "$ENV"
 log "$TYPE VM, the Mac is $HOST"
@@ -268,6 +276,16 @@ if want chromium-video && [[ $TYPE == app ]]; then
     "$R/vdec/guest/install.sh" "$U" on || not_set_up chromium-video "Chromium video"
   else
     "$R/vdec/guest/install.sh" "$U" off || not_set_up chromium-video "Chromium video (off)"
+  fi
+fi
+# Vulkan (Venus): OmacVM's Mesa for it, built once in the VM. Its own step,
+# so the control centre can repair it alone.
+if want vulkan && [[ $TYPE == app ]]; then
+  if [[ ${F[vulkan]} == on ]]; then
+    log "WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
+    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "Vulkan (GL is as it was)"
+  elif [[ -e /opt/omacvm-mesa ]]; then
+    log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
   fi
 fi
 if ! want battery; then

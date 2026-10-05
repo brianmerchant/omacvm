@@ -285,3 +285,43 @@ def counts(rows: list[Row]) -> dict[str, int]:
         out[r.status.value] = out.get(r.status.value, 0) + 1
     out["updates"] = sum(1 for r in rows if r.update)
     return out
+
+
+# ---- OmacVM.app's Graphics setting (src/cmd/graphics.sh) ----
+GRAPHICS_CHOICES = ("auto", "opengl", "vulkan")
+GRAPHICS_TITLES = {"auto": "Automatic", "opengl": "OpenGL", "vulkan": "Vulkan"}
+GRAPHICS_FEATURE = Feature(
+    name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
+    summary="OpenGL, Vulkan, or Automatic (the faster one on this Mac); from the VM's next start")
+
+
+def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,
+                 checks: list[Check] | None = None) -> Row | None:
+    """The Graphics row of an OmacVM.app VM, from the Mac's status (its
+    `graphics`: omacvm graphics --json); None on the other routes."""
+    if vm_type != "app":
+        return None
+    mine = tuple(c for c in (checks or []) if c.feature == "graphics")
+    g = (status or {}).get("graphics")
+    job = next((j for j in (jobs or []) if j.active and j.action == "graphics"), None)
+    if job is not None:
+        return Row(GRAPHICS_FEATURE, True, Status.BUSY, f"to {GRAPHICS_TITLES.get(job.features[0] if job.features else '', '?')}…",
+                   checks=mine)
+    if not isinstance(g, dict) or g.get("graphics") not in GRAPHICS_CHOICES:
+        return Row(GRAPHICS_FEATURE, True, Status.UNKNOWN, "the Mac's OmacVM does not say (older than 3.0.0?)", checks=mine)
+    title = GRAPHICS_TITLES[g["graphics"]]
+    nxt = "OpenGL and Vulkan" if g.get("next_start") == "vulkan" else "OpenGL"
+    this = str(g.get("this_start") or "")
+    now = "OpenGL and Vulkan" if "-> vulkan" in this else "OpenGL" if this else ""
+    note = f"{title}: {now}" if now and now == nxt else f"{title}: {nxt} from the next start"
+    if any(c.status == "fail" for c in mine):
+        bad = next(c for c in mine if c.status == "fail")
+        return Row(GRAPHICS_FEATURE, True, Status.NEEDS_PERSON if bad.human else Status.FAILING,
+                   f"{note}; {bad.name}: {bad.detail}", checks=mine)
+    return Row(GRAPHICS_FEATURE, True, Status.WORKS, note, checks=mine)
+
+
+def next_graphics(current: str) -> str:
+    """Space on the Graphics row: Automatic -> OpenGL -> Vulkan -> Automatic."""
+    i = GRAPHICS_CHOICES.index(current) if current in GRAPHICS_CHOICES else -1
+    return GRAPHICS_CHOICES[(i + 1) % len(GRAPHICS_CHOICES)]

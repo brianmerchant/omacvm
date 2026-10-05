@@ -671,6 +671,8 @@ class ControlCentre(App):
     def describe(self, action: str, features: list[str]) -> str:
         titles = {f.name: f.title for f in self.c.local.features}
         names = ", ".join(titles.get(n, n) for n in features)
+        if action == "graphics":
+            return f"Graphics: {S.GRAPHICS_TITLES.get(features[0] if features else '', '?')}"
         return {"update": "Update", "reinstall": f"Repair {names}", "enable": f"{names} on",
                 "disable": f"{names} off"}.get(action, action)
 
@@ -724,6 +726,9 @@ class ControlCentre(App):
         return f"{head} On the Mac, {self.on_the_mac('apply')} puts this VM right ({again}; ! reports the problem)."
 
     def toggle(self, r: S.Row) -> None:
+        if r.feature.name == "graphics":
+            self.choose_graphics()
+            return
         if r.status is S.Status.UNAVAILABLE:
             self.notify(f"{r.feature.title}: {r.note}", severity="warning")
             return
@@ -758,7 +763,28 @@ class ControlCentre(App):
         return (f"This also brings this VM from OmacVM {self.c.local.version} to OmacVM {mac}, the Mac's: "
                 "all of it goes in, your feature choices stay.")
 
+    def choose_graphics(self) -> None:
+        """Space on Graphics: the next choice, asked first (it applies at the
+        VM's next start; Vulkan builds the VM's driver the first time)."""
+        if not self.can_ask():
+            return
+        cur = self.c.graphics()
+        if not cur:
+            self.notify("Graphics: the Mac's OmacVM does not say this VM's setting (omacvm update on the Mac)", severity="warning")
+            return
+        nxt = S.next_graphics(cur)
+        text = {"auto": "Automatic: Vulkan where it is the faster path on this Mac, else OpenGL.",
+                "opengl": "OpenGL only (no Vulkan in the VM).",
+                "vulkan": "OpenGL plus Vulkan on the Mac's GPU (experimental). The first time, the VM builds its Vulkan driver (a few minutes)."}[nxt]
+        self.push_screen(ConfirmScreen(f"Graphics: {S.GRAPHICS_TITLES[cur]} -> {S.GRAPHICS_TITLES[nxt]}",
+                                       text + "\nFrom the VM's next start (shut it down, then start it again)."),
+                         lambda yes: yes and self.run_job("graphics", [nxt]))
+
     def repair(self, r: S.Row) -> None:
+        if r.feature.name == "graphics":
+            if self.can_ask() and self.c.graphics():
+                self.run_job("graphics", [self.c.graphics()])   # its Vulkan driver again, if it gets Vulkan
+            return
         if not r.on:
             self.notify(f"{r.feature.title} is off: space turns it on", severity="warning")
             return

@@ -32,6 +32,7 @@ done
 source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
+source "$R/src/lib/graphics.sh"
 export OMA_KEY=$KEY
 # stop RC MESSAGE: no VM to check. With --json also the JSON, one failed check.
 stop() {
@@ -299,10 +300,24 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     else ok "GPU path" "$g"; fi
   fi
 fi
+# OmacVM.app's Graphics setting: what this start got (the app says so in
+# qemu.log), and whether the next start gets something else.
+if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then
+  FEATURE=graphics
+  gl=$(sed -n 's/^OmacVM: graphics: //p' "$gd/logs/qemu.log" 2>/dev/null | tail -1)
+  gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd")
+  if [[ -z $gl ]]; then
+    skip "Graphics" "$(graphics_title "$gc"): $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start (an app from before 3.0.0 has OpenGL only)"
+  elif [[ ${gl%% *} != "$gc" || $gl != *"-> $gn "* ]]; then
+    skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start"
+  else ok "Graphics" "$(graphics_title "$gc"): $gl"; fi
+  FEATURE=""
+fi
 # Vulkan in an app VM (the hidden Venus switch): the Mac driver QEMU picked
 # this run (qemu.log starts fresh with each run). KosmicKrisp falls back to
 # MoltenVK when it cannot run.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  FEATURE=graphics
   v=$(grep -o 'vulkan driver: .*' "$miclog" | tail -1)
   case $v in
     "") ;;
@@ -313,6 +328,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
       else ok "Vulkan (Venus)" "MoltenVK"; fi ;;
     *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
   esac
+  FEATURE=""
 fi
 # macOS's own shortcuts while an app VM has the keyboard (this run): to the
 # VM (switched off meanwhile), kept by the user's choice, or a fallback.

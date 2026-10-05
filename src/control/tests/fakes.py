@@ -53,6 +53,7 @@ class FakeMac:
         self.stale_for = 0                # this many status requests get 403 vm-key, looking (an old VM list)
         self.stale_looking = True         # False: the Mac is not looking (a key that is really wrong)
         self.nonces: set = set()
+        self.graphics: dict | None = None   # an OmacVM.app VM's Graphics (omacvm graphics --json)
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -130,6 +131,8 @@ class FakeMac:
                     fake.unknown_for -= 1
                     return self.send(409, {"error": "no running VM that OmacVM set up has this address (the Mac is "
                                                     "looking at its VMs again: try in a moment)", "code": "unknown-vm"})
+                if p == "/omacvm/status" and fake.graphics is not None:
+                    return self.send(200, {"omacvm": fake.version, "features": [], "checks": [], "graphics": fake.graphics})
                 if p == "/omacvm/status":
                     return self.send(200, {"omacvm": fake.version, "features": [
                         {"name": "omanotch", "on": False, "available": False, "reason": "needs a MacBook with a notch"}],
@@ -169,7 +172,8 @@ class FakeMac:
                     return self.send(st, {"error": err, "code": code})
                 if self.path == "/omacvm/jobs":
                     jid = f"{len(fake.jobs) + 1:016x}"
-                    fake.jobs[jid] = {"id": jid, "action": b["action"], "features": b.get("features", []),
+                    fake.jobs[jid] = {"id": jid, "action": b["action"],
+                                      "features": b.get("features", [b["graphics"]] if "graphics" in b else []),
                                       "state": "running", "step": 1, "of": 4, "text": "the Mac side",
                                       "lines": ["==> OmacVM Bridge on the Mac"], "polls": 0}
                     return self.send(202, {k: v for k, v in fake.jobs[jid].items() if k != "polls"})

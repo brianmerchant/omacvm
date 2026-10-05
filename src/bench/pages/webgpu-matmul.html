@@ -1,0 +1,97 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebGPU matmul</title>
+<!-- OmacVM bench: WebGPU f32 matrix multiply (N x N, ?n=, default 2048), 16x16 tiles in workgroup
+     memory, 4x4 outputs per thread. GFLOPS from the slope between r and 4r dispatches in one submit
+     (removes the submit-to-callback latency; Firefox resolves onSubmittedWorkDone on a timer),
+     median of 5; checked against the CPU on 64 cells. Result in #result (data-done when finished). -->
+<body style="font: 14px system-ui; margin: 2em">
+<p>WebGPU matmul: <span id="result">running</span></p>
+<pre id="detail"></pre>
+<script>
+(async () => {
+  const N = +(new URLSearchParams(location.search).get("n") || 2048);
+  const a = await navigator.gpu.requestAdapter({powerPreference: "high-performance"});
+  if (!a) return {error: "no adapter"};
+  const dev = await a.requestDevice({requiredLimits: {maxStorageBufferBindingSize: a.limits.maxStorageBufferBindingSize, maxBufferSize: a.limits.maxBufferSize}});
+  const T = 64; // tile edge in outputs per workgroup (16x16 threads x 4x4 each)
+  const code = `
+  @group(0) @binding(0) var<storage, read> A: array<f32>;
+  @group(0) @binding(1) var<storage, read> B: array<f32>;
+  @group(0) @binding(2) var<storage, read_write> C: array<f32>;
+  const N = ${N}u; const K = 16u;
+  var<workgroup> As: array<array<f32, 64>, 16>;  // [k][row]
+  var<workgroup> Bs: array<array<f32, 64>, 16>;  // [k][col]
+  @compute @workgroup_size(16, 16)
+  fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_id) l: vec3u) {
+    let row0 = wg.y * 64u; let col0 = wg.x * 64u;
+    var acc: array<array<f32, 4>, 4>;
+    let tid = l.y * 16u + l.x;
+    for (var k0 = 0u; k0 < N; k0 += K) {
+      for (var i = 0u; i < 4u; i++) {
+        let e = tid + i * 256u;           // 0..1023 = 64 rows x 16 k
+        let r = e / 16u; let kk = e % 16u;
+        As[kk][r] = A[(row0 + r) * N + k0 + kk];
+        let kb = e / 64u; let c = e % 64u;
+        Bs[kb][c] = B[(k0 + kb) * N + col0 + c];
+      }
+      workgroupBarrier();
+      for (var kk = 0u; kk < K; kk++) {
+        var av: array<f32, 4>; var bv: array<f32, 4>;
+        for (var i = 0u; i < 4u; i++) { av[i] = As[kk][l.y * 4u + i]; bv[i] = Bs[kk][l.x * 4u + i]; }
+        for (var i = 0u; i < 4u; i++) { for (var j = 0u; j < 4u; j++) { acc[i][j] = fma(av[i], bv[j], acc[i][j]); } }
+      }
+      workgroupBarrier();
+    }
+    for (var i = 0u; i < 4u; i++) { for (var j = 0u; j < 4u; j++) {
+      C[(row0 + l.y * 4u + i) * N + col0 + l.x * 4u + j] = acc[i][j]; } }
+  }`;
+  const mod = dev.createShaderModule({code});
+  const info = await mod.getCompilationInfo();
+  const errs = info.messages.filter(m => m.type === "error").map(m => m.message);
+  if (errs.length) return {error: errs};
+  const bytes = N * N * 4;
+  const hA = new Float32Array(N * N), hB = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) { hA[i] = ((i * 7) % 13) / 13 - 0.5; hB[i] = ((i * 5) % 11) / 11 - 0.5; }
+  const mk = (data, usage) => { const b = dev.createBuffer({size: bytes, usage}); if (data) dev.queue.writeBuffer(b, 0, data); return b; };
+  const bA = mk(hA, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST), bB = mk(hB, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  const bC = mk(null, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC), rb = mk(null, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
+  const p = dev.createComputePipeline({layout: "auto", compute: {module: mod, entryPoint: "main"}});
+  const bg = dev.createBindGroup({layout: p.getBindGroupLayout(0), entries: [0, 1, 2].map(i => ({binding: i, resource: {buffer: [bA, bB, bC][i]}}))});
+  const run = async (reps) => {
+    const e = dev.createCommandEncoder();
+    for (let r = 0; r < reps; r++) { const c = e.beginComputePass(); c.setPipeline(p); c.setBindGroup(0, bg); c.dispatchWorkgroups(N / T, N / T); c.end(); }
+    const t0 = performance.now(); dev.queue.submit([e.finish()]); await dev.queue.onSubmittedWorkDone(); return performance.now() - t0;
+  };
+  await run(1); await run(1);
+  // Per-matmul time from the slope between r and 4r dispatches in one submit: removes the fixed
+  // submit-to-callback latency (Firefox resolves onSubmittedWorkDone on a timer).
+  const med = a => { const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+  let reps = 1, t1, t4;
+  for (;;) {
+    t1 = await run(reps); t4 = await run(4 * reps);
+    if (t4 - t1 > 300 || reps >= 1024) break;
+    reps *= 4;
+  }
+  const s1 = [], s4 = [];
+  for (let s = 0; s < 5; s++) { s1.push(await run(reps)); s4.push(await run(4 * reps)); }
+  const per = (med(s4) - med(s1)) / (3 * reps);
+  const gflops = 2 * N * N * N / (per / 1000) / 1e9;
+  const latency = med(s1) - reps * per;
+  // correctness on 64 sampled cells
+  const e = dev.createCommandEncoder(); e.copyBufferToBuffer(bC, 0, rb, 0, bytes); dev.queue.submit([e.finish()]);
+  await rb.mapAsync(GPUMapMode.READ); const out = new Float32Array(rb.getMappedRange());
+  let maxErr = 0;
+  for (let s = 0; s < 64; s++) { const i = (s * 9973) % N, j = (s * 7919) % N; let ref = 0;
+    for (let k = 0; k < N; k++) ref += hA[i * N + k] * hB[k * N + j];
+    maxErr = Math.max(maxErr, Math.abs(ref - out[i * N + j])); }
+  return {N, reps, per_matmul_ms: +per.toFixed(3), gflops: +gflops.toFixed(1), submit_latency_ms: +latency.toFixed(1),
+          max_abs_err: maxErr, t_r_ms: s1.map(x => +x.toFixed(1)), t_4r_ms: s4.map(x => +x.toFixed(1)),
+          adapter: a.info.vendor + "/" + a.info.architecture + "/" + a.info.description};
+})().then(r => {
+  const el = document.getElementById("result");
+  el.textContent = r.error ? "error: " + r.error : (r.max_abs_err < 1e-3 ? String(r.gflops) : "wrong result");
+  document.getElementById("detail").textContent = JSON.stringify(r, null, 1);
+  el.dataset.done = "1";
+}, e => { const el = document.getElementById("result"); el.textContent = "error: " + e; el.dataset.done = "1"; });
+</script>

@@ -134,6 +134,18 @@ the Mac from its next start (shut it down and start it again).
 prints the one command to run in the VM's terminal first (it lets OmacVM in
 with its own SSH key, from the Mac only).
 
+## Graphics: OpenGL, Vulkan or Automatic (OmacVM.app)
+
+```bash
+omacvm graphics --vm Omarchy            # the setting, and what it gives on this Mac
+omacvm graphics --vm Omarchy vulkan     # opengl, vulkan or auto
+```
+
+Also in the app (setup and the VM's window) and on the control centre's
+Graphics row. It applies at the VM's next start. Automatic picks the faster
+path on this Mac; Vulkan adds Vulkan for Vulkan apps next to OpenGL
+([details](routes/app.md)).
+
 ## Change CPUs and memory
 
 ```bash
