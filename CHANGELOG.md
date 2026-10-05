@@ -131,7 +131,8 @@ Pending (each line is decided at release: the lane landed, or it moves to
   paths outside the bundle, no shared folders, no extra QEMU arguments,
   disks without a parent). Free space is checked before the download, and
   the seed with the password hash is deleted however the build ends.
-- ⌃⌥⌘ Esc in the full-screen VM no longer takes the VM out of full screen.
+- The escape combo (now ⌃⌥ Esc) in the full-screen VM no longer takes the VM
+  out of full screen.
   It moves the monitor under the pointer to the Space you came from with
   macOS's own "Move left/right a space" shortcut (as set in System Settings
   › Keyboard › Keyboard Shortcuts, ⌃← and ⌃→ by default), with macOS's own
