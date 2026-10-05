@@ -18,9 +18,10 @@ Checks (the guest is untrusted): the heap must be a placement heap; the plane's
 offset + stride * (height - 1) + width * bytes per pixel must lie inside the
 heap; one plane only; the stride must be at least the row and a whole number
 of pixels; only uncompressed 2D formats. The texture itself goes through the
-normal resource checks and the GPU memory budget.
+normal resource checks and the GPU memory budget, and so does the shared copy
+buffer of a private heap (else the window stays blank).
 Limits: a copy per compositor frame that samples the window (vkmark full
-screen on an M4 Max: 520 against 74 with the software WSI). The copy reads
+screen on an M4 Max, median of 3: 678 against 65 with the software WSI). The copy reads
 what Venus finished; the guest's present wait orders it, the host does not
 add a fence.
 Upstream: not sent (upstream's Metal path needs EGL on ANGLE).
@@ -173,7 +174,7 @@ index 7b66be0..a95693f 100644
 +   free(reader);
 +}
 diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
-index c50615d..2b641c4 100644
+index c50615d..39dabb8 100644
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
 @@ -152,9 +152,13 @@ static struct { uint64_t woken, late, timed_out, stray; } fence_busy_stats;
@@ -264,7 +265,7 @@ index c50615d..2b641c4 100644
  #endif
     free(res);
  }
-@@ -15498,6 +15555,77 @@ void vrend_renderer_borrow_texture_for_scanout(struct pipe_resource *pres)
+@@ -15498,6 +15555,88 @@ void vrend_renderer_borrow_texture_for_scanout(struct pipe_resource *pres)
     }
  }
  
@@ -314,9 +315,20 @@ index c50615d..2b641c4 100644
 +      else if (!args->height)
 +         why = "it has no rows";
 +      else {
++         const uint64_t length = stride * (args->height - 1) + row;
 +         gr->heap_reader = virgl_metal_heap_reader_create(res->metal_heap, args->plane_offsets[0],
-+                                                          stride * (args->height - 1) + row, &why);
++                                                          length, &why);
 +         gr->heap_stride = (uint32_t)stride;
++         /* the copy buffer of a private heap is host memory too: it counts */
++         if (gr->heap_reader && virgl_metal_heap_reader_copies(gr->heap_reader)) {
++            if (virgl_gpu_budget_charge(length, false)) {
++               virgl_metal_heap_reader_destroy(gr->heap_reader);
++               gr->heap_reader = NULL;
++               why = "its copy buffer is past the guest GPU memory budget";
++            } else {
++               gr->budget_bytes += length;
++            }
++         }
 +      }
 +   }
 +
@@ -342,7 +354,7 @@ index c50615d..2b641c4 100644
  int
  vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
                                        uint32_t res_id,
-@@ -15550,6 +15678,11 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
+@@ -15550,6 +15689,11 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
        if (!gr)
           return ENOMEM;
  
