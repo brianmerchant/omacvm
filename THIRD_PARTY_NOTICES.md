@@ -31,8 +31,9 @@ each file taken from them:
   derived from Omarchy's own, each with its `LICENSE`; OmacVM.app's display
   widget (`src/app/guest/monitor-widget`) is built in the VM from the
   installed Omarchy's own display panel, with its `LICENSE`; the icon
-  (`src/icon/omacvm.svg`) uses Omarchy's mark; OmacVM.app's boot logo is
-  Omarchy's `logo.svg`.
+  (`src/icon/omacvm.svg`) uses Omarchy's mark; OmacVM.app's boot logo (the
+  firmware's, and the window's while the VM starts) and the start animation
+  are Omarchy's `logo.svg`.
 - **Omanotch** (`src/omanotch/`) has its own README and licence.
 - In the VM, nothing else is bundled: Arch Linux ARM and Omarchy
   (omarchy-mac) come from their own servers, v4l2loopback too (built in the

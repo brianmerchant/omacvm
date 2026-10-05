@@ -713,6 +713,26 @@ cc -Wall -Werror -I"$display_tests" "$native_dir/Tests/display/test-idle-refresh
   -o "$display_tests/test-idle-refresh"
 "$display_tests/test-idle-refresh"
 OMACVM_IDLE_REFRESH=0 "$display_tests/test-idle-refresh" off
+# OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
+# logo until the guest's desktop, and instead of "Display output is not
+# active."; the cells must be the firmware's logo, the animation's table the
+# generator's, and its core must keep its timeline and tell the desktop apart.
+# After the GPU present patches: it draws the still logo in their IOSurfaces too.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-boot-splash.patch"
+python3 "$native_dir/Tests/display/test-boot-splash-cells.py" "$source_dir/ui/omacvm-splash.h" || \
+  die "the boot splash's logo is not the firmware's (test-boot-splash-cells.py)"
+python3 "$native_dir/boot-logo/make-splash-morph.py" --check "$source_dir/ui/omacvm-splash.h" || \
+  die "the start animation's table is not make-splash-morph.py's"
+cc -Wall -Wextra -Werror -I"$source_dir/ui" "$native_dir/Tests/display/test-boot-splash-morph.c" \
+  -o "$display_tests/test-boot-splash-morph"
+"$display_tests/test-boot-splash-morph"
+# The logo layer's fade into the desktop runs once ("opacity" in its no-action list).
+awk '/NSDictionary \*none = @\{/ { on = 1 } on { print } on && /\};$/ { exit }' "$source_dir/ui/cocoa.m" |
+  sed -e 's/.*NSDictionary \*none = //' -e 's/};$/}/' > "$display_tests/intro-actions.inc"
+cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tests" \
+  "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
+  -framework OpenGL -o "$display_tests/test-boot-splash-fade"
+"$display_tests/test-boot-splash-fade"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

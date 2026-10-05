@@ -6,7 +6,9 @@ The wordmark is pixel art on a 15-unit grid (81 x 19 cells), so each cell
 becomes an exact CELL x CELL block: sharp edges at any whole-number size.
 Only the plain path commands logo.svg uses (m h v l z) are read.
 
-  make-logo-bmp.py logo.svg Logo.bmp [CELL]   (CELL defaults to 5: 405 x 95)
+  make-logo-bmp.py logo.svg Logo.bmp [CELL]   (CELL defaults to 10: 810 x 190)
+  make-logo-bmp.py logo.svg --rows            (the cells as C strings, # = on:
+                                               the app window's boot splash)
 """
 import re
 import struct
@@ -62,19 +64,20 @@ def inside(polys, px, py):
     return hit
 
 
-def main():
-    if len(sys.argv) not in (3, 4):
-        raise SystemExit(__doc__)
-    svg = open(sys.argv[1], encoding="utf-8").read()
-    cell = int(sys.argv[3]) if len(sys.argv) == 4 else 5
+def cells(svg):
+    """The logo's grid, top row first: True where a cell is on."""
     w, h = (int(v) for v in re.search(r'viewBox="0 0 (\d+) (\d+)"', svg).groups())
     if w % GRID or h % GRID:
         raise SystemExit("make-logo-bmp: logo.svg is not on the 15-unit grid")
     paths = [polygons(d) for d in re.findall(r'<path[^>]* d="([^"]+)"', svg)]
     cols, rows = w // GRID, h // GRID
-    on = [[any(inside(p, (c + .5) * GRID, (r + .5) * GRID) for p in paths)
-           for c in range(cols)] for r in range(rows)]
+    return [[any(inside(p, (c + .5) * GRID, (r + .5) * GRID) for p in paths)
+             for c in range(cols)] for r in range(rows)]
 
+
+def bmp(on, cell):
+    """The grid as a 24-bit BMP, each cell CELL x CELL pixels."""
+    cols, rows = len(on[0]), len(on)
     width, height = cols * cell, rows * cell
     stride = (width * 3 + 3) & ~3
     pixels = bytearray()
@@ -87,8 +90,21 @@ def main():
     header = struct.pack("<2sIHHI", b"BM", 54 + len(pixels), 0, 0, 54)
     info = struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels),
                        2835, 2835, 0, 0)
+    return header + info + pixels
+
+
+def main():
+    if len(sys.argv) not in (3, 4):
+        raise SystemExit(__doc__)
+    svg = open(sys.argv[1], encoding="utf-8").read()
+    on = cells(svg)
+    if sys.argv[2] == "--rows":
+        for row in on:
+            print('    "%s",' % "".join("#" if c else "." for c in row))
+        return
+    cell = int(sys.argv[3]) if len(sys.argv) == 4 else 10
     with open(sys.argv[2], "wb") as f:
-        f.write(header + info + pixels)
+        f.write(bmp(on, cell))
 
 
 if __name__ == "__main__":

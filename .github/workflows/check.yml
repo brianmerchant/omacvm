@@ -59,6 +59,9 @@ jobs:
       - name: Update parts cover src/
         run: python3 src/release/manifest.py parts > /dev/null
 
+      - name: Boot splash and start animation (offline, from the patch)
+        run: app/runtime/Tests/display/check-boot-splash.sh
+
       - name: OmacVM.app builds
         working-directory: app/app
         run: swift build
