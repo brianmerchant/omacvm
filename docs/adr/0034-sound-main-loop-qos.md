@@ -47,9 +47,9 @@ late 9 times; the tone broke 337 times. Two causes:
 Options 1 and 6: `qemu-darwin-main-loop-qos.patch` and
 `qemu-hda-no-catch-up.patch` (codec property `pace`, on).
 `defaults write org.omacvm.app audioClassic -bool true` starts QEMU with
-`OMACVM_MAIN_LOOP_QOS=default` and `pace=off`, as 2.9.0. QEMU logs both;
+`OMACVM_MAIN_LOOP_QOS=default` and `pace=off`, as 2.9.1. QEMU logs both;
 `omacvm check` shows them ("sound timing"). Option 4 stays a documented
-fix for 2.9.0 (troubleshooting finding 24).
+fix for 2.9.x (troubleshooting finding 24).
 
 ## Consequences
 

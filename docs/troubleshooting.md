@@ -465,7 +465,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   at 8 CPUs.
 - **Cause:** QEMU moves the sound in its main loop (the HDA's DMA timer and
   the 1 ms audio timer), the same thread that runs the VM's GPU (virgl).
-  Up to 2.9.0 that thread ran at the default QoS, on equal terms with the
+  Up to 2.9.1 that thread ran at the default QoS, on equal terms with the
   VM's CPUs and the Mac's own work; with the cores busy it ran 10-50 ms late
   thousands of times in 10 minutes and up to 200 ms late now and then. New
   shaders (an app's first frames) stop it for 50-80 ms by themselves. QEMU's
@@ -487,9 +487,9 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   delay stays the same (round trip in the VM about 282 ms).
   `omacvm check` shows both ("sound timing");
   `defaults write org.omacvm.app audioClassic -bool true` goes back to
-  2.9.0's timing.
-- **For 2.9.0:** a bigger safety buffer in the VM. As root in the VM
-  (USER = your user):
+  2.9.1's timing.
+- **For 2.9.0 and 2.9.1:** a bigger safety buffer in the VM. As root in
+  the VM (USER = your user):
 
   ```
   mkdir -p /etc/wireplumber/wireplumber.conf.d
@@ -500,7 +500,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 
   Same test on 2.9.0: 337 → 15 breaks in 10 minutes, xruns 234 → 1. It adds
   128 ms to the sound's delay (round trip in the VM 275 → 400 ms). Remove the
-  file and restart WirePlumber to undo; 3.0.0 does not need it.
+  file and restart WirePlumber to undo; 3.0.0 does not need it. (2.9.1 has
+  the same sound path as 2.9.0.)
 - **Where:** `app/runtime/patches/qemu-darwin-main-loop-qos.patch`,
   `app/runtime/patches/qemu-hda-no-catch-up.patch`,
   `app/app/Sources/OmacVM/Runner.swift` (`audioClassic`), `src/cmd/check.sh`,
