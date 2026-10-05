@@ -332,6 +332,15 @@ app)
       check "OpenCL (rusticl on Zink)" "a zink device" bash -c 'RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink'
       check "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)" test -x /usr/local/bin/omacvm-chromium-webgpu
     fi
+  elif [[ -f /etc/environment.d/90-omacvm-opencl.conf ]]; then
+    # Graphics Vulkan: the distro's rusticl on Zink on Venus (venus/opencl.sh).
+    if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
+      skip "OpenCL (rusticl on Zink)" "with Vulkan from the VM's next start"
+    elif RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink; then
+      ok "OpenCL (rusticl on Zink)" "$(RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | sed -n 's/.*Device #0: //p' | head -1)"
+    else
+      bad "OpenCL (rusticl on Zink)" "no device: on MoltenVK (macOS 15) Zink needs OmacVM's Mesa (omacvm enable vulkan)"
+    fi
   else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
   FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
