@@ -606,6 +606,8 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+# OmacVM: a main loop stall > 2 s is logged with its place.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
 # full screen beside the notch; the window keeps its size; full screen at the
 # window's real size; modifiers only from input events; the recording device
