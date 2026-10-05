@@ -30,15 +30,28 @@ decides whether Vulkan apps get the Mac's GPU, not how the desktop draws.
   Set in the app's setup and VM window, `omacvm graphics`, and the control
   centre (one more Bridge request: `{"action": "graphics", "graphics":
   "opengl"|"vulkan"|"auto"}`, app VMs only, a fixed argv).
-- Automatic = Vulkan on macOS 26 and newer when the app has KosmicKrisp,
-  OpenGL otherwise. The numbers are in
+- Automatic = OpenGL on every Mac in 3.0.0 (`Graphics.autoVulkan` /
+  `GRAPHICS_AUTO_VULKAN` = off): a Vulkan window that skips the guest's CPU
+  copy still ends Hyprland's GPU context (black desktop) until the host
+  refuses that import without ending the context. With it on: Vulkan on
+  macOS 26 and newer when the app has KosmicKrisp, OpenGL otherwise. The
+  numbers are in
   [benchmarks](../benchmarks/README.md#graphics-automatic-2026-10-05).
-- Automatic never turns Vulkan on for a VM without a working Venus driver:
-  apply writes `venus-ready` when the VM's driver sizes memory to 16 KiB
-  pages (Mesa >= 26.2.4, or OmacVM's Mesa of the vulkan feature). With the
-  setting giving Vulkan, apply builds Mesa 26.2.4's `vulkan-virtio` ahead;
-  an explicit Vulkan without it gets the driver at the VM's next start
-  (`omacvm-venus-driver.service`).
+- No start gives Venus to a VM without a working Venus driver (the old one
+  fails every Vulkan app with ERROR_OUT_OF_HOST_MEMORY): apply writes
+  `venus-ready` when the VM's driver sizes memory to 16 KiB pages (Mesa >=
+  26.2.4, or OmacVM's Mesa of the vulkan feature). With the setting giving
+  Vulkan, apply (or `omacvm graphics` on a running VM) builds Mesa 26.2.4's
+  `vulkan-virtio` ahead. Until then Vulkan starts with OpenGL and says
+  "Vulkan (driver not built yet: runs on OpenGL until the next apply)".
+  In the VM `omacvm-venus-driver.timer` checks again 90 s after boot (never
+  in the boot's critical chain: no network-online.target, idle priority).
+- The hidden `venus` switch of 2.9 is moved once at the app's first 3.0.0
+  launch (Graphics Vulkan for each VM without its own choice) and removed.
+- A guest can ask for Vulkan for itself through the control centre's Bridge
+  job without a confirm on the Mac (as for feature jobs). That opens more of
+  the host's GPU stack to the guest (Venus, and the black-desktop import
+  above), so the job only takes the three values and app VMs.
 - KosmicKrisp ships in release builds (`build-app.sh --release`,
   `package-release.sh` refuses an app without it). The runtime picks the
   driver per start: macOS < 26 MoltenVK without loading KosmicKrisp;
@@ -51,8 +64,9 @@ decides whether Vulkan apps get the Mac's GPU, not how the desktop draws.
 
 ## Consequences
 
-- A VM that moves to macOS 26 (or gets an app with KosmicKrisp) turns
-  Vulkan on by itself at its next start once its driver is there.
+- With `autoVulkan` on, a VM that moves to macOS 26 (or gets an app with
+  KosmicKrisp) turns Vulkan on by itself at its next start once its driver
+  is there. In 3.0.0 nothing turns Vulkan on except the user.
 - MoltenVK users who want Vulkan pick Vulkan; Automatic does not expose
   MoltenVK's gaps (no `VK_EXT_provoking_vertex`, no zero-initialised
   workgroup memory, five failing CTS cases) to everyone.
