@@ -18,9 +18,15 @@ in more words.
   down). Measured on a Mac mini with two VMs.
 - Fast network field tests on the Mac mini: a real sleep and wake (SSH and
   Omanotch back within 2-5 s, no reconnect), Wi-Fi/Ethernet changes (no
-  gap), two VMs at once. Known limit: a VPN connected after the VM started
-  does not get the VM's traffic translated by macOS; turn the fast network
-  off while on such a VPN (docs/routes/app.md).
+  gap), two VMs at once.
+- Fast network: a VPN connected while the VM runs works for the VM. macOS
+  translates the VM's addresses only on the networks that were up when its
+  sharing service started, so a VPN's server got the VM's own addresses
+  and dropped them (a full tunnel: no internet in the VM). The fast
+  network's service now does that translation itself for such networks,
+  only while a VM is on the fast network and only in its own pf rules
+  (nothing else in the Mac's firewall changes), and takes it away when the
+  VPN goes. `omacvm check` shows it (docs/routes/app.md).
 
 ## 2.9.1
 

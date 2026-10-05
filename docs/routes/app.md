@@ -244,8 +244,33 @@ longer goes through one QEMU thread. Measured: see
   who enabled it: it checks the connecting process's user and code signature
   (OmacVM's Developer ID team, or for an app built from source exactly that
   build: enable it again after a rebuild). It makes one vmnet interface per
-  VM, isolated from the other VMs' interfaces, and does nothing else: no
-  commands, no files, no other requests.
+  VM, isolated from the other VMs' interfaces, and the VPN NAT below; nothing
+  else: no other requests, no files but its two state files in `/var/run`,
+  and no program but `/sbin/pfctl` (fixed arguments, no shell).
+- VPNs connected while a VM runs: macOS's NAT for vmnet only covers the
+  networks that were up when its sharing service started. A VPN you connect
+  later (a new `utun`) got the VM's packets with their `192.168.77.x`
+  source, and the VPN's server dropped them (with a full tunnel the VM lost
+  the internet). The service now adds that NAT itself, while a VM is on the
+  fast network, for each network that is up and that macOS's sharing does
+  not cover: Ethernet, Wi-Fi and VPN tunnels (`en`, `utun`, `ipsec`, `ppp`,
+  `tun`, `tap`), never a bridge (Parallels' and other VM networks stay as
+  they are). IPv4, and IPv6 where the VPN has an IPv6 address. The rules are
+  the same as macOS's own (`nat on utun5 inet from 192.168.77.0/24 to any ->
+  (utun5:0) extfilter ei`) and live only in the service's own pf anchor,
+  `com.apple/org.omacvm.netd` (macOS's main ruleset already evaluates
+  `com.apple/*`); no other anchor and not the main ruleset is changed. pf is
+  enabled with a reference of the service's own (`pfctl -E`, given back with
+  `pfctl -X`), so pf stays on for whoever else wants it. The service learns
+  of new and gone networks from the kernel's routing socket (no polling) and
+  follows within a second or two; the NAT goes when the network goes, when
+  the last VM stops and when the service stops (`omacvm disable
+  fast-network`, `omacvm uninstall`). `src/net/mac/install.sh --status`
+  prints `vpn-nat: utun5` while it is on, `omacvm check` has a VPN NAT row,
+  and the service's log says each change. DNS needs nothing: the VM asks
+  the Mac (`192.168.77.1`), and the Mac asks the VPN's DNS servers where
+  macOS uses them. pf keeps the emptied anchor listed (without rules) until
+  the Mac restarts.
 - Its own network, not UTM's `192.168.64.0/24`: while UTM (or another app)
   has that one up, vmnet refuses an isolated interface on it. With its own,
   UTM VMs and the fast network run side by side (tested on the Mac mini).
@@ -345,15 +370,29 @@ What is missing before it can become the default: [below](#fast-network-not-done
     log. macOS's NAT for vmnet covers every network service the Mac has.
   - VPNs: traffic follows the Mac's routes (a route into a VPN-like tunnel,
     Tailscale to another Mac). But macOS's NAT for vmnet covers only the
-    interfaces it saw when it started: a tunnel that comes up later (a VPN
-    you connect after the VM started) gets the VM's packets with their
-    `192.168.77.x` source untranslated, which a real VPN server drops. Seen
-    with a test tunnel and a split route; Tailscale (up before) works. On
-    QEMU's user network the packets always leave from the Mac's own address.
-    Until this is handled: with a VPN that you connect while the VM runs,
-    turn the fast network off (the VM moves to the user network at once).
-- Not tested yet: a real VPN client connecting while the VM runs (see
-  above), real trackpad gestures over the fast network
+    interfaces it saw when it started: a tunnel that came up later got the
+    VM's packets with their `192.168.77.x` source untranslated, which a real
+    VPN server drops. Fixed by the service's VPN NAT (above).
+- VPN NAT on the Mac mini (macOS 27, 2026-10-05; a test tunnel `utun-sink`
+  that answers pings and DNS, with split routes for `203.0.113.7` and
+  `2001:db8:77::7`, and a resolver for one domain through it):
+  - Tunnel up while a VM runs: the NAT is on within a second; the VM reaches
+    both addresses through the tunnel, which sees the tunnel's own addresses
+    as source (`10.99.0.1`, `2001:db8:99::1`), not the VM's. The VM's DNS
+    (`192.168.77.1`) answers a name only the tunnel's DNS server knows.
+  - Tunnel down: its rule goes; up again (a new `utun`): back within a
+    second. The VM stopping: everything goes, pf's references are as
+    before. A VM starting with the tunnel up: NAT in the same second.
+  - The service killed (`kill -9`) with the NAT on: rules and reference
+    stay, the next start removes both; stopped normally: removed at once.
+  - Untouched throughout: macOS's main ruleset, its own anchors (sharing,
+    AirDrop, firewall), Parallels' `10.211.55.2`/`10.37.129.2`, Tailscale
+    (the VM reaches the other Mac through it with macOS's own NAT).
+  - These runs used a stand-in for the VM (a small program that connects to
+    the service as QEMU does, `vmclient.c` in the track's test folder), not
+    a Linux guest.
+- Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
+  VM runs, a full tunnel, real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
