@@ -118,6 +118,9 @@ extern bool MTDeviceIsRunning(MTDeviceRef);
 #ifndef PORT
 #define PORT 47830
 #endif
+#ifndef BRIDGE_DIR
+#define BRIDGE_DIR "omacvm-bridge"   // the Bridge's token is in ~/Library/Application Support/BRIDGE_DIR
+#endif
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
 // its subnet at install time, the Mac is .1; empty without Fusion) and
@@ -1085,7 +1088,11 @@ static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourc
 // documented: a swipe seen going the other way flips it (learnSign), kept in
 // the settings domain for the next start.
 static int swipeSign = 1;
+// The test identity (build.sh with OMACVM_HELPER_TEST=1) builds with its own
+// domain, port and Bridge folder, so it never meets the installed Gestures.
+#ifndef GESTURES_DOMAIN
 #define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
+#endif
 
 static int dockSwipe(CGPoint at, int phase, int right) {
   CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
@@ -1698,7 +1705,7 @@ static void base64Name(const char *in, char *out, size_t cap) {
 static size_t readToken(char tok[160]) {
   char path[1024];
   tok[0] = 0;
-  snprintf(path, sizeof path, "%s/Library/Application Support/omacvm-bridge/token", getenv("HOME"));
+  snprintf(path, sizeof path, "%s/Library/Application Support/" BRIDGE_DIR "/token", getenv("HOME"));
   FILE *f = fopen(path, "r");
   if (!f) return 0;
   if (!fgets(tok, 160, f)) tok[0] = 0;

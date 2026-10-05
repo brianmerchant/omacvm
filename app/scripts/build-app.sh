@@ -4,6 +4,7 @@
 # UEFI firmware, the VM scripts and OmacVM's VM side (src/ of the repo this
 # lives in, as committed). Signed ad hoc, or with OMACVM_SIGN_ID (below).
 #   scripts/build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]
+#   scripts/build-app.sh --test-identity [--install]
 #     --name     the app's name and Dock title (default OmacVM)
 #     --id       another bundle id (default org.omacvm.app): test builds that
 #                must not share settings, VMs or the running app with an
@@ -11,18 +12,41 @@
 #     --release  for a published zip: the whole repo must be committed, and the
 #                runtime has KosmicKrisp (OMACVM_RUNTIME_KOSMICKRISP=1 unless set:
 #                Vulkan on macOS 26+; its tools: runtime/build-kosmickrisp.sh --check)
+#     --test-identity  (or OMACVM_TEST_IDENTITY=1) the one test identity for the
+#                developers' Macs: "OmacVM Test" (org.omacvm.app.test), its helpers
+#                "OmacVM Test Bridge" (org.omacvm.test.bridge, port 47931) and
+#                "OmacVM Test Gestures" (org.omacvm.test.gestures, port 47930, own
+#                settings domain), never the installed ones' ids, ports or folders.
+#                Always Developer ID signed (OMACVM_SIGN_ID), so macOS keeps the
+#                grants given to it once (Accessibility, Input Monitoring, Bluetooth,
+#                Screen Recording) across rebuilds: tests use only this identity.
+#     --install  with --test-identity: copy it over ~/Applications/OmacVM Test.app
+#                (always that path; refused while it runs)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$ROOT/.." && pwd)
-NAME=OmacVM; ID=org.omacvm.app; RELEASE=0
+NAME=OmacVM; ID=org.omacvm.app; RELEASE=0; TEST=${OMACVM_TEST_IDENTITY:-0}; INSTALL=0
 while (( $# )); do
   case $1 in
     --name) NAME=$2; shift 2 ;;
     --id) ID=$2; shift 2 ;;
     --release) RELEASE=1; shift ;;
-    *) echo "usage: build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]" >&2; exit 2 ;;
+    --test-identity) TEST=1; shift ;;
+    --install) INSTALL=1; shift ;;
+    *) echo "usage: build-app.sh [--name NAME] [--id BUNDLE_ID] [--release] | --test-identity [--install]" >&2; exit 2 ;;
   esac
 done
+[[ $TEST == [01] ]] || { echo "OMACVM_TEST_IDENTITY is 0 or 1" >&2; exit 2; }
+BRIDGE_APP=OmacVMBridge.app; BRIDGE_ID=org.omacvm.bridge
+GESTURES_APP=OmacVMGestures.app; GESTURES_ID=org.omacvm.gestures
+if (( TEST )); then
+  (( ! RELEASE )) || { echo "--test-identity is not a release" >&2; exit 2; }
+  [[ -n ${OMACVM_SIGN_ID:-} ]] || { echo "the test identity is always Developer ID signed: set OMACVM_SIGN_ID" >&2; exit 2; }
+  NAME="OmacVM Test"; ID=org.omacvm.app.test
+  BRIDGE_APP="OmacVM Test Bridge.app"; BRIDGE_ID=org.omacvm.test.bridge
+  GESTURES_APP="OmacVM Test Gestures.app"; GESTURES_ID=org.omacvm.test.gestures
+fi
+(( ! INSTALL || TEST )) || { echo "--install is only for --test-identity" >&2; exit 2; }
 [[ $ID =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "not a bundle id: $ID" >&2; exit 2; }
 (( ! RELEASE )) || [[ $ID == org.omacvm.app ]] || { echo "a release keeps the bundle id org.omacvm.app" >&2; exit 2; }
 log() { printf '==> %s\n' "$*"; }
@@ -144,11 +168,11 @@ xcrun clang -O2 -Wall -Wextra -Werror -mmacosx-version-min=14.0 \
 log "Mac helpers (Bridge, Gestures)"
 HB=$(mktemp -d)
 cp -R "$C/Resources/omacvm/src" "$HB/src"
-"$HB/src/bridge/mac/build.sh" >/dev/null 2>&1 || { echo "the Bridge did not build" >&2; rm -rf "$HB"; exit 1; }
-"$HB/src/gestures/mac/build.sh" >/dev/null 2>&1 || { echo "Gestures did not build" >&2; rm -rf "$HB"; exit 1; }
+OMACVM_HELPER_TEST=$TEST "$HB/src/bridge/mac/build.sh" >/dev/null 2>&1 || { echo "the Bridge did not build" >&2; rm -rf "$HB"; exit 1; }
+OMACVM_HELPER_TEST=$TEST "$HB/src/gestures/mac/build.sh" >/dev/null 2>&1 || { echo "Gestures did not build" >&2; rm -rf "$HB"; exit 1; }
 mkdir -p "$C/Helpers"
-ditto "$HB/src/bridge/mac/build/OmacVMBridge.app" "$C/Helpers/OmacVMBridge.app"
-ditto "$HB/src/gestures/mac/build/OmacVMGestures.app" "$C/Helpers/OmacVMGestures.app"
+ditto "$HB/src/bridge/mac/build/OmacVMBridge.app" "$C/Helpers/$BRIDGE_APP"
+ditto "$HB/src/gestures/mac/build/OmacVMGestures.app" "$C/Helpers/$GESTURES_APP"
 rm -rf "$HB"
 
 # The app carries the version of the OmacVM it is part of.
@@ -171,7 +195,7 @@ cat > "$C/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
-  <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
+  <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>$( (( TEST )) && printf '\n  <key>OmacVMGesturesDomain</key><string>%s</string>' "$GESTURES_ID")
 </dict>
 </plist>
 EOF
@@ -189,8 +213,8 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   codesign "${SIGN[@]}" --identifier "$ID.qemu" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign "${SIGN[@]}" --identifier org.omacvm.netd "$NETD"
-  codesign "${SIGN[@]}" --identifier org.omacvm.bridge --entitlements "$ROOT/app/OmacVMBridge.entitlements" "$C/Helpers/OmacVMBridge.app"
-  codesign "${SIGN[@]}" --identifier org.omacvm.gestures "$C/Helpers/OmacVMGestures.app"
+  codesign "${SIGN[@]}" --identifier "$BRIDGE_ID" --entitlements "$ROOT/app/OmacVMBridge.entitlements" "$C/Helpers/$BRIDGE_APP"
+  codesign "${SIGN[@]}" --identifier "$GESTURES_ID" "$C/Helpers/$GESTURES_APP"
   codesign "${SIGN[@]}" --identifier "$ID" \
     --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
@@ -208,3 +232,16 @@ else
 fi
 codesign --verify --deep --strict "$APP"
 log "built $APP ($(du -sh "$APP" | cut -f1))"
+
+# The test identity lives at one path; a running copy is never replaced.
+if (( INSTALL )); then
+  DEST=$HOME/Applications/"OmacVM Test.app"
+  if pgrep -f "$DEST/Contents/" >/dev/null; then
+    echo "$DEST is running: quit it (and its helpers) first" >&2; exit 1
+  fi
+  mkdir -p "$HOME/Applications"
+  rm -rf "$DEST"
+  ditto "$APP" "$DEST"
+  codesign --verify --deep --strict "$DEST"
+  log "installed $DEST"
+fi

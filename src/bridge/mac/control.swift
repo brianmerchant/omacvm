@@ -10,7 +10,12 @@
 // happen outside it.
 import Foundation
 
-let omacvmSupport = FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Application Support/omacvm"
+/// The test identity's Bridge (org.omacvm.test.bridge, from app/scripts/build-app.sh
+/// --test-identity) keeps its own port and folders: it never meets the installed Bridge
+/// or runs the installed omacvm.
+let testIdentity = Bundle.main.bundleIdentifier == "org.omacvm.test.bridge"
+let omacvmSupport = FileManager.default.homeDirectoryForCurrentUser.path
+  + (testIdentity ? "/Library/Application Support/omacvm-test" : "/Library/Application Support/omacvm")
 let jobsDir = supportDir + "/jobs"
 let feedDefault = "https://github.com/gillesgoetsch/omacvm/releases/latest/download/omacvm-manifest.json"
 
