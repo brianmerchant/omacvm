@@ -37,7 +37,7 @@ src/tests/pointer-start-vm.sh (a throwaway VM on a virtual display: the
 guest gets motion right after the start and after a reboot, no click).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index f7f7a85..1164f25 100644
+index f7f7a85..9105a9a 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -41,10 +41,12 @@
@@ -83,7 +83,7 @@ index f7f7a85..1164f25 100644
  
  /* VM state callbacks hold the BQL; this method only touches input state. */
  static void cocoa_pinch_vm_change(void *opaque, bool running, RunState state)
-@@ -829,20 +840,94 @@ - (void) selectConsoleLocked:(unsigned int)index
+@@ -829,20 +840,103 @@ - (void) selectConsoleLocked:(unsigned int)index
      [self updateUIInfo];
  }
  
@@ -116,11 +116,13 @@ index f7f7a85..1164f25 100644
 +    } else {
 +        [NSCursor unhide];
 +    }
-+}
-+
+ }
+ 
+-- (void) unhideCursor
 +/* OmacVM: the pointer is on the VM's picture (this view), nothing above it. */
 +- (bool) omacvmPointerOver:(NSEvent *)event
-+{
+ {
+-    if (!cursor_hide) {
 +    NSWindow *w = [self window];
 +    NSPoint p;
 +
@@ -141,9 +143,8 @@ index f7f7a85..1164f25 100644
 +    return omacvm_test_pointer ||
 +           [NSWindow windowNumberAtPoint:[NSEvent mouseLocation]
 +             belowWindowWithWindowNumber:0] == [w windowNumber];
- }
- 
--- (void) unhideCursor
++}
++
 +/*
 + * OmacVM: take the pointer without a click (ui/omacvm-pointer-start.h): on
 + * the first motion over the VM, or event nil: now (the window became key,
@@ -170,21 +171,29 @@ index f7f7a85..1164f25 100644
 +}
 +
 +- (void) omacvmFullScreenTake
- {
--    if (!cursor_hide) {
++{
 +    if (isMouseGrabbed) {
 +        return;
 +    }
-+    if (omacvm_ptr.off || !isAbsoluteEnabled) {
-+        [self grabMouse];       /* as upstream */
++    /*
++     * full-screen=on comes before the first look at the pointer's mode: a
++     * relative grab then (the Mac's cursor held and hidden) until it
++     * turned out absolute a moment later.
++     */
++    [self notifyMouseModeChange];
++    if (isMouseGrabbed) {
          return;
      }
 -    [NSCursor unhide];
++    if (omacvm_ptr.off || !isAbsoluteEnabled) {
++        [self grabMouse];       /* as upstream */
++        return;
++    }
 +    [self omacvmTakePointer:nil why:"full screen"];
  }
  
  - (void)updateCursorLayout
-@@ -1686,6 +1771,7 @@ - (bool) handleEventLocked:(NSEvent *)event
+@@ -1686,6 +1780,7 @@ - (bool) handleEventLocked:(NSEvent *)event
  
                          // release the mouse grab
                          case 'g':
@@ -192,7 +201,7 @@ index f7f7a85..1164f25 100644
                              [self ungrabMouse];
                              return true;
                      }
-@@ -1789,7 +1875,7 @@ - (void) handleMouseEvent:(NSEvent *)event
+@@ -1789,7 +1884,7 @@ - (void) handleMouseEvent:(NSEvent *)event
      if (!isMouseGrabbed) {
          return;
      }
@@ -201,7 +210,7 @@ index f7f7a85..1164f25 100644
          omacvm_guard_corners(event);
      }
  
-@@ -1829,6 +1915,7 @@ - (void) handleMouseEvent:(NSEvent *)event
+@@ -1829,6 +1924,7 @@ - (void) handleMouseEvent:(NSEvent *)event
  
  - (void) mouseExited:(NSEvent *)event
  {
@@ -209,7 +218,7 @@ index f7f7a85..1164f25 100644
      /*
       * OmacVM: with several outputs the pointer may just be on the next one,
       * or crossing the strip between them in the middle of a drag (the
-@@ -1859,6 +1946,9 @@ - (void) mouseEntered:(NSEvent *)event
+@@ -1859,6 +1955,9 @@ - (void) mouseEntered:(NSEvent *)event
  
  - (void) mouseMoved:(NSEvent *)event
  {
@@ -219,7 +228,7 @@ index f7f7a85..1164f25 100644
      [self handleMouseEvent:event];
  }
  
-@@ -1922,10 +2012,11 @@ - (void) grabMouse
+@@ -1922,10 +2021,11 @@ - (void) grabMouse
          [[self window] setTitle:[NSString stringWithFormat:@"%s - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)", qemu_name]];
      else
          [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
@@ -232,7 +241,7 @@ index f7f7a85..1164f25 100644
  }
  
  - (void) ungrabMouse
-@@ -1936,10 +2027,10 @@ - (void) ungrabMouse
+@@ -1936,10 +2036,10 @@ - (void) ungrabMouse
          [[self window] setTitle:[NSString stringWithUTF8String:qemu_name]];
      else
          [[self window] setTitle:@"QEMU"];
@@ -244,7 +253,7 @@ index f7f7a85..1164f25 100644
      [self raiseAllButtons];
  }
  
-@@ -1960,8 +2051,11 @@ - (void) notifyMouseModeChange {
+@@ -1960,8 +2060,11 @@ - (void) notifyMouseModeChange {
          } else {
              omacvm_corner_release();
              CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
@@ -256,7 +265,7 @@ index f7f7a85..1164f25 100644
  }
  - (BOOL) isMouseGrabbed {return isMouseGrabbed;}
  
-@@ -2130,6 +2224,18 @@ - (BOOL)canBecomeMainWindow { return YES; }
+@@ -2130,6 +2233,18 @@ - (BOOL)canBecomeMainWindow { return YES; }
  
  static BOOL notchFull;
  static NSRect notchSavedFrame;
@@ -275,7 +284,7 @@ index f7f7a85..1164f25 100644
  static NSWindowStyleMask notchSavedMask;
  
  /* Enters notch full screen on the window's display, or leaves it. */
-@@ -2155,7 +2261,7 @@ static void omacvm_toggle_notch_full_screen(void)
+@@ -2155,7 +2270,7 @@ static void omacvm_toggle_notch_full_screen(void)
          [fullScreenMenuItem setTitle:@"Exit Full Screen"];
          [cocoaView updateScale];
          [cocoaView updateUIInfo];
@@ -284,7 +293,7 @@ index f7f7a85..1164f25 100644
          omacvm_displays_update();
      } else {
          notchFull = NO;
-@@ -2388,7 +2494,7 @@ - (void)windowDidEnterFullScreen:(NSNotification *)notification
+@@ -2388,7 +2503,7 @@ - (void)windowDidEnterFullScreen:(NSNotification *)notification
      [fullScreenMenuItem setTitle:@"Exit Full Screen"];
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
@@ -293,7 +302,7 @@ index f7f7a85..1164f25 100644
      omacvm_displays_update();
  }
  
-@@ -2443,10 +2549,23 @@ - (NSApplicationPresentationOptions) window:(NSWindow *)window
+@@ -2443,10 +2558,23 @@ - (NSApplicationPresentationOptions) window:(NSWindow *)window
  - (void) windowDidResignKey: (NSNotification *)aNotification
  {
      COCOA_DEBUG("%s\n", __func__);
@@ -317,7 +326,7 @@ index f7f7a85..1164f25 100644
  /* We abstract the method called by the Enter Fullscreen menu item
   * because Mac OS 10.7 and higher disables it. This is because of the
   * menu item's old selector's name toggleFullScreen:
-@@ -4863,8 +4982,11 @@ static void omacvm_guard_corners(NSEvent *event)
+@@ -4863,8 +4991,11 @@ static void omacvm_guard_corners(NSEvent *event)
      if (!on) {
          s.nours = 0;    /* never takes hold */
      }
@@ -331,7 +340,7 @@ index f7f7a85..1164f25 100644
      omacvm_guard_event(&omacvm_guard, &s, [event timestamp], loc.x, loc.y,
                         dx, dy, cur.x, cur.y, &st);
      omacvm_guard_apply(&st);
-@@ -5725,6 +5847,12 @@ static void omacvm_chan_line(NSData *data)
+@@ -5725,6 +5856,12 @@ static void omacvm_chan_line(NSData *data)
          NSDictionary *d = obj;
          bool update = false;
          if (d[@"hello"]) {
@@ -344,7 +353,7 @@ index f7f7a85..1164f25 100644
              omacvm_guest_ready = true;
              [omacvm_last_layout release];
              omacvm_last_layout = nil;
-@@ -5823,6 +5951,73 @@ static void omacvm_chan_connect(void)
+@@ -5823,6 +5960,73 @@ static void omacvm_chan_connect(void)
      dispatch_resume(omacvm_chan_src);
  }
  
@@ -418,7 +427,7 @@ index f7f7a85..1164f25 100644
  /* Main thread, with the BQL (from cocoa_display_init). */
  static void omacvm_displays_init(void)
  {
-@@ -5868,10 +6063,19 @@ static void omacvm_displays_init(void)
+@@ -5868,10 +6072,19 @@ static void omacvm_displays_init(void)
                      object:nil
                       queue:[NSOperationQueue mainQueue]
                  usingBlock:^(NSNotification *note) {
