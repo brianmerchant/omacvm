@@ -81,6 +81,8 @@ install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-vid
 # VM has Venus and still lacks it (Vulkan turned on in the app since).
 want=""; [[ $(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1) == vulkan ]] && want=--want
 venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
+# Vulkan windows present through a CPU copy (90-omacvm-vulkan.conf says why).
+install -Dm644 90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf
 install -Dm644 venus/omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service
 systemctl daemon-reload
 systemctl enable omacvm-venus-driver.service >/dev/null 2>&1 || true

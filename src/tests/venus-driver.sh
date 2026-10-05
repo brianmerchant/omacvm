@@ -89,4 +89,10 @@ grep -q 'ExecStart=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh$' "$
   grep -q 'omacvm-venus-driver.service' src/app/guest/install.sh && pass "boot unit runs it" || fail "no boot unit"
 grep -q 'app/guest/venus/vulkan-virtio.sh --status' src/guest/check.sh && pass "check has the Vulkan (Venus) row" || fail "no check row"
 
+# Vulkan windows present through a CPU copy: a dma-buf from Venus imported by
+# Hyprland's virgl context loses that context (PIPE_RESOURCE_SET_TYPE EINVAL).
+grep -qx 'MESA_VK_WSI_DEBUG=sw' src/app/guest/90-omacvm-vulkan.conf &&
+  grep -q 'environment.d/90-omacvm-vulkan.conf' src/app/guest/install.sh && pass "Vulkan presents in software WSI" ||
+  fail "no software WSI for Vulkan (Hyprland would lose its GPU context)"
+
 (( fails == 0 )) && echo "venus-driver: all ok" || { echo "venus-driver: $fails failed"; exit 1; }
