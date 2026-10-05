@@ -194,11 +194,16 @@ itself. Details below.
   Vulkan only adds Vulkan apps (on macOS 26 and newer on KosmicKrisp, which
   ran vkmark off-screen 29 % faster than MoltenVK on a Mac mini M4).
   Automatic is OpenGL on every Mac in 3.0.0; turning it to Vulkan on
-  macOS 26 and newer later is one line. It applies
-  at the VM's next start, and `omacvm check` says what a start got. The
-  hidden `venus` switch of 2.9 is gone: if it was on, the app's first 3.0.0
-  launch sets Graphics to Vulkan for each VM that had no choice of its own
-  (OpenGL stays OpenGL) and says so in its log.
+  macOS 26 and newer later is one line. It applies at the VM's next start,
+  and `omacvm check` says what a start got. The hidden `venus` switch of 2.9
+  is gone: if it was on, the app's first 3.0.0 launch sets Graphics to
+  Vulkan for each VM that had no choice of its own (OpenGL stays OpenGL)
+  and says so in its log.
+  With Vulkan the VM also gets OpenCL on the Mac's GPU (Arch's rusticl on
+  Zink on Venus, no build) where the Mac's driver is KosmicKrisp (macOS 26
+  and newer): Geekbench 7 OpenCL 20,121 on a Mac mini M4 (the Mac itself:
+  35,240). On macOS 15 (MoltenVK) Zink cannot run, so OpenCL there needs
+  `omacvm enable vulkan` (below).
 - KosmicKrisp is in the app (about 13 MB, its licences in the app's
   licences folder): on macOS 26 and newer Vulkan runs on it, on older macOS
   on MoltenVK. A Mac where KosmicKrisp cannot run falls back to MoltenVK

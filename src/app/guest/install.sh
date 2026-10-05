@@ -79,8 +79,12 @@ install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-vid
 # pages (venus/vulkan-virtio.sh says why). Built now when the Mac says this VM
 # gets Vulkan (OMACVM_GRAPHICS, from omacvm apply), and after each boot (a
 # timer, after the desktop) when the VM has Venus and still lacks it.
-want=""; [[ $(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1) == vulkan ]] && want=--want
+graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+want=""; [[ $graphics == vulkan ]] && want=--want
 venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
+# OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
+if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
+elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
 # Vulkan windows: on the GPU when the Mac's app can show them, else through a
 # CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
 # environment.d file.

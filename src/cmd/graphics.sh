@@ -49,6 +49,9 @@ if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d
     if gssh "$ip" "sed -i '/^OMACVM_GRAPHICS=/d' /etc/omacvm/env && echo OMACVM_GRAPHICS=vulkan >> /etc/omacvm/env &&
                    /usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh --want" < /dev/null >&2; then
       : > "$d/venus-ready"
+      # OpenCL on it (an older guest side has no opencl.sh: omacvm apply brings it).
+      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/opencl.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 ||
+        NOTE="${NOTE:+$NOTE; }OpenCL is not set up (see /var/log/omacvm-opencl.log in the VM)"
     else
       rm -f "$d/venus-ready"
       NOTE="${NOTE:+$NOTE; }its Vulkan driver did not build (the VM tries again at each start)"
