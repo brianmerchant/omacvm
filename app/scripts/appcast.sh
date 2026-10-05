@@ -4,6 +4,8 @@
 # package-release.sh made. Upload both to the GitHub release v<version> with
 # the zip; installed apps find them through releases/latest.
 #   scripts/appcast.sh      (package-release.sh runs it)
+#   scripts/appcast.sh ZIP  the feed for a published OmacVM-<version>.zip, next
+#                           to it (a rollback: src/release/release.sh rollback)
 # Signed by src/release/release-key.sh: the main key from the Keychain
 # (generic password, service org.omacvm.release-key), or the spare in
 # OMACVM_RELEASE_KEY_FILE; checked against src/lib/release-key.pub and
@@ -19,7 +21,12 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 VERSION=$(cat "$REPO/src/VERSION")
 ZIP=$ROOT/dist/OmacVM-$VERSION.zip
-FEED=$ROOT/dist/OmacVM-appcast.json
+if [[ -n ${1:-} ]]; then
+  ZIP=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+  [[ $(basename "$ZIP") =~ ^OmacVM-([0-9.]+)\.zip$ ]] || die "$1 is not an OmacVM-<version>.zip"
+  VERSION=${BASH_REMATCH[1]}
+fi
+FEED=$(dirname "$ZIP")/OmacVM-appcast.json
 PUB=$REPO/src/lib/release-key.pub
 KEYS=$REPO/src/release/release-key.sh
 [[ -f $PUB ]] || die "no src/lib/release-key.pub yet: no update feed (installed apps check nothing until a release has a key)"
