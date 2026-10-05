@@ -680,3 +680,44 @@ def test_wrong_key_without_looking_is_not_asked_again(world, monkeypatch):
             assert "omacvm apply" in a.c.mac_problem()
             assert sum(1 for p, ok in world.signed if p == "/omacvm/status") == 1
     asyncio.run(go())
+
+
+def test_graphics_row_on_an_app_vm(tmp_path, monkeypatch):
+    from omacvm_cc.tui import ConfirmScreen
+    """OmacVM.app VMs get a Graphics row; space asks, then sends the next choice."""
+    mac, checks = FakeMac(version="2.9.0"), FakeChecks()
+    mac.graphics = {"graphics": "auto", "next_start": "opengl", "this_start": "auto -> opengl (macOS 15)",
+                    "driver_ready": False}
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path, "OMACVM_VM_TYPE=app\n").items():
+        monkeypatch.setenv(k, v)
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "graphics" in rows(a)
+                                and rows(a)["graphics"].note.startswith("Automatic"))
+            assert rows(a)["graphics"].note == "Automatic: OpenGL"
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            t.move_cursor(row=[r.feature.name for r in a.rows].index("graphics"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            assert "OpenGL" in a.screen.text and "next start" in a.screen.text
+            await pilot.press("y")
+            assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in mac.requests))
+            posts = [b for m, p, b in mac.requests if p == "/omacvm/jobs"]
+            assert posts[-1] == {"action": "graphics", "graphics": "opengl"}
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()
+
+
+def test_no_graphics_row_on_other_routes(world):
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            assert "graphics" not in rows(a)
+    asyncio.run(go())

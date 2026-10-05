@@ -41,6 +41,7 @@ LOGS = {
     "camera": [("user", "omacvm-camera.service")],
     "battery": [("system", "omacvm-battery.service")],
     "control-centre": [("system", "omacvm-check@*.service")],
+    "graphics": [("system", "omacvm-venus-driver.service")],
 }
 
 
