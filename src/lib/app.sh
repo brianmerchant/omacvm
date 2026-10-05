@@ -36,6 +36,10 @@ APP_DOWNLOADS=https://github.com/gillesgoetsch/omacvm/releases/download
 # The test identity (OMACVM_TEST_IDENTITY=1) is "OmacVM Test" (org.omacvm.app.test).
 if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then APP_ID=${OMACVM_APP_ID:-org.omacvm.app.test}
 else APP_ID=${OMACVM_APP_ID:-org.omacvm.app}; fi
+# The app app_bundle looks for: the test identity never finds (and updates or
+# uses) the installed OmacVM.app or a copy with its id.
+APP_BUNDLE_ID=org.omacvm.app
+[[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && APP_BUNDLE_ID=org.omacvm.app.test
 
 # Where new VMs go, as the app decides (app/app/Sources/OmacVM/VMsFolder.swift;
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,
@@ -195,7 +199,7 @@ app_bundle() {   # in ~/Applications, else /Applications, by its bundle id
   local a
   for a in "$HOME"/Applications/*.app /Applications/*.app; do
     [[ -f $a/Contents/Resources/scripts/create-vm.sh ]] || continue
-    [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app ]] && { echo "$a"; return 0; }
+    [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == "$APP_BUNDLE_ID" ]] && { echo "$a"; return 0; }
   done
   return 1
 }
