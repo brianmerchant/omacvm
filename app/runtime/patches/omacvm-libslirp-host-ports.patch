@@ -3,26 +3,30 @@ Subject: [PATCH] socket: host loopback only on listed ports
 
 With OMACVM_SLIRP_HOST_PORTS=47811,47830,47831 the guest reaches the
 Mac's 127.0.0.1 only on those TCP ports; anything else on the host
-address is refused. Applies after the try-omarchy libslirp patches.
+address is refused. An entry "47830>47930" sends the guest's port 47830
+to the Mac's port 47930: OmacVM's test identity runs its own helpers on
+their own ports, and the guest stays as it is. Applies after the
+try-omarchy libslirp patches.
 
 --- a/src/socket.c
 +++ b/src/socket.c
-@@ -971,6 +971,48 @@
-         so->so_state |= SS_FWDRAIN;
-     else
+@@ -973,6 +973,59 @@
          sofcantsendmore(so);
-+}
-+
+ }
+ 
 +/*
 + * OmacVM: the guest reaches the Mac's 127.0.0.1 through the host address only
 + * on the TCP ports listed in OMACVM_SLIRP_HOST_PORTS (comma separated), not on
-+ * every port. Unset: libslirp's usual behaviour.
++ * every port. Unset: libslirp's usual behaviour. An entry "47830>47930" lets
++ * the guest's port 47830 through to the Mac's port 47930 (OmacVM's test
++ * identity: its own helpers on their own ports, the guest unchanged).
++ * Returns the Mac's port (network order), 0 when the guest may not connect.
 + */
-+static bool omacvm_host_port_allowed(struct socket *so)
++static uint16_t omacvm_host_port(struct socket *so)
 +{
 +    static int loaded;
 +    static int count = -1;
-+    static uint16_t ports[32];
++    static uint16_t ports[32], to[32];
 +    if (!loaded) {
 +        const char *list = getenv("OMACVM_SLIRP_HOST_PORTS");
 +        loaded = 1;
@@ -30,47 +34,69 @@ address is refused. Applies after the try-omarchy libslirp patches.
 +            count = 0;
 +            while (*list && count < 32) {
 +                char *end;
-+                long p = strtol(list, &end, 10);
++                long p = strtol(list, &end, 10), q = p;
 +                if (end == list) {
 +                    break;
 +                }
-+                if (p > 0 && p < 65536) {
-+                    ports[count++] = (uint16_t)p;
++                if (*end == '>') {
++                    const char *r = end + 1;
++                    q = strtol(r, &end, 10);
++                    if (end == r) {
++                        break;
++                    }
++                }
++                if (p > 0 && p < 65536 && q > 0 && q < 65536) {
++                    ports[count] = (uint16_t)p;
++                    to[count++] = (uint16_t)q;
 +                }
 +                list = *end == ',' ? end + 1 : end;
 +            }
 +        }
 +    }
 +    if (count < 0) {
-+        return true;
++        return so->so_fport;
 +    }
 +    if (so->so_type != IPPROTO_TCP) {
-+        return false;
++        return 0;
 +    }
 +    for (int i = 0; i < count; i++) {
 +        if (ntohs(so->so_fport) == ports[i]) {
-+            return true;
++            return htons(to[i]);
 +        }
 +    }
-+    return false;
- }
- 
++    return 0;
++}
++
  static bool sotranslate_out4(Slirp *s, struct socket *so, struct sockaddr_in *sin)
-@@ -982,7 +1024,7 @@
+ {
+     if (!s->disable_dns && so->so_faddr.s_addr == s->vnameserver_addr.s_addr) {
+@@ -982,11 +1035,13 @@
  
      if (so->so_faddr.s_addr == s->vhost_addr.s_addr ||
          so->so_faddr.s_addr == 0xffffffff) {
 -        if (s->disable_host_loopback) {
-+        if (s->disable_host_loopback || !omacvm_host_port_allowed(so)) {
++        uint16_t port = omacvm_host_port(so);
++        if (s->disable_host_loopback || !port) {
              return false;
          }
  
-@@ -1006,7 +1048,7 @@
+         sin->sin_addr = loopback_addr;
++        sin->sin_port = port;
+     }
+ 
+     return true;
+@@ -1006,11 +1061,13 @@
  
      if (in6_equal_net(&so->so_faddr6, &s->vprefix_addr6, s->vprefix_len) ||
          in6_equal(&so->so_faddr6, &(struct in6_addr)ALLNODES_MULTICAST)) {
 -        if (s->disable_host_loopback) {
-+        if (s->disable_host_loopback || !omacvm_host_port_allowed(so)) {
++        uint16_t port = omacvm_host_port(so);
++        if (s->disable_host_loopback || !port) {
              return false;
          }
  
+         sin->sin6_addr = in6addr_loopback;
++        sin->sin6_port = port;
+     }
+ 
+     return true;

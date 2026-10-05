@@ -96,6 +96,12 @@ if (( ssh_ok )); then
 fi
 [[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
 [[ -z $MODE || $MODE =~ ^[0-9]+x[0-9]+(@[0-9.]+)?$ ]] || die "--display WxH@Hz, not '$MODE'"
+# OmacVM.app's VMs keep the layout chosen at setup (vm.env KEYBOARD, as the
+# app's own apply-vm.sh passes it): a switch from the control centre or the
+# command must not change it to the Mac's. Other VMs follow the Mac.
+if [[ -z $KB && $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM" 2>/dev/null); then
+  KB=$(app_env "$d" KEYBOARD)
+fi
 [[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
 probe=$(vm_probe "$IP")
 [[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")

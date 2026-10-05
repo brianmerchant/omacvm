@@ -8,6 +8,12 @@ let wallpaperDir = supportDir + "/wallpaper"
 
 func setWallpaper(_ data: Data, theme: String) throws -> String {
   guard !data.isEmpty, NSImage(data: data) != nil else { throw APIError(400, "the body must be an image (PNG or JPEG)") }
+  // The test identity's Bridge (control.swift) never changes the Mac's own
+  // wallpaper, nor the files it points to: test VMs post theirs on every
+  // apply and theme change.
+  if testIdentity {
+    return "wallpaper \(theme.isEmpty ? "" : theme + " ")(\(data.count / 1024) KB) not used: the test identity leaves the Mac's wallpaper as it is"
+  }
   let hash = SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
   let ext = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "png" : "jpg"
   let file = "\(wallpaperDir)/background-\(hash).\(ext)"

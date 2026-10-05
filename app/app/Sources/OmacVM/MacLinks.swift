@@ -38,13 +38,37 @@ struct MacLinks: Equatable {
     }
 
     /// OMACVM_SLIRP_HOST_PORTS: empty means none.
-    var hostPorts: String {
-        [(omanotch, "47811"), (gestures, "47830"), (bridge, "47831")].filter { $0.0 }.map { $0.1 }.joined(separator: ",")
+    var hostPorts: String { hostPorts(test: TestIdentity.isOn) }
+
+    /// The test identity's VMs reach its own Gestures and Bridge (47930,
+    /// 47931) on the usual guest ports, and never the installed helpers. It
+    /// has no Omanotch of its own, so Omanotch stays closed to them.
+    func hostPorts(test: Bool) -> String {
+        let ports = test
+            ? [(gestures, "47830>47930"), (bridge, "47831>47931")]
+            : [(omanotch, "47811"), (gestures, "47830"), (bridge, "47831")]
+        return ports.filter { $0.0 }.map { $0.1 }.joined(separator: ",")
     }
 
     /// For qemu.log, which omacvm check reads: "Omanotch on, Gestures off, ...".
     var record: String {
-        [("Omanotch", omanotch), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera)]
+        [("Omanotch", omanotch && !TestIdentity.isOn), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera)]
             .map { "\($0.0) \($0.1 ? "on" : "off")" }.joined(separator: ", ")
+    }
+}
+
+/// OmacVM's test identity ("OmacVM Test", app/scripts/build-app.sh
+/// --test-identity): its own Gestures and Bridge in Contents/Helpers, on
+/// their own ports and folders. A test VM never reaches the installed helpers.
+enum TestIdentity {
+    static let isOn = Bundle.main.bundleIdentifier == "org.omacvm.app.test"
+    /// The Bridge's folder (token, relay key, relay socket).
+    static let bridgeFolder = isOn ? "omacvm-test-bridge" : "omacvm-bridge"
+    /// For the scripts the app runs: their Mac side starts the test helpers
+    /// and keeps away from the installed ones (src/mac/install.sh).
+    static func environment(_ base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var e = base
+        if isOn { e["OMACVM_TEST_IDENTITY"] = "1" }
+        return e
     }
 }

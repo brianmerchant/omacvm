@@ -37,6 +37,7 @@ final class Creator: ObservableObject {
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [Paths.scripts.appendingPathComponent(prebuilt ? "prebuilt-vm.sh" : "create-vm.sh").path,
                        config.folder.path]
+        p.environment = TestIdentity.environment()
         let input = Pipe(), output = Pipe()
         p.standardInput = input
         p.standardOutput = output

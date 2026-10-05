@@ -105,12 +105,28 @@ json_out() {   # the collected rows as JSON
   printf '\n]}\n'
 }
 running() { launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running'; }
+# The test identity (OMACVM_TEST_IDENTITY=1): its own helpers (started with open,
+# no LaunchAgent) on their own ports.
+BRIDGE_PORT=47831 GESTURES_PORT=47830
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+  BRIDGE_PORT=47931 GESTURES_PORT=47930
+  running() {
+    case $1 in
+      org.omacvm.bridge) pgrep -af "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
+      org.omacvm.gestures) pgrep -af "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
+      *) return 1 ;;
+    esac
+  }
+fi
 # listeners PORT: the addresses something listens on for that port
 listeners() { lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { sub(/:[0-9]+$/, "", $9); print $9 }' | sort -u | tr '\n' ' '; }
 last_line() { grep -E "$2" "$1" 2>/dev/null | tail -1 | sed 's/^.*omacvm-[a-z]*: //'; }
 
 say_ "Mac"
 L=~/Library/Logs
+BRIDGE_LOG=$L/omacvm-bridge.log GESTURES_LOG=$L/omacvm-gestures.log
+# The test identity's helpers log there (src/mac/install.sh starts them so).
+[[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && BRIDGE_LOG=$L/omacvm-test-bridge.log GESTURES_LOG=$L/omacvm-test-gestures.log
 # The VM network's Mac address exists only while a VM of that type runs.
 if ! msg=$(vm_network_ok "$TYPE" "$IP" 2>&1); then
   bad "VM network" "$msg" human
@@ -202,19 +218,19 @@ fi
 FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
-    a=$(listeners 47831)
+    a=$(listeners "$BRIDGE_PORT")
     if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"
     elif [[ " $a " == *" $HOST "* ]]; then ok "Bridge" "listening on $a"
     else bad "Bridge" "not listening on $HOST (only: ${a:-nothing})"; fi
   else bad "Bridge" "OmacVM Bridge is not running (src/mac/install.sh)"; fi
-  T=~/Library/Application\ Support/omacvm-bridge/token
+  T=$OMA_BRIDGE_SUPPORT/token
   if [[ -s $T ]]; then
     [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
     # The token only to this user's Bridge (on 127.0.0.1 any Mac program could
     # listen), and through a header file, never on a command line.
-    bget() { curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831$1"; }
-    lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1 ||
-      { bad "Bridge" "$HOST:47831 is not held by this user's OmacVM Bridge: token not sent"; bget() { :; }; }
+    bget() { curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:$BRIDGE_PORT$1"; }
+    lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":"$BRIDGE_PORT" -sTCP:LISTEN >/dev/null 2>&1 ||
+      { bad "Bridge" "$HOST:$BRIDGE_PORT is not held by this user's OmacVM Bridge: token not sent"; bget() { :; }; }
     st=$(bget /state)
     if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
     else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)" human; fi
@@ -225,10 +241,13 @@ if [[ $BRIDGE == on ]]; then
       *) bad "Bluetooth" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Bluetooth)" human ;;
     esac
   else bad "token" "missing (src/mac/install.sh)"; fi
-  m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
-  [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
+  if [[ $(jq -r '.capture_keys == false' "$OMA_BRIDGE_SUPPORT/config.json" 2>/dev/null) == true ]]; then
+    skip "media keys" "off: macOS keeps them (capture_keys false in config.json)"
+  elif [[ $m == *installed* ]]; then ok "media keys" "event tap installed"
+  else bad "media keys" "${m:-no event tap yet}"; fi
   # The Bridge says which permissions it has (at start and on each change).
-  pm=$(last_line "$L/omacvm-bridge.log" 'omacvm-bridge: permissions: ')
+  pm=$(last_line "$BRIDGE_LOG" 'omacvm-bridge: permissions: ')
   case $pm in
     "") ;;   # a Bridge from before it said so
     *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
@@ -236,8 +255,8 @@ if [[ $BRIDGE == on ]]; then
     *) ok "Bridge permissions" "${pm#permissions: }" ;;
   esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
-  c=~/Library/Application\ Support/omacvm-bridge/config.json
-  if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
+  c=$OMA_BRIDGE_SUPPORT/config.json
+  if [[ $(last_line "$BRIDGE_LOG" 'keyboard light: ') == *none* ]]; then
     skip "keyboard light" "this Mac has none (Shift + brightness keys stay macOS's)"
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
@@ -297,6 +316,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   # the peak of this run from QEMU's status file (logs/gpu-memory, written
   # while the VM runs), else the peak QEMU's log has (512 MB steps). Refused
   # only past the runaway budget or when macOS itself was short of memory.
+  FEATURE=graphics   # the control centre shows it on the Graphics row
   gm="$(dirname "$miclog")/gpu-memory"
   gmv() { sed -n "s/^$1=//p" "$gm" 2>/dev/null | head -1; }
   gb() { awk -v m="$1" 'BEGIN { printf (m < 1024 ? "%d MB" : "%.1f GB"), (m < 1024 ? m : m / 1024) }'; }
@@ -313,6 +333,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
       bad "graphics memory" "refused this run (budget $budget MB or macOS short of memory): an app may have lost its GPU context (restart the VM)"
     else ok "graphics memory" "${peak:+peak about $(gb "$peak"), }no fixed limit (runaway guard $(gb "$budget"))"; fi
   fi
+  FEATURE=""
 fi
 # The GPU path an app VM took this run (qemu.log starts fresh with each run):
 # fences from the sync thread or polled, frames as IOSurfaces or with a
@@ -401,13 +422,13 @@ FEATURE=gestures
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
   if running org.omacvm.gestures; then
-    a=$(listeners 47830)
+    a=$(listeners "$GESTURES_PORT")
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
     # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
     # Gestures refuses it (and it tries again every 2 s) until it is updated.
     if [[ $TYPE != app ]]; then
-      r=$(grep -nF "omacvm-gestures: refused ${IP%:*} on " "$L/omacvm-gestures.log" 2>/dev/null | grep -F ": no token" | tail -1 | cut -d: -f1)
-      c=$(grep -nF "omacvm-gestures: guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1 | cut -d: -f1)
+      r=$(grep -nF "omacvm-gestures: refused ${IP%:*} on " "$GESTURES_LOG" 2>/dev/null | grep -F ": no token" | tail -1 | cut -d: -f1)
+      c=$(grep -nF "omacvm-gestures: guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | tail -1 | cut -d: -f1)
       (( ${r:-0} > ${c:-0} )) &&
         bad "Gestures for this VM" "refused: its trackpad daemon is from OmacVM 2.3 or older (omacvm update --vm \"$VM\")"
     fi
@@ -417,7 +438,7 @@ if [[ $GESTURES == on ]]; then
     fi
     # A Mac mini, iMac or Studio may have no trackpad yet: the helper waits for one.
     if [[ $GESTURES == on && $keysonly == 0 ]]; then
-      t=$(last_line "$L/omacvm-gestures.log" 'no trackpad found|trackpad: ')
+      t=$(last_line "$GESTURES_LOG" 'no trackpad found|trackpad: ')
       case $t in
         "no trackpad"*) skip "trackpad" "none connected: the swipes start when a Magic Trackpad connects" ;;
         trackpad:*) ok "trackpad" "${t#trackpad: }" ;;
@@ -426,8 +447,8 @@ if [[ $GESTURES == on ]]; then
     if [[ $GESTURES == on && $GLIDE == on ]]; then
       FEATURE=scroll-momentum
       # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
-      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
-      [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      g=$(grep "guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
+      [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "on (trackpad only): a trackpad's scrolling goes to this VM in full screen, mice scroll one to one"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
       FEATURE=gestures
@@ -436,13 +457,13 @@ if [[ $GESTURES == on ]]; then
     # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
     # Gestures says which of its two permissions it has (at start and on each
     # change); one from before that: its older lines.
-    p=$(last_line "$L/omacvm-gestures.log" 'omacvm-gestures: permissions: ')
+    p=$(last_line "$GESTURES_LOG" 'omacvm-gestures: permissions: ')
     if [[ $p == *MISSING* ]]; then
       miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
       bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security" human
     elif [[ -n $p ]]; then ok "keyboard/trackpad access" "Accessibility + Input Monitoring"
     else
-      p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
+      p=$(last_line "$GESTURES_LOG" 'permission|listening on')
       [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
         || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
     fi
@@ -459,10 +480,10 @@ if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
   elif ! running org.omacvm.bridge; then
     bad "battery (Mac)" "OmacVM Bridge is not running: it serves the battery to $TYPE VMs (omacvm apply)"
   else
-    T=~/Library/Application\ Support/omacvm-bridge/token b=""
+    T=$OMA_BRIDGE_SUPPORT/token b=""
     # The token only to this user's Bridge (as above).
-    if [[ -s $T ]] && lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1; then
-      b=$(curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831/battery")
+    if [[ -s $T ]] && lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":"$BRIDGE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      b=$(curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:$BRIDGE_PORT/battery")
     fi
     case $(jq -r '.present | tostring' <<<"$b" 2>/dev/null) in
       true) ok "battery (Mac)" "the Bridge serves it: $(jq -r '"\(.percentage) %, \(.state)"' <<<"$b")" ;;

@@ -21,7 +21,7 @@ import Foundation
 final class NativeControlBridge: @unchecked Sendable {
     static let maximumLineBytes = 8192
     /// The Bridge's port (OMACVM_BRIDGE_PORT as for the Bridge itself: tests).
-    static let bridgePort = Int(ProcessInfo.processInfo.environment["OMACVM_BRIDGE_PORT"] ?? "").flatMap { (1...65535).contains($0) ? $0 : nil } ?? 47831
+    static let bridgePort = Int(ProcessInfo.processInfo.environment["OMACVM_BRIDGE_PORT"] ?? "").flatMap { (1...65535).contains($0) ? $0 : nil } ?? (TestIdentity.isOn ? 47931 : 47831)
 
     private let descriptor: Int32
     private let vmName: String
@@ -112,7 +112,7 @@ final class NativeControlBridge: @unchecked Sendable {
 
     private static func secret(_ name: String) -> String? {
         let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/omacvm-bridge/\(name)").path
+            .appendingPathComponent("Library/Application Support/\(TestIdentity.bridgeFolder)/\(name)").path
         guard let s = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.count >= 32 ? t : nil
@@ -121,7 +121,7 @@ final class NativeControlBridge: @unchecked Sendable {
     /// The Bridge's relay socket (OMACVM_BRIDGE_RELAY_SOCKET as for the Bridge itself: tests).
     static let relaySocketPath = ProcessInfo.processInfo.environment["OMACVM_BRIDGE_RELAY_SOCKET"]
         ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/omacvm-bridge/relay.sock").path
+            .appendingPathComponent("Library/Application Support/\(TestIdentity.bridgeFolder)/relay.sock").path
     static let timeout: TimeInterval = 75
     private let fallbackLock = NSLock()
     private var saidFallback = false

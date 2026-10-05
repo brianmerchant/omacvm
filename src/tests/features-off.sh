@@ -254,16 +254,17 @@ if command -v swiftc >/dev/null; then
 import Foundation
 let a = CommandLine.arguments
 let l = a.count > 1 ? MacLinks.load(folder: URL(fileURLWithPath: a[1])) : MacLinks()
-print("ports=\(l.hostPorts) battery=\(l.battery) camera=\(l.camera)")
+print("ports=\(l.hostPorts) battery=\(l.battery) camera=\(l.camera) test=\(l.hostPorts(test: true))")
 EOF
   if swiftc -O -o "$T/links" "$R/app/app/Sources/OmacVM/MacLinks.swift" "$T/main.swift" 2>"$T/swiftc.log"; then
-    expect "app: only gestures' port, camera served, battery not" "ports=47830 battery=false camera=true" "$("$T/links" "$T/vm")"
+    expect "app: only gestures' port, camera served, battery not" "ports=47830 battery=false camera=true test=47830>47930" "$("$T/links" "$T/vm")"
     app_features_write "$T/vm" "bridge=off wallpaper=off gestures=off omanotch=off battery=off camera=off"
-    expect "app: all off: no port to the Mac, no battery, no camera" "ports= battery=false camera=false" "$("$T/links" "$T/vm")"
+    expect "app: all off: no port to the Mac, no battery, no camera" "ports= battery=false camera=false test=" "$("$T/links" "$T/vm")"
     app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on"
-    expect "app: all on" "ports=47811,47830,47831 battery=true camera=true" "$("$T/links" "$T/vm")"
+    # The test identity: its own helpers' ports, never Omanotch (it has none).
+    expect "app: all on" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/vm")"
     mkdir -p "$T/old"
-    expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true" "$("$T/links" "$T/old")"
+    expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/old")"
   else
     echo "FAIL MacLinks.swift does not compile:"; cat "$T/swiftc.log"; fail=1
   fi
@@ -349,5 +350,11 @@ grep -q 'env\["OMACVM_SLIRP_HOST_PORTS"\] = links.hostPorts' "$R/app/app/Sources
   grep -q 'if links.battery { startBattery() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   grep -q 'if links.camera { startCamera() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   echo "ok   Runner.swift follows MacLinks" || { echo "FAIL Runner.swift does not follow MacLinks"; fail=1; }
+
+# off_lines under set -e: taking out the file's last lines is no failure
+# (grep then finds nothing; the control centre's "bridge off" stopped there).
+printf 'omacvm.wifi\nomacvm.audio\n' > "$T/pending"
+got=$(set -e; ROOT=""; source "$R/src/guest/off.sh" 2>/dev/null; off_lines "$T/pending" omacvm.wifi omacvm.audio; echo "rc=0 left=$(wc -c < "$T/pending" | tr -d ' ')")
+expect "off_lines: every line taken out, under set -e" "rc=0 left=0" "$got"
 
 exit $fail

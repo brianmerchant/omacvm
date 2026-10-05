@@ -360,6 +360,9 @@ PATTERNS = [
     # Anthropic, Slack, AWS and GitLab tokens.
     ("secret", re.compile(r"\b(?:sk-ant-[A-Za-z0-9_-]{20,}|xox[abeoprs]-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}"
                           r"|glpat-[A-Za-z0-9_-]{20,})"), "<secret>"),
+    # JSON web tokens (three base64url parts, the first starts with {"): a
+    # login in itself, and its middle part may carry the user's name.
+    ("secret", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "<secret>"),
     # name = value, name: value, "name": "value", 'name': 'value' (YAML, INI,
     # JSON, Python), also with escaped quotes (\"value\" in a logged command
     # line): the value goes, quoted (also with spaces) or not.

@@ -22,7 +22,8 @@ off_lines() {
   [[ -f $f ]] || return 0
   t=$(mktemp) || return 0
   cp "$f" "$t"
-  for l in "$@"; do grep -vxF -e "$l" "$t" > "$t.n"; mv -f "$t.n" "$t"; done
+  # grep finds nothing once the last line goes (status 1): not a failure.
+  for l in "$@"; do { grep -vxF -e "$l" "$t" || true; } > "$t.n"; mv -f "$t.n" "$t"; done
   cmp -s "$t" "$f" || cat "$t" > "$f"
   rm -f "$t"
 }

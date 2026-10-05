@@ -97,6 +97,19 @@ def test_space_switches_through_the_mac(world):
     asyncio.run(go())
 
 
+def test_title_follows_the_vm_version(world):
+    """After an update the open window says the new version (the e2e saw 2.9.1 after 2.9.2 went in)."""
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            a.c.local.version = "9.9.9"
+            a.refresh_all()
+            await pilot.pause(0.1)
+            assert a.screen.query_one(".box").border_title == "OmacVM 9.9.9"
+    asyncio.run(go())
+
+
 def test_failed_job_with_brackets_in_its_text(world):
     world.job_end = ("rolled-back", "omacvm apply: rolled back [/] [bold]x[/bold")
 
