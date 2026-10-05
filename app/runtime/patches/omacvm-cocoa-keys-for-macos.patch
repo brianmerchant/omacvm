@@ -6,7 +6,7 @@ What: a key event marked with OmacVM's marker (kCGEventSourceUserData =
 is not the guest's: QEMU's full-grab tap lets it through and the app does
 not send it to the VM.
 
-Why: after Ctrl+Option+Cmd+Esc, OmacVM Gestures leaves the VM's full-screen
+Why: after the escape combo (Ctrl+Option+Esc), OmacVM Gestures leaves the VM's full-screen
 Space with macOS's own "Move left/right a space" shortcut (Ctrl+Left/Right
 by default), posted at the HID level. QEMU's window is still key at that
 moment, so its full-grab tap (qemu-cocoa-full-grab-focus.patch) took the

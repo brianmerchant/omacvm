@@ -338,10 +338,10 @@ struct ReadyView: View {
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
             Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
                 .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
-            Picker("Escape combo (⌃⌥⌘ Esc)", selection: $escape) {
+            Picker("Escape combo (⌃⌥ Esc)", selection: $escape) {
                 ForEach(EscapeSetting.Choice.allCases, id: \.self) { Text($0.title).tag($0) }
             }
-            .help("In a full-screen VM, Control-Option-Command-Esc swipes back to macOS with macOS's own animation, and again to the VM. The keyboard follows the pointer's monitor.")
+            .help("In a full-screen VM, Control-Option-Esc moves the monitor under the pointer (or all monitors) to the Space beside the VM's with macOS's own animation; the VM stays full screen. Pressed in macOS, it goes back into the VM. The keyboard follows the pointer's monitor.")
             .onChange(of: escape) { _, v in EscapeSetting.set(v) }
             if state.hasNotch {
                 Toggle("Use the notch for the menu bar", isOn: $notch)

@@ -16,6 +16,16 @@ Pending (each line is decided at release: the lane landed, or it moves to
 - (pending #91) Any Omarchy scale on 5K and larger: graphics memory without
   a fixed limit.
 
+- The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
+  with one hand (brianmerchant, #42). Only exactly these keys count: with
+  Shift (or another key) added they go on as ordinary keys. Neither Omarchy
+  nor macOS uses Ctrl+Option+Esc. The old ⌃⌥⌘ Esc
+  still works through 3.0.x; the first time it is used in a VM, Omarchy shows
+  "New shortcut: ⌃⌥ Esc". It is removed in a later version. OmacVM.app's QEMU
+  now lets the combo through to OmacVM Gestures, whichever of the two
+  started first. OmacVM.app's *Escape combo* setting is now *This monitor*
+  or *All monitors*. Parallels, UTM and Fusion: `omacvm update` brings the
+  new Gestures (until then the old combo keeps working).
 - `base-install.sh` keeps pacstrap's whole output in its log, so a failed
   package install shows its real cause.
 - OmacVM.app: the pointer moves in Omarchy right after the VM starts, and
@@ -121,7 +131,8 @@ Pending (each line is decided at release: the lane landed, or it moves to
   paths outside the bundle, no shared folders, no extra QEMU arguments,
   disks without a parent). Free space is checked before the download, and
   the seed with the password hash is deleted however the build ends.
-- ⌃⌥⌘ Esc in the full-screen VM no longer takes the VM out of full screen.
+- The escape combo (now ⌃⌥ Esc) in the full-screen VM no longer takes the VM
+  out of full screen.
   It moves the monitor under the pointer to the Space you came from with
   macOS's own "Move left/right a space" shortcut (as set in System Settings
   › Keyboard › Keyboard Shortcuts, ⌃← and ⌃→ by default), with macOS's own

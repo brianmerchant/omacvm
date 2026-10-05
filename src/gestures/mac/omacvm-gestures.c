@@ -15,7 +15,7 @@
 // While the VM is full screen, the macOS pointer is hidden wherever the VM window
 // is what lies under it (the guest draws its own pointer); over anything else
 // (the Omanotch strip, the Dock, menus, another display) it shows.
-// Ctrl+Option+Cmd+Esc in the full-screen VM hands everything back to macOS and
+// Ctrl+Option+Esc in the full-screen VM hands everything back to macOS and
 // moves the display under the pointer to the Space beside the VM's with
 // macOS's own "Move left/right a space" shortcut (macOS's own animation; the
 // VM stays full screen); pressed there again in macOS, it goes back into the
@@ -43,7 +43,10 @@
 // Protocol (TCP, the guest connects to the Mac on port 47830: 10.211.55.2 on
 // Parallels, 192.168.64.1 on UTM, .1 of Fusion's NAT network), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
-//   S <on|off|esc>                    capture state changes
+//   S <on|off|esc> [<keys>]           capture state changes; after esc the combo pressed:
+//                                     ctrl-opt, or ctrl-opt-cmd (the old one, through 3.0.x).
+//                                     A guest reads no word as ctrl-opt-cmd (a helper
+//                                     from before 3.0.0 knows only that one)
 //   O <natural> <w> <h>               on connect (and when another trackpad touches): macOS's
 //                                     natural scrolling (1/0) and the trackpad's size in 1/100 mm
 //   A <dx> <dy>                       Glide: macOS's scroll while the fingers touch (points)
@@ -157,6 +160,21 @@ static void readFusionHost(void) {
   fclose(f);
 }
 #define ESC_KEYCODE 53
+// The escape combo is Ctrl+Option+Esc (since 3.0.0). Ctrl+Option+Cmd+Esc, the
+// combo up to 2.9.x, still works through 3.0.x as a hidden fallback: the
+// guest then shows "New shortcut: ⌃⌥ Esc" once. TODO(after 3.0.x): remove
+// ESC_OLD (tracked in tracks/keys-escape.md, "old escape combo").
+// Only these two exact modifier sets count: with Shift added it is not the
+// combo and goes on as any other key.
+enum { ESC_NONE, ESC_NEW, ESC_OLD };
+static int escapeCombo(int kc, CGEventFlags f) {
+  if (kc != ESC_KEYCODE) return ESC_NONE;
+  const CGEventFlags ctrlOpt = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate;
+  CGEventFlags m = f & (ctrlOpt | kCGEventFlagMaskCommand | kCGEventFlagMaskShift);
+  return m == ctrlOpt ? ESC_NEW : m == (ctrlOpt | kCGEventFlagMaskCommand) ? ESC_OLD : ESC_NONE;
+}
+// The last combo pressed, for "S esc <keys>".
+static const char *escKeys = "ctrl-opt";
 #define PINCH_SPREAD 0.035f         // normalized change of finger distance that makes a pinch
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
 
@@ -329,7 +347,7 @@ static void sendSize(void) {
 
 // "on"/"esc" concern the front VM; "off" goes to every VM.
 static void sendState(const char *s) {
-  char b[16]; int n = snprintf(b, sizeof b, "S %s\n", s);
+  char b[40]; int n = !strcmp(s, "esc") ? snprintf(b, sizeof b, "S esc %s\n", escKeys) : snprintf(b, sizeof b, "S %s\n", s);
   sendTo(!strcmp(s, "off"), b, (size_t)n);
 }
 
@@ -489,8 +507,10 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
 // sends the escape combo to the guest and returns nothing, so we never saw it
 // after OmacVM.app was restarted (brianmerchant, PR #39). So the tap is
 // created again whenever a different OmacVM VM comes to the front full screen,
-// and when macOS has invalidated it. The new tap goes in before the old one
-// is removed: no gap without one.
+// and when macOS has invalidated it. Since 3.0.0 QEMU's tap lets the combo
+// through as well (omacvm-cocoa-escape-combo-tap.patch); the re-arm stays for
+// a QEMU from before that. The new tap goes in before the old one is removed:
+// no gap without one.
 static int installTap(void) {
   CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
   if (!newTap) return 0;
@@ -754,10 +774,10 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 }
 
 // ---- the escape combo: out of the VM's Space with macOS's own shortcut, and back ----
-// Ctrl+Option+Cmd+Esc in the captured full-screen VM hands the trackpad and
-// keys back to macOS at once ("S esc", Omarchy lets go of held keys). Then
-// the display under the pointer moves one Space toward the one it showed
-// before the VM, with macOS's own "Move left/right a space" shortcut (System
+// Ctrl+Option+Esc (escapeCombo above) in the captured full-screen VM hands the
+// trackpad and keys back to macOS at once ("S esc <keys>", Omarchy lets go of
+// held keys). Then the display under the pointer moves one Space toward the
+// one it showed before the VM, with macOS's own "Move left/right a space" shortcut (System
 // Settings > Keyboard > Keyboard Shortcuts > Mission Control: Ctrl+Left and
 // Ctrl+Right unless the user changed them), so macOS animates it as its own
 // swipe; the keyboard goes to what that display shows. Pressed again there in
@@ -1583,9 +1603,13 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     if (CGEventGetIntegerValueField(e, kCGEventSourceUserData) == OMACVM_KEY_MARKER) return e;
     int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
-    int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
+    int combo = escapeCombo(kc, f);
+    // A plain Esc going down: the combo's Esc up we meant to eat went elsewhere
+    // (QEMU's tap ahead of ours takes it when Ctrl or Option comes up first),
+    // so this press keeps its own up.
+    if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo) swallowEscUp = 0;
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
-    int act = kc == ESC_KEYCODE && combo
+    int act = combo
               ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin),
                             winVMPid > 0 && winVMPid == appPid,
                             alive(leftWinPid) && leftWinPid != appPid && vmWindowFn(leftWinPid, leftWinWin))
@@ -1617,6 +1641,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       logf_("escape combo ignored: posted by pid %lld (%s), state %lld", srcPid, who, srcState);
       return e;
     }
+    escKeys = combo == ESC_OLD ? "ctrl-opt-cmd" : "ctrl-opt";
+    if (combo == ESC_OLD) logf_("escape combo: the old Ctrl+Option+Cmd+Esc (works through 3.0.x; the new one is Ctrl+Option+Esc)");
     if (act == COMBO_ENTER) {
       later(enterVM);
     } else if (act == COMBO_WINDOW_BACK) {
@@ -2039,7 +2065,7 @@ int main(int argc, char **argv) {
     if (!listenAddrs[i][0] && i != NET_FUSION) continue;
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
-  logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
+  logf_(trackpad ? "running (escape: Ctrl+Option+Esc)" : "running, keys only: trackpad gestures stay with macOS");
   CFRunLoopRun();
   return 0;
 }
