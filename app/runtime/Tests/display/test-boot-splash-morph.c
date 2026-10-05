@@ -12,7 +12,11 @@
  * - no cell jumps from one frame to the next (120 Hz);
  * - the glow comes and goes: none at the start and the end, some mid-flight;
  *   the background is plain navy without it;
- * - the desktop is told apart from the firmware's logo and text on black.
+ * - the desktop is told apart from the firmware's logo and text on black;
+ * - when the logo goes (omacvm_splash_look): not on the display agent's
+ *   hello alone (Hyprland's grey comes before the wallpaper), on the lit
+ *   desktop, 2 s after the hello at most, at the time limit only without
+ *   the agent, at once on an error.
  *
  * build-qemu-gpu-runtime.sh builds it with -I the patched ui/;
  * check-boot-splash.sh with the header taken from the patch.
@@ -333,6 +337,41 @@ static void test_desktop(void)
     free(f);
 }
 
+static void test_look(void)
+{
+    const long long limit = 40000;
+
+    CHECK(omacvm_splash_look(false, false, -1, 5000, limit) == SPLASH_LOOK_HOLD,
+          "the logo goes during the firmware");
+    CHECK(omacvm_splash_look(true, false, -1, 5000, limit) == SPLASH_LOOK_ERROR,
+          "an error does not end the logo at once");
+    CHECK(omacvm_splash_look(false, true, -1, 9000, limit) == SPLASH_LOOK_DESKTOP,
+          "a lit desktop without the agent does not end the logo");
+    /* The agent's hello comes ~0.5 s before the wallpaper: hold over the grey. */
+    CHECK(omacvm_splash_look(false, false, 0, 12000, limit) == SPLASH_LOOK_HOLD,
+          "the logo fades on the agent's hello, into Hyprland's grey");
+    CHECK(omacvm_splash_look(false, false, 500, 12500, limit) == SPLASH_LOOK_HOLD,
+          "the logo fades 0.5 s after the hello without the wallpaper");
+    CHECK(omacvm_splash_look(false, true, 500, 12500, limit) == SPLASH_LOOK_DESKTOP,
+          "the logo stays over the drawn wallpaper");
+    /* A dark wallpaper is never lit: 2 s after the hello at most. */
+    CHECK(omacvm_splash_look(false, false, SPLASH_AGENT_SETTLE_MS - 1, 14000, limit) == SPLASH_LOOK_HOLD,
+          "the logo goes before the settle time");
+    CHECK(omacvm_splash_look(false, false, SPLASH_AGENT_SETTLE_MS, 14000, limit) == SPLASH_LOOK_AGENT,
+          "the logo waits for ever on a dark wallpaper");
+    CHECK(SPLASH_AGENT_SETTLE_MS >= 1000 && SPLASH_AGENT_SETTLE_MS <= 3000,
+          "settle time %d ms is not about 2 s", SPLASH_AGENT_SETTLE_MS);
+    /* The time limit: without the agent; with it, the settle time ends it. */
+    CHECK(omacvm_splash_look(false, false, -1, limit, limit) == SPLASH_LOOK_LIMIT,
+          "no give-way at the time limit");
+    CHECK(omacvm_splash_look(false, false, -1, limit - 1, limit) == SPLASH_LOOK_HOLD,
+          "the time limit comes early");
+    CHECK(omacvm_splash_look(false, false, 300, limit + 300, limit) == SPLASH_LOOK_HOLD,
+          "the time limit cuts the agent's settle time short");
+    CHECK(omacvm_splash_look(true, true, 300, 1000, limit) == SPLASH_LOOK_ERROR,
+          "an error does not win");
+}
+
 int main(void)
 {
     test_ends();
@@ -341,11 +380,12 @@ int main(void)
     test_background();
     test_timeline();
     test_desktop();
+    test_look();
     if (failures) {
         fprintf(stderr, "test-boot-splash-morph: %d failures\n", failures);
         return 1;
     }
     printf("test-boot-splash-morph: OMACVM to the logo on the slowed timeline, still ends on "
-           "GL's pixels, no jumps, the desktop told apart\n");
+           "GL's pixels, no jumps, the desktop told apart, the logo waits for the wallpaper\n");
     return 0;
 }

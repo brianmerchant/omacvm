@@ -42,4 +42,18 @@ awk '/^\+static void omacvm_splash_reset\(void \*opaque\)$/ { on = 1 } on { prin
   { echo "FAIL: a guest reset does not forget the agent's hello" >&2; exit 1; }
 grep -A3 '^ *if (d\[@"hello"\]) {$' "$p" | grep -q '^+ *qatomic_set(&omacvm_display_hello, true);' ||
   { echo "FAIL: the agent's hello does not reach the boot logo" >&2; exit 1; }
+# The window's logo goes as omacvm_splash_look says (test-boot-splash-morph.c
+# tests it: it waits for the wallpaper after the hello). After the time limit
+# the tick keeps looking and marks the desktop when it comes, so an output it
+# turns off later is black, not the logo.
+awk '/^\+static void omacvm_hold_tick\(void \*opaque\)$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" \
+  > "$tmp/hold-tick.inc"
+grep -q 'omacvm_splash_look(' "$tmp/hold-tick.inc" ||
+  { echo "FAIL: the boot logo does not go by omacvm_splash_look" >&2; exit 1; }
+awk '/^\+ *if \(omacvm_watching\) \{$/ { on = 1 } on { print } on && /^\+ *return;$/ { exit }' "$tmp/hold-tick.inc" |
+  grep -q 'omacvm_desktop_up = true;' ||
+  { echo "FAIL: a desktop after the time limit is not marked (its screen off shows the logo)" >&2; exit 1; }
+grep -A3 '^+ *case SPLASH_LOOK_LIMIT:$' "$tmp/hold-tick.inc" | grep -q 'omacvm_watching = true;' ||
+  { echo "FAIL: the time limit stops looking for the desktop" >&2; exit 1; }
 echo "check-boot-splash: the display agent counts by its hello when the window talks to it"
+echo "check-boot-splash: the logo waits for the wallpaper; a desktop after the time limit is marked"

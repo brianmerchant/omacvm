@@ -6,19 +6,23 @@ stay, the cells of C, V and M fly and land as R, C, H and Y), Omarchy green
 on Omarchy's background: OMACVM holds 0.6 s, the cells fly for about 2.6 s,
 the glow goes by 3.56 s. Then the logo holds until Omarchy's desktop (or its
 login or lock screen) is there, over the firmware's progress bar, GRUB's
-text and Linux's console, and fades into it. The desktop is there when
-Omarchy's display agent (omacvm-displays, a user service that starts with
-the desktop) says hello on its port org.omacvm.display (QEMU's window talks
-to it when the launcher sets OMACVM_DISPLAY_SOCKET; without that channel the
-port's opening counts: with it, the firmware opens the port too, EDK2's
-VirtioSerialDxe answers the host's open 0.2 s into the boot), or when the guest's picture
-is lit almost everywhere (a wallpaper, not text on black; 32 x 18 pixels
-looked at 4 times a second, read back from the scanout's texture). If the
+text and Linux's console, and fades into it. The desktop is there when the
+guest's picture is lit almost everywhere (a wallpaper, not text on black nor
+Hyprland's grey before the wallpaper; 32 x 18 pixels looked at 4 times a
+second, read back from the scanout's texture), or 2 s after Omarchy's
+display agent (omacvm-displays, a user service that starts with the desktop)
+said hello on its port org.omacvm.display without a lit picture (a dark
+wallpaper). The hello comes about 0.5 s before the wallpaper: fading on it
+showed Hyprland's grey for a moment. QEMU's window talks to the agent when
+the launcher sets OMACVM_DISPLAY_SOCKET; without that channel the port's
+opening counts (with it, the firmware opens the port too, EDK2's
+VirtioSerialDxe answers the host's open 0.2 s into the boot). If the
 desktop comes before the animation ends, the animation still plays to its
 end. The logo gives way at once when the VM stops on an error, and after
 40 s of running time without a desktop (OMACVM_SPLASH_HOLD_SECONDS), so a
 prompt or an error in the guest is not hidden for long; qemu.log says which
-it was. After a reboot the logo comes back, still, the same way. Reduce
+it was. After that it still looks once a second for the desktop, so that
+an output the desktop turns off later is black, not the logo. After a reboot the logo comes back, still, the same way. Reduce
 motion or OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the
 main window has the animation.
 Under it, in the GL layers of the main window and the other displays' windows:
@@ -72,7 +76,9 @@ Tests/display/test-boot-splash-morph.c (the core starts as OMACVM, holds it
 about 0.6 s, flies 2.5 to 3 s and ends as the logo, still, on the pixels GL's
 nearest sampling gives at several window sizes, square cells; no jumps; the
 glow comes and goes; the desktop is told apart from the firmware's logo,
-a console full of text and Hyprland's grey); Tests/display/
+a console full of text and Hyprland's grey; the logo goes on the lit
+desktop, not on the agent's hello alone, 2 s after the hello at most, at
+the time limit only without the agent, at once on an error); Tests/display/
 test-boot-splash-fade.m (the layer's no-action list has "opacity", so the
 fade into the desktop is only its own 0.4 s one: CA's implicit 0.25 s fade
 ended first and the logo came back at ~25 %). The build runs all four;
@@ -88,6 +94,9 @@ still logo; the layer's green and navy are the GL logo's and the firmware's
 values on the screen (168,205,118 and 26,27,38), the logo's box the GL
 logo's to the pixel. Through the launcher (RC2 pre-stage verify) the
 logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
+RC2 polish: the fade landed on Hyprland's grey ~0.5 s before the wallpaper
+(the logo now waits for it), and after a 40 s fallback an output the later
+desktop turned off showed the logo instead of black.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
@@ -121,7 +130,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
      /* Keep the corresponding Hyprland logical dimensions integral. */
      uint32_t cleanScaleDivisor = backingScale > 1.75 ? 2 :
                                   backingScale > 1.25 ? 3 : 1;
-@@ -3353,6 +3362,747 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
+@@ -3353,6 +3362,791 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
      CGLDestroyContext(ctx);
  }
  
@@ -131,18 +140,22 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 + * until Omarchy's desktop (or its login or lock screen) is there: the
 + * firmware's progress bar, GRUB's text and Linux's console stay under it.
 + * After a reboot the logo comes back, still, the same way. The desktop is
-+ * there when
-+ * - Omarchy's display agent (omacvm-displays, a user service that starts
-+ *   with the desktop) says hello on its port, org.omacvm.display (QEMU's
-+ *   window talks to it when the launcher gives OMACVM_DISPLAY_SOCKET; else
-+ *   the port's opening counts), or
-+ * - the guest's picture is lit almost everywhere (omacvm_splash_desktop:
-+ *   a wallpaper, not text on black), looked at 4 times a second.
++ * there when the guest's picture is lit almost everywhere
++ * (omacvm_splash_desktop: a wallpaper, not text on black nor Hyprland's grey
++ * before the wallpaper), looked at 4 times a second, or 2 s after Omarchy's
++ * display agent (omacvm-displays, a user service that starts with the
++ * desktop) said hello on its port, org.omacvm.display, without a lit
++ * picture (a dark wallpaper). QEMU's window talks to the agent when the
++ * launcher gives OMACVM_DISPLAY_SOCKET; else the port's opening counts. The
++ * hello comes about 0.5 s before the wallpaper, so the logo does not fade
++ * into Hyprland's grey (omacvm_splash_look decides).
 + * The logo gives way earlier, and says why in qemu.log, when the VM stops on
 + * an error (at once, even mid-animation), or when there is no desktop after
 + * OMACVM_SPLASH_HOLD_SECONDS (40) of running time: whatever the guest shows
-+ * then (a prompt, an error) is not hidden for longer. If QEMU itself fails
-+ * (no disk, a crash), it quits and the app says so, as before.
++ * then (a prompt, an error) is not hidden for longer. It still looks once a
++ * second for the desktop then, so that an output the desktop turns off later
++ * is black, not the logo. If QEMU itself fails (no disk, a crash), it quits
++ * and the app says so, as before.
 + *
 + * Under the logo, in the window's GL layer, and on the other displays: until
 + * the guest shows a picture on an output, and when it switches the output
@@ -180,11 +193,16 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 +static bool omacvm_holding;
 +static bool omacvm_hold_dirty;          /* the guest's picture changed since the last look */
 +static int64_t omacvm_hold_since;       /* QEMU_CLOCK_VIRTUAL ms */
-+static QEMUTimer *omacvm_hold_timer;    /* QEMU_CLOCK_REALTIME, while holding */
++static int64_t omacvm_agent_since = -1; /* QEMU_CLOCK_REALTIME ms the agent was first seen, -1 */
++/* After the time limit the logo has gone; the desktop may still come (then black when off). */
++static bool omacvm_watching;
++static QEMUTimer *omacvm_hold_timer;    /* QEMU_CLOCK_REALTIME, while holding or watching */
 +/* The main view in pixels: the IOSurface path draws the logo at its size. */
 +static uint32_t omacvm_view_w, omacvm_view_h;
 +
 +#define SPLASH_HOLD_TICK_MS 250
++#define SPLASH_SETTLE_TICK_MS 100   /* the agent is up: the wallpaper is close */
++#define SPLASH_WATCH_TICK_MS 1000   /* after the time limit */
 +
 +static bool omacvm_splash_enabled(void)
 +{
@@ -485,41 +503,72 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 +
 +static void omacvm_intro_reveal(bool now);
 +
-+/* QEMU's thread, BQL, 4 times a second while the logo waits: is the desktop there? */
++/*
++ * QEMU's thread, BQL, 4 times a second while the logo waits (10 once the
++ * agent is up): is the desktop there? After the time limit, once a second
++ * until the desktop comes, so that an output it turns off is black.
++ */
 +static void omacvm_hold_tick(void *opaque)
 +{
++    int64_t now_ms = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
 +    int64_t ran = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) - omacvm_hold_since;
 +    int limit = omacvm_splash_seconds("OMACVM_SPLASH_HOLD_SECONDS", 40);
++    bool error = runstate_check(RUN_STATE_INTERNAL_ERROR) || runstate_check(RUN_STATE_IO_ERROR) ||
++                 runstate_check(RUN_STATE_GUEST_PANICKED);
 +    const char *why = NULL;
-+    bool now = false;
++    bool lit;
 +
-+    if (!omacvm_holding) {
++    if (!omacvm_holding && !omacvm_watching) {
 +        return;
 +    }
-+    if (runstate_check(RUN_STATE_INTERNAL_ERROR) || runstate_check(RUN_STATE_IO_ERROR) ||
-+        runstate_check(RUN_STATE_GUEST_PANICKED)) {
-+        why = "the VM stopped on an error";
-+        now = true;
-+    } else if (omacvm_splash_agent_up()) {
-+        why = "Omarchy's display agent started";
-+        omacvm_desktop_up = true;
-+    } else if (omacvm_hold_dirty && omacvm_splash_sees_desktop()) {
-+        why = "the guest shows its desktop";
-+        omacvm_desktop_up = true;
-+    } else if (ran >= limit * 1000LL) {
-+        why = "no desktop yet: the guest's screen as it is";
++    if (omacvm_agent_since < 0 && omacvm_splash_agent_up()) {
++        omacvm_agent_since = now_ms;
++        omacvm_hold_dirty = true;   /* the wallpaper may be there already */
 +    }
++    lit = omacvm_hold_dirty && omacvm_splash_sees_desktop();
 +    omacvm_hold_dirty = false;
-+    if (!why) {
-+        timer_mod(omacvm_hold_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + SPLASH_HOLD_TICK_MS);
++    if (omacvm_watching) {
++        if (omacvm_agent_since >= 0 || lit) {
++            omacvm_watching = false;
++            omacvm_desktop_up = true;
++            gl_dirty = true;
++            info_report("cocoa: the desktop came after the boot logo's time limit "
++                        "(%.1f s of running time after the start)", ran / 1000.0);
++        } else {
++            timer_mod(omacvm_hold_timer, now_ms + SPLASH_WATCH_TICK_MS);
++        }
 +        return;
++    }
++    switch (omacvm_splash_look(error, lit, omacvm_agent_since < 0 ? -1 : now_ms - omacvm_agent_since,
++                               ran, limit * 1000LL)) {
++    case SPLASH_LOOK_HOLD:
++        timer_mod(omacvm_hold_timer, now_ms +
++                  (omacvm_agent_since < 0 ? SPLASH_HOLD_TICK_MS : SPLASH_SETTLE_TICK_MS));
++        return;
++    case SPLASH_LOOK_ERROR:
++        why = "the VM stopped on an error";
++        break;
++    case SPLASH_LOOK_DESKTOP:
++        why = omacvm_agent_since < 0 ? "the guest shows its desktop"
++                                     : "Omarchy's display agent started and the desktop is drawn";
++        omacvm_desktop_up = true;
++        break;
++    case SPLASH_LOOK_AGENT:
++        why = "Omarchy's display agent started (no lit desktop 2 s later)";
++        omacvm_desktop_up = true;
++        break;
++    case SPLASH_LOOK_LIMIT:
++        why = "no desktop yet: the guest's screen as it is";
++        omacvm_watching = true;
++        timer_mod(omacvm_hold_timer, now_ms + SPLASH_WATCH_TICK_MS);
++        break;
 +    }
 +    omacvm_holding = false;
 +    gl_dirty = true;
 +    info_report("cocoa: boot logo gives way, %s (%.1f s of running time after the start)",
 +                why, ran / 1000.0);
 +    dispatch_async(dispatch_get_main_queue(), ^{
-+        omacvm_intro_reveal(now);
++        omacvm_intro_reveal(error);
 +    });
 +}
 +
@@ -527,7 +576,9 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 +static void omacvm_hold_start(void)
 +{
 +    omacvm_holding = true;
++    omacvm_watching = false;
 +    omacvm_hold_dirty = true;
++    omacvm_agent_since = -1;
 +    omacvm_hold_since = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
 +    if (!omacvm_hold_timer) {
 +        omacvm_hold_timer = timer_new_ms(QEMU_CLOCK_REALTIME, omacvm_hold_tick, NULL);
@@ -543,6 +594,8 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 +    omacvm_guest_drew = false;
 +    qatomic_set(&omacvm_display_hello, false);
 +    omacvm_desktop_up = false;
++    omacvm_watching = false;
++    omacvm_agent_since = -1;
 +    if (omacvm_overlay_ok) {
 +        omacvm_hold_start();
 +        dispatch_async(dispatch_get_main_queue(), ^{
@@ -869,7 +922,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -3361,6 +4111,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
+@@ -3361,6 +4155,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
          gl_dirty = true;
      });
      cocoa_refresh_activity();
@@ -877,7 +930,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -3374,6 +4125,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -3374,6 +4169,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -885,7 +938,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  }
  
  static void cocoa_gl_render(void)
-@@ -3451,6 +4203,8 @@ static void cocoa_gl_render(void)
+@@ -3451,6 +4247,8 @@ static void cocoa_gl_render(void)
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -894,7 +947,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3689,6 +4443,11 @@ static bool cocoa_gl_present_init(void)
+@@ -3689,6 +4487,11 @@ static bool cocoa_gl_present_init(void)
      return true;
  }
  
@@ -906,7 +959,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  static void cocoa_gl_present_free(void)
  {
      for (int i = 0; i < present_nsurf; i++) {
-@@ -3823,6 +4582,7 @@ static bool cocoa_gl_present(void)
+@@ -3823,6 +4626,7 @@ static bool cocoa_gl_present(void)
      bool flip;
      uint32_t w, h;
      GLint filter = qatomic_read(&zoom_interpolation) ? GL_LINEAR : GL_NEAREST;
@@ -914,7 +967,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  
      if (gl_scanout_borrow) {
          DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
-@@ -3834,6 +4594,13 @@ static bool cocoa_gl_present(void)
+@@ -3834,6 +4638,13 @@ static bool cocoa_gl_present(void)
          h = texture.height;
          /* The surface's first row is the top of the window. */
          flip = !texture.y_0_top;
@@ -928,7 +981,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
      } else if (surface && surface->texture) {
          src = surface->texture;
          w = surface_width(surface);
-@@ -3852,14 +4619,16 @@ static bool cocoa_gl_present(void)
+@@ -3852,14 +4663,16 @@ static bool cocoa_gl_present(void)
  
      /* A 10-bit scanout keeps its depth: half-float surfaces. */
      GLint ifmt = 0;
@@ -949,7 +1002,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
          info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
                      deep ? "half-float" : "8-bit",
                      deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
-@@ -3911,13 +4680,18 @@ static bool cocoa_gl_present(void)
+@@ -3911,13 +4724,18 @@ static bool cocoa_gl_present(void)
      glClear(GL_COLOR_BUFFER_BIT);
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
@@ -975,7 +1028,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-@@ -4531,6 +5305,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
+@@ -4531,6 +5349,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -983,7 +1036,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  
      cocoa_gl_log("scanout disable");
  }
-@@ -4543,8 +5318,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
+@@ -4543,8 +5362,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
@@ -997,7 +1050,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -4555,6 +5335,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -4555,6 +5379,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
                                     uint32_t w, uint32_t h)
  {
      gl_dirty = true;
@@ -1005,7 +1058,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
  
      /*
       * Show the guest's frame now, not on the next 30 ms refresh tick:
-@@ -5299,6 +6080,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
+@@ -5299,6 +6124,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -1014,7 +1067,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -5968,6 +6751,8 @@ static void omacvm_chan_line(NSData *data)
+@@ -5968,6 +6795,8 @@ static void omacvm_chan_line(NSData *data)
          NSDictionary *d = obj;
          bool update = false;
          if (d[@"hello"]) {
@@ -1023,7 +1076,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
              if (!omacvm_ptr.drawing) {
                  info_report("cocoa: the guest draws its own pointer now");
              }
-@@ -6332,6 +7117,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -6332,6 +7161,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          }
          info_report("cocoa: GL frames shown %s",
                      present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
@@ -1036,7 +1089,7 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
              QemuConsole *con = qemu_console_lookup_by_index(index);
 --- /dev/null
 +++ b/ui/omacvm-splash.h
-@@ -0,0 +1,535 @@
+@@ -0,0 +1,575 @@
 +/*
 + * OmacVM boot splash: Omarchy's logo as cells, and the core of the start
 + * animation (OMACVM turns into the logo). Only C, no Cocoa or QEMU, so that
@@ -1257,8 +1310,9 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 + * x SPLASH_PROBE_ROWS pixels taken evenly across the picture (the middle of
 + * each part), 32 bits each with the colour in the low 24 bits, in any order.
 + * Text and the logo light up well under a fifth of them; a desktop (a
-+ * wallpaper, Hyprland's background) almost all: 40 % or more brighter than
-+ * 0x18 in some channel count as the desktop.
++ * wallpaper, a lock screen) almost all: 40 % or more brighter than 0x18 in
++ * some channel count as the desktop. Hyprland's grey (0x111111) before the
++ * wallpaper does not.
 + */
 +#define SPLASH_PROBE_COLS 32
 +#define SPLASH_PROBE_ROWS 18
@@ -1273,6 +1327,45 @@ logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 +               ((px[i] >> 16) & 0xff) > 0x18;
 +    }
 +    return lit * 10 >= n * 4;
++}
++
++/*
++ * The window's logo looks a few times a second whether it can go. error: the
++ * VM stopped on an error; lit: the guest's picture is its desktop
++ * (omacvm_splash_desktop); agent_ms: how long Omarchy's display agent has
++ * been up (it starts with the desktop), -1 while it is not; ran_ms: running
++ * time since the start; limit_ms: OMACVM_SPLASH_HOLD_SECONDS.
++ * The agent says hello about half a second before Hyprland draws the
++ * wallpaper (its grey comes first), so the logo waits for a lit picture, but
++ * at most SPLASH_AGENT_SETTLE_MS after the hello: a dark wallpaper is never
++ * "lit". The time limit does not cut that short.
++ */
++#define SPLASH_AGENT_SETTLE_MS 2000
++
++typedef enum {
++    SPLASH_LOOK_HOLD,       /* keep the logo */
++    SPLASH_LOOK_ERROR,      /* go at once: the VM stopped on an error */
++    SPLASH_LOOK_DESKTOP,    /* the desktop is drawn: fade into it */
++    SPLASH_LOOK_AGENT,      /* the agent is up, nothing lit SETTLE ms later: fade */
++    SPLASH_LOOK_LIMIT,      /* no desktop after the limit: the guest's screen as it is */
++} SplashLook;
++
++static SplashLook omacvm_splash_look(bool error, bool lit, long long agent_ms,
++                                     long long ran_ms, long long limit_ms)
++{
++    if (error) {
++        return SPLASH_LOOK_ERROR;
++    }
++    if (lit) {
++        return SPLASH_LOOK_DESKTOP;
++    }
++    if (agent_ms >= SPLASH_AGENT_SETTLE_MS) {
++        return SPLASH_LOOK_AGENT;
++    }
++    if (agent_ms < 0 && ran_ms >= limit_ms) {
++        return SPLASH_LOOK_LIMIT;
++    }
++    return SPLASH_LOOK_HOLD;
 +}
 +
 +/* Where the probe's i-th of n pixels lies across w: the middle of its part. */
