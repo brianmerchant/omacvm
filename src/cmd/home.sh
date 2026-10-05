@@ -18,7 +18,7 @@ app_name() { case $1 in parallels) echo Parallels ;; utm) echo UTM ;; fusion) ec
 
 # The VMs, with OmacVM's state for the running ones.
 NAMES=(); TYPES=(); STATES=(); KIND=()   # KIND: omacvm | plain | locked | stopped
-while IFS=$'\t' read -r name type state; do
+while IFS=$'\t' read -r name type state _; do
   [[ -n $name ]] || continue
   kind=stopped; v=""
   if [[ $state == running ]]; then

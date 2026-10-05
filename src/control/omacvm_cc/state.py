@@ -301,7 +301,8 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     `graphics`: omacvm graphics --json); None on the other routes."""
     if vm_type != "app":
         return None
-    mine = tuple(c for c in (checks or []) if c.feature == "graphics")
+    # "graphics memory" has its own row (older 3.0.0 RCs sent it with FEATURE=graphics).
+    mine = tuple(c for c in (checks or []) if c.feature == "graphics" and c.name != "graphics memory")
     g = (status or {}).get("graphics")
     job = next((j for j in (jobs or []) if j.active and j.action == "graphics"), None)
     if job is not None:
@@ -358,7 +359,7 @@ def gpu_memory_row(answer: dict | None, vm_type: str, supported: bool | None = T
     not asked yet); offline: the Mac does not answer or refused this VM."""
     if vm_type != "app":
         return None
-    mine = tuple(c for c in (checks or []) if c.name == "graphics memory")
+    mine = tuple(c for c in (checks or []) if c.feature == "gpu-memory" or c.name == "graphics memory")
     if supported is False:
         return Row(GPU_MEMORY_FEATURE, True, Status.UNKNOWN, "the Mac's OmacVM does not say (older than 3.0.0?)", checks=mine)
     if not isinstance(answer, dict):

@@ -52,7 +52,7 @@ cli_for_bridge() {
   (( ! links ))
 }
 
-PRLCTL=/usr/local/bin/prlctl
+PRLCTL=${PRLCTL:-/usr/local/bin/prlctl}   # tests: a stand-in
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
 # SSH into the guest as root with the OmacVM key. Each VM's host key is
@@ -249,7 +249,49 @@ parallels_tools_install() {
 }
 
 # ---- UTM ----
-UTMCTL=/Applications/UTM.app/Contents/MacOS/utmctl
+UTMCTL=${UTMCTL:-/Applications/UTM.app/Contents/MacOS/utmctl}
+
+# UTM keeps its VMs and settings in its sandbox container. macOS 14 and later
+# asks before another app reads there ("access data from other apps"), and
+# the reading process waits until someone answers: a Bridge job, an agent or a
+# script hangs, and the person gets a prompt nobody asked for. So OmacVM
+# - leaves UTM alone unless UTM is used with OmacVM on this Mac (utm_used),
+# - reads the container only when someone asked for UTM, and for at most
+#   2 seconds (utm_data),
+# - keeps the UTM VM names it saw in its own folder (utm_seen), so a list
+#   still has them when UTM's data cannot be read.
+UTM_DATA=$HOME/Library/Containers/com.utmapp.UTM/Data
+UTM_SEEN="$OMA_SUPPORT/utm-vms"
+UTM_UNREADABLE="UTM data not readable"
+UTM_UNREADABLE_HINT="$UTM_UNREADABLE: run omacvm in a terminal app on the Mac (macOS asks once whether it may read UTM's data), or open UTM"
+# A person at a terminal runs this omacvm (stdin as it started; utm_data's own
+# stdin may be a heredoc).
+UTM_TTY=0; [[ -t 0 ]] && UTM_TTY=1
+
+# utm_used: asked for (OMACVM_UTM=1, a command on a UTM VM), or OmacVM saw or
+# set up a UTM VM here (its own files only).
+utm_used() {
+  [[ ${OMACVM_UTM:-} == 1 || ${TYPE:-} == utm || -s $UTM_SEEN ]] && return 0
+  compgen -G "$OMA_PINS/utm-*" >/dev/null
+}
+
+# utm_data CMD...: run CMD, which reads UTM's container, only when someone
+# asked for UTM (a person at a terminal, a command on a UTM VM, OMACVM_UTM=1);
+# killed after UTM_DATA_WAIT seconds (2). Fails at once otherwise: never from
+# the Bridge listing VMs or from a script.
+utm_data() {
+  utm_used && [[ ${OMACVM_UTM:-} == 1 || ${TYPE:-} == utm || $UTM_TTY == 1 ]] || return 1
+  perl -e 'my $t = shift; my $p = fork // exit 127; if (!$p) { exec { $ARGV[0] } @ARGV or exit 127 }
+    $SIG{ALRM} = sub { kill "KILL", $p; exit 142 }; alarm $t; waitpid($p, 0);
+    exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "${UTM_DATA_WAIT:-2}" "$@"
+}
+
+# utm_seen: the UTM VM names OmacVM saw, one per line. utm_seen_set: the
+# names on stdin are the list now.
+utm_seen() { cat "$UTM_SEEN" 2>/dev/null; return 0; }
+utm_seen_set() {
+  mkdir -p "$OMA_SUPPORT" && sed '/^$/d' > "$UTM_SEEN.$$" && mv -f "$UTM_SEEN.$$" "$UTM_SEEN"
+}
 
 vm_type() {   # <vm name> -> parallels | utm; a name in both: the one that is running
   local p="" u=""
@@ -327,9 +369,8 @@ utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the V
 # it again); otherwise the card comes with UTM's next start. VMs outside UTM's
 # own folder: unchanged.
 utm_add_sound() {
-  local c="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm/config.plist" i
-  [[ -f $c ]] || return 0
-  [[ $(plutil -extract Sound json -o - "$c" 2>/dev/null) == "[]" ]] || return 0
+  local c="$UTM_DATA/Documents/$1.utm/config.plist" i
+  [[ $(utm_data plutil -extract Sound json -o - "$c" 2>/dev/null) == "[]" ]] || return 0
   if pgrep -xq UTM; then
     if "$UTMCTL" list 2>/dev/null | awk 'NR > 1 && $2 == "started"' | grep -q .; then
       log "UTM: '$1' gets its sound card (speakers and microphone) when UTM starts next"
