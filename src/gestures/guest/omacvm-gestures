@@ -35,6 +35,7 @@ import pwd
 import re
 import secrets
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -65,9 +66,6 @@ def env_floats(name, default):
 
 
 HOST = os.environ.get("OMACVM_GESTURES_HOST") or os.environ.get("OMACVM_HOST") or "10.211.55.2"
-# The Mac address the helper must have accepted on (both proofs name it):
-# OmacVM.app's 10.0.2.2 is the Mac's 127.0.0.1.
-MAC_ADDR = "127.0.0.1" if os.environ.get("OMACVM_VM_TYPE") == "app" else HOST
 PORT = int(env_float("OMACVM_GESTURES_PORT", 47830))
 # The VM's feature choices (/etc/omacvm/env, loaded by the service).
 GESTURES = os.environ.get("OMACVM_FEATURE_gestures", "on") == "on"
@@ -578,11 +576,73 @@ def bridge_token():
         return ""
 
 
-def proof(tok, who, gn, mn):
+ROUTES, SYS_NET = "/proc/net/route", "/sys/class/net"
+
+
+def default_gateway():
+    """The IPv4 default gateway the VM uses, from /proc/net/route ("" without
+    one): the lowest metric among default routes whose network card has a
+    link. When the app switches networks it takes one card's link down; that
+    card's route can stay listed (first) for seconds after."""
+    best = None
+    try:
+        with open(ROUTES) as f:
+            for line in f.readlines()[1:]:
+                p = line.split()
+                if len(p) < 7 or p[1] != "00000000" or int(p[3], 16) & 3 != 3:   # RTF_UP | RTF_GATEWAY
+                    continue
+                try:
+                    with open(f"{SYS_NET}/{p[0]}/carrier") as c:
+                        if c.read().strip() != "1":
+                            continue
+                except OSError:
+                    pass                                 # no carrier to read: count it
+                if best is None or int(p[6]) < best[0]:
+                    best = (int(p[6]), socket.inet_ntoa(struct.pack("<I", int(p[2], 16))))
+    except (OSError, ValueError):
+        pass
+    return best[1] if best else ""
+
+
+def mac_host():
+    """(where to connect, the Mac address the helper must have accepted on: both
+    proofs name it). OmacVM.app: QEMU's user network's 10.0.2.2 is the Mac's
+    127.0.0.1; on its fast network (vmnet, the app picks it at each start) the
+    Mac is the gateway 192.168.77.1."""
+    if os.environ.get("OMACVM_VM_TYPE") != "app":
+        return HOST, HOST
+    if not os.environ.get("OMACVM_GESTURES_HOST") and default_gateway() == "192.168.77.1":
+        return "192.168.77.1", "192.168.77.1"
+    return HOST, "127.0.0.1"
+
+
+# A connection whose path went away (the app switched the VM between its fast
+# network and the user network, or the Mac slept) is noticed by TCP keepalive
+# in about 5 + 2 * 3 s; an idle one also looks every RECHECK seconds whether the
+# way to the Mac changed (a new default gateway) and connects again at once.
+KEEPALIVE = (5, 2, 3)   # idle seconds, seconds between probes, probes
+RECHECK = 2.0
+
+
+class Moved(ConnectionError):
+    """The way to the Mac changed: connect again now."""
+
+
+def keepalive(s):
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    # Linux: TCP_KEEPIDLE; macOS (the offline test): TCP_KEEPALIVE.
+    idle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(socket, "TCP_KEEPALIVE", None)
+    for opt, v in ((idle, KEEPALIVE[0]), (getattr(socket, "TCP_KEEPINTVL", None), KEEPALIVE[1]),
+                   (getattr(socket, "TCP_KEEPCNT", None), KEEPALIVE[2])):
+        if opt is not None:
+            s.setsockopt(socket.IPPROTO_TCP, opt, v)
+
+
+def proof(tok, who, addr, gn, mn):
     """HMAC-SHA256(token, "omacvm-gestures <who> <Mac address> <guest nonce> <mac nonce>"), hex.
     With the address, a listener on 127.0.0.1 cannot pass on a proof it got from
     the helper on 10.211.55.2."""
-    msg = f"omacvm-gestures {who} {MAC_ADDR} {gn} {mn}"
+    msg = f"omacvm-gestures {who} {addr} {gn} {mn}"
     return hmac.new(tok.encode(), msg.encode(), hashlib.sha256).hexdigest().encode()
 
 
@@ -593,41 +653,50 @@ def run(pad, keys, glide):
     tok = bridge_token()
     if not tok:
         raise ConnectionError("no Bridge token yet (omacvm apply puts it in ~/.config/omacvm-bridge/token)")
-    with socket.create_connection((HOST, PORT), timeout=5) as s:
+    host, addr = mac_host()
+    with socket.create_connection((host, PORT), timeout=5) as s:
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        keepalive(s)
         gn = secrets.token_hex(16)
         s.sendall(f"C {gn}\n".encode())
         buf = b""
         while b"\n" not in buf and len(buf) < 4096:
             data = s.recv(4096)
             if not data:
-                raise ConnectionError(f"{HOST}:{PORT} closed the connection (OmacVM Gestures on the Mac "
+                raise ConnectionError(f"{host}:{PORT} closed the connection (OmacVM Gestures on the Mac "
                                       "from before the handshake? omacvm update)")
             buf += data
         line, _, buf = buf.partition(b"\n")
         m = re.fullmatch(rb"M ([0-9a-f]{32}) ([0-9a-f]{64})", line)
-        if not m or not hmac.compare_digest(m[2], proof(tok, "mac", gn, m[1].decode())):
-            raise ConnectionError(f"{HOST}:{PORT} did not prove it knows the Bridge's token: not talking to it")
-        s.sendall(f"R {int(GESTURES)} {int(GLIDE_ON)} {proof(tok, 'vm', gn, m[1].decode()).decode()}"
+        if not m or not hmac.compare_digest(m[2], proof(tok, "mac", addr, gn, m[1].decode())):
+            raise ConnectionError(f"{host}:{PORT} did not prove it knows the Bridge's token: not talking to it")
+        s.sendall(f"R {int(GESTURES)} {int(GLIDE_ON)} {proof(tok, 'vm', addr, gn, m[1].decode()).decode()}"
                   f"{' ' + NAME if NAME else ''}\n".encode())
-        print(f"omacvm-gestures: connected to {HOST}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
+        print(f"omacvm-gestures: connected to {host}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
               f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
         tick = -1          # forces the first settimeout (create_connection left 5 s)
+        recheck = time.monotonic() + RECHECK
         while True:
             # A 2 ms tick (the glide's clock) only while a frame or a held
-            # touch waits; otherwise block, so an idle VM is not woken.
-            want = 0.002 if (pad.pending is not None or glide.held is not None or glide.touch.down) else None
+            # touch waits; otherwise wake every RECHECK seconds (one look at
+            # the routing table), so an idle VM is hardly woken.
+            want = 0.002 if (pad.pending is not None or glide.held is not None or glide.touch.down) else RECHECK
             if want != tick:
                 s.settimeout(want)
                 tick = want
             try:
                 data = s.recv(65536)
             except socket.timeout:
-                pad.flush()
-                glide.idle()
-                continue
+                data = None
             pad.flush()
             glide.idle()
+            now = time.monotonic()
+            if now >= recheck:
+                recheck = now + RECHECK
+                if mac_host() != (host, addr):
+                    raise Moved(f"the way to the Mac changed (now {mac_host()[0]}): connecting again")
+            if data is None:
+                continue
             if not data:
                 raise ConnectionError("helper closed the connection")
             buf += data
@@ -681,6 +750,12 @@ def main():
     glide = Glide(pad)
     print(f"omacvm-gestures: virtual touchpad {ui.device.path}"
           f"{', macOS-native scroll momentum on' if GLIDE_ON else ''}", flush=True)
+    serve(pad, keys, glide)
+
+
+def serve(pad, keys, glide):
+    """run() for good: after a lost connection let go of what is held and
+    connect again, at once when the way to the Mac changed, else after 2 s."""
     while True:
         try:
             run(pad, keys, glide)
@@ -689,7 +764,8 @@ def main():
             pad.release()
             keys.release()
             print(f"omacvm-gestures: {err}; retrying", file=sys.stderr, flush=True)
-            time.sleep(2)
+            if not isinstance(err, Moved):
+                time.sleep(2)
 
 
 if __name__ == "__main__":

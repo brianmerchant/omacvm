@@ -3,6 +3,9 @@
 set -euo pipefail
 
 minimum_macos_version=15.0
+# Loaded only on newer macOS (dlopen by the Vulkan loader, never linked):
+# KosmicKrisp needs Metal 4, and libvirglrenderer picks it only on macOS 26+.
+newer_only_images='libvulkan_kosmickrisp.dylib:26.0'
 
 usage() {
   echo "Usage: macos/verify-macos-compatibility.sh ROOT" >&2
@@ -75,11 +78,15 @@ while IFS= read -r -d '' image; do
   versions=$(minimum_versions "$image") || \
     fail "could not inspect minimum macOS versions: $image"
   [[ -n $versions ]] || fail "Mach-O image has no minimum macOS version: $image"
+  image_minimum=$minimum_macos_version
+  for entry in $newer_only_images; do
+    if [[ ${image##*/} == "${entry%%:*}" ]]; then image_minimum=${entry#*:}; fi
+  done
   while IFS= read -r version; do
     [[ $version =~ ^[0-9]+([.][0-9]+)*$ ]] || \
       fail "invalid minimum macOS version '$version' in $image"
-    if version_is_newer "$version" "$minimum_macos_version"; then
-      fail "$image requires macOS $version; the release minimum is $minimum_macos_version"
+    if version_is_newer "$version" "$image_minimum"; then
+      fail "$image requires macOS $version; the release minimum is $image_minimum"
     fi
   done <<<"$versions"
 

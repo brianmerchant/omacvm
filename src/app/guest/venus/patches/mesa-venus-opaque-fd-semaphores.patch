@@ -1,0 +1,223 @@
+From: OmacVM
+Subject: [PATCH] venus: OPAQUE_FD binary semaphores on DRM syncobjs
+
+What: Venus offers VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT for binary
+semaphores when the kernel's virtio-gpu has DRM syncobjs (6.6+). Such a
+semaphore keeps its payload on the driver side, in the same vn_renderer_sync
+the SYNC_FD path already uses, and an opaque fd is that syncobj itself
+(export: drmSyncobjHandleToFD, import: drmSyncobjFDToHandle, permanent or
+temporary). Signals and waits work as for SYNC_FD semaphores: the signal is
+a renderer sync in the submission, a wait is resolved on the driver side and
+unsignals the shared payload.
+
+Why: Chrome hands a page a hardware WebGPU adapter on Linux only if Dawn's
+SupportsExternalImages() is true, and on desktop Linux that needs OPAQUE_FD
+semaphores that are exportable and importable (Android and ChromeOS take
+SYNC_FD). Venus offered SYNC_FD only, so Chrome always fell back to
+SwiftShader. Chrome's GL (ANGLE) and Dawn are separate Vulkan devices that
+share these semaphores; a syncobj works across devices and processes.
+
+Upstream: upstreamable (Mesa venus), not sent.
+Test: semtest.c (track notes webgpu-compute): two devices share OPAQUE_FD
+semaphores both ways for 100 rounds, plus a temporary import and a SYNC_FD
+export of an opaque semaphore; Chrome then takes the Venus adapter.
+
+diff --git a/src/virtio/vulkan/vn_physical_device.c b/src/virtio/vulkan/vn_physical_device.c
+index f3581aa..487c7c1 100644
+--- a/src/virtio/vulkan/vn_physical_device.c
++++ b/src/virtio/vulkan/vn_physical_device.c
+@@ -1091,6 +1091,10 @@ vn_physical_device_init_external_semaphore_handles(
+     * SYNC_FD semaphore is implemented on top of driver side vn_renderer_sync.
+     * If such semaphore isn't exported but waited, currently we resolve the
+     * wait on the driver side.
++    *
++    * OPAQUE_FD binary semaphore uses the same driver side vn_renderer_sync,
++    * shared as a DRM syncobj fd. Other devices and processes (Chrome's GL
++    * and Dawn) then signal and wait on the same payload.
+     */
+    physical_dev->external_binary_semaphore_handles = 0;
+    physical_dev->external_timeline_semaphore_handles = 0;
+@@ -1099,6 +1103,9 @@ vn_physical_device_init_external_semaphore_handles(
+ #if !DETECT_OS_WINDOWS
+       physical_dev->external_binary_semaphore_handles =
+          VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
++      if (physical_dev->instance->renderer->info.has_external_syncobj)
++         physical_dev->external_binary_semaphore_handles |=
++            VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+ #endif
+    }
+ }
+@@ -1117,7 +1124,7 @@ vn_physical_device_get_native_extensions(
+        VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT)
+       exts->KHR_external_fence_fd = true;
+ 
+-   if (physical_dev->external_binary_semaphore_handles ==
++   if (physical_dev->external_binary_semaphore_handles &
+        VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT)
+       exts->KHR_external_semaphore_fd = true;
+ 
+@@ -2919,8 +2926,13 @@ vn_GetPhysicalDeviceExternalSemaphoreProperties(
+          : physical_dev->external_timeline_semaphore_handles;
+    if (pExternalSemaphoreInfo->handleType & valid_handles) {
+       pExternalSemaphoreProperties->compatibleHandleTypes = valid_handles;
++      /* an imported sync file is a one-shot payload: it can only go out
++       * again as a sync file */
+       pExternalSemaphoreProperties->exportFromImportedHandleTypes =
+-         valid_handles;
++         pExternalSemaphoreInfo->handleType ==
++               VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT
++            ? VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT
++            : valid_handles;
+       pExternalSemaphoreProperties->externalSemaphoreFeatures =
+          VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT |
+          VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT;
+diff --git a/src/virtio/vulkan/vn_renderer.h b/src/virtio/vulkan/vn_renderer.h
+index ea224ea..6a9a472 100644
+--- a/src/virtio/vulkan/vn_renderer.h
++++ b/src/virtio/vulkan/vn_renderer.h
+@@ -66,6 +66,8 @@ struct vn_renderer_info {
+ 
+    bool has_dma_buf_import;
+    bool has_external_sync;
++   /* renderer syncs can be shared as opaque (syncobj) fds */
++   bool has_external_syncobj;
+    bool has_timeline_sync;
+    bool has_implicit_fencing;
+    bool has_guest_vram;
+diff --git a/src/virtio/vulkan/vn_renderer_virtgpu.c b/src/virtio/vulkan/vn_renderer_virtgpu.c
+index 94b6ea7..1dae764 100644
+--- a/src/virtio/vulkan/vn_renderer_virtgpu.c
++++ b/src/virtio/vulkan/vn_renderer_virtgpu.c
+@@ -883,6 +883,10 @@ virtgpu_init_renderer_info(struct virtgpu *gpu)
+    info->has_external_sync = true;
+ 
+    assert(gpu->sync);
++   /* real DRM syncobjs (kernel 6.6+) can travel as opaque fds; the
++    * simulated ones cannot */
++   info->has_external_syncobj =
++      gpu->sync->handle_to_fd && gpu->sync->fd_to_handle;
+    info->has_timeline_sync =
+       !VN_PERF(NO_TIMELINE_SYNC) && !!gpu->sync->timeline_signal;
+ 
+diff --git a/src/virtio/vulkan/vn_sync.c b/src/virtio/vulkan/vn_sync.c
+index ee0a539..8591ac8 100644
+--- a/src/virtio/vulkan/vn_sync.c
++++ b/src/virtio/vulkan/vn_sync.c
+@@ -327,8 +327,6 @@ vn_semaphore_wait_sync_fd(VkDevice dev_handle, VkSemaphore sem_handle)
+    const struct vn_sync_payload *payload = sem->payload;
+ 
+    if (payload->type == VN_SYNC_TYPE_SYNC) {
+-      assert(sem->sync_fd_export && payload == &sem->permanent);
+-
+       const uint64_t sync_val = 1;
+       const struct vn_renderer_wait wait = {
+          .timeout = UINT64_MAX,
+@@ -340,7 +338,14 @@ vn_semaphore_wait_sync_fd(VkDevice dev_handle, VkSemaphore sem_handle)
+       if (result != VK_SUCCESS)
+          return false;
+ 
++      /* a wait unsignals the (possibly shared) payload */
+       result = vn_renderer_sync_reset(dev->renderer, payload->sync);
++
++      /* a temporary import is used up by one wait */
++      if (payload == &sem->temporary) {
++         vn_sync_payload_release(dev, &sem->temporary);
++         sem->payload = &sem->permanent;
++      }
+       return result == VK_SUCCESS;
+    }
+ 
+@@ -434,7 +439,8 @@ vn_CreateSemaphore(VkDevice device,
+       vk_find_struct_const(pCreateInfo->pNext, EXPORT_SEMAPHORE_CREATE_INFO);
+    sem->sync_fd_export =
+       export_info && (export_info->handleTypes &
+-                      VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT);
++                      (VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT |
++                       VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT));
+ 
+    VkResult result = vn_semaphore_init_payloads(dev, sem, initial_val, alloc);
+    if (result != VK_SUCCESS)
+@@ -796,12 +802,36 @@ vn_ImportSemaphoreFdKHR(
+    struct vn_device *dev = vn_device_from_handle(device);
+    struct vn_semaphore *sem =
+       vn_semaphore_from_handle(pImportSemaphoreFdInfo->semaphore);
+-   ASSERTED const bool sync_file =
++   const bool sync_file =
+       pImportSemaphoreFdInfo->handleType ==
+       VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    const int fd = pImportSemaphoreFdInfo->fd;
+ 
+-   assert(sync_file);
++   if (!sync_file) {
++      /* OPAQUE_FD: a DRM syncobj shared with whoever exported it */
++      assert(pImportSemaphoreFdInfo->handleType ==
++             VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT);
++      if (sem->type != VK_SEMAPHORE_TYPE_BINARY)
++         return vn_error(dev->instance, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++
++      struct vn_renderer_sync *sync;
++      VkResult result =
++         vn_renderer_sync_create_from_syncobj(dev->renderer, fd, false, &sync);
++      if (result != VK_SUCCESS)
++         return vn_error(dev->instance, result);
++      /* the syncobj handle holds the payload now; the fd is ours to close */
++      close(fd);
++
++      struct vn_sync_payload *dst =
++         pImportSemaphoreFdInfo->flags & VK_SEMAPHORE_IMPORT_TEMPORARY_BIT
++            ? &sem->temporary
++            : &sem->permanent;
++      vn_sync_payload_release(dev, dst);
++      dst->type = VN_SYNC_TYPE_SYNC;
++      dst->sync = sync;
++      sem->payload = dst;
++      return VK_SUCCESS;
++   }
+ 
+    if (!vn_sync_valid_fd(fd))
+       return vn_error(dev->instance, VK_ERROR_INVALID_EXTERNAL_HANDLE);
+@@ -827,11 +857,20 @@ vn_GetSemaphoreFdKHR(VkDevice device,
+       pGetFdInfo->handleType == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    struct vn_sync_payload *payload = sem->payload;
+ 
+-   assert(sync_file);
++   if (!sync_file) {
++      /* OPAQUE_FD: share the syncobj itself; the payload stays as it is */
++      if (payload->type != VN_SYNC_TYPE_SYNC)
++         return vn_error(dev->instance, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++      const int fd = vn_renderer_sync_export_syncobj(dev->renderer,
++                                                     payload->sync, false);
++      if (fd < 0)
++         return vn_error(dev->instance, VK_ERROR_TOO_MANY_OBJECTS);
++      *pFd = fd;
++      return VK_SUCCESS;
++   }
+ 
+    int fd = -1;
+    if (payload->type == VN_SYNC_TYPE_SYNC) {
+-      assert(sem->sync_fd_export);
+       fd = vn_renderer_sync_export_syncobj(dev->renderer, payload->sync,
+                                            sync_file);
+       vn_renderer_sync_reset(dev->renderer, payload->sync);
+diff --git a/src/virtio/vulkan/vn_sync.h b/src/virtio/vulkan/vn_sync.h
+index 2c88bdd..c0899cf 100644
+--- a/src/virtio/vulkan/vn_sync.h
++++ b/src/virtio/vulkan/vn_sync.h
+@@ -97,12 +97,16 @@ vn_semaphore_is_timeline(VkSemaphore sem_handle)
+    return sem->type == VK_SEMAPHORE_TYPE_TIMELINE;
+ }
+ 
++/* True if the semaphore's payload lives on the driver side (an exportable
++ * or imported sync file or syncobj) and is resolved there, not on the
++ * renderer. A binary semaphore only gets VN_SYNC_TYPE_SYNC for that. */
+ static inline bool
+ vn_semaphore_is_sync_fd(VkSemaphore sem_handle)
+ {
+    struct vn_semaphore *sem = vn_semaphore_from_handle(sem_handle);
+    return sem->payload->type == VN_SYNC_TYPE_IMPORTED_SYNC_FD ||
+-          (sem->payload->type == VN_SYNC_TYPE_SYNC && sem->sync_fd_export);
++          (sem->payload->type == VN_SYNC_TYPE_SYNC &&
++           sem->type == VK_SEMAPHORE_TYPE_BINARY);
+ }
+ 
+ bool

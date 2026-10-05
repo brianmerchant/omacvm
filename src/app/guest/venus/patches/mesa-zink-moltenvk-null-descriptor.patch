@@ -1,0 +1,38 @@
+From: OmacVM
+Subject: [PATCH] zink: start on MoltenVK without nullDescriptor
+
+What: zink starts on MoltenVK although robustness2 nullDescriptor is off,
+with a warning; on every other driver it still refuses.
+
+Why: MoltenVK 1.4.2 has no nullDescriptor, so zink (and with it rusticl,
+OpenCL) never came up on Venus over MoltenVK. A null buffer or image in a
+descriptor becomes an unbound Metal slot there: reading a slot the
+application left unbound is undefined instead of zero. rusticl only reads
+the buffers and images a kernel binds. GL over zink stays off in OmacVM
+(virgl serves GL), so the GL side of this is not relied on.
+
+Upstream: needs discussion (a driver workaround, not a fix); not sent.
+KosmicKrisp (macOS 26) may expose nullDescriptor and not need it.
+Test: src/app/guest/venus/cltest.c, clpeak, Geekbench OpenCL.
+
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -3513,8 +3513,16 @@
+    }
+ 
+    if (!screen->info.rb2_feats.nullDescriptor) {
+-      mesa_loge("Zink requires the nullDescriptor feature of KHR/EXT robustness2.");
+-      goto fail;
++      /* MoltenVK has no nullDescriptor: a null buffer or image written to a
++       * descriptor becomes an unbound Metal slot there, so reading a slot the
++       * application left unbound is undefined instead of zero. Compute
++       * (rusticl) only reads what the kernel binds.
++       */
++      if (zink_driverid(screen) != VK_DRIVER_ID_MOLTENVK) {
++         mesa_loge("Zink requires the nullDescriptor feature of KHR/EXT robustness2.");
++         goto fail;
++      }
++      mesa_logw("zink: MoltenVK has no nullDescriptor; unbound descriptors are undefined");
+    }
+ 
+    if (zink_set_driver_strings(screen)) {

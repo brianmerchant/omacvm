@@ -1,0 +1,13 @@
+# One run of the guest checks per connection: a fixed command, nothing read
+# from the caller.
+[Unit]
+Description=OmacVM guest checks (control centre)
+
+[Service]
+ExecStart=/usr/local/share/omacvm/guest/check.sh --user @USER@ --tsv
+StandardInput=null
+StandardOutput=socket
+StandardError=null
+SuccessExitStatus=1
+RuntimeMaxSec=120
+Nice=5

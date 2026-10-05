@@ -4,7 +4,9 @@
 #   vaapi-check.sh [FILE...]
 # Without files it makes short test clips (H.264, VP9, HEVC; 1080p, B-frames,
 # VP9 alt-ref frames). Prints one line per file: frames compared and how many
-# are bit-identical. Needs ffmpeg (and vainfo for the list of decoders).
+# are bit-identical. 8-bit files are also read out in the other YUV layout
+# (NV12 <-> I420, which OmacVM's driver shim does on the CPU). Needs ffmpeg
+# (and vainfo for the list of decoders).
 set -euo pipefail
 dev=${VAAPI_DEVICE:-/dev/dri/renderD128}
 # OmacVM.app's driver shim (NV12 surfaces), as in the desktop session.
@@ -34,6 +36,16 @@ if ((${#files[@]} == 0)); then
   fi
 fi
 
+# Frames of $1 and $2 (framemd5 files) that are bit-identical.
+same() {
+  paste <(grep -v '^#' "$1" | awk -F, '{ print $NF }') <(grep -v '^#' "$2" | awk -F, '{ print $NF }') |
+    awk '$1 == $2' | wc -l
+}
+hwdl() {   # hwdl FILE FORMAT OUT: VA-API decode, read out as FORMAT
+  ffmpeg -nostdin -hide_banner -loglevel error -y -hwaccel vaapi -hwaccel_device "$dev" \
+    -hwaccel_output_format vaapi -i "$1" -frames 600 -vf hwdownload,format=$2 -f framemd5 "$3"
+}
+
 fail=0
 for f in "${files[@]}"; do
   # The frames are read in the surfaces' own layout: NV12 with OmacVM's shim,
@@ -44,15 +56,23 @@ for f in "${files[@]}"; do
   [[ ${LIBVA_DRIVER_NAME:-} == omacvm ]] || fmt=yuv420p
   [[ $(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$f") == *10* ]] && fmt=p010le
   ffmpeg -nostdin -hide_banner -loglevel error -y -i "$f" -frames 600 -pix_fmt $fmt -f framemd5 "$tmp/sw.md5"
-  if ! ffmpeg -nostdin -hide_banner -loglevel error -y -hwaccel vaapi -hwaccel_device "$dev" \
-      -hwaccel_output_format vaapi -i "$f" -frames 600 -vf hwdownload,format=$fmt -f framemd5 "$tmp/hw.md5"; then
+  if ! hwdl "$f" $fmt "$tmp/hw.md5"; then
     echo "$(basename "$f"): VA-API decoding failed"; fail=1; continue
   fi
-  sw=$(grep -v '^#' "$tmp/sw.md5" | awk -F, '{ print $NF }')
-  hw=$(grep -v '^#' "$tmp/hw.md5" | awk -F, '{ print $NF }')
-  n=$(printf '%s\n' "$sw" | wc -l)
-  same=$(paste <(printf '%s\n' "$sw") <(printf '%s\n' "$hw") | awk '$1 == $2' | wc -l)
-  echo "$(basename "$f"): $same of $n frames bit-identical"
-  ((same == n)) || fail=1
+  n=$(grep -vc '^#' "$tmp/sw.md5")
+  s=$(same "$tmp/sw.md5" "$tmp/hw.md5")
+  echo "$(basename "$f"): $s of $n frames bit-identical"
+  ((s == n)) || fail=1
+  [[ $fmt == p010le ]] && continue
+  # The other layout: a lossless reshuffle, so bit-identical too.
+  other=yuv420p; [[ $fmt == yuv420p ]] && other=nv12
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$f" -frames 600 -pix_fmt $other -f framemd5 "$tmp/sw2.md5"
+  if hwdl "$f" $other "$tmp/hw2.md5"; then
+    s=$(same "$tmp/sw2.md5" "$tmp/hw2.md5")
+    echo "$(basename "$f") as $other: $s of $n frames bit-identical"
+  else
+    s=0; echo "$(basename "$f") as $other: VA-API read-out failed"
+  fi
+  ((s == n)) || fail=1
 done
 exit $fail

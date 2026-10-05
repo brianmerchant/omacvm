@@ -4,21 +4,29 @@
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
-#                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
+#                    [--vm-name-b64 NAME] [--only F,...] [--strict F,...|all]
+#                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
+# control-centre, fast-network, chromium-video, vulkan) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
-# so a later run without --feature keeps them. Old flags --no-thp-kernel,
-# --thp-kernel and --autologin still work.
+# so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
 # --display (UTM: the fixed mode, from display/mac-display.swift) is required on UTM.
 # --vm-name-b64: the VM's name in its app, base64 (kept in /etc/omacvm/env): the
 # gestures daemon says it, so the Mac tells two VMs of one app apart.
 # Idempotent: run it again after an update of this repository.
+# --only F,...: installs only these features' parts again (a repair); the
+# system steps are skipped. --strict F,...|all: a part of these features that
+# could not be set up fails the run (exit 1, after the other parts); without
+# it, such a part is only logged.
+# --graphics (OmacVM.app): what the VM's Graphics setting gives it on this Mac
+# (the Mac decides Automatic); vulkan builds its Venus driver ahead of the
+# start that gets Vulkan. Kept in /etc/omacvm/env.
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""; NAME64=""
+U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=(); GRAPHICS=""
 FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
@@ -34,18 +42,46 @@ while (( $# )); do
     --host) HOST_GIVEN=$2; shift 2 ;;
     --clock-format-b64) CLOCK_FMT=$(base64 -d <<<"$2"); shift 2 ;;
     --vm-name-b64) NAME64=$2; shift 2 ;;
-    --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
-    --no-thp-kernel) SET[thp-kernel]=off; shift ;;
-    --thp-kernel) SET[thp-kernel]=on; shift ;;
-    --autologin) SET[autologin]=on; shift ;;
-    *) sed -n '5,6s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    --feature) SET[${2%%=*}]=${2#*=}; shift 2 ;;
+    --only) ONLY=",$2,"; shift 2 ;;
+    --graphics) [[ $2 == opengl || $2 == vulkan ]] || { echo "guest/install.sh: --graphics opengl|vulkan" >&2; exit 2; }
+                GRAPHICS=$2; shift 2 ;;
+    --strict) STRICT=",$2,"; shift 2 ;;
+    *) sed -n '5,7s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
 [[ -n $U ]] && id "$U" >/dev/null || { echo "guest/install.sh: --user must be the desktop user" >&2; exit 2; }
-log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+log() { LAST_STEP=$*; printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+# A run that stops says where (apply shows it as what failed).
+# One EXIT trap for everything that must run at the end (Fusion's DNS below).
+LAST_STEP="the start"; REPORTED=""; FUSION_DNS=0
+on_exit() {
+  local rc=$?
+  (( rc == 0 || rc == 2 )) || [[ -n $REPORTED ]] || echo "guest/install.sh: failed during: $LAST_STEP" >&2
+  (( ! FUSION_DNS )) || "$R/fusion/guest/dns.sh" off || true
+}
+trap on_exit EXIT
+# want FEATURE: this run installs that feature's part (all of them, or --only).
+want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
+system() { [[ -z $ONLY ]]; }   # the steps that are no feature's
+# not_set_up FEATURE TEXT: a part that did not install; logged, and with
+# --strict it fails the run at the end.
+not_set_up() { log "$2: not set up (see above)"; SOFT+=("$1"); }
 read -r layout variant <<<"$KB"
 H=$(getent passwd "$U" | cut -d: -f6)
 user_ctl() { systemctl --user -M "$U@" "$@"; }
+# A command in the desktop user's session (Hyprland, Omarchy's environment).
+in_session() {
+  local run; run=/run/user/$(id -u "$U")
+  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
+    HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
+    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
+}
+# Updated bar widgets load in a new shell: restarted once at the end.
+restart_shell_later() { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
+# What off means for the features with a part in the VM that talks to the Mac.
+ROOT=""
+source "$R/guest/off.sh"
 
 # Earlier choices, then this run's.
 ENV=/etc/omacvm/env
@@ -56,13 +92,17 @@ AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
 [[ $NAME64 =~ ^[A-Za-z0-9+/=]*$ ]] || { echo "guest/install.sh: --vm-name-b64: not base64" >&2; exit 2; }
 if [[ -r $ENV ]]; then
   [[ -n $NAME64 ]] || NAME64=$(sed -n 's/^OMACVM_VM_NAME_B64=//p' "$ENV" | tail -1)
-  # scroll-momentum was called glide in the experiment
+  [[ -n $GRAPHICS ]] || GRAPHICS=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENV" | tail -1)
+  # scroll-momentum was called glide in the experiment: keep an old VM's choice.
   v=$(sed -n "s/^OMACVM_FEATURE_glide=//p" "$ENV" | tail -1); [[ -n $v ]] && F[scroll-momentum]=$v
   for f in "${FEATURES[@]}"; do
     v=$(sed -n "s/^OMACVM_FEATURE_${f//-/_}=//p" "$ENV" | tail -1)
     [[ -n $v ]] && F[$f]=$v
   done
 fi
+for f in ${ONLY//,/ } ${STRICT//,/ }; do
+  [[ $f == all || -n ${F[$f]+x} ]] || { echo "guest/install.sh: --only/--strict: unknown feature '$f'" >&2; exit 2; }
+done
 for f in "${!SET[@]}"; do
   [[ -n ${F[$f]+x} && ${SET[$f]} =~ ^(on|off)$ ]] || { echo "guest/install.sh: --feature $f=${SET[$f]}: unknown" >&2; exit 2; }
   F[$f]=${SET[$f]}
@@ -95,12 +135,18 @@ case $TYPE in
 esac
 # Parallels gives the VM the Mac's battery itself.
 [[ $TYPE == parallels ]] && F[battery]=off
+# The fast network is OmacVM.app's (the other apps have vmnet themselves).
+[[ $TYPE == app ]] || F[fast-network]=off
+# Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
+[[ $TYPE == app ]] || F[chromium-video]=off
+[[ $TYPE == app ]] || F[vulkan]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
-if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
+[[ $TYPE == fusion ]] && FUSION_DNS=1
 {
   printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\nOMACVM_USER=%s\n' "$TYPE" "$HOST" "$U"
   [[ -z $NAME64 ]] || printf 'OMACVM_VM_NAME_B64=%s\n' "$NAME64"
+  [[ $TYPE != app || -z $GRAPHICS ]] || printf 'OMACVM_GRAPHICS=%s\n' "$GRAPHICS"
   for f in "${FEATURES[@]}"; do printf 'OMACVM_FEATURE_%s=%s\n' "${f//-/_}" "${F[$f]}"; done
 } | install -Dm644 /dev/stdin "$ENV"
 log "$TYPE VM, the Mac is $HOST"
@@ -109,7 +155,7 @@ log "features: $(for f in "${FEATURES[@]}"; do printf '%s=%s ' "$f" "${F[$f]}"; 
 # A VM from a prebuilt image of OmacVM 2.5 or 2.6: first boot left absolute
 # links into the image's placeholder home (Omarchy's wallpaper: a black desktop).
 OLD=$(sed -n 's/^OMACVM_PREBUILT_USER=//p' /var/lib/omacvm/prebuilt/image 2>/dev/null || true)
-if [[ $OLD =~ ^[a-z_][a-z0-9_-]*$ && $OLD != "$U" && ! -e /home/$OLD ]]; then
+if system && [[ $OLD =~ ^[a-z_][a-z0-9_-]*$ && $OLD != "$U" && ! -e /home/$OLD ]]; then
   n=0
   while IFS= read -r -d '' l; do
     t=$(readlink "$l"); ln -sfn "$H${t#/home/$OLD}" "$l"; chown -h "$U:$U" "$l"; n=$((n + 1))
@@ -117,10 +163,22 @@ if [[ $OLD =~ ^[a-z_][a-z0-9_-]*$ && $OLD != "$U" && ! -e /home/$OLD ]]; then
   if (( n )); then log "links from the prebuilt image: $n now point into $H (the wallpaper shows after the next login)"; fi
 fi
 
-log "system: SSH from the Mac, bootable snapshots, DNS fallback"
-# Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
-# network) may still reach SSH.
-ufw allow from "${HOST%.*}.0/24" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
+if system; then
+  log "system: SSH from the Mac, bootable snapshots, DNS fallback"
+  # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
+  # network) may still reach SSH.
+  ufw allow from "${HOST%.*}.0/24" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
+  # OmacVM.app's fast network (vmnet): the Mac reaches SSH from 192.168.77.1
+  # (only the Mac: other VMs on that network do not). For every app VM, since
+  # the app's own button can turn the fast network on without an apply.
+  if [[ $TYPE == app ]]; then
+    ufw allow from 192.168.77.1 to any port 22 proto tcp comment "omacvm: ssh from the Mac (fast network)" >/dev/null 2>&1 || true
+  else
+    ufw delete allow from 192.168.77.1 to any port 22 proto tcp >/dev/null 2>&1 || true
+  fi
+else
+  log "repair: $(tr , ' ' <<<"${ONLY:1:-1}")"
+fi
 # A VM switched off during pacman keeps pacman's lock, and every pacman below
 # would fail. Wait for one that runs (omarchy update); a lock without pacman goes.
 for ((i = 0; i < 120; i++)); do
@@ -134,7 +192,7 @@ if [[ -e /var/lib/pacman/db.lck ]]; then
   rm -f /var/lib/pacman/db.lck
 fi
 pacman -S --needed --noconfirm jq >/dev/null 2>&1 || { echo "guest/install.sh: pacman could not install jq (no network?)" >&2; exit 1; }
-if command -v grub-mkconfig >/dev/null; then
+if system && command -v grub-mkconfig >/dev/null; then
   # Snapshots (snapper, set up by omarchy-mac) appear in the GRUB menu.
   pacman -S --needed --noconfirm grub-btrfs inotify-tools >/dev/null 2>&1
   # Read-only snapshots picked in GRUB boot with a temporary writable overlay
@@ -145,12 +203,14 @@ if command -v grub-mkconfig >/dev/null; then
   # Arch Linux ARM's kernel under a name GRUB pairs with its initramfs.
   "$R/kernel/stock-kernel.sh"
 fi
-install -Dm644 /dev/stdin /etc/systemd/resolved.conf.d/10-omacvm.conf <<'EOF'
-[Resolve]
-FallbackDNS=1.1.1.1 9.9.9.9 2606:4700:4700::1111 2620:fe::fe
-EOF
-systemctl try-restart systemd-resolved 2>/dev/null || true
-if [[ ${F[autologin]} == on ]]; then
+if system; then
+  printf '[Resolve]\nFallbackDNS=1.1.1.1 9.9.9.9 2606:4700:4700::1111 2620:fe::fe\n' |
+    install -Dm644 /dev/stdin /etc/systemd/resolved.conf.d/10-omacvm.conf
+  systemctl try-restart systemd-resolved 2>/dev/null || true
+fi
+if ! want autologin; then
+  :
+elif [[ ${F[autologin]} == on ]]; then
   # The Mac is FileVault-encrypted and locked already; hyprlock still locks
   # the session after idle (unless idle-lock is off).
   install -Dm644 /dev/stdin "$AUTOLOGIN_CONF" <<EOF
@@ -169,13 +229,17 @@ fi
 STAY=$H/.local/state/omarchy/indicators/stay-awake
 MARK=$H/.local/state/omacvm/stay-awake-by-omacvm
 # The Mac's clock: --clock-format-b64 comes from clock/mac-clock.swift (apply.sh).
-if [[ ${F[mac-clock]} == on ]]; then
+if ! want mac-clock; then
+  :
+elif [[ ${F[mac-clock]} == on ]]; then
   if [[ -n $CLOCK_FMT ]]; then log "clock"; "$R/clock/guest/clock.sh" "$U" on "$CLOCK_FMT"; fi
 else
   "$R/clock/guest/clock.sh" "$U" off
 fi
 
-if [[ ${F[idle-lock]} == off ]]; then
+if ! want idle-lock; then
+  :
+elif [[ ${F[idle-lock]} == off ]]; then
   log "idle screensaver and lock: off (the Mac's lock protects the VM)"
   install -d -o "$U" -g "$U" "$(dirname "$STAY")" "$(dirname "$MARK")"
   sudo -u "$U" touch "$STAY" "$MARK"
@@ -187,13 +251,13 @@ fi
 # and JACK parts (omarchy-mac installs them only on Apple hardware; the VM's
 # card is Parallels', Intel HDA on UTM and OmacVM.app, HD Audio on Fusion).
 # pipewire-jack replaces jack2.
-if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1; then
+if system && ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1; then
   log "sound: PipeWire's ALSA, PulseAudio and JACK parts"
   pacman -Q jack2 >/dev/null 2>&1 && pacman -Rdd --noconfirm jack2 >/dev/null
   pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1 || true
   user_ctl restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 fi
-case $TYPE in
+system && case $TYPE in
   parallels)
     log "display";    "$R/display/guest/install.sh" "$U"
     log "clipboard";  "$R/clipboard/guest/install.sh" "$U" ;;
@@ -204,67 +268,102 @@ case $TYPE in
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
-if [[ ${F[battery]} == on ]]; then
+# Chromium's video through V4L2: OmacVM.app VMs only (off on the other routes
+# above). Its own step, so the control centre can repair it alone.
+if want chromium-video && [[ $TYPE == app ]]; then
+  if [[ ${F[chromium-video]} == on ]]; then
+    log "Chromium video on the Mac's media engine"
+    "$R/vdec/guest/install.sh" "$U" on || not_set_up chromium-video "Chromium video"
+  else
+    "$R/vdec/guest/install.sh" "$U" off || not_set_up chromium-video "Chromium video (off)"
+  fi
+fi
+# Vulkan (Venus): OmacVM's Mesa for it, built once in the VM. Its own step,
+# so the control centre can repair it alone.
+if want vulkan && [[ $TYPE == app ]]; then
+  if [[ ${F[vulkan]} == on ]]; then
+    log "WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
+    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "Vulkan (GL is as it was)"
+  elif [[ -e /opt/omacvm-mesa ]]; then
+    log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
+  fi
+fi
+if ! want battery; then
+  :
+elif [[ ${F[battery]} == on ]]; then
   log "the Mac's battery"
-  "$R/battery/guest/install.sh" on || log "the Mac's battery: not installed (see above)"
-elif [[ -f /etc/systemd/system/omacvm-battery.service ]]; then
-  log "the Mac's battery: off"
-  "$R/battery/guest/install.sh" off || log "the Mac's battery: not removed (see above)"
+  "$R/battery/guest/install.sh" on || not_set_up battery "the Mac's battery"
+else
+  # Says "battery: off" when there was something to take off.
+  "$R/battery/guest/install.sh" off || not_set_up battery "the Mac's battery (off)"
 fi
-log "memory";     "$R/memory/guest/install.sh"
-log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd
-# shortcuts as Super, so it stays.
-if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
+if system; then
+  log "memory";     "$R/memory/guest/install.sh"
+  log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
+fi
+# Off means off on every route (off.sh): no service of the feature runs in the
+# VM and nothing of it connects to the Mac.
+if ! want gestures && ! want scroll-momentum; then
+  :
+elif [[ ${F[gestures]} == on ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
-elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
-  log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
+else
+  gestures_off
 fi
-if [[ ${F[scroll-momentum]} == on ]]; then
+if ! want scroll-momentum; then
+  :
+elif [[ ${F[scroll-momentum]} == on ]]; then
   log "macOS-native scroll momentum (experimental)"; "$R/gestures/guest/glide.sh" "$U" on
 elif [[ -f $H/.config/hypr/omacvm_glide.lua ]]; then
   log "scroll momentum: off"; "$R/gestures/guest/glide.sh" "$U" off
 fi
-log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
-if [[ ${F[bridge]} == on ]]; then
+if system; then log "workspaces"; "$R/workspaces/guest/install.sh" "$U"; fi
+if ! want bridge; then
+  :
+elif [[ ${F[bridge]} == on ]]; then
   log "bridge";     "$R/bridge/guest/install.sh" "$U"
-elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
-  # Disabling the clones brings Omarchy's own Bluetooth, Wi-Fi and audio widgets back.
-  log "bridge: off"
-  user_ctl disable --now omacvm-bridge-osd.service omacvm-bridge-events.socket >/dev/null 2>&1 || true
-  user_ctl stop omacvm-bridge-events.service >/dev/null 2>&1 || true
-  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c \
-    'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
-     for p in omacvm.bluetooth omacvm.wifi omacvm.audio omacvm.wifiqr omacvm.nightshift; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
-  # Omarchy's own night light indicator, as it was before the Bridge.
-  NL=$H/.local/state/omacvm/nightlight-indicator C=$H/.config/omarchy/shell.json
-  if [[ -f $NL && -f $C ]]; then
-    tmp=$(mktemp "$C.XXXXXX")
-    jq --argjson items "$(cat "$NL")" '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (if $items == null then del(.items) else .items = $items end)' "$C" > "$tmp" &&
-      chmod --reference="$C" "$tmp" && chown "$U:$U" "$tmp" && mv -f "$tmp" "$C"
-    rm -f "$tmp" "$NL"
+else
+  bridge_off   # Omarchy's own Bluetooth, Wi-Fi and audio widgets come back
+fi
+# External display brightness: Omarchy's own DDC/CI path (ddcutil) goes through
+# the Bridge to the external Mac display an output is on. Only our ddcutil is
+# ever removed; Omarchy's cached "no DDC here" (60 s) goes with each change.
+DDC=/usr/local/bin/ddcutil
+if ! want external-brightness; then
+  :
+elif [[ ${F[external-brightness]} == on ]]; then
+  log "external display brightness"
+  cmp -s "$R/bridge/guest/omacvm-ddcutil" "$DDC" || install -m755 "$R/bridge/guest/omacvm-ddcutil" "$DDC"
+  rm -rf "/run/user/$(id -u "$U")/omarchy-brightness-display-ddc"
+elif grep -qs '^# omacvm-ddcutil' "$DDC"; then
+  log "external display brightness: off"
+  rm -f "$DDC" && rm -rf "/run/user/$(id -u "$U")/omarchy-brightness-display-ddc"
+fi
+# The control centre (omacvm in Omarchy): on, or gone again.
+if want control-centre; then
+  if [[ ${F[control-centre]} == on ]]; then log "control centre (omacvm)"
+  elif [[ -e /usr/local/bin/omacvm || -f /etc/systemd/system/omacvm-check.socket ]]; then log "control centre: off"; fi
+  if [[ ${F[control-centre]} == on || -e /usr/local/bin/omacvm || -f /etc/systemd/system/omacvm-check.socket ]]; then
+    "$R/control/guest/install.sh" "$U" "${F[control-centre]}" "$TYPE" || not_set_up control-centre "control centre"
   fi
-  rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
 fi
 # The Mac's camera: Parallels passes it itself; elsewhere /dev/video42.
-if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)"; fi
-"$R/camera/guest/install.sh" "$U" "$TYPE" "${F[camera]}" || log "camera: not set up (see above)"
-if [[ ${F[wallpaper]} == on ]]; then
+if want camera; then
+  if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)"; fi
+  "$R/camera/guest/install.sh" "$U" "$TYPE" "${F[camera]}" || not_set_up camera "camera"
+fi
+if ! want wallpaper; then
+  :
+elif [[ ${F[wallpaper]} == on ]]; then
   log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
-elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then
-  log "wallpaper: off"; user_ctl disable --now omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
+else
+  wallpaper_off
 fi
 # Omanotch's VM side (omanotch/guest in this copy) builds and installs in the
 # desktop session: omacvm-omanotch.service runs it at the next login, or right
 # away when the session is running. A changed copy installs again.
-in_session() {
-  local run; run=/run/user/$(id -u "$U")
-  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
-    HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
-    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
-}
 # Earlier versions cloned Omanotch into the user's home; this copy is used now.
-if [[ -d $H/.local/share/omanotch/.git ]]; then
+if want omanotch && [[ -d $H/.local/share/omanotch/.git ]]; then
   if [[ -z $(git -C "$H/.local/share/omanotch" status --porcelain 2>/dev/null) ]]; then
     rm -rf "$H/.local/share/omanotch"
   else
@@ -273,9 +372,12 @@ if [[ -d $H/.local/share/omanotch/.git ]]; then
 fi
 # OmacVM.app too: its full screen sits below the notch like the other routes'
 # (its own notch-strip mode is an opt-in; Omanotch then leaves the strip alone).
-if [[ ${F[omanotch]} == on ]]; then
-  # An empty notchcast is a broken install (seen once): build it again.
+if ! want omanotch; then
+  :
+elif [[ ${F[omanotch]} == on ]]; then
+  # An empty notchcast is a broken install (seen once): build it again; a repair always does.
   [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
+  [[ -n $ONLY ]] && rm -f "$H/.local/state/omacvm/omanotch"
   sum=$(cd "$R/omanotch/guest" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
   stamp=$H/.local/state/omacvm/omanotch
   if [[ -x $H/.local/bin/notchcast && $(cat "$stamp" 2>/dev/null) != "$sum" ]]; then
@@ -319,22 +421,17 @@ Description = OmacVM: Omarchy's notifications under Omanotch's strip
 When = PostTransaction
 Exec = /usr/local/lib/omacvm/omanotch-notifications.sh on
 HOOK
-  if [[ -n $(/usr/local/lib/omacvm/omanotch-notifications.sh on || true) ]]; then
-    install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"
-  fi
-elif [[ -x $H/.local/bin/notchcast ]]; then
-  log "Omanotch: off"
-  systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
-  rm -f /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
-  [[ -n $("$R/guest/omanotch-notifications.sh" off || true) ]] && { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
-  in_session bash "$R/omanotch/guest/uninstall.sh" >/dev/null 2>&1 ||
-    user_ctl disable --now notchcast.service >/dev/null 2>&1 || true
-  rm -f "$H/.local/state/omacvm/omanotch"
+  if [[ -n $(/usr/local/lib/omacvm/omanotch-notifications.sh on || true) ]]; then restart_shell_later; fi
+else
+  # Also an Omanotch queued for the next login, not built yet.
+  omanotch_off
 fi
-if [[ ${F[thp-kernel]} == on ]]; then
+if ! want thp-kernel; then
+  :
+elif [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
     log "memory-optimized kernel (about 10 minutes)"
-    "$R/kernel/build-thp-kernel.sh" "$U" || log "memory-optimized kernel: not updated (see above)"
+    "$R/kernel/build-thp-kernel.sh" "$U" || not_set_up thp-kernel "memory-optimized kernel"
   else
     log "memory-optimized kernel skipped: this VM does not boot with GRUB"
   fi
@@ -347,7 +444,7 @@ elif [[ -f /boot/vmlinuz-linux ]] && command -v grub-mkconfig >/dev/null; then
 fi
 # The memory-optimized kernel's package goes once the VM no longer runs it
 # (this run, or the next one after a reboot).
-if [[ ${F[thp-kernel]} != on ]] && pacman -Q linux-aarch64-thp >/dev/null 2>&1; then
+if want thp-kernel && [[ ${F[thp-kernel]} != on ]] && pacman -Q linux-aarch64-thp >/dev/null 2>&1; then
   if [[ $(uname -r) == *thp* ]]; then
     log "memory-optimized kernel: off, Arch Linux ARM's own kernel from the next boot"
   else
@@ -404,4 +501,10 @@ if [[ $grub_old != "$grub_in" ]] && command -v grub-mkconfig >/dev/null; then
 fi
 printf 'initramfs %s\ngrub %s\n' "$init_ok" "$grub_ok" | install -Dm644 /dev/stdin $BOOT_STAMP
 [[ $TYPE == fusion ]] && "$R/fusion/guest/dns.sh" off   # back to Fusion's DNS, which follows the Mac's
+for f in ${SOFT[@]+"${SOFT[@]}"}; do
+  if [[ $STRICT == ",all," || $STRICT == *",$f,"* ]]; then
+    echo "guest/install.sh: $f was not set up (see above)" >&2
+    REPORTED=1; exit 1
+  fi
+done
 log "OmacVM guest side installed for $U (reboot to apply everything)"

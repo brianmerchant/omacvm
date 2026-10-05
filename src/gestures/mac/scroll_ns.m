@@ -16,3 +16,60 @@ void ns_on_app_activate(void (*f)(void)) {
       addObserverForName:NSWorkspaceDidActivateApplicationNotification object:nil queue:nil
               usingBlock:^(NSNotification *n) { (void)n; f(); }];
 }
+
+// Activates the app the usual way (the fallback of the escape combo's switch);
+// 1 if macOS took the request.
+int ns_activate(pid_t pid) {
+  @autoreleasepool {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return app && [app activateWithOptions:NSApplicationActivateIgnoringOtherApps] ? 1 : 0;
+#pragma clang diagnostic pop
+  }
+}
+
+// Finder's pid, 0 without one: where the escape combo goes when the app from
+// before the VM has quit.
+pid_t ns_finder_pid(void) {
+  @autoreleasepool {
+    NSArray<NSRunningApplication *> *a = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.finder"];
+    return a.count ? a[0].processIdentifier : 0;
+  }
+}
+
+// Hides the app (the escape combo in a VM window that kept the keyboard);
+// 1 if macOS took the request.
+int ns_hide(pid_t pid) {
+  @autoreleasepool {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    return app && [app hide] ? 1 : 0;
+  }
+}
+
+// A hidden app shown again (the escape combo hid it): before it is brought to
+// the front, so its window is there to switch to.
+void ns_unhide(pid_t pid) {
+  @autoreleasepool {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (app && [app isHidden]) [app unhide];
+  }
+}
+
+// A regular app (Dock icon, windows), not an accessory or agent such as
+// Raycast, Alfred or a password manager's quick panel.
+int ns_is_regular(pid_t pid) {
+  @autoreleasepool {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    return app && app.activationPolicy == NSApplicationActivationPolicyRegular ? 1 : 0;
+  }
+}
+
+// Mission Control, as its app in /System/Applications opens it (the escape
+// combo's last way out when macOS's shortcut for it is off); 1 if macOS took it.
+int ns_open_mission_control(void) {
+  @autoreleasepool {
+    NSURL *app = [NSURL fileURLWithPath:@"/System/Applications/Mission Control.app"];
+    return [[NSWorkspace sharedWorkspace] openURL:app] ? 1 : 0;
+  }
+}

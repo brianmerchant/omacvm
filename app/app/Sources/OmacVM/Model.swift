@@ -16,14 +16,45 @@ enum Paths {
     static let appSupport = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/OmacVM")
 
-    /// The folder that holds the VM folders. The user can pick another one
-    /// (an external drive, say) in the setup.
+    /// Where new VMs go: ~/OmacVM unless the user picked another folder (an
+    /// external drive, say) in the setup or the settings; see VMsFolder.
     static var vmsRoot: URL {
-        if let custom = UserDefaults.standard.string(forKey: "vmsRoot"), !custom.isEmpty {
-            return URL(fileURLWithPath: custom)
+        get {
+            if let custom = UserDefaults.standard.string(forKey: "vmsRoot"), !custom.isEmpty {
+                return URL(fileURLWithPath: custom)
+            }
+            return defaultVMsRoot
         }
-        return appSupport.appendingPathComponent("VMs")
+        set { UserDefaults.standard.set(newValue.standardizedFileURL.path, forKey: "vmsRoot") }
     }
+    /// Decided once per launch: the VMs folder must not change under a VM
+    /// that runs or is being built.
+    private static let defaultVMsRoot = VMsFolder.resolve(custom: nil, home: VMsFolder.home)
+
+    /// Up to 2.9 the VMs were in this hidden folder. The app still finds them
+    /// there until they are moved (it offers that once).
+    static let legacyVMsRoot = VMsFolder.home.appendingPathComponent(VMsFolder.oldPath)
+
+    /// Folders that held VMs before the user picked another one with "New VMs
+    /// Only" (or a move that did not finish): their VMs keep working.
+    static var otherVMsRoots: [URL] {
+        get { (UserDefaults.standard.stringArray(forKey: "otherVMsRoots") ?? []).map { URL(fileURLWithPath: $0) } }
+        set { UserDefaults.standard.set(newValue.map { $0.standardizedFileURL.path }, forKey: "otherVMsRoots") }
+    }
+
+    /// Every folder the app looks for VMs in: where new VMs go first
+    /// (app_vms_roots in src/lib/app.sh: the same list).
+    static var vmsRoots: [URL] {
+        var seen = Set<String>(), roots: [URL] = []
+        for r in [vmsRoot] + otherVMsRoots + [legacyVMsRoot] {
+            let p = r.standardizedFileURL.path
+            if seen.insert(p).inserted { roots.append(r.standardizedFileURL) }
+        }
+        return roots
+    }
+
+    /// OmacVM.app's downloads (try-omarchy, prebuilt VMs); "Clear Downloads" empties it.
+    static let downloads = VMsFolder.home.appendingPathComponent("Library/Caches/omacvm")
 
     /// The app's resources: Contents/Resources in the app, the source tree when
     /// run with `swift run` (OMACVM_RESOURCES).
@@ -87,9 +118,12 @@ struct VMConfig: Equatable {
     var keyboard = "us"
     // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
     // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") idle-lock=on autologin=off thp-kernel=off"
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on chromium-video=on idle-lock=on autologin=off thp-kernel=off"
 
-    var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
+    /// The folder of a VM that exists (it may be in an older VMs folder);
+    /// nil for a new one, which goes into the VMs folder under its name.
+    var location: URL?
+    var folder: URL { location ?? Paths.vmsRoot.appendingPathComponent(name) }
 
     /// Like build.sh's VM names: letters, digits, space . _ -, at most 64,
     /// no "." or ".." (the folder must stay inside the VMs folder).
@@ -98,10 +132,30 @@ struct VMConfig: Equatable {
             && !name.contains("..")
     }
 
-    /// The folder is a VM folder of ours: directly inside the VMs folder, with vm.env.
+    /// The folder is a VM folder of ours: directly inside one of the VMs folders, with vm.env.
     var folderIsSafe: Bool {
-        folder.standardizedFileURL.deletingLastPathComponent().path == Paths.vmsRoot.standardizedFileURL.path
+        let parent = folder.standardizedFileURL.deletingLastPathComponent().path
+        return Paths.vmsRoots.contains { $0.path == parent }
             && FileManager.default.fileExists(atPath: folder.appendingPathComponent("vm.env").path)
+    }
+
+    /// Why this built VM cannot start because of its files: the drive is not
+    /// connected, the folder is gone, or files in it are (moved or deleted in
+    /// the Finder). Nil when all is there.
+    var filesProblem: String? {
+        guard let folder = location else { return nil }
+        if let drive = Storage.missingDrive(for: folder) {
+            return "\(drive) is not connected. \(name) is on it (\(Storage.short(folder))): connect it, then start again."
+        }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: folder.path) else {
+            return "\(name)'s folder is gone: \(Storage.short(folder)). Put it back there, or into the VMs folder."
+        }
+        let missing = ["vm.env", "disk.img", "efi-vars.fd"].filter {
+            !fm.fileExists(atPath: folder.appendingPathComponent($0).path)
+        }
+        guard isReady, !missing.isEmpty else { return nil }
+        return "Missing in \(Storage.short(folder)): \(missing.joined(separator: ", ")). Put the files back, then start again."
     }
     var disk: URL { folder.appendingPathComponent("disk.img") }
     var efiVars: URL { folder.appendingPathComponent("efi-vars.fd") }
@@ -126,8 +180,11 @@ struct VMConfig: Equatable {
     var clipboardSocket: URL { Paths.runDir.appendingPathComponent("\(id).clip") }
     var batterySocket: URL { Paths.runDir.appendingPathComponent("\(id).batt") }
     var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
+    var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
+    var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
 
     func write() throws {
+        try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let text = """
@@ -148,6 +205,23 @@ struct VMConfig: Equatable {
         try text.write(to: folder.appendingPathComponent("vm.env"), atomically: true, encoding: .utf8)
     }
 
+    /// Only CPUS and MEM_MB in vm.env, every other line as it was (`omacvm
+    /// resources` changes the same two). The VM reads them at its next start.
+    func writeResources() throws {
+        let url = folder.appendingPathComponent("vm.env")
+        var lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
+        if lines.last == "" { lines.removeLast() }
+        var cpusDone = false, memDone = false
+        lines = lines.map { line in
+            if line.hasPrefix("CPUS=") { cpusDone = true; return "CPUS=\(cpus)" }
+            if line.hasPrefix("MEM_MB=") { memDone = true; return "MEM_MB=\(memoryMB)" }
+            return line
+        }
+        if !cpusDone { lines.append("CPUS=\(cpus)") }
+        if !memDone { lines.append("MEM_MB=\(memoryMB)") }
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
     static func load(from folder: URL) -> VMConfig? {
         guard let text = try? String(contentsOf: folder.appendingPathComponent("vm.env"), encoding: .utf8) else { return nil }
         var values: [String: String] = [:]
@@ -160,6 +234,7 @@ struct VMConfig: Equatable {
             values[String(line[..<eq])] = v
         }
         var c = VMConfig()
+        c.location = folder.standardizedFileURL
         c.name = values["NAME"] ?? folder.lastPathComponent
         c.cpus = Int(values["CPUS"] ?? "") ?? c.cpus
         c.memoryMB = Int(values["MEM_MB"] ?? "") ?? c.memoryMB
@@ -175,17 +250,22 @@ struct VMConfig: Equatable {
         return c
     }
 
+    /// Every VM in the VMs folders: the current folder's first, each folder by name.
+    static func all() -> [VMConfig] {
+        Paths.vmsRoots.flatMap { root -> [VMConfig] in
+            let items = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+            return items.sorted(by: { $0.path < $1.path }).compactMap { load(from: $0) }
+        }
+    }
+
     static func named(_ name: String) -> VMConfig? {
-        let items = (try? FileManager.default.contentsOfDirectory(at: Paths.vmsRoot, includingPropertiesForKeys: nil)) ?? []
-        return items.compactMap { load(from: $0) }.first { $0.name == name || $0.folder.lastPathComponent == name }
+        all().first { $0.name == name || $0.folder.lastPathComponent == name }
     }
 
     /// The VM the app manages (one at a time): the one named with --vm NAME,
     /// else the first folder with a vm.env.
     static func existing() -> VMConfig? {
-        let root = Paths.vmsRoot
-        let items = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-        let all = items.sorted(by: { $0.path < $1.path }).compactMap { load(from: $0) }
+        let all = all()
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--vm"), i + 1 < args.count {
             return all.first { $0.name == args[i + 1] || $0.folder.lastPathComponent == args[i + 1] }
@@ -206,6 +286,13 @@ enum Mac {
     static var performanceCores: Int { max(2, sysctlInt("hw.perflevel0.physicalcpu")) }
     static var efficiencyCores: Int { sysctlInt("hw.perflevel1.physicalcpu") }
     static var cores: Int { max(2, sysctlInt("hw.ncpu")) }
+
+    static let tierNames = ["Low", "Balanced", "High", "Best"]
+
+    /// The tier these resources are, if any (the lowest when tiers coincide).
+    static func tierIndex(cpus: Int, memoryMB: Int) -> Int? {
+        (0..<4).first { tier($0).cpus == cpus && tier($0).memoryGB * 1024 == memoryMB }
+    }
 
     /// Like `omacvm build`'s tiers: 0 low, 1 balanced, 2 high, 3 best.
     /// Best leaves macOS and the GPU max(8 GB, a quarter).
@@ -305,23 +392,78 @@ enum Mac {
 
 /// The launcher's own preferences.
 enum Settings {
+    /// The fence and frame path of 2.6.0 (fences polled every 1 ms, frames
+    /// drawn by a CAOpenGLLayer on QEMU's 30 ms refresh), if the faster one
+    /// ever misbehaves on a Mac. Everything else of the GPU stays as it is.
+    /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
+    static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
+    /// Vulkan (Venus) in every VM whatever its Graphics setting, for
+    /// development. Users choose per VM: Graphics (Graphics.swift) in the
+    /// setup, the VM window, `omacvm graphics` and the control centre.
+    /// Hidden: defaults write org.omacvm.app venus -bool true
+    static var venus: Bool { UserDefaults.standard.bool(forKey: "venus") }
+    /// HDR: a 10-bit guest output is shown as BT.2100 PQ with the Mac's EDR,
+    /// and the guest's display sync turns HDR on once its 10-bit virtio-gpu
+    /// module runs (omacvm-virtio-gpu-build in the VM, then a restart).
+    /// Hidden: defaults write org.omacvm.app hdr -bool true
+    static var hdr: Bool { UserDefaults.standard.bool(forKey: "hdr") }
+    /// macOS's own shortcuts (screenshots, Mission Control, Spotlight,
+    /// Cmd+Tab ...) stay with macOS even while the VM has the keyboard: the
+    /// default since RC11. Off (experimental): they all go to the VM while it
+    /// has the keyboard (only the escape combo is macOS's); on the Mac mini
+    /// that switch was not always handed back (macOS's brightness keys stopped
+    /// working in macOS), so it waits for a fix.
+    /// Hidden: defaults write org.omacvm.app macShortcuts -bool false
+    static var macShortcuts: Bool { UserDefaults.standard.object(forKey: "macShortcuts") as? Bool ?? true }
+    /// The VM's window takes the pointer without a click (after a start, a
+    /// guest reboot, or the window becoming key with the pointer on it).
+    /// Off: QEMU's own way, on entering the window or a click.
+    /// Hidden: defaults write org.omacvm.app pointerStart -bool false
+    static var pointerStart: Bool { UserDefaults.standard.object(forKey: "pointerStart") as? Bool ?? true }
+    /// HDR as the VM gets it: only while a display can show it.
+    static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// Full screen also covers the strip beside the notch; Omarchy's bar goes
-    /// there. Off by default: that full screen has no Space of its own (macOS
-    /// keeps full-screen Spaces below the notch).
+    /// "Use the notch for the menu bar" (see NotchSetting): on unless the
+    /// user switched it off.
     static var useNotch: Bool {
-        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
+        get { NotchSetting.choice(stored: UserDefaults.standard.object(forKey: NotchSetting.key)) }
+        set { UserDefaults.standard.set(newValue, forKey: NotchSetting.key) }
+    }
+    /// What a VM start gets: off on a Mac without a notch.
+    static var notchActive: Bool {
+        NotchSetting.active(choice: useNotch, hasNotch: Mac.hasNotch)
+    }
+    /// Full screen hides the Dock and the menu bar on every display and keeps
+    /// the Mac's cursor off the screen corners and the Dock's edge, so neither
+    /// the Dock nor a hot corner comes up from inside the VM (QEMU's
+    /// immersive=on). Off: macOS's own full screen.
+    static var keepDockAway: Bool {
+        get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
 }
 
 extension Mac {
-    /// The built-in display has a camera housing.
-    static var hasNotch: Bool {
-        NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
+    /// The built-in display, when it has a camera notch. Asked at run time
+    /// from the display itself (no model list); nil with the lid closed, on a
+    /// Mac without a notch, or at a resolution that ends below the notch.
+    static var notchScreen: NSScreen? {
+        NSScreen.screens.first { s in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+                  CGDisplayIsBuiltin(id) != 0 else { return false }
+            return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
+        }
+    }
+    static var hasNotch: Bool { notchScreen != nil }
+
+    /// A display that can show HDR (EDR headroom above SDR white: the XDR
+    /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs
+    /// without one (MacBook Air, SDR monitors) keep the 8-bit SDR path.
+    static var hasHDRDisplay: Bool {
+        NSScreen.screens.contains { $0.maximumPotentialExtendedDynamicRangeColorComponentValue > 1 }
     }
 
     /// A MacBook: its battery shows in Omarchy's bar.

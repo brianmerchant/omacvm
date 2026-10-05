@@ -1,13 +1,11 @@
-# Troubleshooting: what we found
+# Troubleshooting
 
-Common problems first, with what to do. After them, the findings: problems
-we hit while building the VMware Fusion route, the browser GPU on
-every route and benchmarking all four ways, and what fixed them. Each one is written as symptom, cause, fix
-and where the fix lives, so you can find it again when it comes back.
-
-Most of these are not obvious from the outside: the symptom points somewhere
-else than the cause. Recipes and the general failure table are in
-[AGENTS.md](../AGENTS.md) (sections 6 and 7).
+Common problems first, with what to do. After them, problems whose cause is
+not obvious from the symptom: each one as symptom, cause, fix and where the
+fix lives. Recipes and the general failure table are in
+[AGENTS.md](../AGENTS.md) (sections 6 and 7); notes for developers (security
+reviews, measuring pitfalls, how the VM apps work inside) are in
+[notes/findings.md](notes/findings.md).
 
 ## Common problems
 
@@ -24,10 +22,79 @@ else than the cause. Recipes and the general failure table are in
   Bluetooth); the panel says so too. A device that is off or out of range
   shows "Not in range?" after about 15 seconds.
 - **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
-  ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
-  Accessibility and Input Monitoring permissions of *OmacVM Gestures*. A VM
+  if ⌃⌥⌘ Esc left you in the VM without the trackpad, press it again. Check the
+  Accessibility and Input Monitoring permissions of *OmacVM Gestures*
+  (`omacvm check` names a missing one; the helpers' logs say
+  "permissions: ... MISSING").
+- **⌃⌥⌘ Esc does not move to another Space**: the move needs a Space beside
+  the VM's on that monitor (System Settings › Desktop & Dock › Mission
+  Control: "Displays have separate Spaces" decides whether each monitor has
+  its own) and macOS's "Move left/right a space" shortcuts (System Settings ›
+  Keyboard › Keyboard Shortcuts › Mission Control). Without them, OmacVM
+  tries a Dock swipe, then opens Mission Control so you pick a Space (below).
+  The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
+  "escape combo: ...") says which way it took.
+- **A macOS shortcut still does its macOS thing in the VM** (a screenshot,
+  Mission Control): that is the default; sending them all to the VM is
+  experimental (`defaults write org.omacvm.app macShortcuts -bool false` and
+  a VM restart). With it on, the VM's window must have the keyboard (click
+  into it). `omacvm check` shows "macOS shortcuts"; `logs/qemu.log` in the
+  VM's folder says "macOS shortcuts off" while the VM has them. Keys macOS
+  handles below every app stay macOS's: the power / Touch ID key, and the
+  globe key on its own.
+- **macOS's shortcuts (⌘Tab, ⌘Space, brightness) do not work after leaving
+  the VM** (only with the experimental `macShortcuts` false): they come back
+  the moment the VM's window loses the keyboard, and macOS restores them by
+  itself if the VM's app quits or crashes. If the VM's window hangs, OmacVM
+  turns them on after 2 seconds (`qemu.log`: "the VM window stopped
+  answering"). Go back to the default with `defaults delete org.omacvm.app
+  macShortcuts` and a VM restart.
+- **The VM is frozen and macOS's shortcuts are gone** (⌘Tab, ⌘Space and
+  ⌥⌘Esc do nothing; only with the experimental `macShortcuts` false): a VM
+  stopped as a whole (all of QEMU stuck, or paused by a debugger) keeps
+  them off, and no other app can turn them on for it. Quit that VM: right-
+  click OmacVM in the Dock, hold Option, choose Force Quit (or Activity
+  Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
+  Applications › Utilities). The shortcuts work again at once. From the
+  Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
+- **⌃⌥⌘ Esc opened Mission Control instead of moving to the next Space**:
+  neither macOS's "Move left/right a space" shortcut nor a Dock swipe moved
+  the Space, so OmacVM opened Mission Control to let you pick one (the VM
+  stays full screen). Check that the shortcuts are on in System Settings ›
+  Keyboard › Keyboard Shortcuts › Mission Control. The Gestures log
+  (`~/Library/Logs/omacvm-gestures.log`) says which step did what
+  ("escape combo: ..."); please send those lines.
+- **Brightness keys do nothing with the VM in front**: OmacVM Bridge reads
+  them from the keyboard and needs Input Monitoring (System Settings › Privacy
+  & Security › Input Monitoring › OmacVM Bridge). Its log says
+  "brightness keys: reading them from the keyboard" when it can.
+- **A mouse scrolls on after the wheel stops, or jumps**: scroll momentum is
+  for trackpads only and passes every mouse's scrolling one to one; this was
+  a smooth-scrolling mouse (Logitech MX and co.) taken as a trackpad before
+  2.9.1. Update the Mac's helpers (`omacvm update`).
+- **Omarchy's bar shows Wi-Fi without its name**: OmacVM Bridge has no
+  Location Services permission (macOS needs it for the network's name). The
+  bar still shows connected from the Mac's link. Allow it in System
+  Settings › Privacy & Security › Location Services › OmacVM Bridge.
+- **Permissions asked again after updating to 2.9.0**: OmacVM Bridge and
+  OmacVM Gestures now come signed with OmacVM's Developer ID, which macOS
+  treats as a new app once. Turn them on again in System Settings › Privacy &
+  Security (Accessibility, Input Monitoring); an older entry of the same name
+  can go (select it, −). Later updates keep the permissions.
+- **Volume keys show macOS's greyed-out panel**: the output has no volume
+  macOS can set (an audio interface). With an OmacVM.app VM in front the keys
+  change the VM's own volume instead; with Parallels, UTM and Fusion they stay
+  macOS's. A VM
   OmacVM did not set up may need `omacvm update --vm NAME` once: the Mac lets in
   only VMs whose trackpad daemon says the Bridge's token.
+- **The brightness keys do not change the external display**: the VM must be
+  in front on it (Parallels, UTM and Fusion: in full screen). `omacvm check`
+  lists each external display: "not settable" means it does not take DDC/CI
+  on this connection. Switch DDC/CI on in the display's own menu, or try
+  another port: some Macs' built-in HDMI ports (M1/M2 Mac mini) and some docks
+  pass no DDC/CI (USB-C or DisplayPort usually do). A display that was asleep
+  when the Bridge looked is asked again after a minute (by the keys, the VM
+  or `omacvm check`) or when displays change.
 - **"answers with another SSH host key"**: OmacVM remembers each VM's SSH key.
   After rebuilding or reinstalling the VM: `omacvm apply --vm NAME --reset-host-key`.
 - **Scrolling feels too fast or slow in one app**: Chromium-based apps get their
@@ -45,23 +112,20 @@ else than the cause. Recipes and the general failure table are in
 | 4 | Fusion | [No hover or clicks on Omanotch's strip](#4-fusion-no-hover-or-clicks-on-omanotchs-strip) |
 | 5 | Fusion | [Omanotch cannot find the Mac](#5-fusion-omanotch-cannot-find-the-mac) |
 | 6 | Fusion | [Cmd+Space opens Spotlight, not Omarchy](#6-fusion-cmdspace-opens-spotlight-not-omarchy) |
-| 7 | Fusion | [Setup facts: download, permissions, graphics memory, dmesg noise](#7-fusion-setup-facts) |
 | 8 | Fusion | [`no such host` during the build](#8-fusion-no-such-host-during-the-build) |
 | 9 | All | [A swipe jumps to the next workspace when the fingers lift](#9-all-routes-a-swipe-jumps-when-the-fingers-lift) |
 | 10 | All | [The Mac's pointer hides over the VM app's other windows](#10-all-routes-the-macs-pointer-hides-over-the-vm-apps-other-windows) |
-| 11 | All | [Benchmarks that don't compare](#11-benchmarks-chromium-vs-chrome-and-the-screensaver) |
-| 12 | UTM | [Moving a UTM VM deletes it](#12-utm-moving-a-vm-and-changing-its-config) |
-| 13 | Fusion | [Security review of PR #1](#13-security-review-of-the-fusion-route-pr-1) |
 | 14 | UTM | [Chrome has no GPU, then WebGL comes out empty](#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty) |
 | 15 | UTM | [UTM idle power is being measured again](#15-utm-idle-power-is-being-measured-again) |
-| 16 | All | [MotionMark gives no stable result](#16-motionmark-gives-no-stable-result) |
-| 17 | All | [Security review of the Mac and guest sides; "another SSH host key"](#17-security-review-of-the-mac-and-guest-sides) |
 | 18 | All | [No snapshots in GRUB with Arch Linux ARM's own kernel](#18-all-routes-no-snapshots-in-grub-with-arch-linux-arms-own-kernel) |
 | 19 | All | [Two VMs in one app both get the swipes and Cmd shortcuts](#19-all-routes-two-vms-in-one-app-both-get-the-swipes-and-cmd-shortcuts) |
 | 20 | UTM | [Cmd+W stops the VM](#20-utm-cmdw-stops-the-vm) |
 | 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
 | 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
 | 23 | app | [Chrome hangs in Basemark Web 3.0, the screen flickers](#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers) |
+
+Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
+[notes/findings.md](notes/findings.md).
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -172,18 +236,6 @@ else than the cause. Recipes and the general failure table are in
 - **Where:** `src/gestures/mac/omacvm-gestures.c` (the event tap, `NET_UTM ||
   NET_FUSION`).
 
-## 7. Fusion: setup facts
-
-Small things that cost time the first time.
-
-| Fact | What to do | Where |
-|---|---|---|
-| Homebrew has no Fusion cask: Broadcom wants a sign-in for the download | support.broadcom.com > My Downloads > VMware Fusion > the newest version, drag it to Applications | README, Requirements |
-| On its first start Fusion asks for Accessibility | click OK, then turn VMware Fusion on in System Settings > Privacy & Security > Accessibility | |
-| Graphics memory comes out of the VM's own RAM | OmacVM gives a quarter of the VM's memory, at least 1 GB and at most 8 GB (Fusion's limit). `--graphics-gb` changes it | `src/cmd/build.sh` (`gfx_auto`), `src/vm/fusion.sh` (`svga.graphicsMemoryKB`) |
-| `mob memory overflow` lines in `dmesg` | harmless: the vmwgfx driver raising its own limit | |
-| A leak of GPU memory with older Mesa | Mesa 26.2.1 or newer fixes an svga dmabuf leak; check with `pacman -Q mesa` | |
-
 ## 8. Fusion: `no such host` during the build
 
 - **Symptom:** the build fails while downloading many things at once (it first
@@ -218,52 +270,6 @@ Small things that cost time the first time.
 - **Where:** `src/gestures/mac/omacvm-gestures.c` (the hit test: the window must
   cover the display's width, and its height minus the menu bar).
 
-## 11. Benchmarks: Chromium vs Chrome, and the screensaver
-
-- **Symptom:** the same VM gives very different browser scores from one day to
-  the next. Parallels scored 35.4 in Speedometer 3.1, after about 45 before.
-- **Cause:** the 35.4 was Arch's Chromium (153) in the VM, the 45 Google
-  Chrome. Arch's Chromium is much slower than Google's Chrome. Omarchy's
-  screensaver and lock can also start in the middle of a run.
-- **Fix:** always benchmark Google Chrome, on the Mac and in the VM, with the
-  same flags Omarchy uses. Turn the screensaver and lock off
-  (`omacvm disable idle-lock`).
-- **Where:** `src/bench/install-chrome.sh` (Chrome for Linux ARM in the VM),
-  `src/bench/bench.sh`. The full method: [benchmarks/](benchmarks/README.md).
-
-## 12. UTM: moving a VM, and changing its config
-
-- **Symptom:** moving a UTM VM to another folder through UTM's scripting lost
-  the VM. Separately, UTM's AppleScript `update configuration` started failing on
-  OmacVM's VMs.
-- **Cause:** a moved VM keeps its UUID, so UTM keeps a stale entry. Deleting the
-  stale entry deleted the moved files too, because UTM follows its bookmark to
-  the new place. And `update configuration` fails once the VM has OmacVM's
-  custom icon.
-- **Fix:** `--vm-dir` (where the VM goes) is for Parallels and Fusion only; UTM
-  keeps its VMs in its own library. Config changes after the icon is set go
-  straight into the VM's `config.plist` (UTM reloads it), not through
-  AppleScript.
-- **Where:** `src/cmd/build.sh` (refuses `--vm-dir` with `--vm-type utm`),
-  `src/vm/utm.sh` (`utm_drop_live` uses AppleScript before the icon is set,
-  `utm_set_icon` edits `config.plist`).
-
-## 13. Security review of the Fusion route (PR #1)
-
-The review found places where the Fusion route trusted too much. All are fixed
-on the branch.
-
-| What | Fix | Where |
-|---|---|---|
-| Hyprland source | built from the exact commit the package's binary names, checked after the download | `src/fusion/guest/build-hyprland.sh` |
-| VMware Tools recipe | Arch's `open-vm-tools` recipe pinned to commit `a2334c0c` (tag `6-13.1.0-3`) | `src/fusion/guest/build-open-vm-tools.sh` (`RECIPE_COMMIT`) |
-| Builds as root | both builds run as the desktop user; only the install runs as root | both build scripts |
-| The pacman hook runs as root | it runs a root-owned copy of the build script in `/usr/local/lib/omacvm/fusion` | `src/fusion/guest/install.sh` |
-| The clipboard agent's X display | a private Xvfb display with its own xauth cookie (in `$XDG_RUNTIME_DIR`) and no TCP listener | `src/fusion/guest/omacvm-fusion-clipboard` |
-| The guest guessed the Mac's address | the Mac passes it (`--host`); the guest accepts only an address ending in `.1` | `src/cmd/apply.sh`, `src/guest/install.sh` |
-| Fusion's `networking` file | strict parsing: the first `VNET_8_HOSTONLY_SUBNET` line, and only a private address (not UTM's) | `src/lib/mac.sh` (`fusion_host`), `src/bridge/mac/main.swift`, `src/gestures/mac/omacvm-gestures.c` |
-| Listeners on the Mac | Gestures never binds `0.0.0.0`: an address it cannot parse, or `0.0.0.0` itself, means no listener on that network | `src/gestures/mac/omacvm-gestures.c` (`serverThread`) |
-
 ## 14. UTM: Chrome has no GPU, then WebGL comes out empty
 
 - **Symptom:** on UTM, `chrome://gpu` says "Software only" and WebGL is off
@@ -297,47 +303,6 @@ on the branch.
   the VM.
 - **Next:** a fair re-run, same state on every route
   ([#32](https://github.com/gillesgoetsch/omacvm/issues/32)).
-
-## 16. MotionMark gives no stable result
-
-- **Symptom:** MotionMark 1.3.1 scores 1 to 4 on Parallels, UTM and
-  OmacVM.app, with ±100 % to ±1900 % per subtest; every subtest stays at its
-  minimum. On Fusion it measures normally (2368 at 120 fps, ±9 %).
-- **Cause:** MotionMark raises each scene's complexity until the frame rate
-  drops, which needs steady frame timing. Chrome's frames on the virgl routes
-  come too unevenly for that, even at the lowest complexity. Animations and
-  scrolling still look smooth in use; the benchmark can't settle.
-- **Where:** `src/bench/browser-bench.py` prints the subtest breakdown.
-
-## 17. Security review of the Mac and guest sides
-
-- **Symptom:** `omacvm apply`, `check` or a build stops with "answers with
-  another SSH host key than the one OmacVM remembered".
-- **Cause:** OmacVM remembers each VM's SSH host key the first time it sets the
-  VM up (build, apply) and refuses another one later. A rebuilt or reinstalled
-  VM has a new key; anything else answering at the VM's address does too.
-- **Fix:** after a rebuild, `omacvm apply --vm NAME --reset-host-key`.
-- **Where:** `src/lib/mac.sh` (`gssh`, `hostkey_changed`), `src/lib/vm.sh`
-  (`vm_pin`); the keys are in `~/Library/Application Support/omacvm/known_hosts/`.
-
-What the review found, and the fixes:
-
-| What | Fix | Where |
-|---|---|---|
-| No host-key check; `omacvm update` sent the Bridge token to any running VM that said it had OmacVM | host keys remembered per VM (above); `update` only updates VMs OmacVM set up from this Mac (a remembered key, or OmacVM's note or icon on the VM), others need `omacvm update --vm NAME` once | `src/lib/mac.sh`, `src/lib/vm.sh` (`vm_marked`), `src/cmd/update.sh` |
-| Gestures let any VM on the VM networks connect (trackpad frames, Cmd keys, capture off) | every listener wants the Bridge token in the hello; daemons from before it are let in only from the VMs OmacVM had set up (their MAC addresses, listed once in `~/Library/Application Support/omacvm/gestures-legacy`), until apply or update replaces them | `src/gestures/mac/omacvm-gestures.c`, `src/gestures/guest/omacvm-gestures`, `src/mac/gestures-legacy.sh` |
-| A quote in a UTM VM's name ran AppleScript | the name goes in as an argument | `src/lib/mac.sh` (`utm_ip`) |
-| The clipboard helper followed links in the folder the guest writes | only a plain file, never through a link, at most 4 MiB | `src/clipboard/mac/omacvm-clip-in` |
-| A full name with `"`, `$` or a backtick ran in the install script; the hostname was not checked | values written with `printf %q`; hostname `^[a-z0-9][a-z0-9-]{0,62}$` | `src/vm/omarchy-install.sh`, `src/cmd/build.sh` |
-| Root followed links in the user's home (`chown`, `monitors.lua`, the notchcast drop-in, the kernel build) | `chown -h`; those files written as the user; the kernel built in a folder of root's and installed from a copy root owns | guest installers, `src/kernel/build-thp-kernel.sh` |
-| The Bridge: a slow client held a thread, a negative `Content-Length` crashed it | a deadline for the whole request, at most 32 requests at a time (16 per address), 400 for a bad length | `src/bridge/mac/server.swift` |
-
-Left open: the Mac apps are signed ad hoc with a requirement that names only
-their identifier, so another program signed the same way could keep their
-privacy permissions (signing releases with a Developer ID fixes that); Omanotch
-and Arch Linux ARM's kernel recipe follow their latest versions (not pinned to
-a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
-(`dmg_sha256`) refuses a `TryOmarchy.dmg` whose SHA-256 differs.
 
 ## 18. All routes: no snapshots in GRUB with Arch Linux ARM's own kernel
 

@@ -2,16 +2,20 @@
 # omacvm check: is every OmacVM feature in place and working, on the Mac and
 # in a running VM (Parallels, UTM or VMware Fusion)? Read-only; run it after a build or an
 # apply, or whenever something seems off:
-#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY] [--json]
+#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY]
+#                [--json] [--mac-only]
 # VM, user and key as in omacvm apply (a stopped VM is not started). One line
-# per feature (ok / FAIL / skip); exits 1 if anything failed. The desktop user
-# must be logged in to the VM.
-# --json: {"vm", "type", "ip", "ok", "checks": [{"section", "name", "status",
-# "detail", "needs_human"}]}; needs_human = only a person can fix it (a macOS
-# permission, a Parallels setting).
+# per feature (ok / WARN / FAIL / skip); exits 1 if anything failed (WARN:
+# works, but on a fallback). The desktop user must be logged in to the VM.
+# --mac-only: the Mac's side for that VM, not the checks inside it.
+# --json: {"vm", "type", "ip", "ok", "checks": [{"section", "name", "status"
+# (ok, warn, fail, skip), "detail", "needs_human", "feature"}]}; needs_human =
+# only a person can fix it (a macOS permission, a Parallels setting: the
+# detail says where); feature = the features.tsv name the check belongs to
+# ("" = the Mac or VM in general).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; JSON=0
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; JSON=0; MAC_ONLY=0
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -20,18 +24,20 @@ while (( $# )); do
     --user) U=$2; shift 2 ;;
     --key) KEY=$2; shift 2 ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --mac-only) MAC_ONLY=1; shift ;;
+    -h|--help) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm check: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
+source "$R/src/lib/graphics.sh"
 export OMA_KEY=$KEY
 # stop RC MESSAGE: no VM to check. With --json also the JSON, one failed check.
 stop() {
   if (( JSON )); then
-    printf '{"vm": %s, "type": %s, "ip": "", "ok": false, "checks": [\n  {"section": "Mac", "name": "VM", "status": "fail", "detail": %s, "needs_human": false}\n]}\n' \
+    printf '{"vm": %s, "type": %s, "ip": "", "ok": false, "checks": [\n  {"section": "Mac", "name": "VM", "status": "fail", "detail": %s, "needs_human": false, "feature": ""}\n]}\n' \
       "$( [[ -n $VM ]] && json_str "$VM" || echo null)" "$( [[ -n $TYPE ]] && json_str "$TYPE" || echo null)" "$(json_str "$2")"
   fi
   echo "omacvm check: $2" >&2
@@ -44,9 +50,18 @@ if [[ -z $IP ]]; then
   msg=$(sed 's/^omacvm: //' "$err"); rm -f "$err"
   (( rc == 0 )) || stop "$rc" "${msg:-no VM}"
   IFS=$'\t' read -r VM TYPE IP <<<"$r"
+  # An app VM whose fast network did not come up has no address: say why.
+  if [[ -z $IP && $TYPE == app ]] && d=$(app_dir "$VM") && app_running_dir "$d" &&
+     n=$(head -1 "$d/logs/network" 2>/dev/null) && [[ $n == vmnet-down* ]]; then
+    stop 1 "fast network: ${n#vmnet-down }"
+  fi
   [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM' (or pass --vm-type and --ip)"
+if [[ -z $TYPE ]]; then
+  TYPE=$(vm_type "$VM" 2>/dev/null) || {
+    (( $? == 2 )) && stop 2 "there is more than one VM named '$VM': pass --vm-type parallels, utm, fusion or app"
+    stop 1 "no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM' (or pass --vm-type and --ip)"; }
+fi
 case $TYPE in
   parallels) HOST=10.211.55.2
              [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || stop 1 "no IP for VM '$VM' (is it running?)" ;;
@@ -54,29 +69,37 @@ case $TYPE in
        [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || stop 1 "no IP for UTM VM '$VM' (is it running?)" ;;
   fusion) HOST=$(fusion_host)
           [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || stop 1 "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
-  app) HOST=127.0.0.1   # OmacVM.app: the VM reaches the Mac's 127.0.0.1 as 10.0.2.2
-       [[ -n $IP ]] || IP=$(app_ip "$VM") || stop 1 "OmacVM.app VM '$VM' is not running" ;;
+  app) [[ -n $IP ]] || IP=$(app_ip "$VM") || stop 1 "OmacVM.app VM '$VM' is not running"
+       # OmacVM.app: QEMU's user network reaches the Mac's 127.0.0.1 as 10.0.2.2;
+       # on its fast network (vmnet) the Mac is 192.168.77.1.
+       if [[ $IP == 127.0.0.1:* ]]; then HOST=127.0.0.1; else HOST=192.168.77.1; fi ;;
   *) stop 2 "--vm-type parallels, utm, fusion or app" ;;
 esac
 export OMA_KEY=$KEY
 
-fails=0; ROWS=""; SECTION=Mac
+fails=0; ROWS=""; SECTION=Mac; FEATURE=""   # FEATURE: what the next lines belong to
+# ROWS: one check per line, fields split by US (\037): unlike a tab, read
+# keeps an empty field.
+US=$'\037'
 # line STATUS LABEL NAME DETAIL [human]
 line() {
-  if (( JSON )); then ROWS+="$1"$'\t'"$SECTION"$'\t'"$3"$'\t'"$4"$'\t'"${5:+1}"$'\n'
+  if (( JSON )); then ROWS+="$1$US$SECTION$US$3$US$4$US${5:+1}$US$FEATURE"$'\n'
   else printf '  %-5s %-24s %s\n' "$2" "$3" "$4"; fi
 }
 ok()   { line ok ok "$1" "${2:-}"; }
 bad()  { line fail FAIL "$1" "${2:-}" "${3:-}"; fails=$((fails + 1)); }
 skip() { line skip skip "$1" "${2:-}" "${3:-}"; }
+# warn: works, but not as it should; does not fail the check.
+warn() { line warn WARN "$1" "${2:-}" "${3:-}"; }
 say_() { (( JSON )) || echo "$@"; }
 json_out() {   # the collected rows as JSON
-  local first=1 st sec name detail human
+  local first=1 st sec name detail human feature
   printf '{"vm": %s, "type": "%s", "ip": %s, "ok": %s, "checks": [' "$(json_str "${VM:-}")" "$TYPE" "$(json_str "${IP:-}")" "$1"
-  while IFS=$'\t' read -r st sec name detail human; do
+  while IFS=$US read -r st sec name detail human feature; do
     [[ -n $st ]] || continue
-    printf '%s\n  {"section": %s, "name": %s, "status": "%s", "detail": %s, "needs_human": %s}' \
-      "$( ((first)) || echo ,)" "$(json_str "$sec")" "$(json_str "$name")" "$st" "$(json_str "$detail")" "$( [[ $human == 1 ]] && echo true || echo false)"
+    printf '%s\n  {"section": %s, "name": %s, "status": "%s", "detail": %s, "needs_human": %s, "feature": %s}' \
+      "$( ((first)) || echo ,)" "$(json_str "$sec")" "$(json_str "$name")" "$st" "$(json_str "$detail")" \
+      "$( [[ $human == 1 ]] && echo true || echo false)" "$(json_str "$feature")"
     first=0
   done <<<"$ROWS"
   printf '\n]}\n'
@@ -91,6 +114,25 @@ L=~/Library/Logs
 # The VM network's Mac address exists only while a VM of that type runs.
 if ! msg=$(vm_network_ok "$TYPE" "$IP" 2>&1); then
   bad "VM network" "$msg" human
+  (( JSON )) && json_out false
+  exit 1
+fi
+# OmacVM.app on the fast network: 192.168.77.1 being up proves little (it
+# stays while any app VM uses it). The app must still say vmnet (it watches
+# the link the whole run), the VM's address must route to a Mac interface
+# with 192.168.77.1, and the VM must answer there.
+fast_net_down() {   # -> why, when the VM's fast network is not working
+  local d n ifc
+  d=$(app_dir "$VM" 2>/dev/null); n=$(head -1 "$d/logs/network" 2>/dev/null)
+  [[ $n == vmnet ]] || { echo "${n:-the app did not say which network it took}"; return 0; }
+  ifc=$(route -n get "$IP" 2>/dev/null | awk '/interface:/ { print $2 }')
+  [[ -n $ifc ]] && ifconfig "$ifc" 2>/dev/null | grep -q "inet 192.168.77.1 " ||
+    { echo "no Mac interface with 192.168.77.1 leads to the VM's $IP"; return 0; }
+  ping -c 1 -t 3 -q "$IP" >/dev/null 2>&1 || { echo "the VM does not answer at $IP"; return 0; }
+  return 1
+}
+if [[ $TYPE == app && $HOST == 192.168.77.1 ]] && why=$(fast_net_down); then
+  bad "VM network" "the fast network is not working: $why (omacvm-netd's log: /var/log/org.omacvm.netd.log)"
   (( JSON )) && json_out false
   exit 1
 fi
@@ -112,7 +154,42 @@ fi
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
 feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
 BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "$(feat glide off)")
+# OmacVM.app's fast network: its fast-network file is the switch (the app's
+# button and omacvm enable/disable both set it).
+FAST_NET=$(feat fast_network off)
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then [[ -s $d/fast-network ]] && FAST_NET=on || FAST_NET=off; fi
 
+FEATURE=fast-network
+# OmacVM.app's fast network: the service on the Mac, and which network this
+# start of the VM took (the app writes it to logs/network).
+netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, as "; omacvm-netd: ..."
+  local l t
+  l=$(grep -E 'refused|failed|did not|kept failing|stopped' /var/log/org.omacvm.netd.log 2>/dev/null | tail -1)
+  t=$(date -j -f '%Y-%m-%d %H:%M:%S' "${l:0:19}" +%s 2>/dev/null) || return 0
+  (( $(date +%s) - t < 600 )) && printf '; %s' "$(cut -d' ' -f3- <<<"$l")"
+  return 0
+}
+if [[ $TYPE == app ]]; then
+  if [[ $FAST_NET == on ]]; then
+    case $("$R/src/net/mac/install.sh" --status 2>/dev/null) in
+      ok) ok "fast network service" "omacvm-netd, for this OmacVM.app" ;;
+      old) bad "fast network service" "for another build of the app, or older: omacvm enable fast-network --vm \"$VM\"" ;;
+      down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" ;;
+      stopped) bad "fast network service" "vmnet failed too often in a row, so omacvm-netd stopped trying (each failure costs macOS's vmnet service for good): restart the Mac, or omacvm enable fast-network --vm \"$VM\" again" ;;
+      *) bad "fast network service" "not installed: omacvm enable fast-network --vm \"$VM\"" ;;
+    esac
+    d=$(app_dir "$VM" 2>/dev/null); net=$(head -1 "$d/logs/network" 2>/dev/null)
+    case $net in
+      vmnet) ok "fast network" "on (vmnet), the VM is $IP" ;;
+      slirp\ fallback*) bad "fast network" "${net#slirp fallback: }$(netd_said)" ;;
+      slirp*) bad "fast network" "this start took QEMU's user network: ${net#slirp }" ;;
+      vmnet-down*) bad "fast network" "${net#vmnet-down }$(netd_said)" ;;
+      *) bad "fast network" "the app did not say which network it took (from before the fast network? omacvm update)" ;;
+    esac
+  else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
+fi
+
+FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
     a=$(listeners 47831)
@@ -140,22 +217,53 @@ if [[ $BRIDGE == on ]]; then
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  # The Bridge says which permissions it has (at start and on each change).
+  pm=$(last_line "$L/omacvm-bridge.log" 'omacvm-bridge: permissions: ')
+  case $pm in
+    "") ;;   # a Bridge from before it said so
+    *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
+    *"Input Monitoring MISSING"*) warn "Bridge permissions" "Input Monitoring is off for OmacVM Bridge: the brightness keys do nothing with a VM in front (System Settings > Privacy & Security > Input Monitoring)" ;;
+    *) ok "Bridge permissions" "${pm#permissions: }" ;;
+  esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
   c=~/Library/Application\ Support/omacvm-bridge/config.json
   if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
     skip "keyboard light" "this Mac has none (Shift + brightness keys stay macOS's)"
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
-  else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
+  else ok "keyboard light" "4 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
+  # External displays: which ones the brightness keys set while the VM is on
+  # them (DDC/CI, an Apple display's own control), and why not.
+  # Asked only while the feature is on: the Bridge then reads each display over DDC/CI.
+  FEATURE=external-brightness
+  if [[ $(feat external_brightness on) != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
+  else
+    ex=""; declare -F bget >/dev/null && ex=$(bget /display/external)
+    if ! jq -e .displays <<<"$ex" >/dev/null 2>&1; then bad "external brightness" "the Bridge does not answer /display/external (omacvm update)"
+    elif [[ $(jq -r .enabled <<<"$ex") != true ]]; then skip "external brightness" "off on this Mac (external_brightness in $c)"
+    elif [[ $(jq '.displays | length' <<<"$ex") == 0 ]]; then skip "external brightness" "no external display connected"
+    else
+      while IFS=$'\t' read -r name method reason; do
+        case $method in
+          ddc) ok "brightness: $name" "DDC/CI: the brightness keys set it while the VM is in front on it" ;;
+          apple) ok "brightness: $name" "its own control: the brightness keys set it while the VM is in front on it" ;;
+          *) skip "brightness: $name" "not settable, $reason: the brightness keys stay as before there" ;;
+        esac
+      done < <(jq -r '.displays[] | [.name, .method, (.reason // "")] | @tsv' <<<"$ex")
+    fi
+  fi
+  FEATURE=bridge
 else skip "Bridge" "off (chosen at setup)"; fi
 # The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
+FEATURE=camera
 if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
   running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
     || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
 fi
+[[ $(feat camera off) == off ]] && skip "camera" "off for this VM (chosen at setup)"
 # The microphone: the VM's app records only with macOS's permission, and its
 # recording helper cannot ask (docs/troubleshooting.md, finding 22). Its log says so.
-miclog=""
+FEATURE=""; miclog=""
 case $TYPE in
   fusion) x=$(fusion_vmx "$VM" 2>/dev/null) && miclog="$(dirname "$x")/vmware.log"; micapp="VMware Fusion" ;;
   app) d=$(app_dir "$VM" 2>/dev/null) && miclog="$d/logs/qemu.log"; micapp="OmacVM" ;;
@@ -165,12 +273,89 @@ if [[ -n $miclog && -f $miclog ]]; then
     bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
   else ok "microphone" "no refusal in $micapp's log"; fi
 fi
-# Gestures runs keys-only when trackpad gestures were turned off; on UTM it
-# also types Cmd as Super, so it is needed there either way.
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
+# A VM app whose GPU context virglrenderer dropped draws nothing until it
+# restarts; for the shell that is a black display without bar. QEMU's log
+# (this run of the VM) names it.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  lost=$(grep -o 'context error reported [0-9]* "[^"]*"' "$miclog" | sed 's/.*"\(.*\)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
+  # Not a failure by itself: the app may have been restarted since (the VM's
+  # "desktop" line says whether the shell draws now).
+  if [[ -n $lost ]]; then
+    skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
+  else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
+fi
+# The GPU path an app VM took this run (qemu.log starts fresh with each run):
+# fences from the sync thread or polled, frames as IOSurfaces or with a
+# CAOpenGLLayer. GPU safe mode takes the old path on purpose; without it the
+# old path is a fallback (still works, slower), and qemu.log says why.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  fences=$(grep -o 'virgl fences .*' "$miclog" | tail -1)
+  frames=$(grep -o 'GL frames shown .*' "$miclog" | tail -1)
+  if [[ -n $fences$frames ]]; then
+    g="fences ${fences#virgl fences }, frames ${frames#GL frames shown }"
+    if [[ $fences == *"did not start"* ]] || grep -q 'IOSurface present failed' "$miclog"; then
+      bad "GPU path" "$g: a fallback (logs/qemu.log says why)"
+    elif [[ $(defaults read org.omacvm.app gpuSafeMode 2>/dev/null) == 1 ]]; then
+      ok "GPU path" "$g (GPU safe mode)"
+    else ok "GPU path" "$g"; fi
+  fi
+fi
+# OmacVM.app's Graphics setting: what this start got (the app says so in
+# qemu.log), and whether the next start gets something else.
+if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then
+  FEATURE=graphics
+  gl=$(sed -n 's/^OmacVM: graphics: //p' "$gd/logs/qemu.log" 2>/dev/null | tail -1)
+  gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd")
+  if [[ -z $gl ]]; then
+    skip "Graphics" "$(graphics_title "$gc"): $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start (an app from before 3.0.0 has OpenGL only)"
+  elif [[ ${gl%% *} != "$gc" || $gl != *"-> $gn "* ]]; then
+    skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start"
+  else ok "Graphics" "$(graphics_title "$gc"): $gl"; fi
+  FEATURE=""
+fi
+# Vulkan in an app VM (the hidden Venus switch): the Mac driver QEMU picked
+# this run (qemu.log starts fresh with each run). KosmicKrisp falls back to
+# MoltenVK when it cannot run.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  FEATURE=graphics
+  v=$(grep -o 'vulkan driver: .*' "$miclog" | tail -1)
+  case $v in
+    "") ;;
+    *kosmickrisp*) ok "Vulkan (Venus)" "KosmicKrisp" ;;
+    *MoltenVK*)
+      if grep -q 'unusable, trying MoltenVK' "$miclog"; then
+        warn "Vulkan (Venus)" "MoltenVK: KosmicKrisp could not run on this Mac, Vulkan has fewer features (logs/qemu.log says why)"
+      else ok "Vulkan (Venus)" "MoltenVK"; fi ;;
+    *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
+  esac
+  FEATURE=""
+fi
+# macOS's own shortcuts while an app VM has the keyboard (this run): to the
+# VM (switched off meanwhile), kept by the user's choice, or a fallback.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  if grep -q 'macOS shortcuts stay with macOS' "$miclog"; then
+    skip "macOS shortcuts" "stay with macOS (the default; experimental, all to the VM: defaults write org.omacvm.app macShortcuts -bool false)"
+  elif grep -q "macOS's switch for them was not found\|macOS shortcuts .*FAILED" "$miclog"; then
+    warn "macOS shortcuts" "some stay with macOS: macOS refused to switch them off (logs/qemu.log)"
+  elif grep -q 'macOS shortcuts off' "$miclog"; then
+    ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥⌘ Esc is macOS's)"
+  fi
+fi
+FEATURE=gestures
+# With gestures off the VM's daemon is off too (also on UTM, Fusion and
+# OmacVM.app), so this VM needs no Gestures on the Mac.
+if [[ $GESTURES == on ]]; then
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
+    # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
+    # Gestures refuses it (and it tries again every 2 s) until it is updated.
+    if [[ $TYPE != app ]]; then
+      r=$(grep -nF "omacvm-gestures: refused ${IP%:*} on " "$L/omacvm-gestures.log" 2>/dev/null | grep -F ": no token" | tail -1 | cut -d: -f1)
+      c=$(grep -nF "omacvm-gestures: guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1 | cut -d: -f1)
+      (( ${r:-0} > ${c:-0} )) &&
+        bad "Gestures for this VM" "refused: its trackpad daemon is from OmacVM 2.3 or older (omacvm update --vm \"$VM\")"
+    fi
     keysonly=$(launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -c -- '--keys-only')
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
@@ -184,19 +369,31 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; the
       esac
     fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
+      FEATURE=scroll-momentum
       # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
       g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
       [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
-      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
+      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "on (trackpad only): a trackpad's scrolling goes to this VM in full screen, mice scroll one to one"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
+      FEATURE=gestures
     fi
     # The helper listens only once it has its permissions, so a later
     # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
-    p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
-    [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
-      || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
+    # Gestures says which of its two permissions it has (at start and on each
+    # change); one from before that: its older lines.
+    p=$(last_line "$L/omacvm-gestures.log" 'omacvm-gestures: permissions: ')
+    if [[ $p == *MISSING* ]]; then
+      miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
+      bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security" human
+    elif [[ -n $p ]]; then ok "keyboard/trackpad access" "Accessibility + Input Monitoring"
+    else
+      p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
+      [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
+        || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
+    fi
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
-else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+else FEATURE=gestures; skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+FEATURE=battery
 # The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app
 # passes it on its own port; Parallels gives the VM its own.
 if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
@@ -219,6 +416,8 @@ if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
     esac
   fi
 fi
+[[ $(feat battery off) == off && $TYPE != parallels ]] && skip "battery (Mac)" "off for this VM (chosen at setup)"
+FEATURE=""
 # macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
 # menu bar over the full-screen VM: a hint (it is the person's setting).
 if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
@@ -242,36 +441,67 @@ parallels)
     || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;
 utm)
   [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
-    || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)"
+    || bad "UTM speed settings" "QEMUVulkanDriver is not 1: omacvm build sets it, or run defaults write com.utmapp.UTM QEMUVulkanDriver -int 1; restart UTM after"
   case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
     0|2) ok "UTM renderer" "ANGLE on Metal (GPU in Chrome)" ;;
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
-if pgrep -xq omanotch; then
+FEATURE=omanotch
+if [[ $(feat omanotch off) == off ]]; then
+  skip "Omanotch" "off for this VM (chosen at setup)"
+elif pgrep -xq omanotch; then
   # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
   [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
   ok "Omanotch (Mac)" "running, bar height: $h"
-elif [[ $(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none) != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
+elif [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
 else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
+  if (( rc == 0 )) && [[ $FAST_NET == on ]]; then
+    rc=0; omanotch_serves_fast_network || rc=$?
+    (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old for the fast network: it does not listen on 192.168.77.1, so this VM's strip stays empty (omacvm update)"
+  fi
 fi
+# OmacVM.app: what of the Mac this start of the VM may use (the app reads
+# the VM's features at start and says so in qemu.log). A feature that is off
+# must get nothing; one switched on while the VM runs waits for its next start.
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
+  l=$(sed -n 's/^OmacVM: Mac links: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+  if [[ -z $l ]]; then
+    skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
+  else
+    fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
+    open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
+    m=""
+    [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
+    [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
+    if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
+    else ok "Mac links (app)" "$l"; fi
+  fi
+fi
+FEATURE=""
 if [[ $TYPE == app ]]; then
-  # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
-  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
-  [[ $n == 1 ]] && skip "notch strip (app)" "the app's full screen covers it (no Space of its own)" \
-    || skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"
+  # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
+  # (Omanotch then leaves the strip alone).
+  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 1)
+  if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  elif [[ $n == 1 ]]; then skip "notch strip (app)" "on: Omarchy's bar beside the notch (full screen has no Space of its own)"
+  else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
+if (( MAC_ONLY )); then
+  (( JSON )) && json_out "$( (( mac_failed )) && echo false || echo true)"
+  (( ! mac_failed )); exit
+fi
 
 if (( JSON )); then
   out=$(gssh "$IP" "bash -s -- --user '$U' --tsv" < "$R/src/guest/check.sh"); guest=$?
-  while IFS=$'\t' read -r a b c d; do
+  while IFS=$US read -r a b c d e; do
     if [[ $a == section ]]; then SECTION="VM: $b"
-    elif [[ -n $a ]]; then ROWS+="$a"$'\t'"$SECTION"$'\t'"$b"$'\t'"$c"$'\t'"$d"$'\n'; fi
-  done <<<"$out"
+    elif [[ -n $a ]]; then ROWS+="$a$US$SECTION$US$b$US$c$US$d$US$e"$'\n'; fi
+  done < <(tr '\t' '\037' <<<"$out")
   json_out "$( (( guest == 0 && ! mac_failed )) && echo true || echo false)"
   (( guest == 0 && ! mac_failed )); exit
 fi

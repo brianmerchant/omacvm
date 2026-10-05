@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "omacvm.control",
+  "name": "OmacVM",
+  "version": "1.0.0",
+  "author": "OmacVM",
+  "description": "Opens the OmacVM control centre (omacvm); lit while a feature needs you or an update is out",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmacVM",
+    "description": "Opens the OmacVM control centre; lit while a feature needs you or an update is out",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

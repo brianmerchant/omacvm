@@ -9,6 +9,8 @@ U=${1:?usage: clock.sh USER on FORMAT | off}; MODE=${2:?on or off}
 H=$(getent passwd "$U" | cut -d: -f6)
 C=$H/.config/omarchy/shell.json
 KEEP=$H/.config/omacvm/clock-before.json
+# Off: a clock queued for the next login (omacvm-plugins) is not set either.
+[[ $MODE != off ]] || rm -f "$H/.local/state/omacvm/pending-clock"
 if [[ ! -f $C ]]; then
   # Fresh build, nobody logged in yet: omacvm-plugins sets it at the next login.
   if [[ $MODE == on ]]; then

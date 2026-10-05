@@ -2,55 +2,41 @@
 
 <h3 align="center">Enabling the MacBook notch in Omarchy VMs</h3>
 
-<p align="center">The real Omarchy bar, right where Parallels (or UTM) leaves a black hole.</p>
+<p align="center">The real Omarchy bar, right where the VM app leaves a black hole.</p>
 
 <p align="center">
-  <b>Part of <a href="../../README.md">OmacVM</a></b> (it lives in OmacVM's <code>src/omanotch</code> now): OmacVM builds the whole Omarchy VM on your Mac in one command and sets Omanotch up with it, along with trackpad gestures, macOS-like scrolling and the Mac's Wi-Fi, audio and keys in Omarchy.<br>
-  <code>curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash</code>
+  <b>Part of <a href="../../README.md">OmacVM</a></b>, which sets it up with the VM: the <code>omanotch</code> feature, on by default on a MacBook with a notch.
 </p>
 
 <p align="center">
   <img src="docs/hero.svg" alt="Animated diagram: the VM leaves the notch strip black; inside the VM Omarchy renders its bar on an invisible monitor; Omanotch streams the changed pixels into the strip, the windows grow to full height, and a click on the clock travels back and opens the calendar right below the notch." width="100%">
 </p>
 
-You run [Omarchy](https://omarchy.org) full screen in a Parallels or UTM VM on a
-MacBook with a notch. It is fast, it is beautiful, and it has a black bar
-across the top that nobody asked for. **Omanotch** puts Omarchy's **real** bar
-into that black strip — not a look-alike, the actual Quickshell bar, pixels and
-all — and gives the space the bar used to take back to your windows.
-
-> [!NOTE]
-> **Got an M1 or M2 Mac?** Run Omarchy natively on [Asahi Linux](https://asahilinux.org)
-> instead — no VM, full hardware, and it uses the notch area itself. This project
-> is for **M3 and M4** Macs, which Asahi does not support yet, so a VM is the way
-> to run Omarchy there. (It works on M1 and M2 too.)
+You run [Omarchy](https://omarchy.org) full screen in a VM (OmacVM.app, UTM,
+VMware Fusion or Parallels) on a MacBook with a notch. The strip beside the
+notch stays black, and Omarchy draws its own bar below it. **Omanotch** puts
+Omarchy's **real** bar into that strip (the actual Quickshell bar, pixels and
+all) and gives the space the bar used to take back to your windows.
 
 <p align="center">
   <img src="docs/before-after.svg" alt="Before: a black strip above the VM plus Omarchy's bar inside it. After: the bar sits beside the notch and the windows use the whole screen below." width="100%">
 </p>
 
-## The black strip (and why nobody can fix it)
+## The black strip
 
-On a notched MacBook, Parallels and UTM put their full-screen window *below* the
-camera housing. The strip beside the notch — the menu bar's height, 43 points on
-a 16-inch MacBook Pro at "More Space", a little less on smaller models — stays
-black, and Omarchy then draws its own 26-point bar underneath. About 69 points
-of your screen, gone.
+In full screen the VM apps put their window *below* the camera housing. The
+strip beside the notch (the menu bar's height, 43 points on a 16-inch MacBook
+Pro at "More Space") stays black, and Omarchy's 26-point bar comes below it:
+about 69 points of screen, gone. The VM cannot go up there:
 
-Can't we just make the VM use that area?
+- **Parallels** has no setting for it; its staff
+  [said so on their forum](https://forum.parallels.com/threads/2021-16-macbook-fullscreen-over-notch.355917/).
+- **UTM** 5.0.6 can draw into the notch area, but only on macOS 27.
+- **macOS** lets only the app that owns a window place it next to the notch;
+  moving the VM app's window there from outside is refused.
 
-- **Parallels:** there is no setting, documented or hidden. Parallels staff
-  [said so on their forum](https://forum.parallels.com/threads/2021-16-macbook-fullscreen-over-notch.355917/):
-  drawing into the notch area would go against Apple's guidelines.
-- **UTM:** 5.0.6 can draw into the notch area, but only on macOS 27.
-- **macOS:** only the app that owns a window may place it next to the notch.
-  Moving Parallels' window there from the outside is simply refused (tried it,
-  also with the menu bar on auto-hide).
-- **Code injection** into the VM app would work in theory, but needs System
-  Integrity Protection turned off. No thanks.
-
-So the VM cannot go up there. **But a tiny Mac app of our own can** — and it can
-show whatever the VM would have shown.
+**But a tiny Mac app of our own can**, and it can show whatever the VM would
+have shown.
 
 ## How the trick works
 
@@ -108,49 +94,21 @@ Mac point for point, the strip is scaled to fit instead of cut off.
 
 ## Requirements
 
-- A MacBook with a notch, macOS 14 or later, Xcode Command Line Tools
-- Omarchy (Arch Linux ARM, Hyprland 0.56 or newer) full screen on the built-in
-  display, in
-  - **Parallels Desktop**, with the shared network (the default), or
-  - **UTM** 5, with the shared network (the default) and **automatic mouse
-    capture off**: UTM → Settings → Input → uncheck both *Capture input
-    automatically…* options. A captured mouse can never reach the strip. For a
-    pixel-sharp strip turn on the display's *Retina Mode* (off by default) and
-    keep *Resize display to window size automatically* on (the default).
-- In the VM: `gcc`, `wayland`, `wayland-protocols`, `lz4`, `python3` — all
-  already there on Omarchy
-
-<sub>Parallels or UTM? Both work. Parallels is faster and drives external
-monitors too: [some numbers](docs/why-parallels.md).</sub>
+- A MacBook with a notch, Omarchy full screen on the built-in display.
+- UTM: **automatic mouse capture off** (UTM → Settings → Input → uncheck both
+  *Capture input automatically…* options), or the pointer can never reach the
+  strip. For a sharp strip turn on the display's *Retina Mode* and keep
+  *Resize display to window size automatically* on.
 
 ## Install
 
-With OmacVM nothing to do: the `omanotch` feature installs both sides. It is on
-by default on a MacBook with a notch (`omacvm enable omanotch` on an existing VM).
-
-By hand, from `src/omanotch` of an OmacVM checkout. In the VM, as your normal
-user:
-
-```bash
-./guest/install.sh
-```
-
-On the Mac:
-
-```bash
-./mac/install.sh
-```
-
-That builds `~/Applications/Omanotch.app` and starts it at login
-(log: `~/Library/Logs/omanotch.log`). Put the VM in full screen on the built-in
-display and the bar moves into the strip.
-
-## Uninstall
-
-```bash
-./guest/uninstall.sh      # in the VM (add --remove-bar-clone to drop the bar clone too)
-./mac/uninstall.sh        # on the Mac
-```
+[OmacVM](../../README.md) installs both sides (`omacvm enable omanotch` on an
+existing VM). To work on Omanotch itself, from `src/omanotch` of an OmacVM
+checkout: `./guest/install.sh` in the VM as your user, `./mac/install.sh` on
+the Mac (builds `~/Applications/Omanotch.app`, starts it at login, logs to
+`~/Library/Logs/omanotch.log`). `./guest/uninstall.sh` (with
+`--remove-bar-clone` to drop the bar clone too) and `./mac/uninstall.sh`
+remove them.
 
 ## Configuration
 
@@ -159,7 +117,7 @@ Mac app — `defaults write ch.gillesgoetsch.omanotch <key> <value>`, then
 
 | Key | Default | |
 |---|---|---|
-| `vmOwners` | `Parallels Desktop`, `UTM` | apps whose full-screen window is the VM (`-array …`) |
+| `vmOwners` | `Parallels Desktop`, `UTM`, `VMware Fusion`, OmacVM.app | apps whose full-screen window is the VM (`-array …`) |
 | `vmInterfacePrefixes` | `bridge`, `vnic` | VM network interfaces the Mac listens on … |
 | `vmSubnets` | `192.168.64.0/24`, `10.211.55.0/24`, `10.37.129.0/24` | … if their network is one of these (UTM, Parallels shared, Parallels host-only); guests are accepted only from that network |
 | `listenHost` | *(automatic)* | listen on this one IPv4 address instead |
@@ -174,7 +132,7 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 | `NOTCHBAR_VM_NETS` | `192.168.64.0/24 10.211.55.0/24 10.37.129.0/24` | networks where the Mac is looked for automatically |
 | `NOTCHBAR_PORT` | `47811` | |
 | `NOTCHBAR_OUTPUT` | `NOTCH` | name of the invisible monitor |
-| `NOTCHBAR_SCREEN` | `Virtual-1` | the built-in display's output |
+| `NOTCHBAR_SCREEN` | `Virtual-1` | the built-in display's output; by default OmacVM.app names it (with external displays it can be `Virtual-2` or later) |
 | `NOTCHBAR_FOLLOW_MODE` | on under QEMU (UTM) | `1`/`0`: when UTM resizes the display to its window while running, apply and keep that size (Hyprland does not pick it up by itself) |
 
 ## Good to know
@@ -199,19 +157,20 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   is deliberate; `notchbar.lua` dismisses that one warning and nothing else.
 - Several VMs at once: the strip shows the bar of the VM whose window is full
   screen on the built-in display, and only that VM's bar is parked; the
-  others keep their own bar. Omanotch tells VMs of the same app apart by the
-  window title (the VM's name), which it reads through Accessibility: allow
-  Omanotch in System Settings → Privacy & Security → Accessibility when it
-  asks (only needed with two or more VMs of one app connected). The VM says
-  its name if [OmacVM](https://github.com/gillesgoetsch/omacvm) set it up
-  (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`); a VM without a name is matched
-  by its app only.
+  others keep their own bar. Omanotch needs no macOS permission for this: it
+  knows the window's app (Parallels, UTM, VMware Fusion or OmacVM.app), not
+  which of its VMs the window shows. With two VMs of one app connected, the
+  strip keeps the one it serves, else takes the one that connected last;
+  switching between them does not switch the strip.
 - OmacVM.app's VMs reach the Mac at 127.0.0.1, where any Mac program could
   connect, or listen in Omanotch's place. There `notchcast` and the Mac first
   prove to each other that they know OmacVM's Bridge token (HMAC-SHA256 over
   two nonces and 127.0.0.1, the Mac first), so the token itself is never
   sent; a connection that has not proved it yet does not get in the way of a
-  connected VM. VMs on Parallels, UTM and VMware Fusion skip this: their VM
+  connected VM. The same on the app's fast network (vmnet, the Mac at
+  192.168.77.1; the proof then names that address): `notchcast` takes it when
+  it is the VM's gateway, and connects again when the app moves the VM between
+  the two networks. VMs on Parallels, UTM and VMware Fusion skip this: their VM
   network is the check. The protocol is in `mac/Sources/GuestAuth.swift`.
 - Keep UTM's library window and Parallels' Control Center out of full screen on
   the built-in display while a VM is connected: from the outside they look just
@@ -239,11 +198,11 @@ up by itself.
 | Strip stays black | `~/Library/Logs/omanotch.log` ("listening on …", "guest connected"?) · in the VM: `systemctl --user status notchcast` |
 | UTM: the pointer never reaches the strip | UTM's automatic input capture is on (see Requirements), or press ⌃⌥ to release the mouse |
 | UTM: with capture off the VM's cursor does not move | a SPICE agent (`spice-vdagentd`) takes UTM's absolute mouse positions: it must run with a real uinput device (not `-f`) and a session agent that reports the screen size — or not at all, then QEMU's USB tablet is used |
-| Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` |
-| OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …") · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
-| Strip shows another VM's bar | `~/Library/Logs/omanotch.log` ("strip serves guest …; front window …"): Omanotch needs Accessibility permission, and the VM's name (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`) must appear in its window title |
+| Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` and `screen` the built-in display · `~/.local/state/omanotch/park` is what notchcast asked for (`1 <output>`); the bar follows it within 3 s, also after a shell restart |
+| OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …", or on 192.168.77.1 on the fast network) · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
+| Strip shows another VM's bar | two VMs of one app are connected: Omanotch tells apps apart, not VMs of one app (`~/Library/Logs/omanotch.log`: "strip serves guest …"); stop the other VM or restart its `notchcast` |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
-| Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display |
+| Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display (OmacVM.app: `$XDG_RUNTIME_DIR/omacvm/builtin` does, `omacvm check` → "notch display") |
 
 ## Credits
 

@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 import SwiftUI
 
 /// What the launcher window shows.
@@ -8,6 +9,7 @@ enum Screen: Equatable {
     case setup
     case building
     case ready
+    case driveMissing
 }
 
 @MainActor
@@ -15,28 +17,57 @@ final class AppState: ObservableObject {
     @Published var screen: Screen = .setup
     @Published var config: VMConfig
     @Published var message: String?
+    /// This Mac's built-in display has a notch right now (follows displays
+    /// being plugged in, the lid and resolution changes).
+    @Published var hasNotch = Mac.hasNotch
     let creator = Creator()
+    let storage = StorageModel()
     var startVM: () -> Void = {}
+    private var screensObserver: NSObjectProtocol?
 
     init() {
-        if let existing = VMConfig.existing() {
-            config = existing
-            screen = existing.isReady ? .ready : .setup
-        } else {
-            screen = .setup
-            var c = VMConfig()
-            let t = Mac.tier(1)
-            c.cpus = t.cpus
-            c.memoryMB = t.memoryGB * 1024
-            c.user = Mac.linuxUserName
-            c.fullName = NSFullUserName()
-            c.timeZone = Mac.timeZone
-            c.language = Mac.language
-            c.keyboard = Mac.keyboard
-            config = c
-        }
+        (config, screen) = Self.start()
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
+        screensObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hasNotch = Mac.hasNotch }
+        }
+        storage.onMoved = { [weak self] in self?.reload() }
+        // The views read the storage through this state too (Start waits for a move).
+        storageChanges = storage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+    private var storageChanges: AnyCancellable?
+
+    /// The VM to show and the screen for it: the VM the app finds, else a
+    /// new one (or the note that the VMs folder's drive is not connected).
+    private static func start() -> (VMConfig, Screen) {
+        if let existing = VMConfig.existing() {
+            return (existing, existing.isReady ? .ready : .setup)
+        }
+        var c = VMConfig()
+        let t = Mac.tier(1)
+        c.cpus = t.cpus
+        c.memoryMB = t.memoryGB * 1024
+        c.user = Mac.linuxUserName
+        c.fullName = NSFullUserName()
+        c.timeZone = Mac.timeZone
+        c.language = Mac.language
+        c.keyboard = Mac.keyboard
+        return (c, Storage.missingDrive(for: Paths.vmsRoot) != nil ? .driveMissing : .setup)
+    }
+
+    /// Looks again (after a move, a delete, a drive plugged in). The same VM
+    /// stays shown when it is still there, wherever it is now.
+    func reload() {
+        guard screen != .building && screen != .install else { storage.refresh(); return }
+        if let c = (config.location != nil ? VMConfig.named(config.name) : nil) {
+            config = c
+            screen = c.isReady ? .ready : .setup
+        } else {
+            (config, screen) = Self.start()
+        }
+        storage.refresh()
     }
 
     /// What the window shows once the install question is answered.
@@ -54,6 +85,7 @@ struct RootView: View {
             case .setup: SetupView(state: state)
             case .building: BuildView(state: state, creator: state.creator)
             case .ready: ReadyView(state: state)
+            case .driveMissing: DriveMissingView(state: state)
             }
         }
         .frame(width: 520)
@@ -69,22 +101,45 @@ struct SetupView: View {
     @State private var bridge = true
     @State private var gestures = true
     @State private var autologin = false
-    @State private var location = Paths.vmsRoot.path
     @State private var locationProblem: String?
+    @State private var prebuilt = PrebuiltImage.Lookup.checking
+    @State private var usePrebuilt = true
+    @State private var graphics = GraphicsChoice.auto
 
     private var userOK: Bool {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
     }
     private var canBuild: Bool {
         userOK && !password.isEmpty && password == password2 && VMConfig.validName(state.config.name)
+            && prebuilt != .checking
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Omarchy VM").font(.title2.bold())
-            Text("\(Product.name) installs Arch Linux ARM and Omarchy into a new VM. It takes 10 to 30 minutes and downloads a few GB.")
+            Text("\(Product.name) makes a new VM with Arch Linux ARM and Omarchy. It downloads one that is already built when there is one for this version (a few minutes), or builds it here (10 to 30 minutes).")
                 .foregroundStyle(.secondary)
             Form {
+                // Shown at once; the choice comes when the lookup is done, so
+                // nothing changes under the user's hands later on.
+                switch prebuilt {
+                case .checking:
+                    LabeledContent("How") {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("checking for a prebuilt VM…").foregroundStyle(.secondary)
+                        }
+                    }
+                case .found(let pb):
+                    Picker("How", selection: $usePrebuilt) {
+                        Text("Download a prebuilt VM (\(pb.size), Omarchy \(pb.omarchy))").tag(true)
+                        Text("Build it here (10 to 30 minutes)").tag(false)
+                    }
+                case .none:
+                    LabeledContent("How") {
+                        Text("Build it here (10 to 30 minutes; no prebuilt VM for this version)").foregroundStyle(.secondary)
+                    }
+                }
                 TextField("VM name", text: $state.config.name)
                 if !state.config.name.isEmpty && !VMConfig.validName(state.config.name) {
                     Text("Letters, digits, spaces, . _ and - only (64 at most).").font(.caption).foregroundStyle(.red)
@@ -102,20 +157,19 @@ struct SetupView: View {
                 Picker("Resources", selection: $tier) {
                     ForEach(0..<4) { t in
                         let v = Mac.tier(t)
-                        Text("\(["Low", "Balanced", "High", "Best"][t]): \(v.cpus) CPUs, \(v.memoryGB) GB").tag(t)
+                        Text("\(Mac.tierNames[t]): \(v.cpus) CPUs, \(v.memoryGB) GB").tag(t)
                     }
                 }
                 Toggle("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar", isOn: $bridge)
                 Toggle("Trackpad gestures in full screen", isOn: $gestures)
                 Toggle("Log in automatically (the Mac's own lock protects Omarchy)", isOn: $autologin)
+                GraphicsPicker(choice: $graphics)
                 Picker("Disk", selection: $state.config.diskGB) {
                     ForEach([64, 128, 256, 512], id: \.self) { Text("\($0) GB (grows as it fills)").tag($0) }
                 }
-                HStack {
-                    Text("Location")
-                    Spacer()
-                    Text(location).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                    Button("Change…") { chooseLocation() }
+                VMsFolderRow(storage: state.storage)
+                if let n = state.storage.note, state.storage.noteIsError {
+                    Text(n).font(.caption).foregroundStyle(.red)
                 }
                 if let p = locationProblem {
                     Text(p).font(.caption).foregroundStyle(.red)
@@ -130,23 +184,8 @@ struct SetupView: View {
                     .disabled(!canBuild)
             }
         }
-    }
-
-    private func chooseLocation() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Use This Folder"
-        panel.message = "Where the VM's disk goes. An external drive works too (APFS)."
-        if panel.runModal() == .OK, let url = panel.url {
-            if let problem = VolumeCheck.problem(with: url) {
-                locationProblem = problem
-                return
-            }
-            locationProblem = nil
-            UserDefaults.standard.set(url.path, forKey: "vmsRoot")
-            location = url.path
+        .task {
+            if let pb = await PrebuiltImage.lookup() { prebuilt = .found(pb) } else { prebuilt = .none }
         }
     }
 
@@ -170,9 +209,17 @@ struct SetupView: View {
         state.config.hostname = "omarchy"
         let on = { (b: Bool) in b ? "on" : "off" }
         // Omanotch off for now: see VMConfig.features.
-        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=\(on(gestures)) omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) chromium-video=on idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        locationProblem = nil
+        // A new VM goes into the VMs folder as it is now, under its name; the
+        // folder is kept (a default that changes later must not hide the VM).
+        Paths.vmsRoot = Paths.vmsRoot
+        state.config.location = nil
+        state.config.location = state.config.folder
         state.screen = .building
-        state.creator.start(config: state.config, password: password)
+        var download = false
+        if case .found = prebuilt { download = usePrebuilt }
+        state.creator.start(config: state.config, password: password, prebuilt: download, graphics: graphics)
         password = ""; password2 = ""
     }
 }
@@ -226,9 +273,8 @@ extension ReadyView {
         }
         do {
             try FileManager.default.trashItem(at: state.config.folder, resultingItemURL: nil)
-            let fresh = AppState()
-            state.config = fresh.config
-            state.screen = fresh.config.isReady ? .ready : .setup
+            state.config.location = nil
+            state.reload()
         } catch {
             state.message = "Could not delete: \(error.localizedDescription)"
         }
@@ -239,25 +285,236 @@ struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
+    @State private var keepDockAway = Settings.keepDockAway
+    @State private var escape = EscapeSetting.current()
+    @State private var resourcesNote: String?
+    @State private var fastNetOn = false
+    @State private var fastNetBusy = false
+    @State private var fastNetNote: String?
+    @State private var fastNetStatus = ""
+    @State private var graphics = GraphicsChoice.auto
+    @State private var graphicsNote: String?
+
+    /// The create screen's tiers; resources set some other way show as Custom.
+    private var tier: Binding<Int> {
+        Binding(get: { Mac.tierIndex(cpus: state.config.cpus, memoryMB: state.config.memoryMB) ?? -1 },
+                set: { setTier($0) })
+    }
+
+    private func setTier(_ t: Int) {
+        guard Mac.tierNames.indices.contains(t) else { return }
+        let v = Mac.tier(t)
+        var c = state.config
+        c.cpus = v.cpus
+        c.memoryMB = v.memoryGB * 1024
+        guard c != state.config else { return }
+        do {
+            try c.writeResources()
+            state.config = c
+            resourcesNote = "Applies on the next start."
+        } catch {
+            resourcesNote = "Could not save: \(error.localizedDescription)"
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(state.config.name).font(.title2.bold())
             Text("\(state.config.cpus) CPUs, \(state.config.memoryMB / 1024) GB memory, \(state.config.diskGB) GB disk, user \(state.config.user)")
                 .foregroundStyle(.secondary)
+            Picker("Resources", selection: tier) {
+                ForEach(0..<4) { t in
+                    let v = Mac.tier(t)
+                    Text("\(Mac.tierNames[t]): \(v.cpus) CPUs, \(v.memoryGB) GB").tag(t)
+                }
+                if Mac.tierIndex(cpus: state.config.cpus, memoryMB: state.config.memoryMB) == nil {
+                    Text("Custom: \(state.config.cpus) CPUs, \(state.config.memoryMB / 1024) GB").tag(-1)
+                }
+            }
+            if let n = resourcesNote {
+                Text(n).font(.caption).foregroundStyle(n.hasPrefix("Could not") ? .red : .secondary)
+            }
             Toggle("Start in full screen", isOn: $fullScreen)
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
-            if Mac.hasNotch {
-                Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
+            Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
+                .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
+            Picker("Escape combo (⌃⌥⌘ Esc)", selection: $escape) {
+                ForEach(EscapeSetting.Choice.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .help("In a full-screen VM, Control-Option-Command-Esc swipes back to macOS with macOS's own animation, and again to the VM. The keyboard follows the pointer's monitor.")
+            .onChange(of: escape) { _, v in EscapeSetting.set(v) }
+            if state.hasNotch {
+                Toggle("Use the notch for the menu bar", isOn: $notch)
+                    .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
+            GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
+                .onChange(of: graphics) { _, v in setGraphics(v) }
+            if let n = graphicsNote {
+                Text(n).font(.caption).foregroundStyle(n.hasPrefix("Could not") ? .red : .secondary)
+            }
+            fastNetwork
+            Divider()
+            StorageSection(storage: state.storage)
+            Divider()
             if let m = state.message { Text(m).foregroundStyle(.red) }
+            if let p = state.config.filesProblem {
+                Text(p).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+            UpdateSection(updater: Updater.shared)
             HStack {
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.config.folder]) }
                 Button("Delete…") { deleteVM() }
+                    .disabled(state.storage.moving != nil)
                 Spacer()
                 Button("Start") { state.startVM() }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
+            }
+        }
+        .onAppear { refreshFastNetwork(); graphics = Graphics.read(folder: state.config.folder) }
+        .onChange(of: state.config) { _, c in refreshFastNetwork(); graphics = Graphics.read(folder: c.folder); graphicsNote = nil }
+    }
+
+    private func setGraphics(_ g: GraphicsChoice) {
+        let folder = state.config.folder
+        guard g != Graphics.read(folder: folder) else { return }
+        do {
+            try Graphics.write(g, folder: folder)
+            let plan = Runner.graphicsPlan(state.config)
+            graphicsNote = "Applies on the next start."
+            if plan.venus && !Graphics.driverReady(folder: folder) {
+                graphicsNote = "Applies on the next start. The first time, the VM builds its Vulkan driver at that start (a few minutes; Vulkan apps wait for it)."
+            }
+        } catch {
+            graphicsNote = "Could not save: \(error.localizedDescription)"
+        }
+    }
+
+    /// The fast network (experimental): a button, never automatic. Turning it
+    /// on installs a small system service, so macOS asks for the password once.
+    private var fastNetwork: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Fast network (experimental)")
+                Spacer()
+                if fastNetBusy { ProgressView().controlSize(.small) }
+                Button(fastNetOn ? "Turn Off…" : "Turn On…") { toggleFastNetwork() }
+                    .disabled(fastNetBusy)
+            }
+            Text(fastNetStatus).font(.caption).foregroundStyle(.secondary)
+            if let n = fastNetNote { Text(n).font(.caption).foregroundStyle(.red) }
+        }
+    }
+
+    /// What the switch says, worked out off the main thread (the service
+    /// check verifies QEMU's code signature, which reads the whole binary).
+    nonisolated private static func fastNetworkStatus(_ c: VMConfig) -> (Bool, String) {
+        guard FastNetwork.isOn(c) else {
+            return (false, "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once.")
+        }
+        if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): Turn Off, then On again.") }
+        return (true, FastNetwork.lastRecord(c) == "vmnet" ? "On." : "On from the VM's next start.")
+    }
+
+    private func refreshFastNetwork() {
+        let c = state.config
+        fastNetOn = FastNetwork.isOn(c)
+        Task.detached {
+            let (on, text) = Self.fastNetworkStatus(c)
+            await MainActor.run {
+                fastNetOn = on
+                fastNetStatus = text
+            }
+        }
+    }
+
+    private func toggleFastNetwork() {
+        let c = state.config, on = !fastNetOn
+        fastNetBusy = true
+        fastNetNote = nil
+        Task.detached {
+            let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c)
+            let (now, text) = Self.fastNetworkStatus(c)
+            await MainActor.run {
+                fastNetBusy = false
+                fastNetNote = err
+                fastNetOn = now
+                fastNetStatus = text
+            }
+        }
+    }
+}
+
+/// The self-update in the window: a ready update (never while update checks
+/// are off), what the last update did, and the weekly-check switch, shared
+/// with the control centre.
+struct UpdateSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            let banner = updater.enabled && updater.staged != nil
+            if banner, let s = updater.staged {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("\(Product.name) \(s.version) is ready", systemImage: "arrow.down.circle.fill")
+                        .font(.headline)
+                    Text(updater.installWhenIdle
+                         ? "You have \(updater.currentVersion). It goes in once the VM has shut down; your VMs are not changed."
+                         : "You have \(updater.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        if let n = s.notes { Button("What's New") { NSWorkspace.shared.open(n) } }
+                        Button("Skip This Version") { updater.skip() }
+                        Spacer()
+                        if !updater.installWhenIdle { Button("Update and Relaunch") { updater.install() } }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            }
+            // While it waits for the VM the banner says so already.
+            if let n = updater.notice, !(banner && updater.installWhenIdle) {
+                Label(n, systemImage: "info.circle")
+                    .font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle("Check for updates once a week", isOn: Binding(get: { updater.enabled }, set: { updater.setEnabled($0) }))
+            Text("Off: no checks and no messages. The same switch as in OmacVM's control centre in Omarchy. \(Product.name) › Check for Updates… still works.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+        }
+    }
+}
+
+/// The Graphics choice (Graphics.swift), in the setup and the VM window.
+struct GraphicsPicker: View {
+    @Binding var choice: GraphicsChoice
+    /// The VM's plan now (the VM window); the setup has none yet.
+    var plan: GraphicsPlan? = nil
+
+    private var autoText: String {
+        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
+        let kk = FileManager.default.fileExists(atPath: lib.path)
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        return Graphics.autoPicksVulkan(macOSMajor: major, kosmicKrisp: kk) ? "Vulkan on this Mac" : "OpenGL on this Mac"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Graphics", selection: $choice) {
+                Text("Automatic (\(autoText))").tag(GraphicsChoice.auto)
+                Text("OpenGL").tag(GraphicsChoice.opengl)
+                Text("Vulkan (experimental)").tag(GraphicsChoice.vulkan)
+            }
+            .help("OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before). Automatic picks what is faster on this Mac.")
+            if let p = plan {
+                Text("Next start: \(p.venus ? "OpenGL and Vulkan" : "OpenGL") (\(p.why)).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

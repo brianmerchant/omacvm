@@ -36,6 +36,8 @@ install -m644 "$here/omacvm-plugins.service" /etc/systemd/user/omacvm-plugins.se
 Q=$H/.local/state/omacvm/pending-plugins
 install -d -o "$U" -g "$U" "$(dirname "$Q")"
 grep -qx "$id" "$Q" 2>/dev/null || echo "$id" >> "$Q"
+# On again before a disable queued at the next login ran: not disabled.
+if [[ -f $Q-off ]]; then grep -vxF "$id" "$Q-off" > "$Q-off.new" || true; mv -f "$Q-off.new" "$Q-off"; chown "$U:$U" "$Q-off"; fi
 chown "$U:$U" "$Q"
 if as_user omarchy-shell shell ping >/dev/null 2>&1; then
   as_user /usr/local/bin/omacvm-plugins
