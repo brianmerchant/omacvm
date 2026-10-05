@@ -19,6 +19,16 @@ enum GuestAgent {
         return reply?.contains("\"return\"") == true
     }
 
+    /// Starts a program in the VM as root (guest-exec) without waiting for it.
+    /// Arguments are passed as they are, no shell in between.
+    @discardableResult
+    static func run(socketPath: String, _ path: String, _ args: [String]) -> Bool {
+        let body: [String: Any] = ["execute": "guest-exec", "arguments": ["path": path, "arg": args]]
+        guard let json = try? JSONSerialization.data(withJSONObject: body),
+              let command = String(data: json, encoding: .utf8) else { return false }
+        return execute(socketPath: socketPath, command)?.contains("\"return\"") == true
+    }
+
     /// Sends one command and waits up to two seconds for its one-line reply,
     /// so no reply is left behind for the next caller.
     static func execute(socketPath: String, _ command: String) -> String? {

@@ -263,14 +263,25 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   if [[ -n $lost ]]; then
     skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
-  # The VM's GPU memory on the Mac: its budget, the highest use logged (in
-  # 512 MB steps) and whether anything was refused for it.
+  # The VM's graphics memory on the Mac (on top of its VM memory): now and
+  # the peak of this run from QEMU's status file (logs/gpu-memory, written
+  # while the VM runs), else the peak QEMU's log has (512 MB steps). Refused
+  # only past the runaway budget or when macOS itself was short of memory.
+  gm="$(dirname "$miclog")/gpu-memory"
+  gmv() { sed -n "s/^$1=//p" "$gm" 2>/dev/null | head -1; }
+  gb() { awk -v m="$1" 'BEGIN { printf (m < 1024 ? "%d MB" : "%.1f GB"), (m < 1024 ? m : m / 1024) }'; }
   budget=$(grep -o 'guest GPU memory budget: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')
-  peak=$(grep -o 'guest GPU memory in use: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')
-  if [[ -n $budget ]]; then
-    if grep -q 'guest GPU memory budget of [0-9]* MB reached' "$miclog"; then
-      bad "GPU memory" "the VM's apps wanted more than the budget of $budget MB this run: one lost its GPU context (restart the VM)"
-    else ok "GPU memory" "${peak:+peak about $peak MB, }budget $budget MB"; fi
+  if [[ -s $gm && -n $(gmv in_use_mb) ]]; then
+    use=$(gmv in_use_mb) peak=$(gmv peak_mb) refused=$(gmv refused) pressure=$(gmv pressure)
+    what="$(gb "$use") now (peak $(gb "$peak")), from the Mac on top of the VM memory; macOS memory pressure $pressure"
+    if (( ${refused:-0} > 0 )); then
+      bad "graphics memory" "$what; $refused allocation(s) refused this run ($(grep -o -e 'budget of [0-9]* MB reached' -e 'macOS is short of memory' "$miclog" | sort -u | paste -sd, - | sed 's/,/, /g')): an app may have lost its GPU context"
+    else ok "graphics memory" "$what"; fi
+  elif [[ -n $budget ]]; then
+    peak=$(grep -o 'guest GPU memory in use: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')
+    if grep -q -e 'guest GPU memory budget of [0-9]* MB reached' -e 'macOS is short of memory' "$miclog"; then
+      bad "graphics memory" "refused this run (budget $budget MB or macOS short of memory): an app may have lost its GPU context (restart the VM)"
+    else ok "graphics memory" "${peak:+peak about $(gb "$peak"), }no fixed limit (runaway guard $(gb "$budget"))"; fi
   fi
 fi
 # The GPU path an app VM took this run (qemu.log starts fresh with each run):
