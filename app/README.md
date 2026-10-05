@@ -40,6 +40,14 @@ scripts/build-app.sh --release      # stops unless the whole repo is committed
 scripts/package-release.sh          # dist/OmacVM-<version>.zip and .sha256
 ```
 
+A release build has KosmicKrisp (Vulkan on macOS 26 and newer; Graphics'
+Automatic uses it): it needs Xcode 26 and Homebrew's `llvm`, `bison`,
+`spirv-llvm-translator` and `spirv-tools` on the release Mac
+(`runtime/build-kosmickrisp.sh --check` lists what is missing), about 13 MB
+in the app, its licence notice in `Contents/Resources/licenses`.
+`OMACVM_RUNTIME_KOSMICKRISP=0` and `OMACVM_RELEASE_NO_KOSMICKRISP=1` leave
+it out (MoltenVK only).
+
 With `OMACVM_SIGN_ID` the app, its QEMU and QEMU's libraries are signed with
 that Developer ID, the hardened runtime and a timestamp; QEMU gets
 `runtime/qemu-hvf.entitlements` (Hypervisor, microphone), the app

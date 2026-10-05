@@ -66,7 +66,7 @@ on CGL, not on ANGLE.
  virtio-gpu: ctrl queue, blob resources, hostmem window, 16 KiB blob alignment,
              up to 5 outputs (Virtual-1..5)
    |
- QEMU virtio-gpu-gl-pci (blob=true, venus=true, hostmem=4G when Venus is on)
+ QEMU virtio-gpu-gl-pci (blob=true, venus=true, hostmem=<memory plan> when the Graphics setting gives Vulkan, ADR 0035)
    |  ctrl queue decoded on the main loop today; async (kick -> render
    |  thread) planned
    v
@@ -102,7 +102,7 @@ on CGL, not on ANGLE.
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
-| KosmicKrisp on macOS 26 | planned | ICD choice already in `virgl-darwin-vulkan-beside.patch` |
+| KosmicKrisp on macOS 26 | built, in release builds (3.0.0, ADR 0035) | `virgl-darwin-vulkan-beside.patch` + `virgl-darwin-kosmickrisp-fallback.patch` |
 | OpenCL (rusticl on Zink), WebGPU in Firefox and Chromium | built: `webgpu-compute`; feature `vulkan` (`gpu-next`, opt-in) | section 6, ADR 0022 |
 | Zink as GL driver, ANGLE-on-Vulkan in Chrome | blocked on MoltenVK (GL 2.1, no `VK_EXT_provoking_vertex`) | - |
 | VideoToolbox decode | built: `video-decode` | `virgl-videotoolbox-decode.patch` |
@@ -369,7 +369,7 @@ Rules:
  guest Vulkan app -> Mesa venus (vulkan-virtio) -> virtio-gpu ring in a blob
    -> QEMU -> virglrenderer proxy -> render server THREAD (in process)
    -> vkr (venus renderer) -> libvulkan.1.dylib (in the runtime)
-   -> ICD: MoltenVK 1.4.2 (macOS 15) | KosmicKrisp (macOS 26+, planned)
+   -> ICD: MoltenVK 1.4.2 (macOS 15) | KosmicKrisp (macOS 26+, release builds)
    -> Metal
 ```
 

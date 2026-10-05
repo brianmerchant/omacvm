@@ -398,6 +398,53 @@ tests as the MacBook measurement of 2026-10-04).
   app (display on, a UTM VM running beside it): 6.9 / 6.3 Gbit/s VM → Mac,
   9.5 / 8.8 Mac → VM (1 / 4 streams).
 
+## Graphics: Automatic (2026-10-05)
+
+What OmacVM.app's Graphics setting picks when it is Automatic
+([ADR 0035](../adr/0035-graphics-setting.md)). With Vulkan on, the VM gets the
+Venus device next to virgl; the question was whether a Vulkan path is faster
+for the work people do: OpenGL apps through Zink (GL on Vulkan), Chrome's
+WebGL through ANGLE on Vulkan, and Vulkan apps themselves. The Venus device
+itself costs OpenGL nothing (MacBook, locked ABBA, gpu-next: glmark2 2,816 vs
+2,898, Aquarium 20.0 vs 19.9 fps).
+
+**macOS 15 (MacBook Pro M4 Max, Venus on MoltenVK 1.4.2).** One test VM, 8
+CPUs and 16 GB, headless, the 3.0.0 runtime, under the bench lock, median of 3.
+One test Mesa (26.2.4 with OmacVM's five patches) for virgl and Zink:
+
+| | virgl (OpenGL) | Vulkan path |
+|---|---|---|
+| glmark2 2023.01, quick set, full screen | 3,780 (Arch's Mesa 26.2.3: 3,731) | Zink on Venus: OpenGL ES 2.0 only, every scene crashes |
+| WebGL Aquarium 30k, Chrome 154 | 19.4 fps (ANGLE on GL, Wayland) | ANGLE on Vulkan: Chrome's GPU process does not start (ES 2.0 only, Chrome needs 3.0): no WebGL |
+| Basemark Web 3.0, WebGL 2 pages | runs | no WebGL on either Vulkan path |
+| vkmark, full screen, Vulkan apps | - | 387 (software present, see below) |
+
+MoltenVK has no `VK_EXT_provoking_vertex`, transform feedback or geometry
+shaders, so ANGLE and Zink stop at ES 2.0. **Automatic = OpenGL on macOS 15**;
+Vulkan (Venus on MoltenVK) is there for Vulkan apps when picked.
+
+**macOS 26 and newer (Mac mini M4, macOS 27, KosmicKrisp),** from the
+kosmickrisp track (unlocked, median of 3 unless said; tracks/kosmickrisp.md):
+
+| | OpenGL path | Vulkan path |
+|---|---|---|
+| vkmark 800x600 | - | KosmicKrisp 840 vs MoltenVK 650 on the same Mac (+29 %) |
+| glmark2-es2 off-screen, one guest Mesa | virgl 592 | Zink on KosmicKrisp 558 (ES 2.0 only) |
+| WebGL Aquarium 30k, Chrome 154 | 21.9 fps (ANGLE on GL) | 26.9 fps (ANGLE on Vulkan, X11 and flags) |
+| Basemark Web 3.0 | 1,654 | 1,511 (ANGLE on Vulkan) |
+
+KosmicKrisp also has `nullDescriptor`, `robustBufferAccess2` and `logicOp`,
+which MoltenVK lacks. **Automatic = Vulkan on macOS 26 and newer** when the
+app has KosmicKrisp: Vulkan apps get the faster, fuller driver, OpenGL stays on
+virgl (Zink is slower and ES 2.0 only), and Chrome keeps ANGLE on GL (ANGLE on
+Vulkan wins Aquarium but loses Basemark and needs X11 and flags).
+
+Vulkan windows present through a CPU copy (Mesa's software WSI,
+`MESA_VK_WSI_DEBUG=sw`, set for app VMs): a Venus image handed to Hyprland
+as a dma-buf cannot be imported by its OpenGL context on the Mac and ended
+that context (black desktop). The copy costs full-screen Vulkan frame rates
+(vkmark 387 full screen; with vkmark's headless output, no window, 4,700-5,200).
+
 ## GPU compute with Venus (2026-10-04)
 
 OmacVM.app with Venus only (the other routes have no Vulkan or OpenCL in the
