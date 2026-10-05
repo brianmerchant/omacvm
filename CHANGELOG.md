@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 2.9.1 (unreleased)
+
+- OmacVM.app: the VM no longer freezes when the Mac cannot send one of its
+  UDP packets at once (seen on a Mac mini during a big file copy; network
+  filters and VPN apps can hold sends back). QEMU's user network waited in
+  that send with the whole VM stopped; now the packet is dropped, as a busy
+  network would, and `qemu.log` says so at most once a minute with where it
+  was going. `info usernet` counts the drops.
+- If QEMU's main loop stops for more than 2 seconds for any reason,
+  `qemu.log` now says where it is and when it is back
+  (`OMACVM_STALL_WATCHDOG=0` turns this off).
+
 ## 2.9.0
 
 A faster GPU path for OmacVM.app with frames on the display's refresh (120
