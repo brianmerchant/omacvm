@@ -19,6 +19,9 @@ UTM_NO_ANSWER="UTM did not answer: run omacvm in a terminal app on the Mac and a
 
 vms_list() {
   local u=""
+  # The test identity ("OmacVM Test") has only its own app's VMs: the user's
+  # Parallels, UTM and Fusion VMs are not its to list or ask over SSH.
+  if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then app_list; return; fi
   if [[ -x $PRLCTL ]]; then
     "$PRLCTL" list -a -o status,name 2>/dev/null | awk 'NR > 1 { s = $1; $1 = ""; sub(/^ /, ""); print $0 "\tparallels\t" s }'
   fi
