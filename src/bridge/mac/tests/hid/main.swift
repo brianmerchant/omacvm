@@ -16,6 +16,11 @@ func check(_ ok: Bool, _ what: String, line: Int = #line) {
 let b = BrightnessKeys()
 var got: [MediaKey] = []
 b.onKey = { got.append($0) }
+// Key repeat: timers are run by hand here (macOS's delay 0.25 s, interval 0.03 s in this test).
+var timers: [(after: Double, run: () -> Void)] = []
+b.repeatTimes = { (0.25, 0.03) }
+b.after = { timers.append(($0, $1)) }
+func runTimers(_ n: Int) { for _ in 0..<n where !timers.isEmpty { timers.removeFirst().run() } }
 var reads: [UInt64: Int] = [:]
 let macbook: [UInt32: UInt32] = [HIDUsage.f1: 0x00FF_0005, HIDUsage.f2: 0x00FF_0004, 0x0007_0044: 0x000C_00EA]
 func key(_ dev: UInt64, _ page: UInt32, _ usage: UInt32, _ down: Bool, map: [UInt32: UInt32], fnState: Bool = false) {
@@ -45,6 +50,45 @@ key(2, 0xFF01, 0x03, true, map: HIDBrightness.appleDefault, fnState: true)
 tap(2, 7, 0x3B, map: HIDBrightness.appleDefault, fnState: true)
 key(2, 0xFF01, 0x03, false, map: HIDBrightness.appleDefault, fnState: true)
 check(got == [.brightnessUp], "Magic Keyboard, standard F-keys: F2 is F2, fn + F2 is brightness up")
+// The Mac mini's Magic Keyboard: Bluetooth, vendor 0x004C, no FnFunctionUsageMap (read on the mini with ioreg).
+got = []
+let btMap = HIDBrightness.map(published: nil, vendor: 0x004C)
+tap(4, 7, 0x3A, map: btMap); tap(4, 7, 0x3B, map: btMap); tap(4, 7, 0x3B, map: btMap)
+check(got == [.brightnessDown, .brightnessUp, .brightnessUp], "Bluetooth Magic Keyboard (0x004C, no map): F1, F2, F2 -> down, up, up")
+got = []
+key(4, 0xFF, 0x03, true, map: btMap); tap(4, 7, 0x3A, map: btMap); key(4, 0xFF, 0x03, false, map: btMap)
+tap(4, 0x0C, 0x6F, map: btMap)
+check(got == [.brightnessUp], "... fn + F1 is F1; its consumer brightness up still acts")
+got = []
+tap(4, 7, 0x3A, map: btMap, fnState: true)
+key(4, 0xFF, 0x03, true, map: btMap, fnState: true); tap(4, 7, 0x3A, map: btMap, fnState: true); key(4, 0xFF, 0x03, false, map: btMap, fnState: true)
+check(got == [.brightnessDown], "... standard F-keys on: F1 is F1, fn + F1 is brightness down")
+// Held keys repeat at macOS's speed until released (HID sends no repeats).
+timers = []; got = []
+key(4, 7, 0x3B, true, map: btMap)
+check(got == [.brightnessUp] && timers.first?.after == 0.25, "held F2: one step at once, the repeat after macOS's delay")
+runTimers(9)
+check(got.count == 10 && got.allSatisfy { $0 == .brightnessUp } && timers.first?.after == 0.03, "held F2: 9 repeats at macOS's interval (\(got.count) steps)")
+key(4, 7, 0x3B, false, map: btMap)
+runTimers(5)
+check(got.count == 10 && timers.isEmpty, "released: the repeats stop")
+timers = []; got = []
+key(4, 7, 0x3A, true, map: btMap); runTimers(2)
+key(4, 7, 0x3B, true, map: btMap); runTimers(3)
+check(got == [.brightnessDown, .brightnessDown, .brightnessDown, .brightnessUp, .brightnessUp, .brightnessUp] && timers.count == 1,
+      "F1 held then F2: F1's repeats stop, F2 repeats (\(got))")
+key(4, 7, 0x3A, false, map: btMap); runTimers(1)
+check(got.count == 7, "releasing F1 (not the held key) does not stop F2")
+key(4, 7, 0x3B, false, map: btMap); runTimers(3)
+check(timers.isEmpty, "... releasing F2 does")
+timers = []; got = []
+key(4, 7, 0x3B, true, map: btMap); runTimers(500)
+check(got.count == 1 + BrightnessKeys.maxRepeats && timers.isEmpty, "a release that never comes: the repeats stop after \(BrightnessKeys.maxRepeats)")
+key(4, 7, 0x3B, false, map: btMap)
+timers = []; got = []
+tap(4, 7, 0x04, map: btMap)
+check(got.isEmpty && timers.isEmpty, "a letter: nothing, no repeat")
+timers = []
 // A PC keyboard's own brightness keys (consumer page).
 got = []
 tap(3, 0x0C, 0x70, map: [:]); tap(3, 0x0C, 0x6F, map: [:]); tap(3, 7, 0x3A, map: [:])

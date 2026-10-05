@@ -1,6 +1,6 @@
 // Brightness keys read from the keyboard itself (why: keys-model.swift,
 // HIDKeyboards). keys.swift's MediaKeys acts on them.
-import Foundation
+import AppKit   // NSEvent: macOS's key repeat speed
 import IOKit
 import IOKit.hid
 
@@ -15,6 +15,15 @@ final class BrightnessKeys {
   private var said: String?
   private var asked = false
   var onKey: ((MediaKey) -> Void)?
+
+  // A held key repeats at macOS's key repeat speed (Keyboard settings): HID
+  // sends one press and one release, no repeats. Stops on release, on another
+  // brightness press, or after `maxRepeats` (a release that never came).
+  static let maxRepeats = 64
+  private var held: (device: UInt64, usage: UInt32, key: MediaKey)?
+  private var holdID = 0
+  var repeatTimes: () -> (delay: Double, interval: Double) = { (NSEvent.keyRepeatDelay, NSEvent.keyRepeatInterval) }
+  var after: (Double, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
 
   /// Opens once Input Monitoring is granted (asked every 2 s with the media
   /// keys); not decided yet: macOS asks the user once. What is missing is
@@ -83,17 +92,27 @@ final class BrightnessKeys {
       maps[id] = m
       return m
     }()
-    if let key = keyboards.value(device: id, usage: usage, pressed: pressed, map: map, fnState: fnState) { onKey?(key) }
+    if !pressed, let h = held, h.device == id, h.usage == usage { held = nil }
+    guard let key = keyboards.value(device: id, usage: usage, pressed: pressed, map: map, fnState: fnState) else { return }
+    onKey?(key)
+    holdID += 1
+    held = (id, usage, key)
+    let hold = holdID
+    after(max(0.05, repeatTimes().delay)) { [weak self] in self?.repeatKey(hold, 0) }
+  }
+
+  private func repeatKey(_ hold: Int, _ n: Int) {
+    guard hold == holdID, let h = held, n < Self.maxRepeats else { return }
+    onKey?(h.key)
+    after(max(0.015, repeatTimes().interval)) { [weak self] in self?.repeatKey(hold, n + 1) }
   }
 
   /// The keyboard's own F-key map (on its event driver, below the device);
-  /// an Apple keyboard without one: F1/F2 as on all of them.
+  /// an Apple keyboard (USB or Bluetooth) without one: F1/F2 as on all of them.
   static func fnMap(_ device: IOHIDDevice, _ service: io_service_t) -> [UInt32: UInt32] {
     let s = IORegistryEntrySearchCFProperty(service, kIOServicePlane, "FnFunctionUsageMap" as CFString, nil,
                                             IOOptionBits(kIORegistryIterateRecursively)) as? String
-    let m = HIDBrightness.fnMap(s)
-    if !m.isEmpty { return m }
-    return IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int == 0x05AC ? HIDBrightness.appleDefault : [:]
+    return HIDBrightness.map(published: s, vendor: IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int)
   }
 
   /// "Use F1, F2, etc. keys as standard function keys" (Keyboard settings).

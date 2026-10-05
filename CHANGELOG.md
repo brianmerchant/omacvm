@@ -121,7 +121,9 @@ in more words.
 - Brightness keys with an OmacVM.app VM in front work on macOS 27 too: there
   they reach no app at all, so OmacVM Bridge reads them from the keyboard
   (Input Monitoring; macOS still gets every key) and sets the display the VM
-  is on. With no VM in front macOS handles them as always.
+  is on, also from a Bluetooth Magic Keyboard. Quick presses step every
+  time and a held key repeats at macOS's key repeat speed. With no VM in
+  front macOS handles them as always.
 - Scroll momentum only ever takes a trackpad's scrolling (the built-in one,
   a Magic Trackpad, also one connected later), decided per scroll: wheel
   mice, smooth-scrolling mice (Logitech MX and co.) and a Magic Mouse scroll

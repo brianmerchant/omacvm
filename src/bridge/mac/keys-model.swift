@@ -149,6 +149,18 @@ enum HIDUsage {
 enum HIDBrightness {
   /// An Apple keyboard without the property: F1 down, F2 up, as on all of them.
   static let appleDefault: [UInt32: UInt32] = [HIDUsage.f1: 0x00FF_0005, HIDUsage.f2: 0x00FF_0004]
+  /// Apple's vendor IDs: 0x05AC over USB, 0x004C (Apple's Bluetooth id) over
+  /// Bluetooth. The Mac mini's Magic Keyboard is Bluetooth, 0x004C, and
+  /// publishes no FnFunctionUsageMap.
+  static let appleVendors: Set<Int> = [0x05AC, 0x004C]
+
+  /// A keyboard's F-key map: its own published one, else Apple's default for
+  /// an Apple keyboard, else none (a PC keyboard: its F1 is F1).
+  static func map(published: String?, vendor: Int?) -> [UInt32: UInt32] {
+    let m = fnMap(published)
+    if !m.isEmpty { return m }
+    return vendor.map { appleVendors.contains($0) } == true ? appleDefault : [:]
+  }
 
   /// FnFunctionUsageMap: "0xFROM,0xTO,0xFROM,0xTO,...". Pairs that do not
   /// parse are left out; an odd last entry is ignored.
@@ -213,6 +225,29 @@ struct BrightnessOnce {
   static func macOSDidIt(before: Float?, after: Float?) -> Bool {
     guard let before, let after else { return false }
     return abs(after - before) >= 0.004
+  }
+}
+
+/// The Bridge's own brightness steps per display. A key read from the keyboard
+/// checks a moment later whether macOS changed the display itself; a step of
+/// the Bridge's in that time (an earlier quick press, a held key's repeat)
+/// would look like macOS's, so then the check is skipped and the key steps.
+struct OwnSteps {
+  /// How long before the press a step of the Bridge's may still show up.
+  static let settle = 0.3
+  private var last: [UInt32: Double] = [:]
+
+  mutating func stepped(_ display: UInt32, at now: Double) { last[display] = now }
+
+  /// The Bridge stepped `display` since shortly before the press at `pressAt`.
+  func since(_ display: UInt32, pressAt: Double) -> Bool {
+    guard let l = last[display] else { return false }
+    return l >= pressAt - OwnSteps.settle
+  }
+
+  /// The press's check: true = macOS changed it itself, the Bridge does not step.
+  func macOSDidIt(_ display: UInt32, pressAt: Double, before: Float?, after: Float?) -> Bool {
+    !since(display, pressAt: pressAt) && BrightnessOnce.macOSDidIt(before: before, after: after)
   }
 }
 
