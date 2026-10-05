@@ -11,8 +11,8 @@ prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
 a boot splash, less power when idle. From 2.9.x: `omacvm update` once; after
 that the app updates itself. Details below.
 
-Still being finished; each line is decided at release (kept, or moved to
-3.0.1):
+Pending (each line is decided at release: the lane landed, or it moves to
+3.0.1; this list goes before the release):
 - (pending #91) Any Omarchy scale on 5K and larger: graphics memory without
   a fixed limit.
 - (pending #93) Sound on a busy Mac without crackles; a VM start no longer
