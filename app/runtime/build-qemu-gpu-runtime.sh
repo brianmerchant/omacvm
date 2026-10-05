@@ -527,6 +527,9 @@ verify_file_sha "IPv4 UDP reply translation patch" "$udp_patch" "$udp_patch_sha2
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$udp_patch"
 # OmacVM: the guest reaches the Mac's 127.0.0.1 only on the ports it may use.
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$native_dir/patches/omacvm-libslirp-host-ports.patch"
+# Non-blocking UDP/ICMP sockets: a send the Mac cannot take at once is dropped
+# instead of freezing the VM (Tests/net/test-slirp-udp-stall.sh).
+patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$native_dir/patches/libslirp-nonblocking-datagram-sockets.patch"
 tar -xzf "$qemu_archive" -C "$source_parent"
 tar -xzf "$virgl_archive" -C "$source_parent"
 tar -xzf "$virgl_tap_archive" -C "$source_parent"
@@ -1097,6 +1100,12 @@ log "Relocating, capability-gating, signing, and publishing the runtime"
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
   ${kosmickrisp_args[@]+"${kosmickrisp_args[@]}"} \
   --archive-dir "$archive_dir"
+
+# A stalled UDP send on the Mac must not freeze the VM, and the stall
+# watchdog must name the place (an idle QEMU without guest, a few seconds).
+"$native_dir/Tests/net/test-slirp-udp-stall.sh" \
+  "$native_dir/.build/qemu-gpu-runtime/bin/qemu-system-aarch64" || \
+  die "the slirp UDP stall test failed"
 
 # The firmware must show the logo and name the disk's boot entry as QEMU's
 # does, with the QEMU it ships with (Tests/firmware/test-firmware.py).
