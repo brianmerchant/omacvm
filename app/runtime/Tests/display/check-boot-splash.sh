@@ -60,5 +60,9 @@ grep -A3 '^+ *case SPLASH_LOOK_LIMIT:$' "$tmp/hold-tick.inc" | grep -q 'omacvm_w
 awk '/^\+- \(void\)reveal:\(BOOL\)now$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" |
   grep -q 'fadeIfStalled' && grep -q '^+    if (left <= 0 && CACurrentMediaTime() - last_tick > 0.25) {$' "$p" ||
   { echo "FAIL: the logo waits for display-link frames a hidden window never gets" >&2; exit 1; }
+# A display link that stops while the animation runs is replaced (and logged).
+awk '/^\+- \(void\)play$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" | grep -q 'watchLink' &&
+  awk '/^\+- \(void\)watchLink$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" | grep -q 'makeLink' ||
+  { echo "FAIL: a display link that stops mid-animation is not replaced" >&2; exit 1; }
 echo "check-boot-splash: the display agent counts by its hello when the window talks to it"
 echo "check-boot-splash: the logo waits for the wallpaper; a desktop after the time limit is marked"
