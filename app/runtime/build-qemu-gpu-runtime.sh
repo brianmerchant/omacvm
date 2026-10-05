@@ -185,11 +185,11 @@ virgl_ubo_align_patch_sha256=0087f49d9f64e497580bbb6174b92ef0990c85eea73afbc18ff
 virgl_block_array_patch_sha256=8b9fb4870fbd4ee629d2802d10672406c7ad43bdf54ae558bd6427e6f5a4011c
 virgl_draw_error_patch_sha256=9243046f78aa8eaa1c22591a3afeafe6a51ea092170ac8370d26ffa57e92c363
 virgl_vertex_unused_patch_sha256=1c424509f19ebcd23c17a8fdb1984ddaa64e90e682959d5621236444aa1a2cc6
-virgl_memory_budget_patch_sha256=c8068ca79738984e8c1205fc4eea73956de44ce92a98148bca50ee19e304c868
+virgl_memory_budget_patch_sha256=3609979e8b4cb1b0ac14474e30d4ff063d63aebbeef83aba9ef6497bad5ae6ae
 virgl_queue_flush_patch_sha256=7f468d955d47cfbf9df75578efddfab0f36256b9b092c8e992f6b78faf67991b
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
-virgl_budget_loss_patch_sha256=cc4e339863d57ce9343de0b1eb54ec6730eeaa7a94e40e676d6a4e24c484bddb
-virgl_venus_budget_patch_sha256=a05efd88854e5c1653b44383336ce1257788e128e66f74b188df8fd8bc0f0eaf
+virgl_budget_loss_patch_sha256=32fca5ea3b3c76d147138935678bc5ca7ded2d17a5922993ba9f9a232caef2a4
+virgl_venus_budget_patch_sha256=fdfc1667e0e9b267104fff8113e6754979d1f4d94c32776f29daab17147cf842
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
 virgl_shader_core_glsl_version_patch_sha256=aa6a6c0055d3b5cdca09e26fba7f2b97a635696e60d9c00835e8edab09cb25c7
 virgl_shader_shadow_lod_patch_sha256=c56fb4fa4637f5c634bce74be2a750b9ba321a7ed79cc16787dd579a71da1d92
@@ -732,6 +732,9 @@ cc -Wall -Werror -I"$display_tests" "$native_dir/Tests/display/test-idle-refresh
   -o "$display_tests/test-idle-refresh"
 "$display_tests/test-idle-refresh"
 OMACVM_IDLE_REFRESH=0 "$display_tests/test-idle-refresh" off
+# OmacVM: VM memory and graphics memory in the app menu (read when it opens).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-graphics-memory.patch"
+"$native_dir/Tests/display/test-gpu-memory-menu.sh"
 # OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
 # logo until the guest's desktop, and instead of "Display output is not
 # active."; the cells must be the firmware's logo, the animation's table the
@@ -936,7 +939,8 @@ verify_file_sha "Draw GL error check" "$virgl_draw_error_patch" "$virgl_draw_err
 patch -d "$virgl_source" -p1 -f -i "$virgl_draw_error_patch"
 verify_file_sha "Unused first vertex input" "$virgl_vertex_unused_patch" "$virgl_vertex_unused_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_unused_patch"
-# OmacVM: guest resources have a memory budget (OMACVM_GPU_MEMORY_MB, default a quarter of the Mac's memory).
+# OmacVM: guest resources have a memory budget against a runaway guest (OMACVM_GPU_MEMORY_MB, default
+# three quarters of the Mac's memory); below it virgl-darwin-memory-pressure.patch asks macOS.
 verify_file_sha "Resource memory budget" "$virgl_memory_budget_patch" "$virgl_memory_budget_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_memory_budget_patch"
 # OmacVM: QEMU's resource and transfer commands are flushed (Apple's GL keeps unflushed texture memory).
@@ -991,6 +995,8 @@ verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_
 patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
 # OmacVM GPU: the sync thread does not test fences while the render thread runs commands.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
+# OmacVM GPU: guest GPU memory follows the Mac's memory pressure; status file for the app.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-memory-pressure.patch"
 # OmacVM Venus: MoltenVK cannot compile zero-initialized workgroup memory.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
 # OmacVM: a compositor's dma-buf import (a Vulkan window) no longer ends its context on macOS OpenGL.

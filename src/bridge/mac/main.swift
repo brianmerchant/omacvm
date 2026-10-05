@@ -74,7 +74,7 @@ func fusionHost() -> String? {
   }
   return nil
 }
-let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? 47831
+let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? (testIdentity ? 47931 : 47831)
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed
 let minorSeconds = 30.0      // Wi-Fi signal jitter alone: sent at most this often
@@ -89,7 +89,7 @@ func log(_ s: String) { print("\(logFormat.string(from: Date())) omacvm-bridge: 
 // ---- token ----
 // OMACVM_BRIDGE_SUPPORT_DIR: a test Bridge's own token and config (never the installed one's).
 let supportDir = ProcessInfo.processInfo.environment["OMACVM_BRIDGE_SUPPORT_DIR"] ?? FileManager.default.homeDirectoryForCurrentUser
-  .appendingPathComponent("Library/Application Support/omacvm-bridge").path
+  .appendingPathComponent(testIdentity ? "Library/Application Support/omacvm-test-bridge" : "Library/Application Support/omacvm-bridge").path
 let tokenPath = supportDir + "/token"
 
 func loadSecret(_ path: String) -> String {
