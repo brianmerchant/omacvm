@@ -3,7 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 2.9.1 (unreleased)
+## 2.9.1
+
+A hotfix for 2.9.0: brightness keys that work with the VM in front, a
+way out of the VM that always works, no VM freeze under network load, and
+WebGL Aquarium back to 2.8.0's speed.
+
+### Fixed
 
 - OmacVM.app: the VM no longer freezes when the Mac cannot send one of its
   UDP packets at once (seen on a Mac mini during a big file copy; network
@@ -14,6 +20,51 @@ in more words.
 - If QEMU's main loop stops for more than 2 seconds for any reason,
   `qemu.log` now says where it is and when it is back
   (`OMACVM_STALL_WATCHDOG=0` turns this off).
+- Brightness keys with an OmacVM.app VM in front (full screen or in a
+  window): on macOS 27 they reach no app, so OmacVM Bridge now reads them
+  from the keyboard (Input Monitoring; macOS still gets every key) and sets
+  the display the VM is on. This works with a Bluetooth Magic Keyboard too.
+  Quick presses step every time and a held key repeats at macOS's key repeat
+  speed. With no VM in front, macOS handles them as always. The volume keys
+  are taken at the keyboard level as well.
+- ⌃⌥⌘ Esc always gets you out of the full-screen VM. After the swipe,
+  OmacVM Gestures checks that the VM is no longer in front; if it still is
+  (on a Mac mini the swipe did nothing and Finder had no window), the VM's
+  window leaves full screen and is hidden, and ⌃⌥⌘ Esc in macOS brings it
+  back. On a Mac with only the desktop and the VM's Space, a swipe that
+  bounces is tried the other way once. "Swipe all monitors" swipes each
+  display.
+- ⌃⌥⌘ Esc in an OmacVM.app window gives the keyboard back to the app you
+  were in before (else Finder); pressed again in macOS, the window comes
+  back with the keyboard.
+- The helpers' key taps take the front place again in more cases after
+  OmacVM.app restarts: also for a VM in a window, and for the Bridge's media
+  keys when macOS names no program for QEMU (builds on brianmerchant's fix,
+  #39).
+- WebGL Aquarium is back to 2.8.0's speed with 2.9.0's GPU gains kept: the
+  thread that waits for GPU fences no longer tests them back to back while
+  QEMU's render thread runs guest commands (it took Apple's OpenGL lock from
+  it). Bench lock, this part alone: Aquarium 20.15-20.6 fps against 2.9.0's
+  19.0 and 2.8.0's 20.2 (ADR 0026). `OMACVM_VIRGL_FENCE_BUSY=0` goes back.
+- Mouse wheels scroll one to one again, with nothing after the wheel stops
+  (a smooth-scrolling mouse such as a Logitech MX could jump on). Scroll
+  momentum now only ever takes a trackpad's scrolling (built-in, or a Magic
+  Trackpad, also one connected later), so it is on by default for new VMs.
+- Omarchy's bar shows Wi-Fi as connected while the Mac is, also before
+  Location Services is allowed for OmacVM Bridge (or when it is not): the
+  link decides then and the network's name stays hidden. No more flipping
+  on and off.
+
+### Also
+
+- OmacVM.app's `apply-vm.sh` takes `--reset-host-key` for a reinstalled VM.
+- OmacVM Bridge logs a brightness key an external display did not take
+  once, and asks for QEMU's control socket again on the next key.
+- Experimental, off by default: every macOS shortcut to the VM while it has
+  the keyboard (`defaults write org.omacvm.app macShortcuts -bool false` and
+  a VM restart). On a Mac mini macOS's shortcuts were not always handed
+  back, so macOS keeps them unless you turn this on.
+- Docs: OmacVM.app needs macOS 15 or newer.
 
 ## 2.9.0
 
