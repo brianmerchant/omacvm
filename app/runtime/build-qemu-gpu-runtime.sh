@@ -694,6 +694,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-system-shortc
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-keys-for-macos.patch"
 grep -q 'if (omacvm_key_for_macos(event))' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not pass OmacVM's marked keys to macOS (keys-for-macos patch)"
+# The escape combo passes QEMU's full-grab tap, so OmacVM Gestures gets it in any tap order.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-escape-combo-tap.patch"
+grep -q 'flags & kCGEventFlagMaskCommand, flags & kCGEventFlagMaskShift)) {' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m's event tap does not let the escape combo through (escape-combo-tap patch)"
 # The VM's window takes the pointer without a click; the Mac's cursor hides only
 # once the guest draws its own (and the logic's test).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-start-logic.patch"
