@@ -173,6 +173,11 @@ final class Runner {
         if Settings.hdrActive {
             env["OMACVM_GL_HDR"] = "1"
         }
+        // QEMU puts its main loop (sound card timers, virgl) at user-interactive
+        // QoS and logs which one it got; the hidden setting keeps the default.
+        if Settings.audioClassic {
+            env["OMACVM_MAIN_LOOP_QOS"] = "default"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"

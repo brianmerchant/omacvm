@@ -306,6 +306,17 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥⌘ Esc is macOS's)"
   fi
 fi
+# Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
+# user-interactive QoS; the hidden audioClassic setting keeps the default.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  q=$(grep -o 'main loop QoS: .*' "$miclog" | tail -1)
+  case $q in
+    "") ;;   # a runtime before 3.0.0 says nothing
+    *user-interactive) ok "sound timing" "QEMU's main loop at user-interactive QoS" ;;
+    *refused*) warn "sound timing" "macOS refused user-interactive QoS: sound may crackle while the Mac is busy" ;;
+    *) ok "sound timing" "QEMU's main loop at the default QoS (audioClassic)" ;;
+  esac
+fi
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
