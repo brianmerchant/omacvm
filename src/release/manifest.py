@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Update manifests (docs/adr/0032): one digest per part of src/.
 
-  manifest.py digests [--src DIR]
+  manifest.py digests [--src DIR] [--manifest FILE]
       {"version", "parts": {part: {"digest", "release"}}} for this copy of
-      src/ (omacvm apply writes it to the VM's /etc/omacvm/installed.json)
+      src/ (omacvm apply writes it to the VM's /etc/omacvm/installed.json); a part
+      whose digest FILE's manifest (or the Bridge's updates.json) has keeps that
+      part's release, else the release is this copy's version
   manifest.py build --version V --commit C [--previous FILE] [--date D] [--notes FILE] [--src DIR]
                     [--teams "T..." | --app APP] [--out FILE]
       the release manifest ("kind": "control-manifest"); a part keeps the release of the previous manifest
@@ -94,6 +96,27 @@ def version(src: str) -> str:
         return f.read().strip()
 
 
+def released(path) -> dict:
+    """{part: {"digest", "release"}} from a release manifest or the Bridge's
+    updates.json (its "raw": the manifest it verified); {} if none. Only the
+    labels in installed.json come from it."""
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            m = json.load(f)
+        if isinstance(m.get("raw"), str):
+            import base64
+            m = json.loads(base64.b64decode(m["raw"]))
+        parts = m.get("parts")
+        if m.get("kind") != "control-manifest" or not isinstance(parts, dict):
+            return {}
+        return {k: p for k, p in parts.items() if isinstance(p, dict) and isinstance(p.get("release"), str)
+                and re.match(r"^\d+\.\d+\.\d+$", p["release"])}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="manifest.py")
     ap.add_argument("cmd", choices=["digests", "build", "parts"])
@@ -106,6 +129,7 @@ def main() -> int:
     ap.add_argument("--teams")
     ap.add_argument("--app")
     ap.add_argument("--out")
+    ap.add_argument("--manifest")
     a = ap.parse_args()
     if a.cmd == "parts":
         for name, fs in assign(a.src, load_parts(os.path.join(HERE, "parts.tsv"))).items():
@@ -115,7 +139,12 @@ def main() -> int:
     d = digests(a.src)
     if a.cmd == "digests":
         v = version(a.src)
-        json.dump({"version": v, "parts": {k: {"digest": x, "release": v} for k, x in sorted(d.items())}}, sys.stdout)
+        rel = released(a.manifest)
+        # A part keeps the release the manifest names while its digest is the
+        # same; any other part (or no manifest) says this copy's version.
+        json.dump({"version": v, "parts": {k: {"digest": x, "release": rel.get(k, {}).get("release", v)
+                                               if rel.get(k, {}).get("digest") == x else v}
+                                           for k, x in sorted(d.items())}}, sys.stdout)
         print()
         return 0
     if not (a.version and re.match(r"^\d+\.\d+\.\d+$", a.version)):

@@ -5,6 +5,7 @@ worker threads."""
 from __future__ import annotations
 
 import dataclasses
+import os
 import time
 
 from . import state as S
@@ -30,6 +31,20 @@ def iso_age(stamp) -> float | None:
         return age if age > -60 else None   # a time in the future: unknown
     except ValueError:
         return None
+
+
+def local_time(stamp) -> str:
+    """An ISO time ("2026-10-05T20:56:00Z") as this VM's local "YYYY-MM-DD HH:MM"."""
+    if not isinstance(stamp, str) or not stamp:
+        return "?"
+    try:
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t.astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return stamp[:16].replace("T", " ")
 
 
 class Controller:
@@ -109,6 +124,19 @@ class Controller:
             self.local.save_cache(vm_checks="\n".join(
                 f"{c.status}\t{c.name}\t{c.detail}\t{'1' if c.human else ''}\t{c.feature}" for c in checks),
                 checked_at=self.checked_at)
+
+    def local_stamp(self) -> tuple:
+        """What the VM's env and installed parts look like on disk now (mtimes):
+        another window, the Mac or a job may change them."""
+        from .local import env_file, installed_file
+        out = []
+        for p in (env_file(), installed_file()):
+            try:
+                st = os.stat(p)
+                out.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                out.append(None)
+        return tuple(out)
 
     def reload_local(self) -> None:
         """After a job: the VM's env and installed parts changed."""
