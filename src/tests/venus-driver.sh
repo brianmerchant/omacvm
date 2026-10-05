@@ -87,6 +87,17 @@ grep -q '^venus/vulkan-virtio.sh $want ||' src/app/guest/install.sh && pass "app
 grep -q 'OMACVM_GRAPHICS=//p' src/app/guest/install.sh && pass "app install builds ahead for Graphics Vulkan" || fail "app install ignores OMACVM_GRAPHICS"
 grep -q 'ExecStart=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh$' "$D/omacvm-venus-driver.service" &&
   grep -q 'omacvm-venus-driver.service' src/app/guest/install.sh && pass "boot unit runs it" || fail "no boot unit"
+# Never in the boot's critical chain: a timer after the desktop, no
+# network-online.target and no [Install] on the service (a build at boot made
+# multi-user.target, and with it the desktop, wait for it).
+svc=$D/omacvm-venus-driver.service tmr=$D/omacvm-venus-driver.timer
+if ! grep -v '^#' "$svc" | grep -q 'network-online' && ! grep -q '^\[Install\]' "$svc" && grep -q '^OnBootSec=' "$tmr" &&
+   grep -q '^WantedBy=timers.target' "$tmr" && grep -q 'systemctl enable omacvm-venus-driver.timer' src/app/guest/install.sh &&
+   grep -q 'rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service' src/app/guest/install.sh; then
+  pass "driver unit runs from a timer after boot, without network-online"
+else
+  fail "driver unit can delay the boot (network-online, [Install] on the service, or no timer)"
+fi
 grep -q 'app/guest/venus/vulkan-virtio.sh --status' src/guest/check.sh && pass "check has the Vulkan (Venus) row" || fail "no check row"
 
 # Vulkan windows: Mesa's normal WSI when the app says it shows them (omacvm.vkwindows=1),

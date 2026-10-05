@@ -151,8 +151,7 @@ final class Runner {
     /// The VM's Graphics setting on this Mac now: the macOS version, whether
     /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
     static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
-        let forced = Settings.venus || FileManager.default.fileExists(
-            atPath: c.folder.appendingPathComponent("vulkan").path)
+        let forced = FileManager.default.fileExists(atPath: c.folder.appendingPathComponent("vulkan").path)
         return Graphics.plan(choice: Graphics.read(folder: c.folder),
                              macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
                              kosmicKrisp: runtimeHasKosmicKrisp,

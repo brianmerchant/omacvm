@@ -28,6 +28,13 @@ struct GraphicsPlan: Equatable {
     /// Why, for qemu.log ("OmacVM: graphics: ...") and omacvm check.
     var why: String
 
+    /// The next start in words, as omacvm graphics and the control centre
+    /// say it: "Vulkan (driver not built yet: ...)" while a VM set to Vulkan
+    /// waits for its driver.
+    var summary: String {
+        venus ? "OpenGL and Vulkan" : choice == .vulkan ? "Vulkan (\(why))" : "OpenGL"
+    }
+
     var record: String {
         "\(choice.rawValue) -> \(venus ? "vulkan" : "opengl") (\(why))" + (venus ? ", host memory window \(hostmemGB) GB" : "")
     }
@@ -40,11 +47,17 @@ enum Graphics {
     /// Mesa of the vulkan feature). Automatic waits for it.
     static let readyFileName = "venus-ready"
 
-    /// Automatic gives Vulkan from this macOS on, and only with KosmicKrisp in
-    /// the app (Metal 4). Numbers: docs/benchmarks/README.md ("Graphics:
-    /// Automatic"). On older macOS Venus runs on MoltenVK, which cannot carry
-    /// OpenGL or WebGL (ES 2.0 only): Automatic stays on OpenGL there, and
-    /// Vulkan is the user's choice.
+    /// Automatic gives Vulkan at all. 3.0.0: no, on every Mac. A Vulkan
+    /// window that bypasses the guest's software WSI still ends Hyprland's GPU
+    /// context (black desktop, CHANGELOG "Known issue"); until the host
+    /// refuses that import without ending the context, Vulkan is the user's
+    /// choice. true turns the macOS 26+ rule below on (src/lib/graphics.sh:
+    /// GRAPHICS_AUTO_VULKAN, kept equal by src/tests/graphics-setting.sh).
+    static let autoVulkan = false
+    /// With autoVulkan: Vulkan from this macOS on, and only with KosmicKrisp
+    /// in the app (Metal 4). On older macOS Venus runs on MoltenVK, which
+    /// cannot carry OpenGL or WebGL (ES 2.0 only): OpenGL there.
+    /// Numbers: docs/benchmarks/README.md ("Graphics: Automatic").
     static let autoVulkanFromMacOS = 26
     static let autoVulkanOnMoltenVK = false
 
@@ -77,7 +90,31 @@ enum Graphics {
     }
 
     static func autoPicksVulkan(macOSMajor: Int, kosmicKrisp: Bool) -> Bool {
-        (macOSMajor >= autoVulkanFromMacOS && kosmicKrisp) || autoVulkanOnMoltenVK
+        autoVulkan && ((macOSMajor >= autoVulkanFromMacOS && kosmicKrisp) || autoVulkanOnMoltenVK)
+    }
+
+    /// Why a VM set to Vulkan still starts with OpenGL: without a Venus
+    /// driver for 16 KiB pages every Vulkan app would fail with
+    /// ERROR_OUT_OF_HOST_MEMORY. `omacvm apply` (or `omacvm graphics` while
+    /// the VM runs) builds it and writes venus-ready. Same text in omacvm.
+    static let waitingForDriver = "driver not built yet: runs on OpenGL until the next apply"
+
+    /// Up to 2.9 a hidden switch (`defaults write org.omacvm.app venus -bool
+    /// true`) put Vulkan in every VM. 3.0.0 moves it once into the Graphics
+    /// setting: a VM without a choice of its own (no file, or Automatic)
+    /// gets Vulkan; one set to OpenGL keeps it. Returns what it changed, for
+    /// the log; the caller removes the switch.
+    static func migrateVenusSwitch(folders: [URL]) -> [String] {
+        var out: [String] = []
+        for f in folders where read(folder: f) == .auto {
+            do {
+                try write(.vulkan, folder: f)
+                out.append("'\(f.lastPathComponent)': Graphics Vulkan (the hidden venus switch was on)")
+            } catch {
+                out.append("'\(f.lastPathComponent)': could not set Graphics to Vulkan: \(error.localizedDescription)")
+            }
+        }
+        return out
     }
 
     /// The Venus host memory window, from the VM's memory plan (one memory
@@ -95,8 +132,9 @@ enum Graphics {
     }
 
     /// The plan for one start. `forced`: the vulkan feature (the VM's
-    /// `vulkan` file, OmacVM's Mesa for WebGPU and OpenCL) or the hidden
-    /// `venus` switch, which keep Venus on whatever the choice.
+    /// `vulkan` file: OmacVM's Mesa for WebGPU and OpenCL, which apply only
+    /// writes once that Mesa is in the VM), which keeps Venus on whatever the
+    /// choice.
     static func plan(choice: GraphicsChoice, macOSMajor: Int, kosmicKrisp: Bool, driverReady: Bool,
                      forced: Bool, macMemoryGB: Int, vmMemoryGB: Int) -> GraphicsPlan {
         let mem = hostmemGB(macMemoryGB: macMemoryGB, vmMemoryGB: vmMemoryGB)
@@ -107,8 +145,11 @@ enum Graphics {
         if forced { return p(true, "WebGPU and GPU compute (vulkan feature) need Vulkan, \(driver)") }
         switch choice {
         case .opengl: return p(false, "chosen")
-        case .vulkan: return p(true, "chosen, \(driver)")
+        case .vulkan:
+            guard driverReady else { return p(false, waitingForDriver) }
+            return p(true, "chosen, \(driver)")
         case .auto:
+            guard autoVulkan else { return p(false, "Automatic is OpenGL on every Mac in this version; Vulkan is your choice") }
             guard autoPicksVulkan(macOSMajor: macOSMajor, kosmicKrisp: kosmicKrisp) else {
                 return p(false, kosmicKrisp || macOSMajor >= autoVulkanFromMacOS
                          ? "macOS \(macOSMajor) without KosmicKrisp in this app: MoltenVK, OpenGL stays"

@@ -416,21 +416,28 @@ One test Mesa (26.2.4 with OmacVM's five patches) for virgl and Zink:
 |---|---|---|
 | glmark2 2023.01, quick set, full screen | 3,780 (Arch's Mesa 26.2.3: 3,731) | Zink on Venus: OpenGL ES 2.0 only, every scene crashes |
 | WebGL Aquarium 30k, Chrome 154 | 19.4 fps (ANGLE on GL, Wayland) | ANGLE on Vulkan: Chrome's GPU process does not start (ES 2.0 only, Chrome needs 3.0): no WebGL |
-| Basemark Web 3.0, WebGL 2 pages | runs | no WebGL on either Vulkan path |
+| Basemark Web 3.0, WebGL 2 pages | not measured (Basemark not run; the WebGL 2 page rows came out empty, a harness bug, see below) | no WebGL on either Vulkan path |
 | vkmark, full screen, Vulkan apps | - | 387 (software present, see below) |
 
 MoltenVK has no `VK_EXT_provoking_vertex`, transform feedback or geometry
-shaders, so ANGLE and Zink stop at ES 2.0. **Automatic = OpenGL on macOS 15**;
-Vulkan (Venus on MoltenVK) is there for Vulkan apps when picked.
+shaders, so ANGLE and Zink stop at ES 2.0: on macOS 15 a Vulkan path cannot
+carry OpenGL or WebGL at all, so the choice does not need the WebGL 2 number.
+The empty WebGL 2 rows: the A/B harness ran the page's runner from `/root` as
+the desktop user, who cannot read it, and dropped the error (fixed in the
+harness; one run after the fix on the same kind of VM gave a full result on
+OpenGL, unlocked, not used here).
 
 **macOS 26 and newer (Mac mini M4, macOS 27, KosmicKrisp),** from the
-kosmickrisp track (unlocked, median of 3 unless said; tracks/kosmickrisp.md):
+kosmickrisp track (unlocked, median of 3 unless said; tracks/kosmickrisp.md).
+These rows compare drivers and paths one by one; none of them compares a VM
+with Vulkan on against the same VM with OpenGL only, and what the Venus device
+costs the OpenGL desktop was measured on macOS 15 only (above: nothing):
 
 | | OpenGL path | Vulkan path |
 |---|---|---|
 | vkmark 800x600 | - | KosmicKrisp 840 vs MoltenVK 650 on the same Mac (+29 %) |
 | glmark2-es2 off-screen, one guest Mesa | virgl 592 | Zink on KosmicKrisp 558 (ES 2.0 only) |
-| WebGL Aquarium 30k, Chrome 154 | 21.9 fps (ANGLE on GL) | 26.9 fps (ANGLE on Vulkan, X11 and flags) |
+| WebGL Aquarium 30k, Chrome 154 | 21.9 fps (ANGLE on GL) | 26.9 fps (ANGLE on Vulkan: X11, Chrome flags and a test Mesa with a patch; no Graphics setting gives this) |
 | Basemark Web 3.0 | 1,654 | 1,511 (ANGLE on Vulkan) |
 
 The 3.0.0 build on that mini (2026-10-05, unlocked) picked Vulkan on
@@ -439,10 +446,15 @@ on ANGLE on GL against 26.9-27.0 on ANGLE on Vulkan (X11, flags); vkpeak
 fp32 3.9 TFLOPS (MacBook M4 Max on MoltenVK: 15.8).
 
 KosmicKrisp also has `nullDescriptor`, `robustBufferAccess2` and `logicOp`,
-which MoltenVK lacks. **Automatic = Vulkan on macOS 26 and newer** when the
-app has KosmicKrisp: Vulkan apps get the faster, fuller driver, OpenGL stays on
-virgl (Zink is slower and ES 2.0 only), and Chrome keeps ANGLE on GL (ANGLE on
-Vulkan wins Aquarium but loses Basemark and needs X11 and flags).
+which MoltenVK lacks. With Vulkan on, OpenGL stays on virgl (Zink is slower
+and ES 2.0 only) and Chrome keeps ANGLE on GL, so on macOS 26 and newer
+Vulkan adds Vulkan apps on the better driver and changes nothing else.
+
+**Automatic = OpenGL on every Mac in 3.0.0.** On macOS 26 and newer
+(KosmicKrisp) Vulkan windows still go through the slow CPU copy below, and
+the GPU path for them is not tested there yet, so Vulkan is the user's
+choice. Turning Automatic to Vulkan on macOS 26 and newer is one constant
+(`Graphics.autoVulkan`, `GRAPHICS_AUTO_VULKAN`).
 
 Vulkan windows: a Venus image handed to Hyprland as a dma-buf cannot be
 imported by its OpenGL context on the Mac. Until 3.0.0 RC that import ended
@@ -461,6 +473,12 @@ These count the app's frames. The frames the screen shows are capped by the
 display's refresh; that was not measured here (the hidden test window paces
 Hyprland at ~12 Hz for both paths). With vkmark's headless output, no window:
 4,700-5,200.
+
+The GPU path is on only with MoltenVK (macOS 15): the app sends
+`omacvm.vkwindows=1` only there. With KosmicKrisp (macOS 26 and newer) and
+with an older app, Vulkan windows still go through the CPU copy (vkmark full
+screen with it on a Mac mini M4 at 5K, macOS 27: 203; another run, not the
+table's scene set).
 
 ## GPU compute with Venus (2026-10-04)
 

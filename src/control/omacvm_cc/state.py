@@ -292,7 +292,7 @@ GRAPHICS_CHOICES = ("auto", "opengl", "vulkan")
 GRAPHICS_TITLES = {"auto": "Automatic", "opengl": "OpenGL", "vulkan": "Vulkan"}
 GRAPHICS_FEATURE = Feature(
     name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
-    summary="OpenGL, Vulkan, or Automatic (the faster one on this Mac); from the VM's next start")
+    summary="OpenGL, Vulkan, or Automatic (OpenGL on every Mac in 3.0.0); from the VM's next start")
 
 
 def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,
@@ -314,6 +314,10 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     this = str(g.get("this_start") or "")
     now = "OpenGL and Vulkan" if "-> vulkan" in this else "OpenGL" if this else ""
     note = f"{title}: {now}" if now and now == nxt else f"{title}: {nxt} from the next start"
+    if g.get("waiting_for_driver") is True:
+        # Vulkan chosen, no Venus driver for the Mac's pages yet: OpenGL until
+        # an apply (or Space on this row while the VM runs) builds it.
+        note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until the next apply)")
     if any(c.status == "fail" for c in mine):
         bad = next(c for c in mine if c.status == "fail")
         return Row(GRAPHICS_FEATURE, True, Status.NEEDS_PERSON if bad.human else Status.FAILING,
