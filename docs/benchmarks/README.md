@@ -116,6 +116,25 @@ for good: that was Basemark's hang at test 5 in 2.6.0
 Each runtime build also compiles the shaders of that case with the Mac's
 OpenGL (`app/runtime/Tests/virgl/test-integer-sampler-shader.c`).
 
+### GPU panel (final round)
+
+The README chart's GPU panel comes from
+[`tests/bench/final-round`](../../tests/bench/final-round/README.md): the
+runbook and the scripts for the Mac and each VM. Two of its tests are new:
+
+- [`tests/bench/gpu-throughput`](../../tests/bench/gpu-throughput/index.html):
+  pure GPU work in WebGL 2, no network. One draw per frame into a fixed
+  1920x1080 offscreen target, with a shader loop long enough that a frame
+  takes about 40 ms, so the window size and vsync don't count. The time is
+  wall time around each draw with `gl.finish()`, the same everywhere; where
+  Chrome has GPU timer queries they are recorded next to it. Headline: a
+  ray-march shader; also an ALU score (GFLOPS) and a fill score (Gpixels/s).
+  `run.py` runs it and prints JSON.
+- [`tests/bench/vkpeak`](../../tests/bench/vkpeak/vkpeak.sh): Vulkan compute
+  peak with [vkpeak](https://github.com/nihui/vkpeak) (MIT, downloaded or
+  built at run time, pinned). On the Mac through MoltenVK; in OmacVM.app
+  through Venus. VMs without Vulkan get "not available".
+
 ## Power draw and battery life
 
 How much power the whole Mac draws while Omarchy runs in a VM, against the
