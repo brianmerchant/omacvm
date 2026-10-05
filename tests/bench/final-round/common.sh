@@ -25,7 +25,7 @@ busy_check() {   # [pattern of the VM under test, kept out of the count]
   local keep=${1:-NONE} vms agents lock load
   vms=$(ps -axo pid=,comm= | grep -E 'qemu-system-aarch64|prl_vm_app|vmware-vmx|QEMULauncher|com.apple.Virtualization.VirtualMachine' |
         grep -Ev -- "$keep" | grep -c .)
-  agents=$(pgrep -fi '(^|/)claude( |$)' | grep -c .)
+  agents=$(ps -axo comm= | grep -Ec '(^|/)claude$')
   lock=$(cat "$HOME/.omacvm-bench.lock/owner" 2>/dev/null)
   load=$(sysctl -n vm.loadavg | tr -d '{}' | awk '{print $1}')
   printf '{"other_vms":%s,"claude_processes":%s,"bench_lock":%s,"load1":%s,"busy":%s}' \
