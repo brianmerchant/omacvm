@@ -202,13 +202,15 @@ compress_stage() {
   # Signed with OmacVM's release key (the main one from the Keychain, or
   # OMACVM_RELEASE_KEY_FILE) and read back as omacvm build and the app read
   # it; "devid_teams": the Developer ID team of the release app
-  # (app/dist/OmacVM.app) or of OMACVM_SIGN_ID (src/release/release-key.sh).
+  # (app/dist/OmacVM.app) or of OMACVM_SIGN_ID (src/release/release-key.sh);
+  # OMACVM_NEXT_SPARE_KEY / OMACVM_REVOKED_KEYS as for the app's feed.
   local teams app=()
   [[ -d $R/app/dist/OmacVM.app ]] && app=("$R/app/dist/OmacVM.app")
   teams=$("$R/src/release/release-key.sh" teams ${app[@]+"${app[@]}"}) || die "no Developer ID team for the manifest"
   python3 "$R/src/prebuilt/manifest.py" write "$OUT/$base.json" --route "$ROUTE" --omacvm "$VERSION" \
     --omarchy "$omarchy" --bundle "$(basename "$stage")" --unpacked "$(du -sk "$stage" | cut -f1)" \
-    --disk-gb "$PREBUILT_DISK_GB" --teams "$teams" --next-spare-key "${OMACVM_NEXT_SPARE_KEY:-}" "$OUT/$base".tar.zst.part-*
+    --disk-gb "$PREBUILT_DISK_GB" --teams "$teams" --next-spare-key "${OMACVM_NEXT_SPARE_KEY:-}" \
+    --revoked-keys "${OMACVM_REVOKED_KEYS:-}" "$OUT/$base".tar.zst.part-*
   "$R/src/release/release-key.sh" sign "$OUT/$base.json" || die "the manifest was not signed"
   python3 "$R/src/prebuilt/manifest.py" get "$OUT/$base.json" route >/dev/null || die "the signed manifest does not read back"
   (cd "$OUT" && shasum -a 256 "$base".tar.zst.part-* "$base.json" "$base.json.sig" > "$base.sha256")

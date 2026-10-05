@@ -55,7 +55,9 @@ busy_check() {   # [pattern of the target's processes, kept out of "other"]
   agents=$(echo "$procs" | grep -Ec '(^|/)claude$')
   lock=$(cat "$HOME/.omacvm-bench.lock/owner" 2>/dev/null)
   load=$(sysctl -n vm.loadavg | tr -d '{}' | awk '{print $1}')
-  if [ "$other" -gt 0 ] || [ "$same" -gt 1 ] || [ "$agents" -gt 1 ] || [ -n "$lock" ]; then busy=true; fi
+  # round.sh holds the lock for the whole round ("final-round ..."): that one is ours.
+  if [ "$other" -gt 0 ] || [ "$same" -gt 1 ] || [ "$agents" -gt 1 ]; then busy=true; fi
+  case $lock in ''|final-round*) ;; *) busy=true ;; esac
   printf '{"other_vm_processes":%s,"target_vms":%s,"claude_processes":%s,"bench_lock":%s,"load1":%s,"busy":%s}' \
     "$other" "$same" "$agents" "$(jstr "$lock")" "$load" "$busy"
 }
@@ -77,7 +79,8 @@ mac_meta() {
 # FINAL_ROUND_ALLOW_BUSY=1: run anyway, every line marked "preliminary" with
 # the reasons; summarize.py leaves those lines out.
 PRELIM=false PRELIM_WHY=""
-preflight() {   # [target pattern]
+# preflight_why [target pattern]: what is not as agreed ("; "-separated), empty when all is.
+preflight_why() {
   local why="" b state pm t
   [ "$(battery ExternalConnected)" = Yes ] || why="$why; no charger (connect it: SystemPowerIn is the whole Mac only on the charger)"
   [ "$(battery IsCharging)" = No ] || why="$why; the battery is charging (wait until it is full or held)"
@@ -91,13 +94,18 @@ preflight() {   # [target pattern]
   fi
   b=$(busy_check "${1:-}")
   case $b in *'"busy":true'*) why="$why; the Mac is not quiet: $b (quit the other VM apps, Parallels' service, agents, test VMs)" ;; esac
-  why=${why#; }
+  echo "${why#; }"
+}
+preflight() {   # [target pattern]
+  local why state
+  why=$(preflight_why "${1:-}")
+  state=$(dirname "$OUT")/round-state
   if [ -n "$why" ]; then
     [ "${FINAL_ROUND_ALLOW_BUSY:-0}" = 1 ] || die "$why. (FINAL_ROUND_ALLOW_BUSY=1 runs anyway, marked preliminary)"
     PRELIM=true PRELIM_WHY=$why
     say "numbers marked preliminary: $why"
   elif [ ! -f "$state" ]; then
-    echo "$pm" > "$state"
+    power_mode > "$state"
   fi
 }
 

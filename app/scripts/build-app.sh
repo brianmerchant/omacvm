@@ -11,7 +11,9 @@
 #                installed OmacVM
 #     --release  for a published zip: the whole repo must be committed, and the
 #                runtime has KosmicKrisp (OMACVM_RUNTIME_KOSMICKRISP=1 unless set:
-#                Vulkan on macOS 26+; its tools: runtime/build-kosmickrisp.sh --check)
+#                Vulkan on macOS 26+; its tools: runtime/build-kosmickrisp.sh --check;
+#                or OMACVM_KOSMICKRISP_FROM=DIR, built on another Mac:
+#                runtime/import-kosmickrisp.sh)
 #     --test-identity  (or OMACVM_TEST_IDENTITY=1) the one test identity for the
 #                developers' Macs: "OmacVM Test" (org.omacvm.app.test), its helpers
 #                "OmacVM Test Bridge" (org.omacvm.test.bridge, port 47931) and
@@ -77,7 +79,12 @@ RT=$ROOT/runtime/.build
 # LLVM rebuilds it).
 KK_STAMP=
 if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-0} == 1 ]]; then
-  KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
+  # OMACVM_KOSMICKRISP_FROM: built on another Mac (runtime/import-kosmickrisp.sh).
+  if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+    KK_STAMP=$("$ROOT/runtime/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM" --stamp)
+  else
+    KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
+  fi
 fi
 INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h Tests/display/* Tests/keys/* Tests/net/* boot-logo/*.py
   echo "firmware=${OMACVM_FIRMWARE:-omacvm}"

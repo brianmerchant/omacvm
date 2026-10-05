@@ -190,7 +190,7 @@ static int check_list(const char *path, int print_qcodes, int *enabled_out)
             continue;
         }
         /* Never our escape combo: macOS would lose it to the VM's way out. */
-        CHECK(!omacvm_is_escape_combo(kc, flags & CONTROL, flags & OPTION, flags & COMMAND),
+        CHECK(!omacvm_is_escape_combo(kc, flags & CONTROL, flags & OPTION, flags & COMMAND, flags & SHIFT),
               "%s: shortcut %d (%s) is the escape combo", path, id, name);
         if (no_guest_key(kc)) {
             CHECK(lnx == 0, "%s: shortcut %d (%s): key 0x%x should give the guest nothing", path, id, name, kc);
@@ -220,11 +220,18 @@ int main(int argc, char **argv)
     CHECK(!omacvm_shortcuts_to_vm(1, 1, 1, 1, 0), "OMACVM_MAC_SHORTCUTS=1: macOS keeps them");
     CHECK(!omacvm_shortcuts_to_vm(1, 1, 1, 0, 1), "hung VM window: macOS gets them back");
 
-    /* The escape combo: exactly Control+Option+Command+Esc. */
-    CHECK(omacvm_is_escape_combo(53, 1, 1, 1), "Ctrl+Opt+Cmd+Esc is the escape combo");
-    CHECK(!omacvm_is_escape_combo(53, 0, 1, 1), "Opt+Cmd+Esc (Force Quit) is not the escape combo");
-    CHECK(!omacvm_is_escape_combo(53, 1, 0, 1), "Ctrl+Cmd+Esc is not the escape combo");
-    CHECK(!omacvm_is_escape_combo(48, 1, 1, 1), "Ctrl+Opt+Cmd+Tab is not the escape combo");
+    /* The escape combo: exactly Control+Option+Esc, and through 3.0.x the old
+       Control+Option+Command+Esc; with Shift neither. */
+    CHECK(omacvm_is_escape_combo(53, 1, 1, 0, 0), "Ctrl+Opt+Esc is the escape combo");
+    CHECK(omacvm_is_escape_combo(53, 1, 1, 1, 0), "Ctrl+Opt+Cmd+Esc (the old one) still is");
+    CHECK(!omacvm_is_escape_combo(53, 1, 1, 0, 1), "Ctrl+Opt+Shift+Esc is not the escape combo");
+    CHECK(!omacvm_is_escape_combo(53, 1, 1, 1, 1), "Ctrl+Opt+Cmd+Shift+Esc is not the escape combo");
+    CHECK(!omacvm_is_escape_combo(53, 0, 1, 1, 0), "Opt+Cmd+Esc (Force Quit) is not the escape combo");
+    CHECK(!omacvm_is_escape_combo(53, 1, 0, 1, 0), "Ctrl+Cmd+Esc is not the escape combo");
+    CHECK(!omacvm_is_escape_combo(53, 1, 0, 0, 0) && !omacvm_is_escape_combo(53, 0, 1, 0, 0),
+          "Ctrl+Esc and Opt+Esc are not the escape combo");
+    CHECK(!omacvm_is_escape_combo(48, 1, 1, 1, 0) && !omacvm_is_escape_combo(48, 1, 1, 0, 0),
+          "Ctrl+Opt(+Cmd)+Tab is not the escape combo");
 
     /* Apple's own key codes: the F-key they sit on. */
     CHECK(omacvm_special_key(0xa0) == 61, "Mission Control key -> F3");

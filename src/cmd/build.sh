@@ -814,7 +814,7 @@ cat <<EOF
   One-time steps on the Mac:
 $mac_steps
   In full screen, the trackpad and ⌘ shortcuts belong to Omarchy.
-  ${UB}⌃⌥⌘ Esc (Control + Option + Command + Escape) takes you back to macOS; in macOS, back into the VM.${UR}
+  ${UB}⌃⌥ Esc (Control + Option + Escape) takes you back to macOS; in macOS, back into the VM.${UR}
 
   SSH: ssh -i "$KEY" $ssh_to
   Check everything: omacvm check --vm "$VM"

@@ -2,8 +2,11 @@
 """Prebuilt image manifests.
 
   manifest.py write OUT.json --route R --omacvm V --omarchy V --bundle NAME
-                    --unpacked KB --disk-gb N --teams JSON-LIST [--next-spare-key KEY] PART...
-                                           unsigned: make-image.sh signs it (OUT.json.sig)
+                    --unpacked KB --disk-gb N --teams JSON-LIST [--next-spare-key KEY]
+                    [--revoked-keys "KEY..."] PART...
+                                           unsigned: make-image.sh signs it (OUT.json.sig);
+                                           the keys: OMACVM_NEXT_SPARE_KEY and
+                                           OMACVM_REVOKED_KEYS (docs/release-keys.md)
   manifest.py get MANIFEST KEY             one value (route, omacvm, omarchy, bundle,
                                            size, unpacked_kb, disk_gb, created); the
                                            manifest is checked first, exit 1 if it is bad
@@ -68,6 +71,11 @@ def write(a):
         if not keys.key(opts["next-spare-key"]):
             sys.exit("manifest.py: --next-spare-key is not a public key")
         m["next_spare_key"] = opts["next-spare-key"]
+    revoked = list(dict.fromkeys(opts.get("revoked-keys", "").split()))
+    if revoked:
+        if not keys.revoked_keys(revoked):
+            sys.exit("manifest.py: --revoked-keys: 1 to %d public keys" % keys.MAX_REVOKED)
+        m["revoked_keys"] = revoked
     m["size"] = sum(p["size"] for p in m["parts"])
     json.dump(m, open(out, "w"), indent=2)
     print(out)

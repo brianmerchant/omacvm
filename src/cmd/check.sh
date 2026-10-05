@@ -348,7 +348,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   elif grep -q "macOS's switch for them was not found\|macOS shortcuts .*FAILED" "$miclog"; then
     warn "macOS shortcuts" "some stay with macOS: macOS refused to switch them off (logs/qemu.log)"
   elif grep -q 'macOS shortcuts off' "$miclog"; then
-    ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥⌘ Esc is macOS's)"
+    ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥ Esc is macOS's)"
   fi
 fi
 # Sound on a busy Mac: QEMU's main loop (the sound card's timers) at

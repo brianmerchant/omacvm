@@ -22,11 +22,14 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Bluetooth); the panel says so too. A device that is off or out of range
   shows "Not in range?" after about 15 seconds.
 - **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
-  if ⌃⌥⌘ Esc left you in the VM without the trackpad, press it again. Check the
+  if ⌃⌥ Esc left you in the VM without the trackpad, press it again. Check the
   Accessibility and Input Monitoring permissions of *OmacVM Gestures*
   (`omacvm check` names a missing one; the helpers' logs say
   "permissions: ... MISSING").
-- **⌃⌥⌘ Esc does not move to another Space**: the move needs a Space beside
+- **⌃⌥ Esc does nothing at all**: on Parallels, UTM or Fusion the Mac's
+  OmacVM Gestures may be older than 3.0.0: `omacvm update` (OmacVM.app
+  brings its own). `omacvm check` names a missing permission.
+- **⌃⌥ Esc does not move to another Space**: the move needs a Space beside
   the VM's on that monitor (System Settings › Desktop & Dock › Mission
   Control: "Displays have separate Spaces" decides whether each monitor has
   its own) and macOS's "Move left/right a space" shortcuts (System Settings ›
@@ -57,7 +60,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
   Applications › Utilities). The shortcuts work again at once. From the
   Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
-- **⌃⌥⌘ Esc opened Mission Control instead of moving to the next Space**:
+- **⌃⌥ Esc opened Mission Control instead of moving to the next Space**:
   neither macOS's "Move left/right a space" shortcut nor a Dock swipe moved
   the Space, so OmacVM opened Mission Control to let you pick one (the VM
   stays full screen). Check that the shortcuts are on in System Settings ›
@@ -359,7 +362,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Symptom:** the VM is gone after Cmd+W; the guest journal of that boot
   just ends, without a shutdown.
 - **Cause:** when OmacVM Gestures does not take the key (VM not full screen,
-  trackpad handed back with ⌃⌥⌘Esc, or a key posted by a script below the
+  trackpad handed back with ⌃⌥ Esc, or a key posted by a script below the
   keyboard, such as System Events' `keystroke`), UTM gets Cmd+W and closes
   the VM window. With UTM's "don't ask before quitting" setting
   (`NoQuitConfirmation`), closing the window stops the VM at once.

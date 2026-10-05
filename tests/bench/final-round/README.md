@@ -126,7 +126,43 @@ scripts check what they can and refuse otherwise:
 `FINAL_ROUND_ALLOW_BUSY=1` runs anyway and marks every line "preliminary"
 with the reasons; `summarize.py` leaves those lines out.
 
-## Run it
+## Run it: one command
+
+`round.sh` runs the whole round in the order below, inside a time budget
+(default 3 hours), and writes the table and the chart at the end:
+
+```bash
+RC2_APP=~/Applications/"OmacVM 3.0.0 RC2.app" \
+  tests/bench/final-round/round.sh --dir ~/bench/final-$(date +%Y%m%d)
+```
+
+- Order: macOS, OmacVM.app (`APP_291`), a second app build (`RC2_APP`,
+  Vulkan rows: vkpeak, Geekbench, vkmark; its OpenGL rows only with time to
+  spare), UTM, VMware Fusion, Parallels. Each VM: started, put in full screen
+  on the built-in display (View > Full Screen when it does not start that
+  way), checked at 3000 px or more, the Mac's wallpaper and no
+  notifications, the GPU tests 3 times, idle power, stopped, its app quit.
+- Budget: GPU steps first. The idle windows get one length for every system
+  (5 to 10 minutes, from the budget); when the round runs late the idle rows
+  of the last systems are left out (noted), never shortened. glmark2 runs its
+  scenes at 5 s (`GLMARK2_DURATION`, the same in every VM).
+- Before each step the preflight must pass (charger, not charging, thermal,
+  quiet Mac, built-in display only); it waits up to 10 minutes, else the step
+  is noted "refused" with the reason and the round goes on.
+- It waits for 10 idle minutes first if someone used the Mac, holds the
+  bench lock for the whole round, and stops if a VM that is not a "Bench"
+  VM runs (it never touches the user's VMs).
+- Resumable: the same command again skips what is done and retries what
+  failed or was refused. Outputs in `--dir`: one `<step>.jsonl` per step,
+  `round.log`, `steps.state`, `screen-<vm>.png` (the guest's screen at the
+  start), `table.md`, `chart.json`, `gpu.svg`, `gpu.png`.
+- `--plan` shows the steps and times, `--dry-run` walks the round with a
+  simulated clock (nothing starts), `--fullscreen VM` checks one VM's full
+  screen, `--summary` redraws the table and chart, `--prepare-rc2` (before
+  the round) makes the RC2's Bench VM: a clone of "Bench OmacVM" with the
+  Graphics setting on Vulkan and the RC2's Venus driver.
+
+## Run it step by step
 
 From a clone of OmacVM on the Mac (`~/.omacvm` or your checkout):
 

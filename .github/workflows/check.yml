@@ -99,6 +99,9 @@ jobs:
       - name: Release keys on the command line (either key, Developer ID teams, a named spare)
         run: src/tests/release-keys.sh
 
+      - name: Release script (KosmicKrisp from another Mac, bad arguments)
+        run: src/tests/release-script.sh
+
       - name: Vulkan (Venus) driver step for app VMs (when it builds Mesa's vulkan-virtio)
         run: src/tests/venus-driver.sh
 
