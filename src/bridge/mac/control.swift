@@ -183,12 +183,15 @@ final class Control {
     var vmName = "-"
     // Set once the VM's signature checked out: the answer is signed with its key.
     var signer: (key: String, nonce: String)?
+    // Graphics memory is asked every 2 s while the control centre is open:
+    // its answers are not logged (refusals still are).
+    var quiet = false
     func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
       let line = "control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))"
       // Refusals once a minute per address, VM and reason: a guest that
       // floods (or any guest, from addresses of its own) must not fill the
       // log the report reads.
-      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note)", line) } else { log(line) }
+      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note)", line) } else if !quiet { log(line) }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -210,11 +213,16 @@ final class Control {
     let proto: Int
     switch negotiateProto(headers["x-omacvm-proto"]) { case .success(let p): proto = p; case .failure(let e): return refuse(e) }
     let version = macVersion(cli)
+    quiet = route == .gpuMemory
+    // The VM list as it is for graphics memory (asked every 2 s): a new run of
+    // omacvm vms only when the VM is not in it, not each minute.
+    let fresh = route != .gpuMemory
 
     if route == .hello {
       let v = ProcessInfo.processInfo.operatingSystemVersion
       return answer(200, ["proto": proto, "proto_min": controlProtoMin, "omacvm": version,
-                          "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs"],
+                          "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs",
+                                       "gpu-memory"],
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
@@ -230,13 +238,13 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
-      switch vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false }) {
+      switch vmForApp(name, vmList(cli, fresh: fresh) { if case .success = vmForApp(name, $0) { return true }; return false }) {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
       if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
-      switch vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false }) {
+      switch vmForPeer(peer, vmList(cli, fresh: fresh) { if case .success = vmForPeer(peer, $0) { return true }; return false }) {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
@@ -282,6 +290,9 @@ final class Control {
       return answer(200, updatesAnswer(version), on ? "checks on" : "checks off")
     case .status:
       answer(200, statusAnswer(cli, vm, version))
+    case .gpuMemory:
+      guard vm.type == "app" else { return refuse(PolicyError(409, "not-app", "graphics memory is measured for OmacVM.app's VMs")) }
+      answer(200, gpuMemoryAnswer(gpuMemoryText(vm)))
     case .job(let id):
       guard let j = job(id), j.vm == vmKey(vm) else { return refuse(PolicyError(404, "not-found", "no such job")) }
       answer(200, jobAnswer(j))
@@ -352,10 +363,12 @@ final class Control {
 
   /// `omacvm vms --json`, cached (VMListCache): the cache at once, never
   /// waiting for a run; a run in the background when it is due. `known`:
-  /// whether the cache already has the VM that asks.
-  private func vmList(_ cli: String, known: ([VMEntry]) -> Bool) -> [VMEntry] {
+  /// whether the cache already has the VM that asks. `fresh` false: a VM
+  /// the cache has does not start a run however old the list is.
+  private func vmList(_ cli: String, fresh: Bool = true, known: ([VMEntry]) -> Bool) -> [VMEntry] {
     let (list, start) = q.sync { () -> ([VMEntry], Bool) in
-      (vms.list, vms.shouldRefresh(known: known(vms.list), now: Date()))
+      let k = known(vms.list)
+      return (vms.list, (fresh || !k) && vms.shouldRefresh(known: k, now: Date()))
     }
     if start { refreshVMs(cli) }
     return list
@@ -372,7 +385,8 @@ final class Control {
           VMEntry(name: v["name"] as? String ?? "", type: v["type"] as? String ?? "", state: v["state"] as? String ?? "",
                   ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
                   // Set up by OmacVM, and its remembered SSH host key answered at that address just now.
-                  setup: (strictBool(v["setup"]) ?? false) && (strictBool(v["reachable"]) ?? false))
+                  setup: (strictBool(v["setup"]) ?? false) && (strictBool(v["reachable"]) ?? false),
+                  dir: v["dir"] as? String ?? "")
         }
       } else {
         log("control: omacvm vms --json gave no list (asked again in 10 s at the earliest)")
@@ -472,6 +486,23 @@ final class Control {
                                "checks": checks, "graphics": graphics, "checked_at": isoFormat.string(from: Date())]
     q.sync { status[key] = (Date(), body) }
     return body
+  }
+
+  // ---- graphics memory: the VM's status file, read as is ----
+  /// logs/gpu-memory of an app VM: a regular file of this user, at most 4 KB
+  /// (no link followed); nil when there is none.
+  private func gpuMemoryText(_ vm: VMEntry) -> String? {
+    guard let path = gpuMemoryFile(dir: vm.dir) else { return nil }
+    let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    guard fd >= 0 else { return nil }
+    defer { close(fd) }
+    var st = stat()
+    guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == getuid(),
+          st.st_size <= off_t(gpuMemoryFileMax) else { return nil }
+    var buf = [UInt8](repeating: 0, count: gpuMemoryFileMax)
+    let n = read(fd, &buf, buf.count)
+    guard n >= 0 else { return nil }
+    return String(decoding: buf[0..<n], as: UTF8.self)
   }
 
   // ---- jobs ----

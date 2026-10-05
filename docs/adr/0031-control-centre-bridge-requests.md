@@ -24,7 +24,8 @@ control centre has to ask the Mac to do that. The guest is untrusted
 
 Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 `updates/check`, `settings/update-checks`, `jobs` (actions `enable`,
-`disable`, `reinstall`, `update`) and `jobs/<id>`. Nothing else.
+`disable`, `reinstall`, `update`) and `jobs/<id>`. Nothing else. (Later:
+`graphics` jobs and `gpu-memory`, read-only numbers for OmacVM.app VMs, 3.0.0.)
 
 - The Mac decides which VM: the peer address must match exactly one running
   VM that OmacVM set up (pinned host key); otherwise 409 and nothing runs.

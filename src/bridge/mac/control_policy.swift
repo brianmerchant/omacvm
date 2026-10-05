@@ -20,7 +20,7 @@ let graphicsChoices: Set<String> = ["opengl", "vulkan", "auto"]
 struct JobRequest: Equatable { let action: ControlAction; let features: [String] }
 
 enum ControlRoute: Equatable {
-  case hello, status, updates, updatesCheck
+  case hello, status, updates, updatesCheck, gpuMemory
   case setUpdateChecks(Bool)
   case startJob(JobRequest)
   case job(String)
@@ -66,9 +66,9 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
     guard path.hasPrefix("/omacvm/") else { throw PolicyError(404, "not-found", "not found") }
     let sub = String(path.dropFirst("/omacvm/".count))
     switch (method, sub) {
-    case ("GET", "hello"), ("GET", "status"), ("GET", "updates"):
+    case ("GET", "hello"), ("GET", "status"), ("GET", "updates"), ("GET", "gpu-memory"):
       guard body.isEmpty else { throw PolicyError(400, "body", "no body for GET") }
-      return .success(sub == "hello" ? .hello : sub == "status" ? .status : .updates)
+      return .success(sub == "hello" ? .hello : sub == "status" ? .status : sub == "updates" ? .updates : .gpuMemory)
     case ("POST", "updates/check"):
       if let o = try strictObject(body, allowed: []), !o.isEmpty { throw PolicyError(400, "unknown-key", "no keys") }
       return .success(.updatesCheck)
@@ -108,7 +108,8 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       let id = String(s.dropFirst(5))
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
-    case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"):
+    case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
+         (_, "gpu-memory"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")
@@ -136,9 +137,53 @@ func relaySocketPathOK(_ p: String) -> Bool {
   p.hasPrefix("/") && !p.utf8.contains(0) && p.utf8.count <= relaySocketPathMax
 }
 
-/// A VM as `omacvm vms --json` lists it.
+/// A VM as `omacvm vms --json` lists it. `dir`: an OmacVM.app VM's folder.
 struct VMEntry: Equatable {
   let name: String, type: String, state: String, ip: String, omacvm: String, setup: Bool
+  var dir: String = ""
+}
+
+// ---- an OmacVM.app VM's graphics memory (GET /omacvm/gpu-memory) ----
+// QEMU writes logs/gpu-memory in the VM's folder while it runs
+// (virgl-darwin-memory-pressure.patch): what the VM's GPU work uses of the
+// Mac's memory on top of the VM memory. The control centre shows it, asking
+// at most every 2 s while it is open. Only numbers and a pressure word go
+// back: no names (lost_last is a guest app's name), no paths.
+let gpuMemoryFileMax = 4096
+let gpuMemoryPressures: Set<String> = ["normal", "warn", "critical"]
+
+/// The status file of a VM folder from `omacvm vms --json`, or nil.
+func gpuMemoryFile(dir: String) -> String? {
+  guard dir.hasPrefix("/"), !dir.utf8.contains(0), dir.utf8.count <= 1024, !dir.contains("/../"), !dir.hasSuffix("/..")
+  else { return nil }
+  return dir + "/logs/gpu-memory"
+}
+
+/// The answer from the file's text (nil: no file). "measured": false until
+/// QEMU wrote its first numbers (the VM just started, or an app older than 3.0.0).
+func gpuMemoryAnswer(_ text: String?) -> [String: Any] {
+  guard let text = text, text.utf8.count <= gpuMemoryFileMax else { return ["measured": false] }
+  var numbers: [String: Int] = [:]
+  var pressure = "unknown"
+  for line in text.split(separator: "\n") {
+    let kv = line.split(separator: "=", maxSplits: 1).map(String.init)
+    guard kv.count == 2 else { continue }
+    switch kv[0] {
+    case "in_use_mb", "peak_mb", "budget_mb", "refused", "lost":
+      // Plain decimal only, at most 12 digits: no signs, no overflow.
+      if (1...12).contains(kv[1].utf8.count), kv[1].utf8.allSatisfy({ (48...57).contains($0) }), let n = Int(kv[1]) {
+        numbers[kv[0]] = n
+      }
+    case "pressure":
+      if gpuMemoryPressures.contains(kv[1]) { pressure = kv[1] }
+    default:
+      break
+    }
+  }
+  guard let inUse = numbers["in_use_mb"] else { return ["measured": false] }
+  return ["measured": true, "in_use_mb": inUse, "peak_mb": max(numbers["peak_mb"] ?? inUse, inUse),
+          "budget_mb": numbers["budget_mb"] ?? 0, "pressure": pressure, "refused": numbers["refused"] ?? 0,
+          "lost": numbers["lost"] ?? 0]
 }
 
 /// The VM a request came from: exactly one running VM OmacVM set up at the
