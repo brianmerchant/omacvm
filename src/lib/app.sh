@@ -64,6 +64,8 @@ app_vms_roots() {
     r=${r%/}
     [[ -n $r && $seen != *$'\n'"$r"$'\n'* ]] && { echo "$r"; seen+="$r"$'\n'; }
   done
+  # The old place holds the installed app's VMs from 2.9 and older: not the test identity's.
+  [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && return
   [[ $seen == *$'\n'"$HOME/$APP_VMS_OLD"$'\n'* ]] || echo "$HOME/$APP_VMS_OLD"
 }
 
