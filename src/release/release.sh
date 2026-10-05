@@ -222,7 +222,8 @@ step_build() {
     [[ $info == *"TeamIdentifier=$team"* ]] || die "$(basename "$h") is not team $team"
     [[ $info == *$'\nTimestamp='* ]] || die "$(basename "$h") has no timestamp"
   done
-  note "build tests: $(grep -c -E '(^| )(ok|passed|PASS)' "$OUT/build.log") ok lines, no FAIL"
+  if grep -q 'QEMU (from source)' "$OUT/build.log"; then note "runtime built from source, build tests passed"
+  else note "runtime from the cache (its inputs match; no build tests ran this time)"; fi
   note "app $VERSION, OmacVMCommit $m, team $team, $(du -sh "$APP" | cut -f1)"
 }
 
