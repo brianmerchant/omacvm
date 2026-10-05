@@ -489,9 +489,12 @@ apps, the GPU. A VM takes two kinds from it:
   1.2 GB, with a browser about 2 GB, 3 GB at 8K, and for a moment more
   while the display scale changes (the table above).
 
-The app shows both: "VM memory: 8 GB; graphics memory last run: peak 2.6 GB,
-from the Mac on top". `omacvm check` has a "graphics memory" row: now, the
-peak of this run, and macOS's memory pressure.
+The app shows both: before a start, "VM memory: 8 GB; graphics memory last
+run: peak 2.6 GB, from the Mac on top"; while the VM runs, its app menu (the
+one beside the Apple menu) has "VM memory: 8 GB" and "Graphics memory:
+1.6 GB (peak 2.6 GB)", read when you open the menu (a click explains them).
+`omacvm check` has a "graphics memory" row: now, the peak of this run, and
+macOS's memory pressure.
 
 **No fixed limit.** QEMU asks macOS how much memory it can give
 (`virgl-darwin-memory-pressure.patch`):
@@ -499,8 +502,14 @@ peak of this run, and macOS's memory pressure.
 - While macOS's memory pressure is normal (green in Activity Monitor),
   every allocation goes through.
 - When macOS warns (yellow), QEMU lets the Mac's GPU driver free what it
-  still holds for deleted textures, and the app asks the VM to drop its file
-  cache (at most every 10 minutes), which Linux then gives back to the Mac.
+  still holds for deleted textures (measured: nothing, as QEMU already
+  flushes after every resource command; `logs/qemu.log` says "freed N MB"),
+  and the app asks the VM to drop its file cache (at most every 10 minutes,
+  again after 30 s if the VM did not answer), which Linux then gives back to
+  the Mac (the cache it dropped: 0.1 GB on a fresh VM, 1 GB after a long
+  session).
+  QEMU keeps no cache of its own for the VM's graphics: everything it holds
+  belongs to a live buffer of an app in the VM.
   Everything still goes through, unless a new big buffer (16 MB or more)
   is bigger than all the memory macOS has left: more swapping is better
   than a black desktop.

@@ -17,8 +17,9 @@ in more words.
   pressure). 6K and 8K displays fit too. A runaway VM still stops at three
   quarters of the Mac's memory.
 - OmacVM.app: the app shows the VM's graphics memory beside its VM memory
-  (graphics memory comes from the Mac on top), and so does `omacvm check`
-  (now and peak). When macOS warns that memory is short, the VM drops its
+  (graphics memory comes from the Mac on top): before a start in the app,
+  while the VM runs in its app menu ("Graphics memory: 1.6 GB (peak
+  2.6 GB)"), and in `omacvm check` (now and peak). When macOS warns that memory is short, the VM drops its
   file cache so the Mac gets that memory back.
 - OmacVM.app: if the VM's desktop loses its GPU context anyway, the app says
   so and offers to restart the desktop session, instead of a black VM.
