@@ -315,15 +315,17 @@ fi
 if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then
   FEATURE=graphics
   gl=$(sed -n 's/^OmacVM: graphics: //p' "$gd/logs/qemu.log" 2>/dev/null | tail -1)
-  gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd")
+  gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd"); gs=$(graphics_summary "$gd")
   if [[ -z $gl ]]; then
-    skip "Graphics" "$(graphics_title "$gc"): $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start (an app from before 3.0.0 has OpenGL only)"
+    skip "Graphics" "$(graphics_title "$gc"): $gs from the VM's next start (an app from before 3.0.0 has OpenGL only)"
   elif [[ ${gl%% *} != "$gc" || $gl != *"-> $gn "* ]]; then
-    skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start"
+    skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $gs from the VM's next start"
+  elif graphics_waiting_for_driver "$gd"; then
+    skip "Graphics" "$(graphics_title "$gc"): $gs (omacvm apply, or omacvm graphics --vm \"$VM\" vulkan while it runs)"
   else ok "Graphics" "$(graphics_title "$gc"): $gl"; fi
   FEATURE=""
 fi
-# Vulkan in an app VM (the hidden Venus switch): the Mac driver QEMU picked
+# Vulkan in an app VM (Graphics Vulkan): the Mac driver QEMU picked
 # this run (qemu.log starts fresh with each run). KosmicKrisp falls back to
 # MoltenVK when it cannot run.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then

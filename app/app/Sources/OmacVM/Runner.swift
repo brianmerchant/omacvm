@@ -138,8 +138,7 @@ final class Runner {
     static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
         let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
-        let forced = Settings.venus || FileManager.default.fileExists(
-            atPath: c.folder.appendingPathComponent("vulkan").path)
+        let forced = FileManager.default.fileExists(atPath: c.folder.appendingPathComponent("vulkan").path)
         return Graphics.plan(choice: Graphics.read(folder: c.folder),
                              macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
                              kosmicKrisp: FileManager.default.fileExists(atPath: lib.path),

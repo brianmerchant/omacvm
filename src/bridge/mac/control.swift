@@ -457,7 +457,7 @@ final class Control {
         if let (rc, out) = runCLI([cli, "graphics", "--vm", vm.name, "--vm-type", "app", "--json"], timeout: 30), rc == 0,
            let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any] {
           var d: [String: Any] = [:]
-          for k in ["graphics", "next_start", "this_start", "driver_ready"] { d[k] = o[k] ?? NSNull() }
+          for k in ["graphics", "next_start", "summary", "this_start", "driver_ready", "waiting_for_driver"] { d[k] = o[k] ?? NSNull() }
           graphics = d
         }
       }

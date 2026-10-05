@@ -6,9 +6,9 @@
 #   --yes    never ask (the control centre's job)
 # OpenGL: the VM's apps draw with OpenGL on the Mac's GPU (virgl). Vulkan: the
 # same plus Vulkan on the Mac's GPU (Venus: KosmicKrisp on macOS 26 and newer
-# when the app has it, else MoltenVK). Automatic: Vulkan where it is the faster
-# path on this Mac and the VM has its Venus driver, else OpenGL. A running VM
-# with Vulkan ahead builds its Venus driver now.
+# when the app has it, else MoltenVK), once the VM has its Venus driver (until
+# then OpenGL). Automatic: OpenGL on every Mac in 3.0.0. A running VM with
+# Vulkan ahead builds its Venus driver now.
 # Exit codes: 0 done, 1 failed, 2 usage.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -59,13 +59,15 @@ fi
 choice=$(graphics_choice "$d"); next=$(graphics_next_start "$d")
 last=$(sed -n 's/^OmacVM: graphics: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1) || last=""
 ready=false; [[ -e $d/venus-ready ]] && ready=true
+waiting=false; graphics_waiting_for_driver "$d" && waiting=true
+summary=$(graphics_summary "$d")
 if (( JSON )); then
-  printf '{"vm": %s, "type": "app", "graphics": "%s", "title": "%s", "next_start": "%s", "driver_ready": %s, "this_start": %s, "changed": %s%s}\n' \
-    "$(json_str "$VM")" "$choice" "$(graphics_title "$choice")" "$next" "$ready" "$(json_str "$last")" "$CHANGED" \
-    "$([[ -n $NOTE ]] && printf ', "note": %s' "$(json_str "$NOTE")")"
+  printf '{"vm": %s, "type": "app", "graphics": "%s", "title": "%s", "next_start": "%s", "summary": %s, "driver_ready": %s, "waiting_for_driver": %s, "this_start": %s, "changed": %s%s}\n' \
+    "$(json_str "$VM")" "$choice" "$(graphics_title "$choice")" "$next" "$(json_str "$summary")" "$ready" "$waiting" \
+    "$(json_str "$last")" "$CHANGED" "$([[ -n $NOTE ]] && printf ', "note": %s' "$(json_str "$NOTE")")"
 else
   echo "'$VM': Graphics $(graphics_title "$choice")${NOTE:+ ($NOTE)}"
-  echo "  next start: $([[ $next == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL)"
+  echo "  next start: $summary"
   [[ -z $last ]] || echo "  last start: $last"
   [[ -n $SET ]] || echo "Change with: omacvm graphics --vm \"$VM\" opengl|vulkan|auto"
 fi
