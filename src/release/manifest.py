@@ -13,7 +13,8 @@
       OMACVM_SIGN_ID, plus OMACVM_EXTRA_TEAMS (release-key.sh teams). OMACVM_NEXT_SPARE_KEY:
       "next_spare_key"; OMACVM_REVOKED_KEYS: "revoked_keys" (docs/release-keys.md). --out:
       writes FILE and signs it (FILE.sig, release-key.sh sign: the main key from the
-      Keychain), then reads it back as the Bridge would
+      Keychain, only inside release.sh: OMACVM_RELEASE_RUN = --version), then
+      reads it back as the Bridge would
   manifest.py parts [--src DIR]
       every file with its part (to check parts.tsv)
 
@@ -169,6 +170,12 @@ def main() -> int:
         if not keys.revoked_keys(revoked):
             ap.error("OMACVM_REVOKED_KEYS: 1 to %d public keys" % keys.MAX_REVOKED)
         m["revoked_keys"] = revoked
+    if a.out and not os.environ.get("OMACVM_RELEASE_KEY_FILE") and os.environ.get("OMACVM_RELEASE_RUN") != a.version:
+        # The Keychain's release key signs only inside release.sh for this
+        # version (release-key.sh checks the tree too). Test manifests: build
+        # to stdout and sign with a test key.
+        ap.error("--out signs with the release key: only inside release.sh %s (OMACVM_RELEASE_RUN); "
+                 "test manifests go to stdout and get a test key" % a.version)
     if not a.out:
         json.dump(m, sys.stdout, indent=1, sort_keys=True)
         print()

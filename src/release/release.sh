@@ -63,6 +63,8 @@ shift
 STEPS=("$@")
 (( ${#STEPS[@]} )) || STEPS=(check bump merge build notarize package verify image publish after)
 
+# release-key.sh signs with the Keychain's release key only inside this run.
+export OMACVM_RELEASE_RUN=$VERSION
 BASE=${OMACVM_RELEASE_OUT:-$HOME/omacvm-work/release-$VERSION}
 if (( DRY )); then OUT=$BASE/dry-run; WT=$HOME/omacvm-rel-$VERSION-dry
 else OUT=$BASE/release; WT=$HOME/omacvm-rel-$VERSION-build; fi
