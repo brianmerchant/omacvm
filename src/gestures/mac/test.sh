@@ -12,14 +12,15 @@
 # 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
 #    own tap sits ahead of ours) comes to the front, and when macOS invalidated
 #    it; a failed re-creation keeps the old tap and is logged once (test-tap.c).
-# 5. Ctrl+Option+Cmd+Esc: in the VM the display under the pointer moves out
+# 5. Ctrl+Option+Esc (and the old Ctrl+Option+Cmd+Esc, exact modifiers only): in the VM the display under the pointer moves out
 #    with macOS's own Space shortcut as the user set it (or every display
 #    with "all"), toward the Space it came from; in macOS back in; not moved
 #    -> a Dock swipe -> Mission Control; never out of full screen, never
 #    hidden; the keyboard follows the pointer's display; the posted key's
 #    shape and marker (test-escape.c, a made-up world of displays and Spaces:
 #    nothing posted, swiped or activated). The marker is the same in
-#    Gestures, the Bridge and QEMU's patch.
+#    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,
+#    and after the old one the new one, once per VM (test-escape-notice.py).
 # 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
 #    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
@@ -206,6 +207,9 @@ if [[ -n $m_gest && $(( m_gest )) == $(( m_bridge )) && $(( m_gest )) == $(( m_q
 else
   echo "FAIL key markers differ: Gestures '$m_gest', Bridge '$m_bridge', QEMU '$m_qemu'" >&2; fail=1
 fi
+# The guest's notice for "S esc <keys>": the old combo names the new one once per VM.
+python3 "$HERE/../guest/test-escape-notice.py" "$HERE/../guest/omacvm-gestures" > "$T/notice" 2>&1 || fail=1
+grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
