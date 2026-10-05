@@ -1,44 +1,130 @@
 # Final round: GPU and idle power, Mac vs the four VMs
 
 One session on one quiet Mac: macOS itself (the baseline, 100 %), then
-OmacVM.app, UTM, VMware Fusion and Parallels, one at a time. About 25 minutes
+OmacVM.app, UTM, VMware Fusion and Parallels, one at a time. About 35 minutes
 of GPU tests and 11 minutes of idle power per system.
 
 ## What runs
 
 | Test | What it measures | Mac | VMs | Time per system |
 |---|---|---|---|---|
-| GPU throughput page ([`../gpu-throughput`](../gpu-throughput)) | pure GPU work in WebGL 2: a ray-march shader (headline), an ALU chain, blended fill. Offscreen at 1920x1080, so window size and vsync don't count | ✓ | ✓ | 1.5 min (3 sessions) |
-| vkpeak ([`../vkpeak`](../vkpeak)) | Vulkan compute peak, fp32 / fp16 / int32 | ✓ (MoltenVK) | OmacVM.app with Venus; the others have no Vulkan: "not available" | 3 min (3 runs) |
-| WebGL Aquarium, 30,000 fish | 3D in the browser, fps | ✓ | ✓ | 2 min (3 runs) |
-| Basemark Web 3.0 | browser graphics, with some JavaScript | ✓ | ✓ | 8 to 15 min (3 runs) |
-| glmark2 (one version everywhere, 2023.01) | OpenGL ES in the VM | ✗ no macOS version | ✓ | 5 min (3 runs) |
+| GPU throughput page ([`../gpu-throughput`](../gpu-throughput)) | pure GPU work in WebGL 2: a ray-march shader (headline), an ALU chain, blended fill. Offscreen at 1920x1080, so window size and vsync don't count. Each session runs it twice: GPU timer, then wall time (see below) | ✓ | ✓ | 4 min (3 sessions) |
+| vkpeak ([`../vkpeak`](../vkpeak)) | Vulkan compute peak, fp32 / fp16 / int32 | ✓ (vkpeak's own MoltenVK 1.4.1) | a GPU Vulkan device only (OmacVM.app with Venus); else "not available" | 3 min |
+| Geekbench 7 GPU | GPU compute, OpenCL and Vulkan | ✓ OpenCL and Metal | OpenCL (rusticl) and Vulkan (Venus) on a real GPU device only, never PoCL, llvmpipe or lavapipe | 6 min |
+| vkmark | Vulkan drawing, score | ✗ no macOS version | a GPU Vulkan device only | 3 min |
+| glmark2 2023.01 (one version everywhere) | OpenGL ES in the VM, score | ✗ no macOS version | ✓ | 5 min |
+| WebGL Aquarium, 30,000 fish | 3D in the browser, fps | ✓ | ✓ | 2 min |
+| Basemark Web 3.0 | browser graphics, with some JavaScript | ✓ | ✓ | 8 to 15 min |
 | Idle power (`SystemPowerIn`) | the whole Mac, desktop idle | ✓ | ✓ | 11 min |
 
-Each test runs 3 times; the chart uses the median.
+Each test runs 3 times; the table and chart use the median.
+
+Geekbench is version 7 (the 2026-10-03 round's and OmacVM.app's 2026-10-04
+GPU number): 6 and 7 scores don't compare. The Mac has no Vulkan in
+Geekbench, so a VM's Vulkan score is shown against the Mac's Metal score, and
+the chart says so.
+
+### Timing the throughput page: one method per row
+
+The page times a frame two ways ([index.html](../gpu-throughput/index.html)):
+
+- **GPU timer** (`method=timer`, frames of 40 ms): GPU time from
+  `EXT_disjoint_timer_query_webgl2`. The cleanest number where the browser
+  has timer queries.
+- **Wall time, long frames** (`method=wall`, frames of at least 80 ms): the
+  clock around each draw. The waits around a frame (and a VM's sync path) add
+  a fixed few ms; the page measures that cost and makes the frames longer
+  until it is under 2 % of a frame.
+
+Each session runs both. `summarize.py` then picks one method per row, the
+same for every system: the GPU timer if every system has one and it holds up
+(within -2 % and +10 % of the same system's long-frame wall time), else wall
+time for everyone. The table, the JSON (`methods`, `validation`) and the
+chart name the method. Never a timer number next to a wall-time number.
+
+## The benchmark VMs
+
+The round uses only VMs made for it, one per hypervisor, named:
+
+| Hypervisor | VM name |
+|---|---|
+| OmacVM.app (the 2.9.0 release; a 3.0.0 RC as a second run if ready) | `Bench OmacVM` |
+| UTM | `Bench UTM` |
+| VMware Fusion | `Bench Fusion` |
+| Parallels Desktop | `Bench Parallels` |
+
+**Never** the user's own VMs: Parallels' "Omarchy" (production) and
+"Omarchy ARM", OmacVM.app's "OmacVM Test", UTM's "Windows" on the Mac mini,
+or anything on the mini. `vm.sh` refuses any name that does not start with
+`Bench `, and refuses unless that VM is the one VM running on its
+hypervisor (and, for OmacVM.app, the SSH port is that VM's).
+
+Each VM: 16 CPUs, 48 GB, Google Chrome installed (pacman/AUR, or
+`src/bench/install-chrome.sh`: fine here, these are our VMs), the screensaver
+and lock off (`omacvm disable idle-lock --vm NAME`), the same dark wallpaper
+as the Mac (the built-in display dims per zone, so a bright desktop draws
+more power). On Fusion, `--ignore-gpu-blocklist` in `/etc/chrome-flags.conf`,
+or Chrome draws in software and the page says "software renderer (check
+Chrome flags)".
+
+## Before the round: prepare each VM
+
+Hours or at least a few minutes before, not in the round:
+
+```bash
+F=tests/bench/final-round
+$F/vm.sh app       --vm "Bench OmacVM"    root@127.0.0.1:<port> --prepare
+$F/vm.sh utm       --vm "Bench UTM"       root@<ip> --prepare
+$F/vm.sh fusion    --vm "Bench Fusion"    root@<ip> --prepare
+$F/vm.sh parallels --vm "Bench Parallels" root@<ip> --prepare
+```
+
+`--prepare` runs a full `pacman -Syu` in that VM, installs glmark2, vkmark,
+vulkan-tools, clinfo, opencl-mesa, mesa-utils and vkpeak's build tools,
+builds vkpeak and fetches Geekbench into the desktop user's
+`~/.cache/omacvm-bench`, and records the versions (Mesa, OmacVM's own Mesa,
+glmark2, vkmark, Chrome, kernel) in `/opt/omacvm-final-round/state`. If the
+kernel was updated it says so: reboot the VM and prepare again. In the round,
+`vm.sh` runs no pacman at all and refuses a VM whose versions changed since
+(Mesa stays fixed for the whole round). Build heat is gone before the
+numbers: give the Mac 10 minutes after the last prepare.
+
+For OmacVM.app's Vulkan rows: the VM's Vulkan setting on and Mesa 26.2.4 or
+newer in the guest (Arch Linux ARM's 26.2.3 fails, see
+`src/app/guest/venus/install.sh`). Without it the rows say "not available"
+with the reason.
 
 ## The Mac, before you start
 
 All of it, or the numbers don't compare (the rules of the 2026-10-03/04
-rounds, [docs/benchmarks](../../../docs/benchmarks/README.md#the-setup)):
+rounds, [docs/benchmarks](../../../docs/benchmarks/README.md#the-setup)). The
+scripts check what they can and refuse otherwise:
 
 - Charger connected, battery **not charging** (full, or held by macOS).
-  `ioreg -rw0 -c AppleSmartBattery | grep -E '"(IsCharging|ExternalConnected)"'`
-  must say `IsCharging = No`, `ExternalConnected = Yes`. The scripts refuse otherwise.
+  Checked: `ExternalConnected = Yes`, `IsCharging = No`.
+- Low Power Mode off, and the energy mode (`pmset -g | grep powermode`) left
+  as it is for the whole round. Checked: the first script writes the mode to
+  `round-state` next to the results and refuses later if it changed.
+- Thermal state nominal. Checked (macOS's own state, and `pmset -g therm` is
+  recorded).
+- Nothing else running: no other VM app, **Parallels' service included**
+  (`prl_disp_service`, `prl_naptd`; `omacvm apply` restarts it, so quit it
+  again), Fusion's vmnet daemons, UTM, no second VM of the app under test,
+  no agents, no test VMs, no bench lock held. Checked.
 - External monitor unplugged, built-in display only, brightness 50 % (set by
-  you; the scripts only read it and record it). Automatic brightness off.
-- Nothing else running: no other VM app (`pgrep -l prl_` empty while testing
-  UTM or Fusion), no agents, no test VMs, no bench lock held. The scripts check
-  and refuse; `FINAL_ROUND_ALLOW_BUSY=1` runs anyway and marks every line
-  "preliminary".
-- The same Google Chrome version on the Mac and in every VM. The lines record it.
-- Each VM: 16 CPUs, 48 GB, in full screen on the built-in display, its
-  screensaver and lock off (`omacvm disable idle-lock --vm NAME`), the desktop
-  idle (no windows open) for the idle-power part.
+  you; the scripts only read and record it). Automatic brightness off.
+- Each VM in full screen on the built-in display. Checked: the guest at least
+  3000 px wide, and Chrome's page 1728x1080 at 2x (on the Mac too) before the
+  browser tests.
+- The same Google Chrome version on the Mac and in every VM. Recorded;
+  `summarize.py` warns when they differ.
 - Order: macOS first, then OmacVM.app, UTM, VMware Fusion, Parallels. Quit
-  each VM app (and Parallels' service) before the next.
+  each VM app (and its services) before the next.
 - For idle power: start the script and don't touch the Mac (and don't poll it)
   until it prints the result.
+
+`FINAL_ROUND_ALLOW_BUSY=1` runs anyway and marks every line "preliminary"
+with the reasons; `summarize.py` leaves those lines out.
 
 ## Run it
 
@@ -49,59 +135,74 @@ F=tests/bench/final-round; R=~/bench/final-$(date +%Y%m%d); mkdir -p $R
 
 # 1. macOS
 $F/mac.sh $R/mac.jsonl
-$F/idle-power.sh mac $R/mac.jsonl          # Terminal minimised, desktop showing
+$F/idle-power.sh mac --desktop "dark wallpaper" $R/mac.jsonl   # Terminal minimised
 
 # 2. each VM, alone, in full screen; SSH as root with ~/.ssh/omacvm
-$F/vm.sh app root@127.0.0.1:52222 $R/app.jsonl
-$F/idle-power.sh app $R/app.jsonl
-$F/vm.sh utm root@192.168.64.9 $R/utm.jsonl
-$F/idle-power.sh utm $R/utm.jsonl
-$F/vm.sh fusion root@192.168.70.128 $R/fusion.jsonl
-$F/idle-power.sh fusion $R/fusion.jsonl
-$F/vm.sh parallels root@10.211.55.14 $R/parallels.jsonl
-$F/idle-power.sh parallels $R/parallels.jsonl
+OMACVM_APP=~/Applications/OmacVM.app \
+$F/vm.sh app --vm "Bench OmacVM" root@127.0.0.1:<port> $R/app.jsonl
+$F/idle-power.sh app --ssh root@127.0.0.1:<port> $R/app.jsonl
+$F/vm.sh utm --vm "Bench UTM" root@<ip> $R/utm.jsonl
+$F/idle-power.sh utm --ssh root@<ip> $R/utm.jsonl
+$F/vm.sh fusion --vm "Bench Fusion" root@<ip> $R/fusion.jsonl
+$F/idle-power.sh fusion --ssh root@<ip> $R/fusion.jsonl
+$F/vm.sh parallels --vm "Bench Parallels" root@<ip> $R/parallels.jsonl
+$F/idle-power.sh parallels --ssh root@<ip> $R/parallels.jsonl
 
-# 3. table and chart
-$F/summarize.py $R/*.jsonl --json $R/chart.json
-src/bench/chart.py --panel gpu $R/chart.json docs/images/benchmarks.svg \
+# 3. table and chart (Geekbench's scores are read from its result pages in a
+#    visible Chrome on the Mac, after the round)
+$F/summarize.py $R/*.jsonl --fetch-geekbench --json $R/chart.json
+src/bench/chart.py --panel gpu $R/chart.json $R/gpu.svg \
   "MacBook Pro M4 Max · macOS 15.7 · Google Chrome 154 · October 2026"
 ```
 
-(The IP addresses are the 2026-10-03 round's VMs; check yours.)
+`OMACVM_APP` names the app build under test, so the lines record its version
+(not whatever is in `~/Applications`).
 
-For OmacVM.app, `vm.sh` records the version of `~/Applications/OmacVM.app`
-(else `/Applications`); test another build with `OMACVM_APP=/path/to/OmacVM.app`
-in front.
+The chart's rows: GPU throughput (headline, with the method), GPU compute
+(vkpeak fp32, Geekbench OpenCL, Geekbench Vulkan against the Mac's Metal),
+glmark2 and vkmark (VMs only: scores, bars against the best VM), Basemark.
+`--aquarium` adds WebGL Aquarium as an optional row. The user sees the draft
+before it becomes `docs/images/benchmarks.svg`.
 
-`vm.sh` copies `src/bench` and `tests/bench` into the VM
-(`/opt/omacvm-final-round`), installs glmark2, vulkan-tools and vkpeak's
-build tools with pacman (vkpeak builds once into the desktop user's
-`~/.cache/omacvm-bench`), and needs Google Chrome already installed in the VM.
+## After the round: clean up
 
-**OmacVM.app and Vulkan.** vkpeak needs Venus in the VM: the VM's Vulkan
-setting on, and Mesa 26.2.4 or newer in the guest (Arch Linux ARM's 26.2.3
-fails, see `src/app/guest/venus/install.sh`). Without it the line says "not
-available" with the reason; that is what the chart shows.
+```bash
+$F/vm.sh app --vm "Bench OmacVM" root@127.0.0.1:<port> --cleanup     # and the other three
+rm -rf ~/.cache/omacvm-bench                                          # on the Mac: vkpeak's download
+```
+
+`--cleanup` removes `/opt/omacvm-final-round` and `~/.cache/omacvm-bench`
+in the VM and lists the packages `--prepare` added; `--cleanup --packages`
+also removes them (`pacman -Rns`).
 
 ## What each line holds
 
-`{"target", "test", "preliminary", "result", "mac_state", "quiet", "at"}`:
+`{"target", "test", "preliminary", "preliminary_why", "result", "mac_state", "quiet", "at"}`:
 
 - `result`: the test's own JSON. VM lines add `vm` (kernel, CPUs, memory,
-  monitor mode, GL renderer, Vulkan device, Chrome, Mesa, glmark2 versions) and
-  `hypervisor` (name and version).
+  monitors and their widths, GL renderer, Vulkan devices, Chrome, Mesa,
+  glmark2, vkmark, when prepared), `hypervisor` (name and version) and
+  `vm_name`.
 - `mac_state`: Mac model, macOS version, display mode, brightness (read only),
-  charging, charger, battery %.
-- `quiet`: other VM processes, Claude processes, the bench lock, load.
+  charging, charger, battery %, energy mode, thermal state.
+- `quiet`: other hypervisor processes, VMs of the target, Claude processes,
+  the bench lock, load.
 
-A line with `"preliminary": true` or `quiet.busy: true` does not go into
-the README.
+`summarize.py` leaves out of the medians, and lists apart with the reason:
+lines marked preliminary, from a busy Mac, charging, on battery, in Low Power
+Mode, not at thermal state nominal, after the energy mode changed, from a
+guest narrower than 3000 px or with Chrome's page other than 1728x1080 at 2x;
+page results that are unstable (CV 3 % or more), not linear at half and double
+the work, fell back from the timer to wall time, ran at a frame target other
+than 40 ms (timer), or whose fixed cost was 2 % of a frame or more (wall).
+`--include-preliminary` keeps the lines for a draft; the JSON and the chart
+then say "preliminary".
 
 ## Times
 
 | Step | About |
 |---|---|
-| mac.sh | 15 to 20 min (Basemark is most of it) |
-| vm.sh, first time in a VM | + 3 min (pacman, vkpeak build) |
-| vm.sh | 20 to 25 min (+ glmark2) |
+| vm.sh --prepare | 5 to 10 min per VM (update, vkpeak build), before the round |
+| mac.sh | 20 to 25 min (Basemark is most of it) |
+| vm.sh | 30 to 35 min |
 | idle-power.sh | 11 min (1 min settle, 10 min window) |
