@@ -686,6 +686,9 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-colo
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shortcuts-logic.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-system-shortcuts.patch"
 "$native_dir/Tests/keys/test-shortcuts.sh"
+# OmacVM: VM memory and graphics memory in the app menu (read when it opens).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-graphics-memory.patch"
+"$native_dir/Tests/display/test-gpu-memory-menu.sh"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
