@@ -1,0 +1,61 @@
+From: OmacVM
+Subject: [PATCH] ui: keys OmacVM's helpers post for macOS never go to the guest
+
+What: a key event marked with OmacVM's marker (kCGEventSourceUserData =
+0x0BAC0E5C, the value OmacVM Bridge already marks its own posted keys with)
+is not the guest's: QEMU's full-grab tap lets it through and the app does
+not send it to the VM.
+
+Why: after Ctrl+Option+Cmd+Esc, OmacVM Gestures leaves the VM's full-screen
+Space with macOS's own "Move left/right a space" shortcut (Ctrl+Left/Right
+by default), posted at the HID level. QEMU's window is still key at that
+moment, so its full-grab tap (qemu-cocoa-full-grab-focus.patch) took the
+shortcut and typed Ctrl+Left into Omarchy; macOS never saw it. The user
+wants to swipe away to macOS, not leave full screen (Mac mini, macOS 27,
+2026-10-05: the synthesized Dock swipe does nothing there).
+
+Upstream: not applicable (OmacVM's helpers).
+Test: src/gestures/mac/test.sh checks that Gestures, the Bridge and this
+patch use the same marker; the build checks the patch is in ui/cocoa.m.
+The escape path itself: src/gestures/mac/test-escape.c (no QEMU).
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -649,7 +649,27 @@
+     [cocoaView resetPinchLocked:running];
+ }
+ 
++/*
++ * OmacVM: a key that OmacVM's Mac helpers post for macOS itself carries this
++ * value in kCGEventSourceUserData (the Bridge's marker; OmacVM Gestures posts
++ * macOS's "Move left/right a space" shortcut with it after the escape combo).
++ * It never goes to the guest, even while our window has the keyboard, so
++ * macOS gets it.
++ */
++#define OMACVM_MAC_KEY_MARKER 0x0BAC0E5C
+ 
++static bool omacvm_key_for_macos(NSEvent *event)
++{
++    NSEventType type = [event type];
++    if (!event || (type != NSEventTypeKeyDown && type != NSEventTypeKeyUp &&
++                   type != NSEventTypeFlagsChanged)) {
++        return false;
++    }
++    CGEventRef cgEvent = [event CGEvent];
++    return cgEvent && CGEventGetIntegerValueField(cgEvent, kCGEventSourceUserData) ==
++                      OMACVM_MAC_KEY_MARKER;
++}
++
+ static CGEventRef handleTapEvent(CGEventTapProxy proxy, CGEventType type, CGEventRef cgEvent, void *userInfo)
+ {
+     QemuCocoaView *view = userInfo;
+@@ -1335,6 +1355,9 @@
+ 
+ - (bool) handleEvent:(NSEvent *)event
+ {
++    if (omacvm_key_for_macos(event)) {
++        return false;
++    }
+     return bool_with_bql(^{
+         return [self handleEventLocked:event];
+     });

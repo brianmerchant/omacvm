@@ -690,6 +690,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-colo
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shortcuts-logic.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-system-shortcuts.patch"
 "$native_dir/Tests/keys/test-shortcuts.sh"
+# Keys OmacVM's helpers post for macOS (the escape combo's Space shortcut) skip the guest.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-keys-for-macos.patch"
+grep -q 'if (omacvm_key_for_macos(event))' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not pass OmacVM's marked keys to macOS (keys-for-macos patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

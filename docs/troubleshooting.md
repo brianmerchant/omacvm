@@ -56,10 +56,13 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
   Applications › Utilities). The shortcuts work again at once. From the
   Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
-- **⌃⌥⌘ Esc left the VM's window instead of swiping**: the swipe did not
-  land, so OmacVM took the VM out of full screen and hid it (never stuck).
-  ⌃⌥⌘ Esc in macOS brings it back in full screen. The Gestures log says
-  "escape combo: still in the VM (...)" for this case; please send it.
+- **⌃⌥⌘ Esc opened Mission Control instead of moving to the next Space**:
+  neither macOS's "Move left/right a space" shortcut nor a Dock swipe moved
+  the Space, so OmacVM opened Mission Control to let you pick one (the VM
+  stays full screen). Check that the shortcuts are on in System Settings ›
+  Keyboard › Keyboard Shortcuts › Mission Control. The Gestures log
+  (`~/Library/Logs/omacvm-gestures.log`) says which step did what
+  ("escape combo: ..."); please send those lines.
 - **Brightness keys do nothing with the VM in front**: OmacVM Bridge reads
   them from the keyboard and needs Input Monitoring (System Settings › Privacy
   & Security › Input Monitoring › OmacVM Bridge). Its log says
