@@ -247,21 +247,55 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(forwardGate(release: "2.9.0", mac: "2.9.0", vm: "2.9.0")?.code == "not-newer", "nothing newer")
 
     // ---- manifest ----
+    // Throwaway keys: key and spare play the main and the spare release key.
     let key = Curve25519.Signing.PrivateKey()
+    let spare = Curve25519.Signing.PrivateKey()
     let other = Curve25519.Signing.PrivateKey()
-    let pub = key.publicKey.rawRepresentation.base64EncodedString()
+    func b64(_ k: Curve25519.Signing.PrivateKey) -> String { k.publicKey.rawRepresentation.base64EncodedString() }
+    func sign(_ d: Data, _ k: Curve25519.Signing.PrivateKey) -> Data { Data(try! k.signature(for: d).base64EncodedString().utf8) }
+    let pub = b64(key)
+    let keys = ReleaseKeys(shipped: [pub, b64(spare)], store: nil)
     let digest = "sha256:" + String(repeating: "ab", count: 32)
-    let body = Data(#"{"schema": 1, "kind": "control-manifest", "version": "2.9.1", "commit": "\#(String(repeating: "c", count: 40))", "date": "2026-10-20", "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1", "proto": 1, "proto_min": 1, "parts": {"gestures": {"digest": "\#(digest)", "release": "2.9.1", "note": "fewer missed swipes"}}}"#.utf8)
+    let body = Data(#"{"schema": 1, "kind": "control-manifest", "version": "2.9.1", "commit": "\#(String(repeating: "c", count: 40))", "date": "2026-10-20", "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1", "proto": 1, "proto_min": 1, "parts": {"gestures": {"digest": "\#(digest)", "release": "2.9.1", "note": "fewer missed swipes"}}, "devid_teams": ["722686Y34B"]}"#.utf8)
     let sig = Data(try! key.signature(for: body).base64EncodedString().utf8)
-    expect(manifestSigned(body, sig: sig, key: pub), "good signature")
-    expect(!manifestSigned(body, sig: Data(try! other.signature(for: body).base64EncodedString().utf8), key: pub), "wrong key")
+    expect(manifestSigned(body, sig: sig, keys: keys), "good signature (main key)")
+    expect(manifestSigned(body, sig: sign(body, spare), keys: keys), "good signature (spare key)")
+    expect(!manifestSigned(body, sig: sign(body, other), keys: keys), "wrong key")
+    expect(!manifestSigned(body, sig: sign(body, spare), keys: ReleaseKeys(shipped: [pub], store: nil)), "spare where only the main key ships")
     var tampered = body; tampered[tampered.count - 3] = UInt8(ascii: "x")
-    expect(!manifestSigned(tampered, sig: sig, key: pub), "changed manifest")
-    expect(!manifestSigned(body, sig: Data("bm90IGEgc2ln".utf8), key: pub), "garbage signature")
-    expect(!manifestSigned(body, sig: sig, key: ""), "no key")
+    expect(!manifestSigned(tampered, sig: sig, keys: keys), "changed manifest")
+    expect(!manifestSigned(body, sig: Data("bm90IGEgc2ln".utf8), keys: keys), "garbage signature")
+    expect(!manifestSigned(body, sig: sig, keys: ReleaseKeys(shipped: [""], store: nil)), "no key")
     if case .success(let m) = parseManifest(body) {
-      expect(m.version == "2.9.1" && m.parts["gestures"]?["note"] == "fewer missed swipes", "manifest fields")
+      expect(m.version == "2.9.1" && m.parts["gestures"]?["note"] == "fewer missed swipes" && m.teams == ["722686Y34B"], "manifest fields")
     } else { expect(false, "manifest parses") }
+    for (what, teams) in [("no teams", ""), ("empty teams", #", "devid_teams": []"#), ("lower-case team", #", "devid_teams": ["722686y34b"]"#),
+                          ("team twice", #", "devid_teams": ["722686Y34B", "722686Y34B"]"#), ("teams as a string", #", "devid_teams": "722686Y34B""#)] {
+      let d = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #", "devid_teams": ["722686Y34B"]"#, with: teams).utf8)
+      if case .failure(let e) = parseManifest(d) { expect(e.code == "bad-manifest", what) } else { expect(false, what) }
+    }
+    let badSpare = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 1, "next_spare_key": "bm90IGEga2V5""#).utf8)
+    if case .failure = parseManifest(badSpare) { expect(true, "next_spare_key not a key") } else { expect(false, "next_spare_key not a key") }
+
+    // Rotation: a signed manifest names a new spare, kept with its signature.
+    let store = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("omacvm-bridge-keys-\(getpid())")
+    defer { try? FileManager.default.removeItem(at: store) }
+    let rotating = ReleaseKeys(shipped: [pub, b64(spare)], store: store)
+    let next = Curve25519.Signing.PrivateKey()
+    let naming = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 1, "next_spare_key": "\#(b64(next))""#).utf8)
+    if case .success = parseManifest(naming) { expect(true, "a manifest naming a new spare parses") } else { expect(false, "a manifest naming a new spare parses") }
+    let byNext = sign(body, next)
+    expect(!manifestSigned(body, sig: byNext, keys: rotating), "the new spare before it was named: refused")
+    expect(!rotating.remember(naming, signature: sign(naming, other)), "named by a stranger: not kept")
+    expect(rotating.remember(naming, signature: sign(naming, spare)), "named by the spare: kept")
+    expect(!rotating.remember(naming, signature: sign(naming, spare)), "named again: already trusted")
+    expect(manifestSigned(body, sig: byNext, keys: rotating), "signed by the named spare: accepted from then on")
+    expect(!manifestSigned(body, sig: byNext, keys: ReleaseKeys(shipped: [b64(other)], store: store)), "other shipped keys: the kept one does not count")
+    for n in (try? FileManager.default.contentsOfDirectory(atPath: store.path)) ?? [] where n.hasSuffix(".json") {
+      var d = try! Data(contentsOf: store.appendingPathComponent(n)); d[d.count / 2] ^= 1
+      try! d.write(to: store.appendingPathComponent(n))
+    }
+    expect(!manifestSigned(body, sig: byNext, keys: rotating), "kept document changed on disk: ignored")
     let schema2 = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 2"#).utf8)
     if case .failure(let e) = parseManifest(schema2) { expect(e.code == "bad-manifest", "schema 2") } else { expect(false, "schema 2") }
     // One key signs both feeds: the app's feed, or no kind, is no manifest.
