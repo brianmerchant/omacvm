@@ -303,6 +303,44 @@ for i in 0..<20 {
 expect(junky.trusted().count == 2, "20 junk documents: nothing trusted from them")
 expect(junky.remember(announce, signature: sign(announce, with: spareKey))?.named == [b64(nextKey)] && junky.trusted().count == 3,
        "20 junk documents first: a real one is still kept and trusted")
+// More junk than the old 256-file cap, on both sides of the real names, plus a
+// link and a pipe named like documents: all of it is read past, nothing hangs.
+let flood = fresh("flood")
+try! FileManager.default.createDirectory(at: flood.store!, withIntermediateDirectories: true)
+let junkDoc = feed(["next_spare_key": b64(Curve25519.Signing.PrivateKey())]), junkSig = sign(feed([:]), with: Curve25519.Signing.PrivateKey())
+for i in 0..<300 {
+    for n in [String(format: "%016x", i), String(format: "ffffffff%08x", i)] {
+        try! junkDoc.write(to: flood.store!.appendingPathComponent("\(n).json"))
+        try! junkSig.write(to: flood.store!.appendingPathComponent("\(n).json.sig"))
+    }
+}
+expect(flood.remember(announce, signature: sign(announce, with: spareKey)) != nil
+       && flood.remember(announce2, signature: sign(announce2, with: nextKey)) != nil && flood.trusted().count == 4,
+       "600 junk documents around them: a chain of two named keys is still kept and trusted")
+expect(mkfifo(flood.store!.appendingPathComponent("00000000000b0000.json").path, 0o600) == 0
+       && mkfifo(flood.store!.appendingPathComponent("00000000000b0000.json.sig").path, 0o600) == 0, "a pipe named like a document")
+expect(flood.trusted().count == 4, "a pipe in the folder: skipped, no hang")
+// A kept document swapped for a link to itself elsewhere: links are not followed.
+let real = try! FileManager.default.contentsOfDirectory(atPath: flood.store!.path).first { !$0.hasPrefix("0000") && !$0.hasPrefix("ffffffff") && $0.hasSuffix(".json") }!
+let away = tmp.appendingPathComponent("away.json")
+try? FileManager.default.removeItem(at: away)
+try! FileManager.default.moveItem(at: flood.store!.appendingPathComponent(real), to: away)
+try! FileManager.default.createSymbolicLink(at: flood.store!.appendingPathComponent(real), withDestinationURL: away)
+expect(flood.trusted().count < 4, "a kept document that is a link: not followed")
+// The same document under another name (a copy): skipped before its signature is checked.
+let copyName = "0123456789abcdef.json"
+try! FileManager.default.copyItem(at: away, to: flood.store!.appendingPathComponent(copyName))
+try! FileManager.default.copyItem(at: flood.store!.appendingPathComponent(real + ".sig"), to: flood.store!.appendingPathComponent(copyName + ".sig"))
+expect(flood.trusted().count < 4, "a kept document under a name that is not its hash: skipped")
+let crowded = fresh("crowded")
+for i in 0..<(3 * ReleaseKeys.maxKept) {
+    let d = feed(["next_spare_key": b64(Curve25519.Signing.PrivateKey()), "version": "4.0.\(i)"])
+    let sig = sign(d), n = SHA256.hash(data: d + sig).prefix(8).map { String(format: "%02x", $0) }.joined()
+    try! FileManager.default.createDirectory(at: crowded.store!, withIntermediateDirectories: true)
+    try! d.write(to: crowded.store!.appendingPathComponent("\(n).json"))
+    try! sig.write(to: crowded.store!.appendingPathComponent("\(n).json.sig"))
+}
+expect(crowded.trusted().count == 2 + ReleaseKeys.maxKept, "\(3 * ReleaseKeys.maxKept) signed documents in the folder: still at most \(ReleaseKeys.maxKept) count")
 
 // Who may replace the bundle: its folder and the bundle itself writable
 let folder = tmp.appendingPathComponent("Applications")

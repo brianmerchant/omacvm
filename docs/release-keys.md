@@ -77,7 +77,8 @@ would trust it for good. So a document can revoke it:
    ships, never with a named one) and list the leaked key:
    `OMACVM_REVOKED_KEYS="<leaked public key>" app/scripts/package-release.sh`
    (and `manifest.py build --out`, so copies that only run the Bridge get it
-   too). Add `OMACVM_NEXT_SPARE_KEY` in the same run to name the new spare.
+   too; `src/prebuilt/make-image.sh` reads it as well, for prebuilt images
+   made in the same round). Add `OMACVM_NEXT_SPARE_KEY` in the same run to name the new spare.
    The feed then has `"revoked_keys": ["<key>"]` (1 to 8 keys).
 3. Each copy that reads it keeps it (like a naming document) in
    `~/Library/Application Support/omacvm/release-keys`. From then on the
@@ -111,7 +112,15 @@ only (`<16 hex>.json` and `.json.sig`). A bare key file, a changed document
 or any other junk there adds nothing: only documents whose signature checks
 out (against a shipped key, or a key a checked document named) count, and
 at most 8 of them. Junk does not count toward the 8, so it cannot crowd
-out the real ones. At most 256 files there are looked at.
+out the real ones.
+
+Every file there is looked at, one at a time, the cheap checks first: the
+name, a regular file (no link, pipe or device), the sizes (256 KB, 1 KB for
+the signature), the signature's format, the name being the first 16 hex
+digits of SHA-256(document + signature) (as they are written), then JSON.
+Only then is the signature checked, and a document is held in memory only
+when it checks out and adds a key or a revocation (at most 16). So many
+junk files make reading slower, never wrong, and never take much memory.
 
 ## Which Developer ID the fast network trusts
 
@@ -121,8 +130,16 @@ for it: the signed update feed of that app's release lists the team, or the
 script is the app's own copy (its Fast Network button). Otherwise, for
 example an app that is not a published release, or a fake app signed with
 someone else's Developer ID, it trusts only that exact build of the QEMU
-(its cdhash), as for an app built from source. `install.sh --trust` shows
-what an install would trust.
+(its cdhash), as for an app built from source.
+
+The root daemon itself comes from the app (signed and built with it) only
+in the same two cases: a team the signed feed lists, or the app's own copy
+of the script. For any other app the script builds the daemon from its own
+source (Xcode's Command Line Tools needed, as for a source build); without
+the tools it refuses and points to the app's Fast Network button. So a fake
+app plus an administrator's password never gets its own file run as root.
+`install.sh --trust` shows what an install would trust and where the daemon
+would come from.
 
 ## When the Developer ID team changes
 

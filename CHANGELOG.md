@@ -33,7 +33,9 @@ Pending (each line is decided at release: the lane landed, or it moves to
   Prebuilt images are only used with a signed manifest. A signed feed can
   revoke a spare key that leaked. The fast network's service trusts a
   Developer ID team only when the release's signed feed lists it (or the
-  app installs it for itself); otherwise it trusts only that exact build.
+  app installs it for itself); otherwise it trusts only that exact build,
+  and builds the service from source instead of running the app's own copy
+  as root.
   Maintainers: [docs/release-keys.md](docs/release-keys.md).
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
