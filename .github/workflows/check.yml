@@ -127,6 +127,9 @@ jobs:
       - name: The vulkan feature's Mesa build (build tools come and go)
         run: src/tests/venus-build-tools.sh
 
+      - name: Graphics setting (OpenGL, Vulkan, Automatic; app and omacvm agree)
+        run: src/tests/graphics-setting.sh
+
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 

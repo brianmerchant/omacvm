@@ -27,8 +27,8 @@ final class Runner {
         // older VMs keep the Mac's pointer.
         let guestPointer = FileManager.default.fileExists(
             atPath: c.folder.appendingPathComponent("guest-pointer").path)
-        let vulkan = Settings.venus || FileManager.default.fileExists(
-            atPath: c.folder.appendingPathComponent("vulkan").path)
+        let g = Runner.graphicsPlan(c)
+        graphics = g
         var a: [String] = [
             "-name", q(c.name),
             "-machine", "virt,gic-version=3",
@@ -47,9 +47,9 @@ final class Runner {
         ] + networkArguments() + [
             // One output per Mac display in full screen (Virtual-1 is the window;
             // QEMU's window code opens the others): the built-in and four more.
-            // Venus (Vulkan; omacvm enable vulkan writes the VM's vulkan file)
+            // Venus (Vulkan: the VM's Graphics setting, see Graphics.swift)
             // needs blobs and a host memory window for them.
-            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(vulkan ? ",blob=true,venus=true,hostmem=4G" : "")",
+            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(g.venus ? ",blob=true,venus=true,hostmem=\(g.hostmemGB)G" : "")",
             "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
@@ -126,6 +126,23 @@ final class Runner {
         return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid && $0[kCGWindowLayer as String] as? Int == 0 }
     }
 
+    /// The graphics this start got (Graphics.swift).
+    private(set) var graphics: GraphicsPlan?
+
+    /// The VM's Graphics setting on this Mac now: the macOS version, whether
+    /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
+    static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
+        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
+        let forced = Settings.venus || FileManager.default.fileExists(
+            atPath: c.folder.appendingPathComponent("vulkan").path)
+        return Graphics.plan(choice: Graphics.read(folder: c.folder),
+                             macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                             kosmicKrisp: FileManager.default.fileExists(atPath: lib.path),
+                             driverReady: Graphics.driverReady(folder: c.folder), forced: forced,
+                             macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024)
+    }
+
     /// The path the network took at the last start (FastNetwork).
     private(set) var network = FastNetwork.Choice(vmnet: false, mac: FastNetwork.defaultMAC, record: "slirp off")
 
@@ -195,6 +212,7 @@ final class Runner {
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
+        if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
         try? Data("\(network.record)\n".utf8).write(to: c.folder.appendingPathComponent("logs/network"))
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))

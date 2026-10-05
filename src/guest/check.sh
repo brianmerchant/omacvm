@@ -366,6 +366,7 @@ app)
   esac
   # Vulkan (Venus), with the app's Vulkan switch on: the driver must size GPU
   # memory to the Mac's pages, or every Vulkan app fails to start.
+  FEATURE=graphics
   # (OmacVM's Mesa above has its own Venus driver; the distro's is not used then.)
   vk=$(/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh --status 2>/dev/null)
   [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]] && vk=omacvm
@@ -377,6 +378,7 @@ app)
     no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
     *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
   esac
+  FEATURE=""
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
   # The shim prints the Mac's per-VM limit (past it, players decode on the CPU).

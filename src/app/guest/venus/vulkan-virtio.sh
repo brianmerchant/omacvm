@@ -9,6 +9,10 @@
 # minutes) and installs it with pacman; the distro's 26.2.4 or newer replaces
 # it on the next pacman -Syu. OpenGL stays on the distro's Mesa.
 #   vulkan-virtio.sh            install it if this VM needs it (silent when Vulkan is off)
+#   vulkan-virtio.sh --want     install it also before the VM has Vulkan (omacvm apply,
+#                               when the VM's Graphics setting gives it Vulkan here)
+#   vulkan-virtio.sh --ready    exit 0 if the VM has a Venus driver for 16 KiB pages
+#                               (this package from 26.2.4 on, or OmacVM's Mesa)
 #   vulkan-virtio.sh --status   one line: STATE DETAIL, STATE one of
 #                               ok | needed | no-venus | no-pages (nothing to do)
 # Tests: OMACVM_VENUS_PROBE replaces the probe's output ("venus=1 blob_alignment=16384").
@@ -33,13 +37,26 @@ status() {
   fi
 }
 
-if [[ ${1:-} == --status ]]; then status; exit 0; fi
-[[ -z ${1:-} ]] || { echo "usage: vulkan-virtio.sh [--status]" >&2; exit 2; }
+# The VM's Venus driver sizes GPU memory to 16 KiB pages (with or without the
+# Venus device now): the Mac's Automatic Graphics waits for this.
+ready() {
+  local have
+  [[ -f ${OMACVM_MESA_ICD:-/etc/vulkan/icd.d/omacvm_venus_icd.json} ]] && return 0
+  have=$(pacman -Q vulkan-virtio 2>/dev/null | awk '{ print $2 }' || true)
+  [[ -n $have ]] && (( $(vercmp "$have" "$FIXED") >= 0 ))
+}
+
+case ${1:-} in
+  --status) status; exit 0 ;;
+  --ready) ready; exit ;;
+  --want|"") ;;
+  *) echo "usage: vulkan-virtio.sh [--want | --ready | --status]" >&2; exit 2 ;;
+esac
 s=$(status)
 case ${s%% *} in
   needed) ;;
   ok) echo "Vulkan (Venus): ${s#* }"; exit 0 ;;
-  *) exit 0 ;;
+  *) [[ ${1:-} == --want ]] && ! ready || exit 0 ;;
 esac
 (( EUID == 0 )) || { echo "vulkan-virtio.sh: run as root" >&2; exit 1; }
 
@@ -77,5 +94,10 @@ reason=--asexplicit
 pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
 pacman -U --noconfirm "$reason" "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
 s=$(status)
+if [[ ${s%% *} == no-venus || ${s%% *} == no-pages ]]; then
+  ready || fail "installed, but it is not ${FIXED#*:} or newer"
+  echo "Vulkan (Venus): vulkan-virtio $(pacman -Q vulkan-virtio | awk '{ print $2 }') ready for the VM's next start"
+  exit 0
+fi
 [[ ${s%% *} == ok ]] || fail "installed, but: ${s#* }"
 echo "Vulkan (Venus): ${s#* } (restart Vulkan apps)"
