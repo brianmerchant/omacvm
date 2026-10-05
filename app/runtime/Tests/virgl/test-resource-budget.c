@@ -5,7 +5,7 @@
  *   test-resource-budget            runs every mode below as a child process
  *   test-resource-budget limit      OMACVM_GPU_MEMORY_MB=64: what fits and what is refused
  *   test-resource-budget off        OMACVM_GPU_MEMORY_MB=0: no budget
- *   test-resource-budget default    unset: a quarter of the Mac's memory */
+ *   test-resource-budget default    unset: three quarters of the Mac's memory */
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
 #include <spawn.h>
@@ -242,17 +242,17 @@ static int run_default(void)
    uint64_t mem = 0;
    size_t len = sizeof mem;
    sysctlbyname("hw.memsize", &mem, &len, NULL, 0);
-   uint32_t quarter_mb = (uint32_t)(mem / 4 / MB);
+   uint32_t default_mb = (uint32_t)(mem / 4 * 3 / MB);
    char line[160];
    uint32_t a = make(T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_STAGING, 4096, 1, 1, 1, 0, 0);
    check(a != 0, "default budget: a small resource fits");
-   /* 16384x16384 RGBA32F, 64 layers = 256 GB: refused unless a quarter of the memory
-    * is more than 64 GB */
+   /* 16384x16384 RGBA32F, 64 layers = 256 GB: refused unless three quarters of the
+    * memory are 256 GB or more */
    uint32_t b = make(T_2D_ARRAY, VIRGL_FORMAT_R32G32B32A32_FLOAT, VIRGL_BIND_SAMPLER_VIEW,
                      16384, 16384, 1, 64, 0, 0);
-   snprintf(line, sizeof line, "default budget (%u MB = a quarter of %llu MB): a 256 GB texture "
-            "array is refused", quarter_mb, (unsigned long long)(mem / MB));
-   check(quarter_mb >= 262144 ? 1 : b == 0, line);
+   snprintf(line, sizeof line, "default budget (%u MB = three quarters of %llu MB): a 256 GB "
+            "texture array is refused", default_mb, (unsigned long long)(mem / MB));
+   check(default_mb >= 262144 ? 1 : b == 0, line);
    if (a)
       virgl_renderer_resource_unref(a);
    if (b)

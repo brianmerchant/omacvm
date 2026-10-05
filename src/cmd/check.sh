@@ -263,6 +263,15 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   if [[ -n $lost ]]; then
     skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
+  # The VM's GPU memory on the Mac: its budget, the highest use logged (in
+  # 512 MB steps) and whether anything was refused for it.
+  budget=$(grep -o 'guest GPU memory budget: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')
+  peak=$(grep -o 'guest GPU memory in use: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')
+  if [[ -n $budget ]]; then
+    if grep -q 'guest GPU memory budget of [0-9]* MB reached' "$miclog"; then
+      bad "GPU memory" "the VM's apps wanted more than the budget of $budget MB this run: one lost its GPU context (restart the VM)"
+    else ok "GPU memory" "${peak:+peak about $peak MB, }budget $budget MB"; fi
+  fi
 fi
 # The GPU path an app VM took this run (qemu.log starts fresh with each run):
 # fences from the sync thread or polled, frames as IOSurfaces or with a
