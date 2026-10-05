@@ -80,7 +80,8 @@ routes run on macOS 14).
   2.8.0 fence and frame path; `omacvm check` shows which path a VM took.
 - Vulkan, WebGPU and GPU compute (experimental, off by default):
   `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
-  The VM gets Vulkan (Venus on MoltenVK, KosmicKrisp on macOS 26+), OpenCL
+  The VM gets Vulkan (Venus on MoltenVK; on KosmicKrisp on macOS 26+ only
+  in an app built with `OMACVM_RUNTIME_KOSMICKRISP=1`, not the default), OpenCL
   (rusticl), WebGPU in Firefox, and a "Chromium (WebGPU)" menu entry that
   starts Chromium with WebGPU on the Mac's GPU (the normal Chromium keeps
   its software WebGPU: its Vulkan mode costs WebGL about a fifth). The

@@ -21,7 +21,8 @@ end. The tools are in [`src/bench/`](../../src/bench).
 **GPU compute needs Vulkan or OpenCL in the VM.** Parallels, UTM and VMware
 Fusion offer neither to a Linux guest: Geekbench 7's Linux ARM preview lists
 no GPU there, and `bench.sh` records that as "not available in this VM".
-OmacVM.app with Venus (still a hidden switch) has both: OpenCL through
+OmacVM.app with the vulkan feature (`omacvm enable vulkan`, experimental)
+has both: OpenCL through
 rusticl and WebGPU in Firefox and in the "Chromium (WebGPU)" launcher (ADR
 0022). One locked batch on the M4 Max: Geekbench 7 GPU OpenCL 42486 in the
 VM vs 95380 for the Mac's own OpenCL; WebGPU matmul 5071 GFLOPS in the VM's
