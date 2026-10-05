@@ -550,6 +550,26 @@ int main(void) {
   front = finder; world[0].cur = 401;
   frontChanged(finder, -1, 0, "", 0, 1); sent();
 
+  // QEMU's tap ahead of ours took the combo's Esc up (Ctrl let go first): the
+  // next plain Esc in macOS keeps its up.
+  layout(1, mini, 2, NULL, 0);
+  owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22;
+  pointer = CGPointMake(1000, 700); front = terminal; world[0].cur = 101;
+  frontChanged(terminal, -1, 0, "", 11, 1);
+  inVM(vm, 102);
+  {
+    went = swipes = hidden = keys = spaceKeys = mcKeys = mcApp = 0;
+    CGEventRef d = key(1, K, HID, 0), rd = tapCb(NULL, kCGEventKeyDown, d, NULL);
+    CFRelease(d); settleSteps();
+    check(!rd && world[0].cur == 101 && !capturing, "combo down, its up taken by QEMU's tap: moved out");
+  }
+  settle(vm, NET_APP); sent();
+  check(press(0, HID, 0) == 0, "... a plain Esc in macOS after it: down and up both pass");
+  check(press(K, HID, 0) == 1 && world[0].cur == 102 && front == vm, "... the combo still takes it back in");
+  settle(vm, NET_APP); sent();
+  front = finder; world[0].cur = 401;
+  frontChanged(finder, -1, 0, "", 0, 1); sent();
+
   // ---- Parallels: the same way out and back; Mission Control by its app ----
   layout(1, mini, 2, NULL, 0);
   owner[101] = terminal; winOn[101] = 11; owner[102] = parallels; winOn[102] = 55;

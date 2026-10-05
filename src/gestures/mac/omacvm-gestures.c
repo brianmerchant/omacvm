@@ -1604,6 +1604,10 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
     int combo = escapeCombo(kc, f);
+    // A plain Esc going down: the combo's Esc up we meant to eat went elsewhere
+    // (QEMU's tap ahead of ours takes it when Ctrl or Option comes up first),
+    // so this press keeps its own up.
+    if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo) swallowEscUp = 0;
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     int act = combo
               ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin),
