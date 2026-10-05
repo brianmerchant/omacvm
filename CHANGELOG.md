@@ -5,6 +5,12 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+- OmacVM.app: the pointer moves in Omarchy right after the VM starts, and
+  after a reboot in the VM, without a click into the window first, in a
+  window and in full screen, on any display. Coming back to the VM's window
+  (Command-Tab, the escape combo) gives it the pointer at once too. The Mac's
+  pointer over the VM hides only once Omarchy draws its own, so there is
+  always one to see while the VM boots.
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.
