@@ -870,7 +870,8 @@ verify_file_sha "Draw GL error check" "$virgl_draw_error_patch" "$virgl_draw_err
 patch -d "$virgl_source" -p1 -f -i "$virgl_draw_error_patch"
 verify_file_sha "Unused first vertex input" "$virgl_vertex_unused_patch" "$virgl_vertex_unused_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_unused_patch"
-# OmacVM: guest resources have a memory budget (OMACVM_GPU_MEMORY_MB, default a quarter of the Mac's memory).
+# OmacVM: guest resources have a memory budget against a runaway guest (OMACVM_GPU_MEMORY_MB, default
+# three quarters of the Mac's memory); below it virgl-darwin-memory-pressure.patch asks macOS.
 verify_file_sha "Resource memory budget" "$virgl_memory_budget_patch" "$virgl_memory_budget_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_memory_budget_patch"
 # OmacVM: QEMU's resource and transfer commands are flushed (Apple's GL keeps unflushed texture memory).
@@ -919,6 +920,8 @@ verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_
 patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
 # OmacVM GPU: the sync thread does not test fences while the render thread runs commands.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
+# OmacVM GPU: guest GPU memory follows the Mac's memory pressure; status file for the app.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-memory-pressure.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
