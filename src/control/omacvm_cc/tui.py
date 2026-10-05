@@ -192,6 +192,8 @@ class FeaturesScreen(Screen):
         self.query_one("#banner", Static).update(Text(app.banner()))
         self.query_one("#banner").set_class(bool(app.banner()), "show")
         box = self.query_one(".box")
+        # After an update this VM has another OmacVM: the title follows.
+        box.border_title = f"OmacVM {app.c.local.version}"
         box.border_subtitle = app.subtitle()
         self.show_hint()
 
