@@ -8,7 +8,9 @@
 #     --id       another bundle id (default org.omacvm.app): test builds that
 #                must not share settings, VMs or the running app with an
 #                installed OmacVM
-#     --release  for a published zip: the whole repo must be committed
+#     --release  for a published zip: the whole repo must be committed, and the
+#                runtime has KosmicKrisp (OMACVM_RUNTIME_KOSMICKRISP=1 unless set:
+#                Vulkan on macOS 26+; its tools: runtime/build-kosmickrisp.sh --check)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$ROOT/.." && pwd)
@@ -24,6 +26,12 @@ done
 [[ $ID =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "not a bundle id: $ID" >&2; exit 2; }
 (( ! RELEASE )) || [[ $ID == org.omacvm.app ]] || { echo "a release keeps the bundle id org.omacvm.app" >&2; exit 2; }
 log() { printf '==> %s\n' "$*"; }
+# A release ships KosmicKrisp: Graphics' Automatic gives Vulkan with it on
+# macOS 26 and newer (MoltenVK stays for older macOS and as the fallback).
+if (( RELEASE )); then
+  : "${OMACVM_RUNTIME_KOSMICKRISP:=1}"
+  export OMACVM_RUNTIME_KOSMICKRISP
+fi
 
 # OmacVM's VM side as committed (git archive of HEAD), so the app always says
 # which commit it carries. Uncommitted changes in src/ would not be in it:

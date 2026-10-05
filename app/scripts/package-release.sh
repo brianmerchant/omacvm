@@ -20,6 +20,13 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/d
 [[ $(plist OmacVMCommit) == "$(git -C "$REPO" rev-parse HEAD)" ]] ||
   die "the app was built from another commit: build it again (scripts/build-app.sh --release)"
 [[ -z $(git -C "$REPO" status --porcelain) ]] || die "uncommitted changes: a release comes from a clean tree"
+# Vulkan on macOS 26+ (Graphics: Automatic) needs KosmicKrisp in the app, with
+# its licence notice; OMACVM_RELEASE_NO_KOSMICKRISP=1 ships MoltenVK only.
+if [[ ${OMACVM_RELEASE_NO_KOSMICKRISP:-0} != 1 ]]; then
+  [[ -f $APP/Contents/Resources/runtime/lib/libvulkan_kosmickrisp.dylib &&
+     -s $APP/Contents/Resources/licenses/LICENSE.mesa-kosmickrisp.txt ]] ||
+    die "the app has no KosmicKrisp (or no licence notice for it): build-app.sh --release builds it (tools: runtime/build-kosmickrisp.sh --check)"
+fi
 # The runtime's build log holds local home paths. It once got into the
 # history (037fcf58, filtered out since); a branch made before that brings it
 # back until it is rebased onto the filtered history.
