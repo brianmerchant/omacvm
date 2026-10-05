@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import OmacVMUpdate
 
 /// Runs one VM: QEMU with its own Cocoa window (VirGL), a QMP socket for
 /// power and pause, and the Mac's sleep and wake.
@@ -197,7 +198,12 @@ final class Runner {
         // The window opens on the display the user is using (WindowPlacement).
         // QEMU's hook for that (omacvm-cocoa-displays.patch) still has the name
         // its first user, the display tests, gave it; it is no test mode.
-        if let d = Runner.placement() { env["OMACVM_TEST_MAIN_DISPLAY"] = String(d) }
+        // A test build keeps a display it was given (a virtual one), so a test
+        // never opens a window on the user's screens.
+        if TestHooks.value("OMACVM_TEST_MAIN_DISPLAY", bundleID: Bundle.main.bundleIdentifier) == nil,
+           let d = Runner.placement() {
+            env["OMACVM_TEST_MAIN_DISPLAY"] = String(d)
+        }
         if Settings.hdrActive {
             env["OMACVM_GL_HDR"] = "1"
         }
