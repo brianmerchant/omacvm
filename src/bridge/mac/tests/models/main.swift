@@ -89,6 +89,27 @@ _ = w.take(wifi(true), link: true, event: nil, now: at(1040))
 r1 = w.take(wifi(false), link: true, event: nil, now: at(1070))
 check(connected(r1.state) && r1.held, "wifi: a good read between restarts the minute")
 
+// Without Location Services (not decided after a new Bridge, or "Don't Allow"; the Mac mini on
+// macOS 27): CoreWLAN reads a channel with no signal and no SSID most of the time, now and then
+// a signal. The link state decides; the bar never flips while the link is up.
+check(WiFiRead.connected(power: true, channel: true, rssi: 0, locationOK: false, link: true), "wifi read: no Location, link up: connected")
+check(!WiFiRead.connected(power: true, channel: true, rssi: -51, locationOK: false, link: false), "wifi read: no Location, link down: not connected")
+check(WiFiRead.connected(power: true, channel: true, rssi: -51, locationOK: false, link: nil), "wifi read: no Location, link not known: CoreWLAN's read")
+check(!WiFiRead.connected(power: true, channel: true, rssi: 0, locationOK: true, link: true), "wifi read: with Location, CoreWLAN's read (WiFiSteady holds it)")
+check(!WiFiRead.connected(power: false, channel: false, rssi: 0, locationOK: false, link: true), "wifi read: power off: not connected")
+var nl = WiFiSteady(), nlFlips = 0, nlLast = false
+for i in 0..<120 {   // 10 minutes of reads every 5 s, a signal in one read of six
+  let rssi = i % 6 == 0 ? -51 : 0
+  let c = WiFiRead.connected(power: true, channel: true, rssi: rssi, locationOK: false, link: true)
+  var raw = wifi(c, ssid: nil, rssi: rssi, location: false)
+  if rssi == 0 { raw["rssi"] = NSNull() }
+  let s = nl.take(raw, link: true, event: nil, now: at(Double(i) * 5)).state
+  if i > 0 && connected(s) != nlLast { nlFlips += 1 }
+  nlLast = connected(s)
+  if i == 7 { check(s["rssi"] as? Int == -51, "wifi: no Location: a read without a signal keeps the last one known") }
+}
+check(nlFlips == 0 && nlLast, "wifi: no Location, link up, 10 minutes of mostly empty reads: connected, 0 flips")
+
 // ---- MediaRoute: where each media key goes ----
 func route(_ k: MediaKey, _ vm: FrontVM?, volume: Bool = true, mute: Bool = true, mac: UInt32? = nil,
            external: ExternalState = .unknown, light: Bool = false) -> KeyRoute {
@@ -131,7 +152,7 @@ let builtinFull = FrontVM(omacvm: true, fullScreen: true, display: 1, builtin: t
 let builtinWin = FrontVM(omacvm: true, fullScreen: false, display: 1, builtin: true, vmKeys: true)
 let extFull = FrontVM(omacvm: true, fullScreen: true, display: 2, builtin: false, vmKeys: true)
 check(route(.brightnessUp, builtinFull, mac: 1) == .mac, "MacBook full screen: the built-in's brightness, by the Bridge (no macOS popup)")
-check(route(.brightnessUp, builtinWin, mac: 1) == .macOS(nil), "MacBook windowed on the built-in: macOS's own (its popup)")
+check(route(.brightnessUp, builtinWin, mac: 1) == .mac, "MacBook windowed on the built-in: the Bridge sets it (macOS's shortcuts are off while the VM has the keyboard)")
 check(route(.brightnessUp, extFull, mac: 1, external: .works) == .external(2), "MacBook, VM on the Pi-X9: DDC/CI")
 check(route(.brightnessUp, extFull, mac: 1, external: .no("no DDC")) == .macOS("no DDC"), "MacBook, Pi-X9 without DDC: macOS, with why")
 check(route(.brightnessUp, extFull, mac: 1, external: .off) != .mac, "MacBook: the built-in is never set for a VM on the external")
@@ -145,6 +166,101 @@ check(route(.play, parFull) == .macOS(nil), "Parallels: play stays as it was (it
 
 var once = OnceLog()
 check(once.first("a") && !once.first("a") && once.first("b"), "a reason is logged once")
+
+// ---- brightness keys read from the keyboard (HIDBrightness, HIDKeyboards, BrightnessOnce) ----
+// The MacBook Pro M4 Max's own keyboard map (ioreg, FnFunctionUsageMap).
+let macbookMap = HIDBrightness.fnMap("0x0007003a,0x00ff0005,0x0007003b,0x00ff0004,0x0007003c,0xff010010,0x0007003d,0x000c0221,"
+  + "0x0007003e,0x000c00cf,0x0007003f,0x0001009b,0x00070040,0x000c00b4,0x00070041,0x000c00cd,0x00070042,0x000c00b3,"
+  + "0x00070043,0x000c00e2,0x00070044,0x000c00ea,0x00070045,0x000c00e9")
+check(macbookMap.count == 12 && macbookMap[HIDUsage.f1] == 0x00FF_0005 && macbookMap[HIDUsage.f2] == 0x00FF_0004,
+      "hid: the MacBook's FnFunctionUsageMap: F1 -> top-case brightness down, F2 -> up (12 keys)")
+check(HIDBrightness.fnMap(nil).isEmpty && HIDBrightness.fnMap("").isEmpty && HIDBrightness.fnMap("0x0007003a").isEmpty,
+      "hid: no map, an empty one, an odd one: nothing")
+check(HIDBrightness.fnMap("zz,0x00ff0005,0x0007003b,0x00ff0004") == [HIDUsage.f2: 0x00FF_0004], "hid: a pair that does not parse is left out")
+check(HIDBrightness.key(0x000C_006F) == .brightnessUp && HIDBrightness.key(0x000C_0070) == .brightnessDown,
+      "hid: consumer page 0x6F/0x70 are brightness up/down")
+check(HIDBrightness.key(0x00FF_0004) == .brightnessUp && HIDBrightness.key(0xFF01_0021) == .brightnessDown,
+      "hid: Apple's top-case and keyboard pages too")
+check(HIDBrightness.key(HIDUsage.f1) == nil && HIDBrightness.key(0x000C_00E9) == nil, "hid: F1 itself and volume up are not")
+var kb = HIDKeyboards()
+func hid(_ d: UInt64, _ u: UInt32, _ p: Bool, _ m: [UInt32: UInt32] = macbookMap, fnState: Bool = false) -> MediaKey? {
+  kb.value(device: d, usage: u, pressed: p, map: m, fnState: fnState)
+}
+// MacBook / Magic Keyboard, macOS's default (special keys on top).
+check(hid(1, HIDUsage.f1, true) == .brightnessDown && hid(1, HIDUsage.f1, false) == nil, "hid: F1 pressed: brightness down; released: nothing")
+check(hid(1, HIDUsage.f2, true) == .brightnessUp, "hid: F2: brightness up")
+check(hid(1, 0x0007_003C, true) == nil && hid(1, 0x0007_0044, true) == nil, "hid: F3 (Mission Control), F11 (volume): not brightness")
+_ = hid(1, 0x00FF_0003, true)
+check(hid(1, HIDUsage.f1, true) == nil, "hid: fn + F1: plain F1, no brightness")
+_ = hid(1, 0x00FF_0003, false)
+check(hid(1, HIDUsage.f1, true) == .brightnessDown, "hid: fn released: F1 is brightness again")
+// "Use F1, F2, etc. keys as standard function keys".
+check(hid(1, HIDUsage.f1, true, fnState: true) == nil, "hid: standard F-keys: F1 is F1")
+_ = hid(1, 0xFF01_0003, true)
+check(hid(1, HIDUsage.f2, true, fnState: true) == .brightnessUp, "hid: standard F-keys: fn (Apple keyboard page) + F2 is brightness up")
+_ = hid(1, 0xFF01_0003, false)
+// fn from another interface of the keyboard than F1.
+_ = hid(7, 0x00FF_0003, true)
+check(hid(8, HIDUsage.f1, true) == nil, "hid: fn on one interface, F1 on another: still fn + F1")
+_ = hid(7, 0x00FF_0003, false)
+// A Magic Keyboard without the property: Apple's default map.
+check(hid(2, HIDUsage.f2, true, HIDBrightness.appleDefault) == .brightnessUp, "hid: Apple keyboard with no map: F2 is brightness up")
+// A Bluetooth Magic Keyboard (the Mac mini's: vendor 0x004C, no FnFunctionUsageMap): Apple's default map.
+check(HIDBrightness.map(published: nil, vendor: 0x004C) == HIDBrightness.appleDefault
+      && HIDBrightness.map(published: nil, vendor: 0x05AC) == HIDBrightness.appleDefault,
+      "hid: Apple keyboard without a map, Bluetooth (0x004C) or USB (0x05AC): F1/F2 brightness")
+check(HIDBrightness.map(published: nil, vendor: 0x046D).isEmpty && HIDBrightness.map(published: nil, vendor: nil).isEmpty,
+      "hid: another vendor's keyboard (Logitech) or no vendor, no map: none")
+check(HIDBrightness.map(published: "0x0007003a,0x000c0070", vendor: 0x046D) == [HIDUsage.f1: 0x000C_0070],
+      "hid: a published map wins, any vendor")
+let bt = HIDBrightness.map(published: nil, vendor: 0x004C)
+check(hid(9, HIDUsage.f1, true, bt) == .brightnessDown && hid(9, HIDUsage.f2, true, bt) == .brightnessUp,
+      "hid: Bluetooth Magic Keyboard: F1 down, F2 up")
+_ = hid(9, 0x00FF_0003, true, bt)
+check(hid(9, HIDUsage.f1, true, bt) == nil, "hid: Bluetooth Magic Keyboard: fn + F1 is F1")
+check(hid(9, HIDUsage.f1, true, bt, fnState: true) == .brightnessDown, "hid: ... with standard F-keys on: fn + F1 is brightness down")
+_ = hid(9, 0x00FF_0003, false, bt)
+check(hid(9, HIDUsage.f2, true, bt, fnState: true) == nil, "hid: ... standard F-keys, no fn: F2 is F2")
+// A PC keyboard: no map, its own consumer-page brightness keys; its F1 stays F1.
+check(hid(3, HIDUsage.f1, true, [:]) == nil, "hid: another keyboard's F1 is F1")
+check(hid(3, 0x000C_0070, true, [:]) == .brightnessDown && hid(3, 0x000C_0070, false, [:]) == nil,
+      "hid: its brightness key (consumer page) pressed: down; released: nothing")
+// One press seen by both paths: the first acts, the copy is dropped.
+var once2 = BrightnessOnce()
+check(once2.take(.keyboard, .brightnessUp, at: 10) && !once2.take(.tap, .brightnessUp, at: 10.05),
+      "hid: keyboard first, the tap's copy 50 ms later: once")
+check(once2.take(.tap, .brightnessUp, at: 11) && !once2.take(.keyboard, .brightnessUp, at: 11.02), "hid: tap first: once too")
+check(once2.take(.keyboard, .brightnessUp, at: 12) && once2.take(.keyboard, .brightnessUp, at: 12.1) && once2.take(.keyboard, .brightnessUp, at: 12.2),
+      "hid: quick presses from the keyboard alone (macOS 27: no tap event): each acts")
+check(once2.take(.keyboard, .brightnessUp, at: 13) && once2.take(.tap, .brightnessDown, at: 13.05), "hid: another key: acts")
+check(once2.take(.keyboard, .brightnessUp, at: 14) && once2.take(.tap, .brightnessUp, at: 14.5), "hid: the tap 0.5 s later: a new press")
+check(BrightnessOnce.macOSDidIt(before: 0.5, after: 0.5625) && !BrightnessOnce.macOSDidIt(before: 0.5, after: 0.5)
+      && !BrightnessOnce.macOSDidIt(before: nil, after: 0.6) && !BrightnessOnce.macOSDidIt(before: 0.5, after: nil),
+      "hid: macOS stepped it already (1/16): not again; unchanged or unreadable (DDC): the Bridge steps")
+// RC11 check finding 1: quick presses lost every other step. Press 2 read "before" while press 1's step was
+// still waiting; its check saw press 1's change as macOS's. The Bridge's own steps do not count as macOS's.
+var own = OwnSteps()
+check(own.macOSDidIt(1, pressAt: 20, before: 0.5, after: 0.5625), "hid: no step of the Bridge's: a change is macOS's (not stepped again)")
+own.stepped(1, at: 20.25)   // press 1 (20.0) acts
+check(!own.macOSDidIt(1, pressAt: 20.1, before: 0.5, after: 0.5625), "hid: quick press 2 (0.1 s later): press 1's step is not macOS's: it steps")
+own.stepped(1, at: 20.35)
+check(!own.macOSDidIt(1, pressAt: 20.2, before: 0.5625, after: 0.625) && !own.macOSDidIt(1, pressAt: 20.4, before: 0.625, after: 0.6875),
+      "hid: 5 quick presses: each steps")
+var held = OwnSteps(); var stepsDone = 0; var level: Float = 0.5
+// A held key at 30 ms repeats (KeyRepeat 2): each act 0.25 s after its press, every one steps.
+var pending: [(at: Double, before: Float)] = []
+for i in 0..<20 {
+  let t = 30 + Double(i) * 0.03
+  while let p = pending.first, p.at + 0.25 <= t {
+    pending.removeFirst()
+    if !held.macOSDidIt(1, pressAt: p.at, before: p.before, after: level) { held.stepped(1, at: p.at + 0.25); level += 1 / 16; stepsDone += 1 }
+  }
+  pending.append((t, level))
+}
+for p in pending where !held.macOSDidIt(1, pressAt: p.at, before: p.before, after: level) { held.stepped(1, at: p.at + 0.25); level += 1 / 16; stepsDone += 1 }
+check(stepsDone == 20, "hid: a held key's 20 repeats: 20 steps (\(stepsDone))")
+check(own.macOSDidIt(2, pressAt: 20.2, before: 0.5, after: 0.5625), "hid: another display: its own check (macOS's change counts)")
+check(own.macOSDidIt(1, pressAt: 25, before: 0.5, after: 0.5625), "hid: a press 4 s after the last step: the check is back")
 
 // ---- QEMU's control socket ----
 check(QMPKeys.socketPath(["-name", "Omarchy", "-qmp", "unix:/Users/a/Library/Caches/OmacVM/run/x.qmp,server=on,wait=off"])

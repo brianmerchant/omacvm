@@ -2,9 +2,18 @@
 # Put OmacVM onto a running OmacVM.app VM: `omacvm apply` from the copy of
 # OmacVM inside the app (the Mac side its features need, the Bridge token,
 # the VM side), with the features in the VM's vm.env.
-#   apply-vm.sh VM_DIR [--no-mac]
+#   apply-vm.sh VM_DIR [--no-mac] [--reset-host-key]
+#     --reset-host-key  the VM was rebuilt or reinstalled: forget its old SSH key
 set -euo pipefail
-VM_DIR=${1:?usage: apply-vm.sh VM_DIR [--no-mac]}
+VM_DIR=${1:?usage: apply-vm.sh VM_DIR [--no-mac] [--reset-host-key]}
+shift
+extra=()
+for a in "$@"; do
+  case $a in
+    --no-mac|--reset-host-key) extra+=("$a") ;;
+    *) echo "apply-vm.sh: unknown option $a (--no-mac, --reset-host-key)" >&2; exit 2 ;;
+  esac
+done
 HERE=$(cd "$(dirname "$0")" && pwd)
 source "$HERE/vm-common.sh"
 vm_load "$VM_DIR"
@@ -23,5 +32,7 @@ if [[ -d $HERE/../../Helpers ]]; then
 fi
 args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
 for f in ${FEATURES:-}; do args+=(--feature "$f"); done
-[[ ${2:-} == --no-mac ]] && args+=(--no-mac)
-"$tmp/omacvm/src/cmd/apply.sh" "${args[@]}"
+# A changed SSH host key: say how to forget it the app's way.
+OMA_RESET_HINT="bash '$HERE/apply-vm.sh' '$VM_DIR' --reset-host-key"
+export OMA_RESET_HINT
+"$tmp/omacvm/src/cmd/apply.sh" "${args[@]}" ${extra[@]+"${extra[@]}"}

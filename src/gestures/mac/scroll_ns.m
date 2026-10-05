@@ -47,6 +47,15 @@ int ns_hide(pid_t pid) {
   }
 }
 
+// A hidden app shown again (the escape combo hid it): before it is brought to
+// the front, so its window is there to switch to.
+void ns_unhide(pid_t pid) {
+  @autoreleasepool {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (app && [app isHidden]) [app unhide];
+  }
+}
+
 // A regular app (Dock icon, windows), not an accessory or agent such as
 // Raycast, Alfred or a password manager's quick panel.
 int ns_is_regular(pid_t pid) {

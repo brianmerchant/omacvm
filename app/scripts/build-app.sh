@@ -41,7 +41,7 @@ KK_STAMP=
 if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-0} == 1 ]]; then
   KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
 fi
-INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h Tests/display/* Tests/net/*
+INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h Tests/display/* Tests/keys/* Tests/net/*
   echo "firmware=${OMACVM_FIRMWARE:-omacvm}"
   echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}${KK_STAMP:+ $KK_STAMP}"; } | shasum -a 256 | cut -d' ' -f1)
 # A runtime built with OMACVM_RUNTIME_TEST_HOOKS=1 (test hooks) is never shipped.

@@ -9,7 +9,7 @@ ID=org.omacvm.bridge
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ../../icon/make-icns.sh "$APP/Contents/Resources/OmacVM.icns"
 swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$APP/Contents/MacOS/omacvm-bridge" main.swift wifi.swift audio.swift server.swift keys.swift display.swift wallpaper.swift bluetooth.swift battery.swift camera.swift \
-  external-model.swift external-brightness.swift keys-model.swift wifi-model.swift vm-keys.swift \
+  external-model.swift external-brightness.swift keys-model.swift wifi-model.swift vm-keys.swift hid-keys.swift \
   -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework CoreWLAN -framework CoreLocation -framework CoreAudio -framework AudioToolbox -framework ApplicationServices -framework Security -framework SystemConfiguration -framework IOBluetooth -framework CoreBluetooth -framework IOKit
 WHY="OmacVM Bridge reads the name of the Wi-Fi network this Mac is on, and of nearby networks, to show them in your Linux VM's status bar. macOS only reveals Wi-Fi network names to apps with Location Services access. No location is ever read or stored."
 cat > "$APP/Contents/Info.plist" <<PL

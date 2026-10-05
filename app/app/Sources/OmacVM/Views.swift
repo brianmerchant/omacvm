@@ -178,7 +178,7 @@ struct SetupView: View {
         state.config.hostname = "omarchy"
         let on = { (b: Bool) in b ? "on" : "off" }
         // Omanotch off for now: see VMConfig.features.
-        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=\(on(gestures)) omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         state.screen = .building
         state.creator.start(config: state.config, password: password)
         password = ""; password2 = ""

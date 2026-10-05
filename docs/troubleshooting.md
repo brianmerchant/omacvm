@@ -33,6 +33,45 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   switching to an application, switch to a Space with open windows" (on by
   default). The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
   "escape combo: ...") says which way it took.
+- **A macOS shortcut still does its macOS thing in the VM** (a screenshot,
+  Mission Control): that is the default; sending them all to the VM is
+  experimental (`defaults write org.omacvm.app macShortcuts -bool false` and
+  a VM restart). With it on, the VM's window must have the keyboard (click
+  into it). `omacvm check` shows "macOS shortcuts"; `logs/qemu.log` in the
+  VM's folder says "macOS shortcuts off" while the VM has them. Keys macOS
+  handles below every app stay macOS's: the power / Touch ID key, and the
+  globe key on its own.
+- **macOS's shortcuts (⌘Tab, ⌘Space, brightness) do not work after leaving
+  the VM** (only with the experimental `macShortcuts` false): they come back
+  the moment the VM's window loses the keyboard, and macOS restores them by
+  itself if the VM's app quits or crashes. If the VM's window hangs, OmacVM
+  turns them on after 2 seconds (`qemu.log`: "the VM window stopped
+  answering"). Go back to the default with `defaults delete org.omacvm.app
+  macShortcuts` and a VM restart.
+- **The VM is frozen and macOS's shortcuts are gone** (⌘Tab, ⌘Space and
+  ⌥⌘Esc do nothing; only with the experimental `macShortcuts` false): a VM
+  stopped as a whole (all of QEMU stuck, or paused by a debugger) keeps
+  them off, and no other app can turn them on for it. Quit that VM: right-
+  click OmacVM in the Dock, hold Option, choose Force Quit (or Activity
+  Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
+  Applications › Utilities). The shortcuts work again at once. From the
+  Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
+- **⌃⌥⌘ Esc left the VM's window instead of swiping**: the swipe did not
+  land, so OmacVM took the VM out of full screen and hid it (never stuck).
+  ⌃⌥⌘ Esc in macOS brings it back in full screen. The Gestures log says
+  "escape combo: still in the VM (...)" for this case; please send it.
+- **Brightness keys do nothing with the VM in front**: OmacVM Bridge reads
+  them from the keyboard and needs Input Monitoring (System Settings › Privacy
+  & Security › Input Monitoring › OmacVM Bridge). Its log says
+  "brightness keys: reading them from the keyboard" when it can.
+- **A mouse scrolls on after the wheel stops, or jumps**: scroll momentum is
+  for trackpads only and passes every mouse's scrolling one to one; this was
+  a smooth-scrolling mouse (Logitech MX and co.) taken as a trackpad before
+  2.9.0. Update the Mac's helpers (`omacvm update`).
+- **Omarchy's bar shows Wi-Fi without its name**: OmacVM Bridge has no
+  Location Services permission (macOS needs it for the network's name). The
+  bar still shows connected from the Mac's link. Allow it in System
+  Settings › Privacy & Security › Location Services › OmacVM Bridge.
 - **Permissions asked again after updating to 2.9.0**: OmacVM Bridge and
   OmacVM Gestures now come signed with OmacVM's Developer ID, which macOS
   treats as a new app once. Turn them on again in System Settings › Privacy &

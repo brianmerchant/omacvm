@@ -22,6 +22,7 @@ static void fakeEnable(CFMachPortRef t, bool on) { (void)t; enabled = on; }
 #undef main
 
 static int fail;
+static int fakeQemu(pid_t pid) { return pid != 1200; }   // 1200: OmacVM.app's launcher
 static void check(int ok, const char *what) {
   printf("%s %s\n", ok ? "ok  " : "FAIL", what);
   fflush(stdout);
@@ -30,6 +31,7 @@ static void check(int ok, const char *what) {
 
 int main(void) {
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
+  isQemuFn = fakeQemu;
   check(installTap() && created == 1, "the first tap");
   CFMachPortRef first = tapPort; CFRetain(first);
   // Front app, network, full screen, title, window, other: as updateCapture finds them.
@@ -68,5 +70,15 @@ int main(void) {
   frontChanged(500, -1, 0, "", 0, 0);
   frontChanged(1002, NET_APP, 1, "Omarchy", 0, 0);
   check(created == 6 && tapPort != keep, "works again once permitted");
+  // An OmacVM VM in a window: its tap too (the escape combo is ours there).
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1100, NET_APP, 0, "", 0, 0);
+  check(created == 7, "new tap when an OmacVM VM window comes to the front");
+  frontChanged(1100, NET_APP, 1, "Omarchy", 0, 0);
+  frontChanged(1100, NET_APP, 0, "", 0, 0);
+  check(created == 7, "not again when that VM goes full screen and back (the same QEMU)");
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1200, NET_APP, 0, "", 0, 0);
+  check(created == 7, "no new tap for OmacVM.app's launcher window");
   return fail;
 }
