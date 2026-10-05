@@ -496,6 +496,7 @@ func parseManifest(_ data: Data) -> Result<Manifest, PolicyError> {
   }
   guard let teams = devidTeams(o["devid_teams"]) else { return bad("no Developer ID teams") }
   if let k = o["next_spare_key"] { guard let s = k as? String, ReleaseKeys.key(s) != nil else { return bad("next_spare_key") } }
+  if let r = o["revoked_keys"], ReleaseKeys.revokedKeys(r) == nil { return bad("revoked_keys") }
   return .success(Manifest(version: v, commit: c, date: date, notesURL: notes,
                            proto: o["proto"] as? Int ?? 1, protoMin: o["proto_min"] as? Int ?? 1, parts: parts, teams: teams))
 }
@@ -510,58 +511,109 @@ func manifestSigned(_ data: Data, sig: Data, keys: ReleaseKeys) -> Bool {
 /// (app/app/Sources/OmacVMUpdate/ReleaseKeys.swift, the same rules and the
 /// same folder): the main and the spare public key from the checkout's
 /// src/lib, either one valid, plus a spare a signed document named
-/// ("next_spare_key"). Such a document is kept with its signature in
+/// ("next_spare_key"), minus named keys a document signed by a shipped key
+/// revoked ("revoked_keys"). Such documents are kept with their signature in
 /// ~/Library/Application Support/omacvm/release-keys, never as a bare key,
 /// so a file written there by another process adds nothing.
 struct ReleaseKeys {
   let shipped: [String]
   let store: URL?
   static let kinds: Set<String> = ["app-feed", "control-manifest", "prebuilt-manifest"]
-  static let maxKept = 8
+  static let maxKept = 8, maxScan = 256, maxRevoked = 8, maxDocumentBytes = 256 << 10
 
   static func key(_ b64: String) -> Curve25519.Signing.PublicKey? {
     guard let d = Data(base64Encoded: b64.trimmingCharacters(in: .whitespacesAndNewlines)), d.count == 32 else { return nil }
     return try? Curve25519.Signing.PublicKey(rawRepresentation: d)
   }
 
-  static func signed(_ data: Data, _ sig: Data, by keys: [Curve25519.Signing.PublicKey]) -> Bool {
+  static func signatureBytes(_ sig: Data) -> Data? {
     guard let s = Data(base64Encoded: String(decoding: sig, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)),
-          s.count == 64 else { return false }
+          s.count == 64 else { return nil }
+    return s
+  }
+
+  static func signed(_ data: Data, _ sig: Data, by keys: [Curve25519.Signing.PublicKey]) -> Bool {
+    guard let s = signatureBytes(sig) else { return false }
     return keys.contains { $0.isValidSignature(s, for: data) }
   }
 
-  static func namedKey(_ data: Data) -> Curve25519.Signing.PublicKey? {
-    guard data.count <= 256 << 10, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-          let kind = o["kind"] as? String, kinds.contains(kind), let k = o["next_spare_key"] as? String else { return nil }
-    return key(k)
-  }
-
-  /// The shipped keys plus those named by kept documents a trusted key signed.
-  func trusted() -> [Curve25519.Signing.PublicKey] {
-    var keys = shipped.compactMap(Self.key)
-    var left = kept()
-    var grew = true
-    while grew && !left.isEmpty {
-      grew = false
-      for (i, doc) in left.enumerated().reversed() where Self.signed(doc.0, doc.1, by: keys) {
-        left.remove(at: i)
-        if let k = Self.namedKey(doc.0), !keys.contains(where: { $0.rawRepresentation == k.rawRepresentation }) {
-          keys.append(k)
-          grew = true
-        }
-      }
-    }
+  /// "revoked_keys": 1 to maxRevoked distinct keys; nil for anything else.
+  static func revokedKeys(_ v: Any?) -> [Curve25519.Signing.PublicKey]? {
+    guard let a = v as? [Any], (1...maxRevoked).contains(a.count) else { return nil }
+    let keys = a.compactMap { ($0 as? String).flatMap(key) }
+    guard keys.count == a.count, Set(keys.map(\.rawRepresentation)).count == keys.count else { return nil }
     return keys
   }
 
-  /// Keeps a verified document that names a key not trusted yet.
+  /// A document that may change the trusted keys (names a spare, revokes
+  /// keys, or both). Not verified yet.
+  struct Doc {
+    let data: Data, sig: Data
+    let named: Curve25519.Signing.PublicKey?
+    let revokes: [Curve25519.Signing.PublicKey]
+
+    init?(_ data: Data, _ sig: Data) {
+      guard data.count <= ReleaseKeys.maxDocumentBytes, sig.count <= 1024, ReleaseKeys.signatureBytes(sig) != nil,
+            let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+            let kind = o["kind"] as? String, ReleaseKeys.kinds.contains(kind) else { return nil }
+      named = (o["next_spare_key"] as? String).flatMap(ReleaseKeys.key)
+      revokes = ReleaseKeys.revokedKeys(o["revoked_keys"]) ?? []
+      guard named != nil || !revokes.isEmpty else { return nil }
+      self.data = data
+      self.sig = sig
+    }
+  }
+
+  /// The trusted keys, the revoked ones and the documents used (indexes),
+  /// as ReleaseKeys.resolve in the app: revocations only from a shipped key
+  /// (used once per shipped key that signs them) and never of a shipped key; then the named spares, each signed by a
+  /// trusted key that is not revoked; at most maxKept documents used, and
+  /// one that does not verify uses none.
+  static func resolve(shipped: [Curve25519.Signing.PublicKey], docs: [Doc])
+    -> (keys: [Curve25519.Signing.PublicKey], revoked: Set<Data>, used: [Int]) {
+    var known = Set<Data>(), keys: [Curve25519.Signing.PublicKey] = []
+    for k in shipped where known.insert(k.rawRepresentation).inserted { keys.append(k) }
+    let base = keys
+    var revoked = Set<Data>(), used: [Int] = [], by: [Data: Set<Data>] = [:]
+    for (i, d) in docs.enumerated() where !d.revokes.isEmpty && used.count < maxKept {
+      guard let signer = base.first(where: { signed(d.data, d.sig, by: [$0]) })?.rawRepresentation else { continue }
+      let new = Set(d.revokes.map(\.rawRepresentation)).subtracting(known).subtracting(by[signer, default: []])
+      if !new.isEmpty { by[signer, default: []].formUnion(new); revoked.formUnion(new); used.append(i) }
+    }
+    var fresh = base
+    var left = docs.indices.filter { docs[$0].named != nil }
+    while !fresh.isEmpty && !left.isEmpty {
+      var added: [Curve25519.Signing.PublicKey] = []
+      for i in left where signed(docs[i].data, docs[i].sig, by: fresh) {
+        left.removeAll { $0 == i }
+        let k = docs[i].named!, raw = k.rawRepresentation
+        guard !revoked.contains(raw), !known.contains(raw), used.contains(i) || used.count < maxKept else { continue }
+        known.insert(raw)
+        keys.append(k)
+        added.append(k)
+        if !used.contains(i) { used.append(i) }
+      }
+      fresh = added
+    }
+    return (keys, revoked, used)
+  }
+
+  /// The shipped keys plus those named by kept documents a trusted key signed, minus the revoked ones.
+  func trusted() -> [Curve25519.Signing.PublicKey] {
+    Self.resolve(shipped: shipped.compactMap(Self.key), docs: kept()).keys
+  }
+
+  /// Keeps a verified document that names a key not trusted yet or revokes one not revoked yet.
   @discardableResult
   func remember(_ data: Data, signature: Data) -> Bool {
-    guard let store, let k = Self.namedKey(data) else { return false }
-    let keys = trusted()
-    guard Self.signed(data, signature, by: keys), !keys.contains(where: { $0.rawRepresentation == k.rawRepresentation }),
-          kept().count < Self.maxKept else { return false }
-    let name = SHA256.hash(data: k.rawRepresentation).prefix(8).map { String(format: "%02x", $0) }.joined()
+    guard let store, let doc = Doc(data, signature) else { return false }
+    let base = shipped.compactMap(Self.key), docs = kept()
+    let before = Self.resolve(shipped: base, docs: docs), after = Self.resolve(shipped: base, docs: docs + [doc])
+    let old = Set(before.keys.map(\.rawRepresentation))
+    guard after.used.contains(docs.count),
+          after.keys.contains(where: { !old.contains($0.rawRepresentation) }) || !after.revoked.isSubset(of: before.revoked)
+            || !doc.revokes.isEmpty else { return false }
+    let name = SHA256.hash(data: data + signature).prefix(8).map { String(format: "%02x", $0) }.joined()
     do {
       try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
       try signature.write(to: store.appendingPathComponent("\(name).json.sig"), options: .atomic)
@@ -570,14 +622,16 @@ struct ReleaseKeys {
     return true
   }
 
-  func kept() -> [(Data, Data)] {
+  /// The documents in the folder that could matter (at most maxScan files looked at; junk skipped).
+  func kept() -> [Doc] {
     guard let store, let names = try? FileManager.default.contentsOfDirectory(atPath: store.path) else { return [] }
+    func size(_ f: URL) -> Int { (try? FileManager.default.attributesOfItem(atPath: f.path)[.size] as? Int) ?? Int.max }
     return names.filter { $0.range(of: "^[0-9a-f]{16}\\.json$", options: .regularExpression) != nil }.sorted()
-      .prefix(Self.maxKept).compactMap { n in
-        let f = store.appendingPathComponent(n)
-        guard let d = try? Data(contentsOf: f), d.count <= 256 << 10,
-              let s = try? Data(contentsOf: f.appendingPathExtension("sig")), s.count <= 1024 else { return nil }
-        return (d, s)
+      .prefix(Self.maxScan).compactMap { n in
+        let f = store.appendingPathComponent(n), g = f.appendingPathExtension("sig")
+        guard size(f) <= Self.maxDocumentBytes, size(g) <= 1024,
+              let d = try? Data(contentsOf: f), let s = try? Data(contentsOf: g) else { return nil }
+        return Doc(d, s)
       }
   }
 }

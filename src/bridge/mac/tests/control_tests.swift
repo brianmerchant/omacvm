@@ -296,6 +296,38 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
       try! d.write(to: store.appendingPathComponent(n))
     }
     expect(!manifestSigned(body, sig: byNext, keys: rotating), "kept document changed on disk: ignored")
+    // A leaked named spare: revoked by a manifest a shipped key signed.
+    func with(_ extra: String) -> Data {
+      Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 1, "# + extra).utf8)
+    }
+    for (what, extra) in [("revoked_keys empty", #""revoked_keys": []"#), ("revoked_keys not a key", #""revoked_keys": ["bm90IGEga2V5"]"#),
+                          ("revoked_keys as a string", #""revoked_keys": "\#(pub)""#)] {
+      if case .failure = parseManifest(with(extra)) { expect(true, what) } else { expect(false, what) }
+    }
+    try? FileManager.default.removeItem(at: store)
+    expect(rotating.remember(naming, signature: sign(naming, spare)), "the spare names a new one (again)")
+    let third = Curve25519.Signing.PrivateKey()
+    let naming2 = with(#""next_spare_key": "\#(b64(third))""#)
+    expect(rotating.remember(naming2, signature: sign(naming2, next)), "the named spare names the next")
+    let badRevoke = with(#""revoked_keys": ["\#(pub)", "\#(b64(spare))"]"#)
+    expect(!rotating.remember(badRevoke, signature: sign(badRevoke, next)) && rotating.trusted().count == 4,
+           "a named spare revoking the shipped keys: ignored")
+    let revoke = with(#""revoked_keys": ["\#(b64(next))"]"#)
+    if case .success = parseManifest(revoke) { expect(true, "a manifest with revoked_keys parses") } else { expect(false, "a manifest with revoked_keys parses") }
+    expect(rotating.remember(revoke, signature: sign(revoke, key)), "the revocation (signed by the main key) is kept")
+    expect(!manifestSigned(body, sig: byNext, keys: rotating) && !manifestSigned(body, sig: sign(body, third), keys: rotating)
+           && rotating.trusted().count == 2, "the revoked key and the one it named: refused")
+    expect(!rotating.remember(revoke, signature: sign(revoke, key)), "revoked again: not kept")
+    // Junk that sorts first counts toward nothing.
+    try? FileManager.default.removeItem(at: store)
+    try! FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+    for i in 0..<12 {
+      let n = String(format: "%016x", i)
+      try! with(#""next_spare_key": "\#(b64(Curve25519.Signing.PrivateKey()))""#).write(to: store.appendingPathComponent("\(n).json"))
+      try! sign(body, other).write(to: store.appendingPathComponent("\(n).json.sig"))
+    }
+    expect(rotating.remember(naming, signature: sign(naming, spare)) && manifestSigned(body, sig: byNext, keys: rotating),
+           "12 junk documents first: a real one is still kept and trusted")
     let schema2 = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 2"#).utf8)
     if case .failure(let e) = parseManifest(schema2) { expect(e.code == "bad-manifest", "schema 2") } else { expect(false, "schema 2") }
     // One key signs both feeds: the app's feed, or no kind, is no manifest.

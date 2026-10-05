@@ -10,7 +10,8 @@
 # release-key-spare.pub, which every app carries (docs/release-keys.md).
 # "devid_teams" is the Developer ID team the zip's app is signed with (plus
 # OMACVM_EXTRA_TEAMS while a change of team goes out); OMACVM_NEXT_SPARE_KEY
-# names a new spare key.
+# names a new spare key, OMACVM_REVOKED_KEYS revokes named spares that leaked
+# (docs/release-keys.md).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$ROOT/.." && pwd)
@@ -36,6 +37,7 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/d
 # The team it is signed with (a Developer ID, or this fails) goes into the feed.
 TEAMS=$("$KEYS" teams "$APP") || die "the zip's app is not signed with a Developer ID"
 SPARE=$("$KEYS" spare) || die "OMACVM_NEXT_SPARE_KEY is not a public key"
+REVOKED=$("$KEYS" revoked) || die "OMACVM_REVOKED_KEYS holds something that is not a public key"
 MIN=$(plist LSMinimumSystemVersion)
 
 URL=https://github.com/gillesgoetsch/omacvm/releases/download/v$VERSION/OmacVM-$VERSION.zip
@@ -52,7 +54,7 @@ cat > "$FEED" <<EOF
   "minimum_macos": "$MIN",
   "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v$VERSION",
   "date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "devid_teams": $TEAMS$SPARE
+  "devid_teams": $TEAMS$SPARE$REVOKED
 }
 EOF
 

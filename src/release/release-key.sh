@@ -18,6 +18,10 @@
 #   release-key.sh spare         the "next_spare_key" field from
 #                                OMACVM_NEXT_SPARE_KEY (a new spare's public key),
 #                                with a comma in front, or nothing
+#   release-key.sh revoked       the "revoked_keys" field from OMACVM_REVOKED_KEYS
+#                                (named spares that leaked, space-separated; the
+#                                document must be signed by a shipped key), with
+#                                a comma in front, or nothing
 # The private key only goes through a pipe into sign.swift; it is never
 # written to a file or printed.
 set -euo pipefail
@@ -72,5 +76,14 @@ case ${1:-} in
       die "OMACVM_NEXT_SPARE_KEY is not a public key (base64 of 32 bytes)"
     printf ', "next_spare_key": "%s"' "$k"
     ;;
-  *) sed -n '2,20s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+  revoked)
+    out=""
+    for k in ${OMACVM_REVOKED_KEYS:-}; do
+      [[ $k =~ ^[A-Za-z0-9+/]{43}=$ ]] && python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import keys; sys.exit(0 if keys.key(sys.argv[2]) else 1)' "$HERE" "$k" ||
+        die "OMACVM_REVOKED_KEYS: $k is not a public key (base64 of 32 bytes)"
+      [[ $out == *"\"$k\""* ]] || out+="${out:+, }\"$k\""
+    done
+    [[ -z $out ]] || printf ', "revoked_keys": [%s]' "$out"
+    ;;
+  *) sed -n '2,24s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac

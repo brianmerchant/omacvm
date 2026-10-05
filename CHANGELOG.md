@@ -11,8 +11,9 @@ in more words.
   ID team the app must be signed by comes from that signed feed, not from
   the code, so a new Developer ID can be announced; the app and
   `omacvm build`/`omacvm update` refuse an app of a team it does not name.
-  Prebuilt images are only used with a signed manifest. Maintainers:
-  [docs/release-keys.md](docs/release-keys.md).
+  Prebuilt images are only used with a signed manifest. A signed feed can
+  revoke a spare key that leaked.
+  Maintainers: [docs/release-keys.md](docs/release-keys.md).
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.

@@ -4,7 +4,8 @@
 # throwaway keys: either shipped key signs, other keys and changed documents
 # are refused, the Developer ID teams come from the signed document (missing,
 # empty or another team: refused), a named spare is trusted from then on,
-# test keys count nowhere inside a release app. No network beyond 127.0.0.1.
+# a revoked one is not, junk in the kept folder changes nothing, test keys
+# count nowhere inside a release app. No network beyond 127.0.0.1.
 #   src/tests/release-keys.sh
 # OMACVM_TEST_DEVID_APP: a Developer ID signed org.omacvm.app (a release
 # build) for the download that passes; skipped without it.
@@ -99,6 +100,67 @@ rm -rf "$STORE"; mkdir -p "$STORE"
 cp "$T/next-key.pub" "$STORE/0123456789abcdef.json"; echo x > "$STORE/0123456789abcdef.json.sig"
 doc "$D" control-manifest "" next-key
 expect "a bare key file in the folder: not trusted" refused "$(verdict control-manifest "$D")"
+rm -rf "$STORE"
+
+# ---- a leaked named spare: revoked by a document a shipped key signed ----
+"$T/sign" keygen "$T/other-key" > "$T/other-key.pub"
+doc "$T/naming.json" app-feed ", \"next_spare_key\": \"$(cat "$T/next-key.pub")\"" spare-key
+verdict app-feed "$T/naming.json" >/dev/null
+doc "$T/naming2.json" control-manifest ", \"next_spare_key\": \"$(cat "$T/third-key.pub")\"" next-key
+verdict control-manifest "$T/naming2.json" >/dev/null
+doc "$D" control-manifest "" third-key
+expect "before: the chain of named spares is trusted" good "$(verdict control-manifest "$D")"
+doc "$T/r.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/test-key.pub")\", \"$(cat "$T/spare-key.pub")\"]" next-key
+verdict app-feed "$T/r.json" >/dev/null
+doc "$D" control-manifest
+expect "a named spare revoking the shipped keys: ignored" good "$(verdict control-manifest "$D")"
+while IFS='|' read -r what field; do
+  doc "$T/r.json" app-feed ", \"revoked_keys\": $field"
+  expect "revoked_keys $what: refused" refused "$(verdict app-feed "$T/r.json")"
+done <<EOF
+empty|[]
+as a string|"$(cat "$T/next-key.pub")"
+not a key|["bm90IGEga2V5"]
+twice the same|["$(cat "$T/next-key.pub")", "$(cat "$T/next-key.pub")"]
+EOF
+doc "$T/r.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]" stranger-key
+verdict app-feed "$T/r.json" >/dev/null
+doc "$D" control-manifest "" next-key
+expect "a revocation signed by a stranger: nothing changes" good "$(verdict control-manifest "$D")"
+doc "$T/r.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]"
+expect "a feed revoking the leaked spare (signed by the main key)" good "$(verdict app-feed "$T/r.json")"
+expect "the revoked spare: refused from then on" refused "$(verdict control-manifest "$D")"
+doc "$D" control-manifest "" third-key
+expect "the one it named: refused too" refused "$(verdict control-manifest "$D")"
+doc "$T/n.json" app-feed ", \"next_spare_key\": \"$(cat "$T/next-key.pub")\""
+verdict app-feed "$T/n.json" >/dev/null
+doc "$D" control-manifest "" next-key
+expect "the revoked key named again: still refused" refused "$(verdict control-manifest "$D")"
+# A later release ships the spare as main: the old main's revocation no longer counts, the spare's does.
+rotated="$(cat "$T/spare-key.pub") $(cat "$T/other-key.pub")"
+expect "keys rotated: a revocation only the old main signed no longer counts" good "$(OMACVM_RELEASE_TEST_KEYS=$rotated verdict control-manifest "$D")"
+doc "$T/r2.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]" spare-key
+verdict app-feed "$T/r2.json" >/dev/null
+expect "the same revocation signed by the spare: kept too" 8 "$(ls "$STORE" | wc -l | tr -d ' ')"
+expect "after the rotation the leaked key stays revoked" refused "$(OMACVM_RELEASE_TEST_KEYS=$rotated verdict control-manifest "$D")"
+OMACVM_REVOKED_KEYS="$(cat "$T/next-key.pub") $(cat "$T/next-key.pub")" "$R/src/release/release-key.sh" revoked > "$T/field"
+expect "release-key.sh revoked: the field, once per key" ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]" "$(cat "$T/field")"
+expect "release-key.sh revoked: not a key refused" 1 "$(OMACVM_REVOKED_KEYS=bm90 "$R/src/release/release-key.sh" revoked >/dev/null 2>&1; echo $?)"
+rm -rf "$STORE"
+
+# ---- junk in the folder (names that sort first) counts toward nothing ----
+mkdir -p "$STORE"
+for i in 0 1 2 3 4 5 6 7 8 9; do
+  n=000000000000000$i
+  printf '{"kind": "app-feed", "next_spare_key": "%s"}' "$(cat "$T/other-key.pub")" > "$STORE/$n.json"
+  cp "$T/doc.json.sig" "$STORE/$n.json.sig"
+done
+doc "$D" control-manifest "" other-key
+expect "10 junk documents: their key is not trusted" refused "$(verdict control-manifest "$D")"
+doc "$T/naming.json" app-feed ", \"next_spare_key\": \"$(cat "$T/next-key.pub")\"" spare-key
+verdict app-feed "$T/naming.json" >/dev/null
+doc "$D" control-manifest "" next-key
+expect "10 junk documents first: a real one is still kept and trusted" good "$(verdict control-manifest "$D")"
 rm -rf "$STORE"
 
 # ---- test keys count nowhere inside a release app ----

@@ -86,6 +86,8 @@ let bad: [(String, [String: Any])] = [
     ("team twice", ["devid_teams": ["722686Y34B", "722686Y34B"]]), ("five teams", ["devid_teams": ["AAAAAAAAA1", "AAAAAAAAA2", "AAAAAAAAA3", "AAAAAAAAA4", "AAAAAAAAA5"]]),
     ("team as a number", ["devid_teams": [1234567890]]), ("next_spare_key not a key", ["next_spare_key": "bm90IGEga2V5"]),
     ("next_spare_key as a number", ["next_spare_key": 1]),
+    ("revoked_keys empty", ["revoked_keys": [String]()]), ("revoked_keys as a string", ["revoked_keys": pub]),
+    ("revoked_keys not a key", ["revoked_keys": ["bm90IGEga2V5"]]), ("revoked_keys twice the same", ["revoked_keys": [pub, pub]]),
 ]
 for (what, change) in bad {
     let f = feed(change)
@@ -202,7 +204,7 @@ expect(Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), ke
 expect(rotating.remember(announce, signature: sign(announce, with: Curve25519.Signing.PrivateKey())) == nil,
        "a naming feed signed by a stranger: not kept")
 expect(rotating.remember(feed([:]), signature: sign(feed([:]))) == nil, "a feed naming nothing: nothing kept")
-expect(rotating.remember(announce, signature: sign(announce, with: spareKey)) == b64(nextKey), "the named spare is kept")
+expect(rotating.remember(announce, signature: sign(announce, with: spareKey))?.named == [b64(nextKey)], "the named spare is kept")
 expect(rotating.remember(announce, signature: sign(announce, with: spareKey)) == nil, "named again: already trusted")
 if case .success = Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), keys: rotating) {
     expect(true, "signed with the named spare: accepted from then on")
@@ -212,7 +214,7 @@ expect(keptFiles.count == 2 && keptFiles.contains { $0.hasSuffix(".json.sig") },
 // The named spare names the next one: a chain.
 let thirdKey = Curve25519.Signing.PrivateKey()
 let announce2 = feed(["next_spare_key": b64(thirdKey), "version": "2.9.4"])
-expect(rotating.remember(announce2, signature: sign(announce2, with: nextKey)) == b64(thirdKey), "the named spare names another")
+expect(rotating.remember(announce2, signature: sign(announce2, with: nextKey))?.named == [b64(thirdKey)], "the named spare names another")
 expect(rotating.trusted().count == 4, "trusted: main, spare and the two named")
 // A copy that ships other keys does not trust what the old ones named.
 expect(ReleaseKeys(shipped: [b64(Curve25519.Signing.PrivateKey())], store: store).trusted().count == 1,
@@ -230,6 +232,77 @@ expect(Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), ke
 try! Data(b64(nextKey).utf8).write(to: store.appendingPathComponent("0123456789abcdef.json"))
 try! Data("x".utf8).write(to: store.appendingPathComponent("0123456789abcdef.json.sig"))
 expect(rotating.trusted().count == 2, "a bare key file in the folder: not trusted")
+
+// A named spare that leaked: a feed signed by a shipped key revokes it (docs/release-keys.md).
+func fresh(_ name: String) -> ReleaseKeys {
+    let d = tmp.appendingPathComponent("support-\(name)/release-keys")
+    try? FileManager.default.removeItem(at: d)
+    return ReleaseKeys(shipped: [pub, b64(spareKey)], store: d)
+}
+func trusts(_ k: ReleaseKeys, _ key: Curve25519.Signing.PrivateKey) -> Bool {
+    k.trusted().contains { $0.rawRepresentation == key.publicKey.rawRepresentation }
+}
+let revoking = fresh("revoke")
+_ = revoking.remember(announce, signature: sign(announce, with: spareKey))
+_ = revoking.remember(announce2, signature: sign(announce2, with: nextKey))
+expect(revoking.trusted().count == 4, "before: main, spare and two named")
+let leakedRevokes = feed(["revoked_keys": [pub, b64(spareKey)], "version": "2.9.5"])
+expect(revoking.remember(leakedRevokes, signature: sign(leakedRevokes, with: nextKey)) == nil && trusts(revoking, key) && trusts(revoking, spareKey),
+       "a named spare revoking the shipped keys: ignored")
+let selfRevoke = feed(["revoked_keys": [b64(spareKey)], "version": "2.9.5"])
+expect(revoking.remember(selfRevoke, signature: sign(selfRevoke)) == nil && trusts(revoking, spareKey),
+       "a shipped key revoked by a document: ignored (a release drops it)")
+let revoke = feed(["revoked_keys": [b64(nextKey)], "version": "2.9.6"])
+if case .success = Appcast.verified(feed: revoke, signature: sign(revoke), keys: revoking) { expect(true, "a feed with revoked_keys reads") }
+else { expect(false, "a feed with revoked_keys reads") }
+let kept1 = revoking.remember(revoke, signature: sign(revoke))
+expect(kept1?.named == [] && kept1?.revoked == [b64(nextKey)], "the revocation is kept")
+expect(!trusts(revoking, nextKey) && !trusts(revoking, thirdKey) && revoking.trusted().count == 2,
+       "the revoked key and the one it named: not trusted any more")
+expect(Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), keys: revoking) == .failure(.badSignature),
+       "a feed signed by the revoked key: refused")
+expect(revoking.remember(revoke, signature: sign(revoke)) == nil, "revoked again: nothing kept")
+// A later release ships the spare as main (the old main lost): the main key's revocation no longer counts...
+let rotated = ReleaseKeys(shipped: [b64(spareKey), b64(Curve25519.Signing.PrivateKey())], store: revoking.store)
+expect(trusts(rotated, nextKey), "shipped keys rotated: a revocation only the old main signed no longer counts")
+// ...so the release signed by the spare lists the leaked key again; copies keep that one too.
+let revokeBySpare = feed(["revoked_keys": [b64(nextKey)], "version": "2.9.9"])
+expect(revoking.remember(revokeBySpare, signature: sign(revokeBySpare, with: spareKey)) != nil, "the same revocation signed by the spare: kept as well")
+expect(!trusts(rotated, nextKey) && !trusts(rotated, thirdKey), "after the rotation the leaked key stays revoked")
+let again = feed(["revoked_keys": [b64(nextKey)], "version": "3.0.0"])
+expect(revoking.remember(again, signature: sign(again, with: spareKey)) == nil, "a third copy of it: nothing kept")
+let renamed = feed(["next_spare_key": b64(nextKey), "version": "2.9.7"])
+expect(revoking.remember(renamed, signature: sign(renamed)) == nil && !trusts(revoking, nextKey), "a revoked key named again: not trusted")
+let other = Curve25519.Signing.PrivateKey()
+let both = feed(["next_spare_key": b64(other), "revoked_keys": [b64(nextKey)], "version": "2.9.8"])
+let fresh2 = fresh("both")
+_ = fresh2.remember(announce, signature: sign(announce, with: spareKey))
+let kept2 = fresh2.remember(both, signature: sign(both))
+expect(kept2?.named == [b64(other)] && kept2?.revoked == [b64(nextKey)] && fresh2.trusted().count == 3,
+       "one feed revokes the leaked spare and names a new one")
+// The leaked spare filled the folder with documents of its own: the revocation still gets in.
+let filled = fresh("filled")
+_ = filled.remember(announce, signature: sign(announce, with: spareKey))
+var signer = nextKey
+for i in 0..<10 {
+    let k = Curve25519.Signing.PrivateKey()
+    let d = feed(["next_spare_key": b64(k), "version": "3.0.\(i)"])
+    _ = filled.remember(d, signature: sign(d, with: signer))
+    signer = k
+}
+expect(filled.trusted().count == 2 + ReleaseKeys.maxKept, "at most \(ReleaseKeys.maxKept) kept documents count")
+expect(filled.remember(revoke, signature: sign(revoke)) != nil && filled.trusted().count == 2, "a full folder: the revocation is kept, the chain dropped")
+// Junk in the folder (names that sort first) counts toward nothing.
+let junky = fresh("junk")
+try! FileManager.default.createDirectory(at: junky.store!, withIntermediateDirectories: true)
+for i in 0..<20 {
+    let n = String(format: "%016x", i)
+    try! feed(["next_spare_key": b64(Curve25519.Signing.PrivateKey())]).write(to: junky.store!.appendingPathComponent("\(n).json"))
+    try! sign(feed([:]), with: Curve25519.Signing.PrivateKey()).write(to: junky.store!.appendingPathComponent("\(n).json.sig"))
+}
+expect(junky.trusted().count == 2, "20 junk documents: nothing trusted from them")
+expect(junky.remember(announce, signature: sign(announce, with: spareKey))?.named == [b64(nextKey)] && junky.trusted().count == 3,
+       "20 junk documents first: a real one is still kept and trusted")
 
 // Who may replace the bundle: its folder and the bundle itself writable
 let folder = tmp.appendingPathComponent("Applications")
