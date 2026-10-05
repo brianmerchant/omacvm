@@ -42,8 +42,9 @@ enum Graphics {
 
     /// Automatic gives Vulkan from this macOS on, and only with KosmicKrisp in
     /// the app (Metal 4). Numbers: docs/benchmarks/README.md ("Graphics:
-    /// Automatic"). On older macOS Venus runs on MoltenVK: Automatic stays on
-    /// OpenGL there, and Vulkan is the user's choice.
+    /// Automatic"). On older macOS Venus runs on MoltenVK, which cannot carry
+    /// OpenGL or WebGL (ES 2.0 only): Automatic stays on OpenGL there, and
+    /// Vulkan is the user's choice.
     static let autoVulkanFromMacOS = 26
     static let autoVulkanOnMoltenVK = false
 
@@ -97,8 +98,8 @@ enum Graphics {
         case .auto:
             guard autoPicksVulkan(macOSMajor: macOSMajor, kosmicKrisp: kosmicKrisp) else {
                 return p(false, kosmicKrisp || macOSMajor >= autoVulkanFromMacOS
-                         ? "macOS \(macOSMajor) without KosmicKrisp in this app: OpenGL is faster"
-                         : "macOS \(macOSMajor): OpenGL is faster than Vulkan on MoltenVK")
+                         ? "macOS \(macOSMajor) without KosmicKrisp in this app: MoltenVK, OpenGL stays"
+                         : "macOS \(macOSMajor): MoltenVK, OpenGL stays")
             }
             guard driverReady else { return p(false, "the VM has no Venus driver for 16 KiB pages yet: omacvm apply") }
             return p(true, "macOS \(macOSMajor), \(driver)")
