@@ -645,12 +645,20 @@ final class Control {
     guard let url = URL(string: feed), let sigURL = URL(string: feed + ".sig") else { out["error"] = "bad feed address"; return out }
     let (data, e1) = fetch(url)
     let (sig, e2) = data == nil ? (nil, e1) : fetch(sigURL)
-    guard let data, let sig else {
+    switch feedFetch(manifest: data, manifestError: e1, sig: sig, sigError: e2) {
+    case .got: break
+    case .unsigned:
+      // The server has the manifest but no signature: refused like a bad one.
+      out["error"] = "the update is not signed: not used"; out["unsigned"] = true
+      log("control: update check: the manifest has no signature (\(e2 ?? "?")): refused")
+      return out
+    case .offline(let e):
       // Offline: the last good result stays, marked.
-      out = old; out["offline"] = true; out["error"] = e1 ?? e2 ?? "no answer"
+      out = old; out["offline"] = true; out["error"] = e
       out["tried_at"] = isoFormat.string(from: Date())
       return out
     }
+    guard let data, let sig else { return out }
     guard manifestSigned(data, sig: sig, keys: keys) else { out["error"] = "the update's signature does not match: not used"; return out }
     switch parseManifest(data) {
     case .failure(let e): out["error"] = e.message
@@ -673,7 +681,8 @@ final class Control {
     let r = lastResult()
     var a: [String: Any] = ["checks_enabled": updateChecks(), "omacvm": version,
                             "checked_at": r["checked_at"] ?? NSNull(), "ok": r["ok"] ?? false,
-                            "offline": r["offline"] ?? false, "error": r["error"] ?? NSNull(), "manifest": NSNull()]
+                            "offline": r["offline"] ?? false, "unsigned": r["unsigned"] ?? false,
+                            "error": r["error"] ?? NSNull(), "manifest": NSNull()]
     if let m = verifiedManifest() {
       a["manifest"] = ["version": m.version, "date": m.date, "notes_url": m.notesURL, "proto": m.proto,
                        "proto_min": m.protoMin, "parts": m.parts]
