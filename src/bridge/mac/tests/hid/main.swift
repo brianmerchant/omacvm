@@ -45,6 +45,19 @@ key(2, 0xFF01, 0x03, true, map: HIDBrightness.appleDefault, fnState: true)
 tap(2, 7, 0x3B, map: HIDBrightness.appleDefault, fnState: true)
 key(2, 0xFF01, 0x03, false, map: HIDBrightness.appleDefault, fnState: true)
 check(got == [.brightnessUp], "Magic Keyboard, standard F-keys: F2 is F2, fn + F2 is brightness up")
+// The Mac mini's Magic Keyboard: Bluetooth, vendor 0x004C, no FnFunctionUsageMap (read on the mini with ioreg).
+got = []
+let btMap = HIDBrightness.map(published: nil, vendor: 0x004C)
+tap(4, 7, 0x3A, map: btMap); tap(4, 7, 0x3B, map: btMap); tap(4, 7, 0x3B, map: btMap)
+check(got == [.brightnessDown, .brightnessUp, .brightnessUp], "Bluetooth Magic Keyboard (0x004C, no map): F1, F2, F2 -> down, up, up")
+got = []
+key(4, 0xFF, 0x03, true, map: btMap); tap(4, 7, 0x3A, map: btMap); key(4, 0xFF, 0x03, false, map: btMap)
+tap(4, 0x0C, 0x6F, map: btMap)
+check(got == [.brightnessUp], "... fn + F1 is F1; its consumer brightness up still acts")
+got = []
+tap(4, 7, 0x3A, map: btMap, fnState: true)
+key(4, 0xFF, 0x03, true, map: btMap, fnState: true); tap(4, 7, 0x3A, map: btMap, fnState: true); key(4, 0xFF, 0x03, false, map: btMap, fnState: true)
+check(got == [.brightnessDown], "... standard F-keys on: F1 is F1, fn + F1 is brightness down")
 // A PC keyboard's own brightness keys (consumer page).
 got = []
 tap(3, 0x0C, 0x70, map: [:]); tap(3, 0x0C, 0x6F, map: [:]); tap(3, 7, 0x3A, map: [:])

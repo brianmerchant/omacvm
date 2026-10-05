@@ -205,6 +205,22 @@ check(hid(8, HIDUsage.f1, true) == nil, "hid: fn on one interface, F1 on another
 _ = hid(7, 0x00FF_0003, false)
 // A Magic Keyboard without the property: Apple's default map.
 check(hid(2, HIDUsage.f2, true, HIDBrightness.appleDefault) == .brightnessUp, "hid: Apple keyboard with no map: F2 is brightness up")
+// A Bluetooth Magic Keyboard (the Mac mini's: vendor 0x004C, no FnFunctionUsageMap): Apple's default map.
+check(HIDBrightness.map(published: nil, vendor: 0x004C) == HIDBrightness.appleDefault
+      && HIDBrightness.map(published: nil, vendor: 0x05AC) == HIDBrightness.appleDefault,
+      "hid: Apple keyboard without a map, Bluetooth (0x004C) or USB (0x05AC): F1/F2 brightness")
+check(HIDBrightness.map(published: nil, vendor: 0x046D).isEmpty && HIDBrightness.map(published: nil, vendor: nil).isEmpty,
+      "hid: another vendor's keyboard (Logitech) or no vendor, no map: none")
+check(HIDBrightness.map(published: "0x0007003a,0x000c0070", vendor: 0x046D) == [HIDUsage.f1: 0x000C_0070],
+      "hid: a published map wins, any vendor")
+let bt = HIDBrightness.map(published: nil, vendor: 0x004C)
+check(hid(9, HIDUsage.f1, true, bt) == .brightnessDown && hid(9, HIDUsage.f2, true, bt) == .brightnessUp,
+      "hid: Bluetooth Magic Keyboard: F1 down, F2 up")
+_ = hid(9, 0x00FF_0003, true, bt)
+check(hid(9, HIDUsage.f1, true, bt) == nil, "hid: Bluetooth Magic Keyboard: fn + F1 is F1")
+check(hid(9, HIDUsage.f1, true, bt, fnState: true) == .brightnessDown, "hid: ... with standard F-keys on: fn + F1 is brightness down")
+_ = hid(9, 0x00FF_0003, false, bt)
+check(hid(9, HIDUsage.f2, true, bt, fnState: true) == nil, "hid: ... standard F-keys, no fn: F2 is F2")
 // A PC keyboard: no map, its own consumer-page brightness keys; its F1 stays F1.
 check(hid(3, HIDUsage.f1, true, [:]) == nil, "hid: another keyboard's F1 is F1")
 check(hid(3, 0x000C_0070, true, [:]) == .brightnessDown && hid(3, 0x000C_0070, false, [:]) == nil,

@@ -87,13 +87,11 @@ final class BrightnessKeys {
   }
 
   /// The keyboard's own F-key map (on its event driver, below the device);
-  /// an Apple keyboard without one: F1/F2 as on all of them.
+  /// an Apple keyboard (USB or Bluetooth) without one: F1/F2 as on all of them.
   static func fnMap(_ device: IOHIDDevice, _ service: io_service_t) -> [UInt32: UInt32] {
     let s = IORegistryEntrySearchCFProperty(service, kIOServicePlane, "FnFunctionUsageMap" as CFString, nil,
                                             IOOptionBits(kIORegistryIterateRecursively)) as? String
-    let m = HIDBrightness.fnMap(s)
-    if !m.isEmpty { return m }
-    return IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int == 0x05AC ? HIDBrightness.appleDefault : [:]
+    return HIDBrightness.map(published: s, vendor: IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int)
   }
 
   /// "Use F1, F2, etc. keys as standard function keys" (Keyboard settings).

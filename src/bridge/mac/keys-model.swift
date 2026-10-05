@@ -149,6 +149,18 @@ enum HIDUsage {
 enum HIDBrightness {
   /// An Apple keyboard without the property: F1 down, F2 up, as on all of them.
   static let appleDefault: [UInt32: UInt32] = [HIDUsage.f1: 0x00FF_0005, HIDUsage.f2: 0x00FF_0004]
+  /// Apple's vendor IDs: 0x05AC over USB, 0x004C (Apple's Bluetooth id) over
+  /// Bluetooth. The Mac mini's Magic Keyboard is Bluetooth, 0x004C, and
+  /// publishes no FnFunctionUsageMap.
+  static let appleVendors: Set<Int> = [0x05AC, 0x004C]
+
+  /// A keyboard's F-key map: its own published one, else Apple's default for
+  /// an Apple keyboard, else none (a PC keyboard: its F1 is F1).
+  static func map(published: String?, vendor: Int?) -> [UInt32: UInt32] {
+    let m = fnMap(published)
+    if !m.isEmpty { return m }
+    return vendor.map { appleVendors.contains($0) } == true ? appleDefault : [:]
+  }
 
   /// FnFunctionUsageMap: "0xFROM,0xTO,0xFROM,0xTO,...". Pairs that do not
   /// parse are left out; an odd last entry is ignored.
