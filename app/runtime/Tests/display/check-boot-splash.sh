@@ -55,5 +55,10 @@ awk '/^\+ *if \(omacvm_watching\) \{$/ { on = 1 } on { print } on && /^\+ *retur
   { echo "FAIL: a desktop after the time limit is not marked (its screen off shows the logo)" >&2; exit 1; }
 grep -A3 '^+ *case SPLASH_LOOK_LIMIT:$' "$tmp/hold-tick.inc" | grep -q 'omacvm_watching = true;' ||
   { echo "FAIL: the time limit stops looking for the desktop" >&2; exit 1; }
+# A window that is not visible gets no display-link frames: the fade must not
+# wait for the animation's last frame then.
+awk '/^\+- \(void\)reveal:\(BOOL\)now$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" |
+  grep -q 'fadeIfStalled' && grep -q '^+    if (left <= 0 && CACurrentMediaTime() - last_tick > 0.25) {$' "$p" ||
+  { echo "FAIL: the logo waits for display-link frames a hidden window never gets" >&2; exit 1; }
 echo "check-boot-splash: the display agent counts by its hello when the window talks to it"
 echo "check-boot-splash: the logo waits for the wallpaper; a desktop after the time limit is marked"

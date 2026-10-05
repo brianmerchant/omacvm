@@ -22,7 +22,10 @@ end. The logo gives way at once when the VM stops on an error, and after
 40 s of running time without a desktop (OMACVM_SPLASH_HOLD_SECONDS), so a
 prompt or an error in the guest is not hidden for long; qemu.log says which
 it was. After that it still looks once a second for the desktop, so that
-an output the desktop turns off later is black, not the logo. After a reboot the logo comes back, still, the same way. Reduce
+an output the desktop turns off later is black, not the logo. The
+animation's frames come from a display link, which gives a window that is
+not visible none: once the animation is over by the clock and no frame came
+for 0.25 s, the logo fades without them (it stayed over the desktop). After a reboot the logo comes back, still, the same way. Reduce
 motion or OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the
 main window has the animation.
 Under it, in the GL layers of the main window and the other displays' windows:
@@ -96,7 +99,9 @@ logo's to the pixel. Through the launcher (RC2 pre-stage verify) the
 logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 RC2 polish: the fade landed on Hyprland's grey ~0.5 s before the wallpaper
 (the logo now waits for it), and after a 40 s fallback an output the later
-desktop turned off showed the logo instead of black.
+desktop turned off showed the logo instead of black. Twice in five test
+starts the window got no display-link frames, the animation stood still
+and the logo never faded: now it fades by the clock.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
@@ -130,7 +135,7 @@ desktop turned off showed the logo instead of black.
      /* Keep the corresponding Hyprland logical dimensions integral. */
      uint32_t cleanScaleDivisor = backingScale > 1.75 ? 2 :
                                   backingScale > 1.25 ? 3 : 1;
-@@ -3353,6 +3362,791 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
+@@ -3353,6 +3362,822 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
      CGLDestroyContext(ctx);
  }
  
@@ -656,6 +661,7 @@ desktop turned off showed the logo instead of black.
 +    double t;                   /* where the animation is (s) */
 +    CFTimeInterval start;       /* of the first frame; 0 before */
 +    CFTimeInterval opened;
++    CFTimeInterval last_tick;   /* when the display link last gave a frame; 0 before */
 +    bool ready;                 /* the desktop is there: fade once the animation ends */
 +    bool fading;
 +    IntroCell buf[INTRO_MAX];
@@ -844,6 +850,7 @@ desktop turned off showed the logo instead of black.
 +{
 +    CFTimeInterval now = [l targetTimestamp];
 +
++    last_tick = CACurrentMediaTime();
 +    if (!start) {
 +        start = now;
 +    }
@@ -865,13 +872,42 @@ desktop turned off showed the logo instead of black.
 +    ready = false;
 +}
 +
++/*
++ * Ready, and the display link still runs the animation: it fades at the
++ * animation's end. A window that is not visible gets no frames from it
++ * (another Space, hidden), so once the animation is over by the clock and
++ * no frame came for a while, fade without it: else the logo would stay over
++ * the desktop until the window shows again.
++ */
++- (void)fadeIfStalled
++{
++    CFTimeInterval left = opened + INTRO_END - CACurrentMediaTime();
++
++    if (!ready || fading || !link) {
++        return;
++    }
++    if (left <= 0 && CACurrentMediaTime() - last_tick > 0.25) {
++        info_report("cocoa: boot logo: the animation got no frames for a while, fading without it");
++        [self fade];
++        return;
++    }
++    [self retain];
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(left, 0.25) * NSEC_PER_SEC)),
++                   dispatch_get_main_queue(), ^{
++        [self fadeIfStalled];
++        [self release];
++    });
++}
++
 +/* The desktop is there (or the logo gives way): fade after the animation; now: at once. */
 +- (void)reveal:(BOOL)now
 +{
 +    ready = true;
 +    if (now || !link) {
 +        [self fade];
++        return;
 +    }
++    [self fadeIfStalled];
 +}
 +@end
 +
@@ -922,7 +958,7 @@ desktop turned off showed the logo instead of black.
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -3361,6 +4155,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
+@@ -3361,6 +4186,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
          gl_dirty = true;
      });
      cocoa_refresh_activity();
@@ -930,7 +966,7 @@ desktop turned off showed the logo instead of black.
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -3374,6 +4169,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -3374,6 +4200,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -938,7 +974,7 @@ desktop turned off showed the logo instead of black.
  }
  
  static void cocoa_gl_render(void)
-@@ -3451,6 +4247,8 @@ static void cocoa_gl_render(void)
+@@ -3451,6 +4278,8 @@ static void cocoa_gl_render(void)
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -947,7 +983,7 @@ desktop turned off showed the logo instead of black.
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3689,6 +4487,11 @@ static bool cocoa_gl_present_init(void)
+@@ -3689,6 +4518,11 @@ static bool cocoa_gl_present_init(void)
      return true;
  }
  
@@ -959,7 +995,7 @@ desktop turned off showed the logo instead of black.
  static void cocoa_gl_present_free(void)
  {
      for (int i = 0; i < present_nsurf; i++) {
-@@ -3823,6 +4626,7 @@ static bool cocoa_gl_present(void)
+@@ -3823,6 +4657,7 @@ static bool cocoa_gl_present(void)
      bool flip;
      uint32_t w, h;
      GLint filter = qatomic_read(&zoom_interpolation) ? GL_LINEAR : GL_NEAREST;
@@ -967,7 +1003,7 @@ desktop turned off showed the logo instead of black.
  
      if (gl_scanout_borrow) {
          DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
-@@ -3834,6 +4638,13 @@ static bool cocoa_gl_present(void)
+@@ -3834,6 +4669,13 @@ static bool cocoa_gl_present(void)
          h = texture.height;
          /* The surface's first row is the top of the window. */
          flip = !texture.y_0_top;
@@ -981,7 +1017,7 @@ desktop turned off showed the logo instead of black.
      } else if (surface && surface->texture) {
          src = surface->texture;
          w = surface_width(surface);
-@@ -3852,14 +4663,16 @@ static bool cocoa_gl_present(void)
+@@ -3852,14 +4694,16 @@ static bool cocoa_gl_present(void)
  
      /* A 10-bit scanout keeps its depth: half-float surfaces. */
      GLint ifmt = 0;
@@ -1002,7 +1038,7 @@ desktop turned off showed the logo instead of black.
          info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
                      deep ? "half-float" : "8-bit",
                      deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
-@@ -3911,13 +4724,18 @@ static bool cocoa_gl_present(void)
+@@ -3911,13 +4755,18 @@ static bool cocoa_gl_present(void)
      glClear(GL_COLOR_BUFFER_BIT);
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
@@ -1028,7 +1064,7 @@ desktop turned off showed the logo instead of black.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-@@ -4531,6 +5349,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
+@@ -4531,6 +5380,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -1036,7 +1072,7 @@ desktop turned off showed the logo instead of black.
  
      cocoa_gl_log("scanout disable");
  }
-@@ -4543,8 +5362,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
+@@ -4543,8 +5393,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
@@ -1050,7 +1086,7 @@ desktop turned off showed the logo instead of black.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -4555,6 +5379,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -4555,6 +5410,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
                                     uint32_t w, uint32_t h)
  {
      gl_dirty = true;
@@ -1058,7 +1094,7 @@ desktop turned off showed the logo instead of black.
  
      /*
       * Show the guest's frame now, not on the next 30 ms refresh tick:
-@@ -5299,6 +6124,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
+@@ -5299,6 +6155,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -1067,7 +1103,7 @@ desktop turned off showed the logo instead of black.
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -5968,6 +6795,8 @@ static void omacvm_chan_line(NSData *data)
+@@ -5968,6 +6826,8 @@ static void omacvm_chan_line(NSData *data)
          NSDictionary *d = obj;
          bool update = false;
          if (d[@"hello"]) {
@@ -1076,7 +1112,7 @@ desktop turned off showed the logo instead of black.
              if (!omacvm_ptr.drawing) {
                  info_report("cocoa: the guest draws its own pointer now");
              }
-@@ -6332,6 +7161,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -6332,6 +7192,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          }
          info_report("cocoa: GL frames shown %s",
                      present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
