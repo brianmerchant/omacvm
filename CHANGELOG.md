@@ -3,6 +3,24 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+### GPU and display (OmacVM.app)
+
+- OmacVM.app: an in-between scale (1.6, say) on a 5K display no longer turns
+  the VM black and flickering. The VM's GPU memory on the Mac had a budget of
+  a quarter of the Mac's memory (4 GB on a 16 GB Mac mini), and a 5K desktop
+  with apps open, whose buffers are all made again on a scale change, reached
+  it: Hyprland's next buffer was refused and its GPU context lost. The budget
+  is now three quarters of the Mac's memory, only there to stop a runaway VM;
+  6K and 8K displays fit too. `omacvm check` shows the VM's peak GPU memory.
+- OmacVM.app: the VM's display sync sends a mode only when Hyprland shows
+  another (each resend was a modeset: a flash, every buffer made again), one
+  call at a time, and stops following an output that keeps changing (a loop)
+  for a minute, with a line in `omacvm check`.
+- OmacVM.app: on a 4K or larger display, Omarchy's display panel says 2x is
+  the sharp scale there. What in-between scales cost:
+  [docs/routes/app.md](docs/routes/app.md#display-scale-on-4k-5k-and-larger-displays).
 ## 2.9.1
 
 A hotfix for 2.9.0: brightness keys that work with the VM in front, a

@@ -19,5 +19,6 @@ a new record replaces it and says so.
 | [0021](0021-colour-deep-colour-hdr.md) | Colour-tagged frames, deep colour and HDR | accepted, built (`pacing-hdr`), HDR off by default, only on EDR displays |
 | [0023](0023-refresh-rate-follows-the-guest.md) | The refresh rate follows the guest (ProMotion) | accepted, built (`pacing-hdr`) |
 | [0026](0026-fence-tests-off-the-render-threads-lock.md) | Fence tests stay off Apple GL's lock while the render thread works | accepted, sync-thread part in 2.9.1 |
+| [0034](0034-gpu-memory-budget-for-runaway-vms.md) | The GPU memory budget stops a runaway VM, never a desktop | accepted, built (`fractional-scale`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

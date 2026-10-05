@@ -405,3 +405,57 @@ Space, no menu bar change) and QEMU never takes the focus.
 `OMACVM_TEST_ONLY_DISPLAYS=<ids>` keeps real full screen but gives windows
 only to those displays (another test's virtual display is left alone).
 `OMACVM_DISPLAYS_DEBUG=1` logs what goes over the port (QEMU's log).
+
+## Display scale on 4K, 5K and larger displays
+
+Omarchy's scale menu (Super+/ and its display panel) works at any scale; the
+VM's screen keeps the Mac window's full size (5120×2880 on a 5K display)
+and Hyprland scales the desktop. What a scale costs:
+
+- **2x** (or another whole number) is the sharp one: every app draws at the
+  screen's own size. On a 4K or larger display, OmacVM.app's display panel
+  says so under the scale presets.
+- **In-between scales** (1.25, 1.6, ...) look the same size as macOS's
+  "looks like" settings, but apps that cannot draw at a fraction (X11 apps,
+  Omarchy's own bar) draw at the next whole scale and are shrunk (1.6) or
+  at the one below and stretched (1.25: a softer bar). Hyprland always
+  draws the screen's full size.
+- **GPU memory on the Mac** (the VM's textures and buffers, from QEMU's
+  log; Omarchy's desktop with Chromium showing WebGL Aquarium and a page;
+  virtual 60 Hz displays at 2x on an M4 Max):
+
+  | Display (guest screen) | 2x | 1.6 | 1.25 | 1x | Highest, while the scale changed |
+  |---|---|---|---|---|---|
+  | 4K (3840×2160) | 1.1 GB | 1.1 GB | 1.1 GB | 1.2 GB | 1.6 GB |
+  | 5K (5120×2880) | 1.6 GB | 1.8 GB | 1.9 GB | 1.7 GB | 2.6 GB |
+  | 6K (6016×3384) | 2.0 GB | 2.2 GB | 2.1 GB (1.33) | 2.5 GB | 3.4 GB |
+  | 8K (7680×4320) | 3.1 GB | 3.3 GB | 3.2 GB | 4.1 GB | 5.3 GB |
+
+  Omarchy alone at 5K: 1.2 GB at 2x, 1.3 GB at 1.6. Scales that would not
+  give whole pixels are rounded the way Omarchy does: on 5K 1.5 becomes 1.6
+  and 1.75 becomes 2; on 4K and 8K 1.75 becomes 1.875.
+
+- **A scale change** makes every screen-sized buffer again, Hyprland's and
+  every app's (20 to 50 of them, 32 to 127 MB each from 4K to 8K): Hyprland
+  sets the mode 2 or 3 times (Omarchy's scale command sets it, then its
+  config reload sets it again) and for a moment old and new buffers both
+  count (the last column). Switching between 1.6 and 2 sixteen times
+  left the same memory in use each time: nothing leaks.
+- The VM's GPU memory has a budget so a runaway VM cannot fill the Mac's
+  memory: three quarters of the Mac's memory (`OMACVM_GPU_MEMORY_MB` in
+  QEMU's environment sets another). Up to 2.9.1 it was a quarter, which a 5K
+  desktop at 1.6 with apps open could reach on a 16 GB Mac
+  ([troubleshooting, finding 24](../troubleshooting.md#24-app-a-scale-like-16-on-a-5k-display-turns-the-vm-black-and-flickering)).
+  `omacvm check` shows the highest use so far ("GPU memory"). The VM's own
+  memory comes on top: on an 8 GB Mac, 8K with apps open fills it.
+- The display sync (`omacvm-display-sync`) sends Hyprland a mode only when
+  it shows another, one call at a time, and stops following an output that
+  keeps changing (6 times in 10 s between two states, or 12 times at all)
+  for a minute, then looks once more; `omacvm check` in the VM says so
+  ("display sync"). A window being resized is never held.
+
+Tests: `src/app/guest/tests/test_display_sync.py` (no VM: 4K and 5K at
+Omarchy's scales, nothing sent twice, the loop guard),
+`tests/graphics/fractional-scale.sh` (a running VM: every scale, mode kept,
+no loop, no refused memory or lost GPU context in QEMU's log; `--frames`
+adds frame times of a full-screen page).
