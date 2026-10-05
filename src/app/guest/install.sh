@@ -79,8 +79,12 @@ install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-vid
 # pages (venus/vulkan-virtio.sh says why). Built now when the Mac says this VM
 # gets Vulkan (OMACVM_GRAPHICS, from omacvm apply), and at each boot when the
 # VM has Venus and still lacks it (Vulkan turned on in the app since).
-want=""; [[ $(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1) == vulkan ]] && want=--want
+graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+want=""; [[ $graphics == vulkan ]] && want=--want
 venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
+# OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
+if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
+elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
 # Vulkan windows present through a CPU copy (90-omacvm-vulkan.conf says why).
 install -Dm644 90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf
 install -Dm644 venus/omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service

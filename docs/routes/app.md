@@ -99,6 +99,16 @@ VM runs, and goes back by itself when a new version does not start
   builds it at its next start when Vulkan was picked in the app since
   (`omacvm-venus-driver.service`). Arch's 26.2.4 replaces it on an update.
   Automatic waits for that driver: until it is there it gives OpenGL.
+  OpenCL comes with it: apply installs Arch's `opencl-mesa` (rusticl) and
+  `clinfo` and turns rusticl's Zink on (`RUSTICL_ENABLE=zink` in
+  `/etc/environment.d/90-omacvm-opencl.conf`, for apps started after the
+  next login), so OpenCL apps (Geekbench, darktable, ffmpeg) run on the
+  Mac's GPU through Zink on Venus ([`venus/opencl.sh`](../../src/app/guest/venus/opencl.sh);
+  OpenGL turns the switch off again). That works on KosmicKrisp (macOS 26
+  and newer). On MoltenVK Zink refuses the device (no `nullDescriptor`):
+  there OpenCL needs the vulkan feature below. `omacvm check` has an
+  "OpenCL (rusticl on Zink)" row. WebGPU in Chrome needs the feature too
+  (its Venus driver has the semaphores Chrome's WebGPU asks for).
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan

@@ -173,6 +173,9 @@ Pending (each line is decided at release: the lane landed, or it moves to
   because MoltenVK cannot carry OpenGL or WebGL (ES 2.0 only; numbers in
   docs/benchmarks). OpenGL stays on virgl either way. It applies at the
   VM's next start, and `omacvm check` says what a start got. The hidden `venus` switch stays for development.
+  With Vulkan the VM also gets OpenCL on the Mac's GPU (Arch's rusticl on
+  Zink on Venus, no build) where the Mac's driver is KosmicKrisp: Geekbench 7
+  OpenCL 20,121 on a Mac mini M4 (the Mac itself: 35,240).
 - KosmicKrisp is in the app (about 13 MB, its licences in the app's
   licences folder): on macOS 26 and newer Vulkan runs on it, on older macOS
   on MoltenVK. A Mac where KosmicKrisp cannot run falls back to MoltenVK

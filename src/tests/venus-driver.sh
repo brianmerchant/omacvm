@@ -89,6 +89,29 @@ grep -q 'ExecStart=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh$' "$
   grep -q 'omacvm-venus-driver.service' src/app/guest/install.sh && pass "boot unit runs it" || fail "no boot unit"
 grep -q 'app/guest/venus/vulkan-virtio.sh --status' src/guest/check.sh && pass "check has the Vulkan (Venus) row" || fail "no check row"
 
+# OpenCL on that Vulkan (venus/opencl.sh): apply sets it up for Graphics Vulkan, off for OpenGL,
+# leaves it to the vulkan feature's Mesa when that is there; omacvm graphics does it too.
+grep -q '^if \[\[ $graphics == vulkan \]\]; then venus/opencl.sh ||' src/app/guest/install.sh &&
+  grep -q 'venus/opencl.sh --off' src/app/guest/install.sh && pass "app install sets up OpenCL with Vulkan" ||
+  fail "app install does not run venus/opencl.sh"
+grep -q 'app/guest/venus/opencl.sh' src/cmd/graphics.sh && pass "omacvm graphics sets up OpenCL" || fail "omacvm graphics skips OpenCL"
+grep -q '90-omacvm-opencl.conf' src/guest/check.sh && pass "check has the OpenCL row" || fail "no OpenCL check row"
+O=$T/opencl.conf
+OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/none.icd "$D/opencl.sh" --nonsense >/dev/null 2>&1
+[[ $? == 2 ]] && pass "opencl.sh: unknown option: usage" || fail "opencl.sh: unknown option accepted"
+echo RUSTICL_ENABLE=zink > "$O"
+OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/none.icd "$D/opencl.sh" --off && [[ ! -e $O ]] &&
+  pass "opencl.sh --off removes the switch" || fail "opencl.sh --off kept the switch"
+echo RUSTICL_ENABLE=zink > "$O"; : > "$T/ours.icd"
+out=$(OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/ours.icd "$D/opencl.sh" 2>&1); rc=$?
+[[ $rc == 0 && ! -e $O && $out == *"feature vulkan"* ]] && pass "opencl.sh: OmacVM's Mesa has its own rusticl" ||
+  fail "opencl.sh with OmacVM's Mesa: rc $rc, said '$out'"
+if (( EUID != 0 )); then
+  out=$(OMACVM_OPENCL_ENV=$O OMACVM_MESA_CLICD=$T/none.icd "$D/opencl.sh" 2>&1); rc=$?
+  [[ $rc == 1 && $out == *"run as root"* && ! -e $O ]] && pass "opencl.sh installs as root only" ||
+    fail "opencl.sh as a user: rc $rc, said '$out'"
+fi
+
 # Vulkan windows present through a CPU copy: a dma-buf from Venus imported by
 # Hyprland's virgl context loses that context (PIPE_RESOURCE_SET_TYPE EINVAL).
 grep -qx 'MESA_VK_WSI_DEBUG=sw' src/app/guest/90-omacvm-vulkan.conf &&
