@@ -78,6 +78,9 @@ final class Runner {
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
             a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
         }
+        // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch):
+        // the guest then presents Vulkan on the GPU, not through a CPU copy (omacvm-vulkan-present).
+        a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]

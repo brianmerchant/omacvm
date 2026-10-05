@@ -390,9 +390,12 @@ if [ "$MODE" = prepare-rc2 ]; then
   # Bench VM keeps its 2.9.1 guest otherwise). Not through the CLI: it looks for the VM's QEMU by the
   # folder name it expects, and the app may start QEMU with the folder's on-disk case
   # ("Application Support/omacvm/VMs"): the CLI then sees the VM stopped and starts it again.
-  COPYFILE_DISABLE=1 tar -C "$RC2_SRC/src/app/guest" --no-xattrs -cf - venus 90-omacvm-vulkan.conf |
+  # The Vulkan present mode needs no file: the RC2 app tells the guest (omacvm.vkwindows); an older
+  # tree still has 90-omacvm-vulkan.conf (software WSI), installed when it is there.
+  # shellcheck disable=SC2046  # zero or one file name
+  ( cd "$RC2_SRC/src/app/guest" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - venus $(ls 90-omacvm-vulkan.conf 2>/dev/null) ) |
     gsi "$h" 'rm -rf /opt/omacvm-final-round/venus && mkdir -p /opt/omacvm-final-round && tar --no-same-owner -C /opt/omacvm-final-round -xf - &&
-      install -m644 /opt/omacvm-final-round/90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf' ||
+      { [ ! -f /opt/omacvm-final-round/90-omacvm-vulkan.conf ] || install -m644 /opt/omacvm-final-round/90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf; }' ||
     { rc2_stop; die "copying the Venus driver files failed"; }
   gs "$h" 'sed -i "/^OMACVM_GRAPHICS=/d" /etc/omacvm/env && echo OMACVM_GRAPHICS=vulkan >> /etc/omacvm/env &&
     OMARCHY_ALLOW_DIRECT_PACMAN=1 /opt/omacvm-final-round/venus/vulkan-virtio.sh --want' ||
