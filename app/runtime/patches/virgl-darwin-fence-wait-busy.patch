@@ -11,6 +11,13 @@ usually follows at once. When the render thread is idle (a guest that waits
 on its fence, e.g. glmark2) the wait is as before: up to 100 us of spinning,
 then naps of 50 us, doubling after 1 ms. OMACVM_VIRGL_FENCE_BUSY=0 turns it
 off (the sync thread logs which way it waits).
+Wake-ups are counted exactly: the sync thread raises a flag only while it
+really waits on the semaphore, and whoever takes the flag back decides. If
+the render thread did, it signals once and the sync thread takes that
+signal, also when its wait already timed out; so no count is left to end a
+later wait at once (2.9.1 had that: a submit ending just after a 1 ms
+timeout, or during the grace wait, left a count, and the build test failed
+under load). Both sides use seq_cst, so an end is never missed.
 Why: each glClientWaitSync takes Apple GL's share-group lock, which the
 render thread's GL calls (glBindBuffer, glUseProgram, ...) take too. In
 WebGL Aquarium the render thread is saturated and the sync thread tested
@@ -27,9 +34,10 @@ in A B C C B A order): Aquarium
 The sync thread's CPU in Aquarium 7.3 % -> 2.3 %, QEMU's wakeups 5,900 ->
 3,600 a second.
 Upstream: macOS-specific, goes with virgl-darwin-fence-wait.patch.
-Test: Tests/virgl/test-fence-wait-busy.c (build time, no GL: busy and grace
-detection, a waiter wakes at the end of a 300 us submit, at about 1 ms
-during a long one, not at all for an idle render thread); Aquarium,
+Test: Tests/virgl/test-fence-wait-busy.c (build time, no GL; forces each
+race at a fixed point and checks the wait's counters and the semaphore's
+count, not the clock: end before the wait, end after a timeout, a submit in
+the grace wait, a stray count, a real render thread); Aquarium,
 glmark2, testufo, Basemark A/B against RC3 (bench lock); tests/graphics
 dEQP GLES2/3 + WebGL smoke.
 Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
@@ -44,7 +52,7 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
  
  /* The sync thread's fence wait on macOS (do_wait): busy for at most SPIN
   * after the thread last slept, then naps of NAP between tests; once a
-@@ -115,8 +116,47 @@
+@@ -115,8 +116,59 @@
  
  /* When the sync thread last woke from a sleep (only it reads or writes). */
  static uint64_t fence_awake_since;
@@ -68,7 +76,19 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
 +static atomic_bool fence_busy_waiting;   /* the sync thread waits for an end */
 +static semaphore_t fence_busy_sem;
 +static bool fence_busy_on;
++
++/* How the sync thread's waits for a submit end went (only it writes):
++ * woken by the end; end seen only after the wait (as it timed out) or before
++ * it began; timed out with the submit still running; stray wake-ups dropped
++ * before a wait (should stay 0). */
++static struct { uint64_t woken, late, timed_out, stray; } fence_busy_stats;
++
++/* Tests (Tests/virgl/test-fence-wait-busy.c) define this to end a submit at
++ * a chosen point of fence_wait_render. */
++#ifndef FENCE_BUSY_TEST_POINT
++#define FENCE_BUSY_TEST_POINT(point) ((void)0)
  #endif
++#endif
  
 +/* Called by virgl_renderer_submit_cmd(2) around a context's command buffer. */
 +void vrend_renderer_submit_begin(void)
@@ -82,9 +102,9 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
 +{
 +#ifdef __APPLE__
 +   atomic_store_explicit(&render_idle_at, mach_absolute_time(), memory_order_relaxed);
-+   atomic_fetch_sub_explicit(&render_submits, 1, memory_order_release);
-+   if (atomic_load_explicit(&fence_busy_waiting, memory_order_acquire) &&
-+       atomic_exchange(&fence_busy_waiting, false))
++   /* seq_cst on purpose: see fence_wait_render. */
++   atomic_fetch_sub(&render_submits, 1);
++   if (atomic_load(&fence_busy_waiting) && atomic_exchange(&fence_busy_waiting, false))
 +      semaphore_signal(fence_busy_sem);
 +#endif
 +}
@@ -92,10 +112,14 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
  struct vrend_fence {
     /* When the sync thread is waiting on the fence and the main thread
      * destroys the context, ctx is set to NULL.  Otherwise, ctx is always
-@@ -8251,6 +8291,45 @@
-    }
- }
- 
+@@ -8247,9 +8299,91 @@
+       list_for_each_entry_safe(struct vrend_fence, fence, &vrend_state.fence_list, fences) {
+          if (fence->ctx == ctx)
+             free_fence_locked(fence);
++      }
++   }
++}
++
 +#ifdef __APPLE__
 +/* Sync thread: is the render thread running guest commands (or did it stop
 + * less than the grace period ago)? */
@@ -111,8 +135,26 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
 +          now - atomic_load_explicit(&render_idle_at, memory_order_relaxed) < grace;
 +}
 +
++/* Sync thread: drop wake-ups no wait took. The handshake below leaves none;
++ * this only makes sure a stray one can never end a later wait at once. */
++static void fence_busy_drain(void)
++{
++   const mach_timespec_t zero = { 0, 0 };
++   while (semaphore_timedwait(fence_busy_sem, zero) == KERN_SUCCESS) {
++      if (!fence_busy_stats.stray++)
++         virgl_warn("sync thread: dropped a stray wake-up from the render thread\n");
++   }
++}
++
 +/* Sync thread: wait until a submit ends, at most FENCE_BUSY_NAP; or, when
-+ * the render thread already stopped, until the grace period is over. */
++ * the render thread already stopped, until the grace period is over.
++ * Handshake with vrend_renderer_submit_end, all seq_cst: the sync thread
++ * sets fence_busy_waiting, then reads render_submits; the render thread
++ * lowers render_submits, then reads the flag. One of the two always sees the
++ * other, so an end is never missed. Whoever clears the flag (exchange)
++ * decides: if the render thread did, it signals exactly once and the sync
++ * thread takes that signal, also when its wait already timed out; if the
++ * sync thread did, no signal comes. So every wait leaves the count at 0. */
 +static void fence_wait_render(uint64_t now)
 +{
 +   static uint64_t grace;
@@ -121,24 +163,48 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
 +      mach_timebase_info(&tb);
 +      grace = FENCE_BUSY_GRACE_NS * tb.denom / tb.numer;
 +   }
-+   atomic_store(&fence_busy_waiting, true);
 +   if (atomic_load(&render_submits)) {
-+      mach_timespec_t ts = { 0, (clock_res_t)FENCE_BUSY_NAP_NS };
-+      semaphore_timedwait(fence_busy_sem, ts);
++      fence_busy_drain();
++      atomic_store(&fence_busy_waiting, true);
++      FENCE_BUSY_TEST_POINT(armed);
++      kern_return_t kr = KERN_OPERATION_TIMED_OUT;
++      const bool running = atomic_load(&render_submits);
++      if (running) {
++         mach_timespec_t ts = { 0, (clock_res_t)FENCE_BUSY_NAP_NS };
++         kr = semaphore_timedwait(fence_busy_sem, ts);
++      }
++      FENCE_BUSY_TEST_POINT(waited);
++      if (kr == KERN_SUCCESS) {
++         fence_busy_stats.woken++;
++      } else if (atomic_exchange(&fence_busy_waiting, false)) {
++         /* No signal comes: the submit still runs, or it ended before it
++          * could see the flag (then there was no wait). */
++         if (running)
++            fence_busy_stats.timed_out++;
++         else
++            fence_busy_stats.late++;
++      } else {
++         /* A submit ended and took the flag: its signal is (about to be)
++          * sent. Take it, so it does not end the next wait at once. */
++         while (semaphore_wait(fence_busy_sem) == KERN_ABORTED)
++            ;
++         fence_busy_stats.late++;
+       }
 +   } else {
++      /* No flag here: a submit that starts and ends in this window must
++       * not signal, nobody waits on the semaphore. */
 +      uint64_t idle = atomic_load_explicit(&render_idle_at, memory_order_relaxed);
 +      if (now - idle < grace)
 +         mach_wait_until(idle + grace);
-+   }
-+   atomic_store(&fence_busy_waiting, false);
++      FENCE_BUSY_TEST_POINT(grace);
+    }
 +   fence_awake_since = mach_absolute_time();
-+}
+ }
 +#endif
-+
+ 
  static bool do_wait(struct vrend_fence *fence, bool can_block)
  {
- #ifdef HAVE_EPOXY_EGL_H
-@@ -8270,7 +8349,7 @@
+@@ -8270,7 +8404,7 @@
        static mach_timebase_info_data_t tb;
        if (!tb.denom)
           mach_timebase_info(&tb);
@@ -147,7 +213,7 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
        const uint64_t spin = FENCE_SPIN_NS * tb.denom / tb.numer;
        const uint64_t lng = FENCE_LONG_NS * tb.denom / tb.numer;
        const uint64_t nap_max = FENCE_NAP_MAX_NS * tb.denom / tb.numer;
-@@ -8282,6 +8361,13 @@
+@@ -8282,6 +8416,13 @@
           if (glret != GL_TIMEOUT_EXPIRED)
              return true;
           const uint64_t now = mach_absolute_time();
@@ -161,7 +227,7 @@ Applies after virgl-darwin-fence-wait.patch and the rest of the list (last).
           if (now - t0 <= spin && now - fence_awake_since <= spin)
              continue;
           mach_wait_until(now + nap);
-@@ -8408,6 +8494,13 @@
+@@ -8408,6 +8549,13 @@
        if (kr != KERN_SUCCESS)
           virgl_warn("sync thread: no time-constraint policy, fence waits may be late\n");
        fence_awake_since = mach_absolute_time();
