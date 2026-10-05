@@ -116,8 +116,17 @@ the driver ID is asked for whenever `VK_KHR_driver_properties` is there.
   30 % of the Mac's OpenCL, Particle Physics 37 %, Super Resolution 49 %).
 - Unbound descriptors are undefined on MoltenVK instead of zero; rusticl
   binds what kernels use.
-- First install builds Mesa in the VM: about 1-2 minutes on 8 vCPUs (M4
-  Max), after pacman fetched LLVM, Clang, Rust and bindgen.
+- First install builds Mesa in the VM: about 3 minutes on 8 vCPUs (M4 Max),
+  pacman included. A stock OmacVM VM has LLVM and Clang (Omarchy installs
+  them); the download is about 140 MB: Mesa's source (65 MB), Rust (56 MB)
+  and small tools (meson, ninja, bindgen, libclc). The build tools the VM
+  lacked are removed after the build, so they take no disk space later.
+  Trade-off: a rebuild (an Arch LLVM update, a new Mesa pin) downloads them
+  again. Mesa's runtime libraries (Clang, libclc, SPIR-V) stay.
+- apply turns Vulkan on (the VM folder's `vulkan` file) only when
+  `omacvm_venus_icd.json` is in the VM after the guest step. Without it the
+  distro's venus (Mesa 26.2.3, no 16 KiB blob rounding) would get the
+  device, and every Vulkan app fails with ERROR_OUT_OF_HOST_MEMORY.
 - On macOS 26 KosmicKrisp compiles NIR to MSL itself: the global-loads and
   zero-init workarounds are MoltenVK-only by driver ID. The same guest Mesa
   passes the same checks on KosmicKrisp (Mac mini M4, macOS 27): OpenCL,

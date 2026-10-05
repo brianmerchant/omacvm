@@ -86,8 +86,12 @@ routes run on macOS 14).
   starts Chromium with WebGPU on the Mac's GPU (the normal Chromium keeps
   its software WebGPU: its Vulkan mode costs WebGL about a fifth). The
   first time the VM builds OmacVM's Mesa for it (pinned 26.2.4 with five
-  patches, a few minutes plus LLVM, Clang and Rust from pacman) into
-  `/opt/omacvm-mesa`; OpenGL stays on virgl. `omacvm disable vulkan`
+  patches) into `/opt/omacvm-mesa`: about 3 minutes on an M4 Max and a
+  140 MB download (Mesa's source and Rust; Omarchy has LLVM and Clang
+  already). The build tools it adds (Rust, meson, ninja, bindgen) are
+  removed after the build. If the build fails, Vulkan stays off and apply
+  says so (log: `/var/log/omacvm-mesa-build.log` in the VM). OpenGL stays
+  on virgl. `omacvm disable vulkan`
   removes it. Numbers: [benchmarks](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04),
   how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).
   For development `defaults write org.omacvm.app venus -bool true` gives

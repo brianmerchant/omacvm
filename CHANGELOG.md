@@ -10,8 +10,10 @@ in more words.
   gets Vulkan on the Mac's GPU (Venus), OpenCL (darktable, ffmpeg's OpenCL
   filters, Geekbench GPU), WebGPU in Firefox, and a "Chromium (WebGPU)"
   menu entry with WebGPU on the Mac's GPU (the normal Chromium keeps its
-  software WebGPU). The first time, the VM builds a Mesa for it (a few
-  minutes). WebGPU matrix multiply in that Chromium: about 5,000-6,300
+  software WebGPU). The first time, the VM builds a Mesa for it: about 3
+  minutes on an M4 Max and a 140 MB download (Mesa's source and Rust;
+  Omarchy has LLVM and Clang already). The build tools it adds are removed
+  after the build, and Vulkan is only turned on when the build worked. WebGPU matrix multiply in that Chromium: about 5,000-6,300
   GFLOPS, 84 % of Chrome on the Mac in a locked batch; Geekbench 7 GPU
   OpenCL 45 % of the Mac's own OpenCL. A 15-minute soak (OpenCL, WebGPU in
   both browsers, ffmpeg OpenCL) passed in the app with no failure, and
