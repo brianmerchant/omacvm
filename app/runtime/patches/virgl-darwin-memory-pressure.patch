@@ -35,9 +35,10 @@ the renderer thread (QEMU's main loop), like the budget.
 Upstream: not sent (macOS only; upstream has no host memory limit).
 Tests: Tests/virgl/test-resource-budget.c (build time, Apple's software renderer):
 critical refuses a 64 MB texture after trying again (>= 90 ms) but not an 8 MB
-texture or a 5K screen; warn with 100 MB left fits 64 MB and refuses 128 MB; the status file's in use, peak, pressure, refusals and two lost
-contexts (a sanitised name, the recent list). In a VM: tests/graphics/fractional-scale.sh and the
-memory soak in docs/routes/app.md.
+texture or a 5K screen; warn with 100 MB left fits 64 MB and refuses 128 MB; the
+status file's in use, peak, pressure, refusals and two lost contexts (a sanitised
+name, the recent list). In a VM: tests/graphics/fractional-scale.sh; on the Mac
+mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
 @@ -27,6 +27,16 @@
