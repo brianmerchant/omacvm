@@ -8,7 +8,7 @@
 bridge	on	mac,vm	-	-	OmacVM Bridge	the Mac's Wi-Fi, Bluetooth, audio, Night Shift and media keys in Omarchy's bar
 wallpaper	on	vm	-	bridge	Wallpaper on the Mac	Omarchy's wallpaper becomes the Mac's, following the theme
 gestures	on	mac,vm	-	-	Trackpad gestures	3/4-finger swipes and pinch in Omarchy while it is full screen (⌃⌥⌘ Esc takes you back to macOS and into the VM again); on UTM, VMware Fusion and OmacVM.app also Cmd shortcuts as Super
-scroll-momentum	off	mac,vm	experimental	gestures	macOS-native scroll momentum	two-finger scrolling with your Mac's own acceleration and momentum, passed through
+scroll-momentum	on	mac,vm	experimental	gestures	macOS-native scroll momentum	two-finger scrolling on a trackpad (built-in or Magic Trackpad, also one connected later) with your Mac's own acceleration and momentum; mice scroll as before, one step per notch
 omanotch	notch	mac,vm	notch	-	Omanotch	Omarchy's bar beside the MacBook's notch
 mac-clock	on	mac,vm	-	-	The Mac's clock	the clock at the far right of the bar, formatted like the Mac's menu bar
 camera	on	mac,vm	-	-	The Mac's camera	Linux apps and video calls in the browser see it as Mac Camera; it is on only while one of them uses it (UTM and VMware Fusion: through OmacVM Bridge, installed for it also with the Bridge off)

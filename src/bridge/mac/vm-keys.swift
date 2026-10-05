@@ -12,15 +12,17 @@ import AppKit
 import Darwin
 
 final class VMKeys {
-  private var paths: [pid_t: String?] = [:]   // main thread: QEMU pid -> its QMP socket
+  private var paths: [pid_t: String] = [:]    // main thread: QEMU pid -> its QMP socket (hits only)
   static let marker: Int64 = 0x0BAC_0E5C      // a key the Bridge handed back to macOS
 
   /// The QMP socket of this QEMU (OmacVM.app's VM), nil if it has none we may use.
   func socket(for pid: pid_t) -> String? {
     if let p = paths[pid] { return p }
     if paths.count > 32 { paths = [:] }   // old VMs
+    // Not found yet (QEMU still starting, its socket not made): asked again
+    // on the next key, never remembered as "none".
     let p = VMKeys.arguments(pid).flatMap(QMPKeys.socketPath).flatMap { VMKeys.ours($0) ? $0 : nil }
-    paths[pid] = p
+    if let p { paths[pid] = p }
     return p
   }
 

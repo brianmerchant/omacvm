@@ -197,8 +197,10 @@ final class WiFi: NSObject, CWEventDelegate {
     let power = i.powerOn()
     let channel = power ? i.wlanChannel() : nil
     let rssi = i.rssiValue()
-    let connected = channel != nil && rssi < 0
-    let problem = connected ? nil : !power ? "power off" : channel == nil ? "no channel, rssi \(rssi)" : "rssi \(rssi)"
+    let link = linkActive(i.interfaceName)
+    let connected = WiFiRead.connected(power: power, channel: channel != nil, rssi: rssi, locationOK: locationOK, link: link)
+    let problem = connected ? nil : !power ? "power off" : !locationOK && link == false ? "no link (without Location Services)"
+      : channel == nil ? "no channel, rssi \(rssi)" : "rssi \(rssi)"
     s["interface"] = nn(i.interfaceName)
     s["power"] = power
     s["connected"] = connected
@@ -206,8 +208,11 @@ final class WiFi: NSObject, CWEventDelegate {
     if connected {
       let noise = i.noiseMeasurement(), sec = i.security()
       s["ssid"] = nn(i.ssid()); s["bssid"] = nn(i.bssid())
-      s["rssi"] = rssi; s["noise"] = noise; s["snr"] = rssi - noise; s["quality"] = quality(rssi)
-      s["channel"] = channelInfo(channel)
+      // Without Location Services a read may have no signal: shown as unknown.
+      if rssi < 0 {
+        s["rssi"] = rssi; s["noise"] = noise; s["snr"] = rssi - noise; s["quality"] = quality(rssi)
+        s["channel"] = channelInfo(channel)
+      }
       s["security"] = securityName(sec); s["secure"] = sec != .none
       s["can_share"] = shareableSecurity.contains(securityName(sec))   // QR sharing via /wifi/password
       s["tx_rate_mbps"] = i.transmitRate()

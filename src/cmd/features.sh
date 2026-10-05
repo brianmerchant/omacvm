@@ -96,6 +96,8 @@ label() {   # INDEX -> one line for the list
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
   feature_has_tag "$i" slow && tag=" $dim(slow to build)$off"
   available "$i" || tag=" $dim($REASON)$off"
+  # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
+  [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"
   printf '%s%s' "${FTITLE[$i]}" "$tag"
 }
 

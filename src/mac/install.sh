@@ -95,7 +95,7 @@ if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " ==
   [[ " ${INSTALLED[*]} " == *" OmacVM Gestures "* ]] &&
     printf '    * Accessibility and Input Monitoring: OmacVM Gestures (trackpad gestures, scroll momentum, Cmd keys)\n'
   [[ " ${INSTALLED[*]} " == *" OmacVM Bridge "* ]] &&
-    printf '    * Accessibility: OmacVM Bridge (media keys); Location Services: OmacVM Bridge (Wi-Fi names);\n      Bluetooth: OmacVM Bridge (your Bluetooth devices)\n'
+    printf '    * Accessibility and Input Monitoring: OmacVM Bridge (media keys, brightness keys);\n      Location Services: OmacVM Bridge (Wi-Fi names); Bluetooth: OmacVM Bridge (your Bluetooth devices)\n'
   printf '  Until then those features wait; the build goes on either way.\n\n'
 fi
 (( QUIET )) || echo "OmacVM Mac side installed"

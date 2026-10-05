@@ -57,6 +57,7 @@ git ls-files -z '*.py' | xargs -0 python3 -m py_compile
 src/gestures/mac/build.sh && src/bridge/mac/build.sh
 src/omanotch/mac/test.sh
 src/bridge/mac/test.sh && src/tests/external-brightness.sh
+src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
 src/tests/vm-names.sh
 src/tests/prebuilt-manifest.sh
 src/tests/gestures-off.sh

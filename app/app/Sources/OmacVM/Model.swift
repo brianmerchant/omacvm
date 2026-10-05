@@ -90,7 +90,7 @@ struct VMConfig: Equatable {
     var keyboard = "us"
     // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
     // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on idle-lock=on autologin=off thp-kernel=off"
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
 
@@ -348,6 +348,14 @@ enum Settings {
     /// module runs (omacvm-virtio-gpu-build in the VM, then a restart).
     /// Hidden: defaults write org.omacvm.app hdr -bool true
     static var hdr: Bool { UserDefaults.standard.bool(forKey: "hdr") }
+    /// macOS's own shortcuts (screenshots, Mission Control, Spotlight,
+    /// Cmd+Tab ...) stay with macOS even while the VM has the keyboard: the
+    /// default since RC11. Off (experimental): they all go to the VM while it
+    /// has the keyboard (only the escape combo is macOS's); on the Mac mini
+    /// that switch was not always handed back (macOS's brightness keys stopped
+    /// working in macOS), so it waits for a fix.
+    /// Hidden: defaults write org.omacvm.app macShortcuts -bool false
+    static var macShortcuts: Bool { UserDefaults.standard.object(forKey: "macShortcuts") as? Bool ?? true }
     /// HDR as the VM gets it: only while a display can show it.
     static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {

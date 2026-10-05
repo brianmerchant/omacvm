@@ -90,8 +90,8 @@ UTM, or choose their password: hand those over, never work around them.
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
-     is experimental and off by default: offer
-     it, do not decide it.
+     is experimental and on by default; it only ever takes a trackpad's
+     scrolling (mice scroll one to one), so a Mac with only mice is unaffected.
      `prebuilt.available` in the plan: a prebuilt VM exists for this app
      (same major version, up to this one; never for OmacVM.app); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
      minutes) or a build here (`--build`, the default with `--yes`).
@@ -159,7 +159,7 @@ A build is done when all of this holds:
 
 | Requirement | Value |
 |---|---|
-| Host | Apple Silicon, macOS 14+ (verified 15.7.4, MacBook Pro M4 Max) |
+| Host | Apple Silicon, macOS 14+ (OmacVM.app: macOS 15+; verified 15.7.4, MacBook Pro M4 Max) |
 | Parallels route | Parallels Desktop 19+ (verified 27.0.2, Pro trial). Per-VM limits from `prlsrvctl info --license` (`cpu_total`, `max_memory`): Standard 4 CPUs / 8 GB, Pro/Business/trial 32 CPUs (18 tested on Apple Silicon) / 128 GB; build.sh never writes more than the licence allows (Parallels would reject the config). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
 | UTM route | UTM 5 (verified 5.0.6, QEMU 10.0.12); required: on UTM 4.7 GL clients map but never paint (black windows) unless rendering is forced to software (ggalancs/omarchy-arm-utm#7). OmacVM never sets `LIBGL_ALWAYS_SOFTWARE`; VirGL (virtio-gpu-gl), Vulkan off. VM creation through UTM's AppleScript dictionary (`/Applications/UTM.app/Contents/Resources/UTM.sdef`), `utmctl` for start/stop/status/ip-address |
 | VMware Fusion route (new) | VMware Fusion 13+ (verified 26.0.1). Needs Hyprland with the vmwgfx fix (`src/fusion/guest/`); see `docs/routes/vmware-fusion.md` (and the build log `docs/experiments/vmware-fusion.md`). `vmcli VM Create`, `vmware-vdiskmanager`, `vmrun start/list` from `VMware Fusion.app/Contents/Library`; the rest is the `.vmx` (`src/vm/fusion.sh`). VMs in `~/Virtual Machines.localized` or `$OMACVM_FUSION_DIR` |
@@ -269,9 +269,39 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   (the exact name first, else the longest name in the title); without a match
   (older daemons, a VM renamed since its last `omacvm apply`) to every VM of
   that app. The helper captures the trackpad only when those VMs all want it,
-  and the scroll momentum (macOS's continuous scroll events dropped,
-  `A`/`W`/`P` sent, every two-finger frame forwarded) only when they all want
-  that.
+  and the scroll momentum (a trackpad's scroll events dropped, `A`/`W`/`P`
+  sent, every two-finger frame forwarded) only when they all want that.
+  Which scroll is a trackpad's: `mac/scroll-model.h`, per event (phases and
+  momentum of a scroll made while a trackpad has two fingers on it); wheel
+  mice, smooth-scrolling mice and a Magic Mouse always pass to the VM app.
+- OmacVM.app's keyboard: while QEMU's window has the keyboard (full grab, app
+  active, window key) macOS's global shortcuts are off
+  (CGSSetGlobalHotKeyOperatingMode, `omacvm-cocoa-system-shortcuts.patch`;
+  logic in `omacvm-cocoa-shortcuts-logic.patch`, tested against macOS's whole
+  list by `app/runtime/Tests/keys/test-shortcuts.sh` and in a real QEMU by
+  `src/tests/vm-shortcuts.sh`). The switch belongs to QEMU's window-server
+  connection (macOS restores it when QEMU dies); a watchdog thread turns it
+  on after 2 s without the main thread. Off by default since 2.9.1 (not
+  always handed back on the Mac mini): `macShortcuts` (org.omacvm.app,
+  default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
+  turns the switch on. Gestures' tap still takes ⌃⌥⌘ Esc first; the Bridge
+  still routes media keys.
+- Escape combo (Gestures): every way out of a full-screen VM ends in
+  `verifyOut` (front app not the VM, its full-screen window not on the
+  pointer's display); still in → AXFullScreen false + hide, and the next
+  combo restores full screen (`restoreFull`). An OmacVM.app window with the
+  keyboard: the combo gives it to the app from before / Finder
+  (`COMBO_WINDOW_OUT`), again in macOS brings the window back.
+- Bridge media keys: the tap is at `.cghidEventTap` (macOS 27 sends volume
+  only there). Brightness keys reach no tap on macOS 27: `hid-keys.swift`
+  reads them with IOHIDManager (not seized; Input Monitoring): F1/F2 through
+  the keyboard's own `FnFunctionUsageMap` (IORegistry; none on an Apple
+  keyboard, also Bluetooth vendor 0x004C: Apple's F1/F2 default) and
+  `com.apple.keyboard.fnState`, or the consumer/Apple brightness usages;
+  acted on only with an OmacVM.app VM in front (`MediaRoute`), deduplicated
+  against the tap (`BrightnessOnce`), and not stepped again when macOS
+  changed the display itself (`OwnSteps`: not when the Bridge stepped it
+  itself meanwhile). Held keys repeat at macOS's key repeat speed.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.

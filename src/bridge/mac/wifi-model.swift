@@ -10,6 +10,20 @@
 // SSID, BSSID, power) and with the system's link state going down.
 import Foundation
 
+/// Whether one read is "connected". With Location Services granted, from
+/// CoreWLAN's own read (a channel and a signal). Without it (not decided yet
+/// after a new Bridge, or "Don't Allow"), macOS 27's CoreWLAN gives a channel
+/// with no signal and no SSID most of the time, as for an unauthorized
+/// reader: then the system's link state of the interface decides (associated
+/// or not), and the network's name stays hidden.
+enum WiFiRead {
+  static func connected(power: Bool, channel: Bool, rssi: Int, locationOK: Bool, link: Bool?) -> Bool {
+    guard power else { return false }
+    if !locationOK, let link { return link }
+    return channel && rssi < 0
+  }
+}
+
 struct WiFiSteady {
   /// A lone "not connected" without an event is believed after this long.
   static let hold: TimeInterval = 10
@@ -29,8 +43,19 @@ struct WiFiSteady {
   /// (nil: not known); `event`: when CoreWLAN last said link, SSID, BSSID or
   /// power changed. Returns the state to report, and `held` when a "not
   /// connected" read was not believed (yet).
+  /// The signal fields; a connected read without them (no Location
+  /// Services) keeps the last ones known, so the bar's icon does not drop.
+  static let signal = ["rssi", "noise", "snr", "quality", "channel"]
+
   mutating func take(_ raw: [String: Any], link: Bool?, event: Date?, now: Date) -> (state: [String: Any], held: Bool) {
-    if raw["connected"] as? Bool == true { good = raw; dropSince = nil; linkBadSince = nil; return (raw, false) }
+    if raw["connected"] as? Bool == true {
+      var r = raw
+      if r["rssi"] is NSNull || r["rssi"] == nil, let good, good["rssi"] is Int {
+        for k in Self.signal { r[k] = good[k] }
+      }
+      good = r; dropSince = nil; linkBadSince = nil
+      return (r, false)
+    }
     guard let good else { return (raw, false) }
     var keep = good
     for k in Self.fresh { keep[k] = raw[k] }

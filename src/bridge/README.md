@@ -31,6 +31,7 @@ private `IOBluetoothPreferenceSetControllerPowerState` and
 |---|---|---|
 | Location Services | macOS only shows Wi-Fi names to apps with it; no location is read | prompt on first start; System Settings › Privacy & Security › Location Services |
 | Accessibility | the event tap that takes the media keys while a VM is in front (logged as `permissions: ...`, shown by `omacvm check`) | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
+| Input Monitoring | the brightness keys read from the keyboard while an OmacVM.app VM is in front (`mac/hid-keys.swift`; on macOS 27 they reach no event tap) | Privacy & Security › Input Monitoring |
 | Bluetooth | connecting, disconnecting, forgetting and switching from the VM (without it the devices are listed read-only, from macOS's system report) | prompt on first start; Privacy & Security › Bluetooth |
 | Camera | the Mac's camera for UTM and VMware Fusion VMs (`GET /camera`) | prompt the first time a Linux app in such a VM uses the camera; Privacy & Security › Camera |
 
@@ -341,6 +342,22 @@ rule, `MediaRoute` in `mac/keys-model.swift` (`mac/test-models.sh`):
   into a real, headless QEMU;
 - a key the Bridge cannot use goes to macOS, and the log says once why
   (`media key ...: to macOS: ...`).
+
+The tap sits at the HID level (`.cghidEventTap`): on macOS 27 the volume keys
+reach no session-level tap. The brightness keys reach no tap at all there,
+so the Bridge also reads them from the keyboard (`mac/hid-keys.swift`,
+IOHIDManager, never seized: macOS still gets every key; Input Monitoring).
+Apple keyboards send F1/F2; the keyboard's own `FnFunctionUsageMap`
+(IORegistry) and macOS's "standard function keys" setting say when they
+are brightness; an Apple keyboard without that map (a Bluetooth Magic
+Keyboard: vendor 0x004C; USB: 0x05AC) gets Apple's usual F1 down, F2 up.
+Other keyboards' consumer-page brightness keys count too.
+They act only while an OmacVM.app VM is in front, by the same rule; a press
+that also came through the tap acts once, and a display macOS already
+changed itself is not stepped again (unless the Bridge stepped it itself
+meanwhile: quick presses each step). HID sends no key repeat, so a held key
+repeats at macOS's key repeat speed until it is released. Tests: `mac/test-models.sh`,
+`mac/test-hid.sh` (made-up keyboards, and this Mac's own maps read only).
 
 Anything else, or any key while no VM is in front, passes through untouched.
 Switch it off in the menu-bar icon or with `"capture_keys": false`.

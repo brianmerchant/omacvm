@@ -49,7 +49,7 @@ Return to confirm):
    | OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio, Night Shift and media keys in Omarchy | on |
    | Omarchy's wallpaper on the Mac too | on |
    | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc takes you back to macOS) | on |
-   | macOS-native scroll momentum *(experimental)* | off |
+   | macOS-native scroll momentum *(experimental)*: a trackpad's scrolling only, mice scroll one to one | on |
    | Omanotch, on a MacBook with a notch | on |
    | The Mac's battery: its charge and charging state in Omarchy's bar (Parallels shows it itself) | on with a battery, not on Parallels |
    | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
@@ -102,7 +102,7 @@ Then put the VM in full screen: see
 
 ```bash
 omacvm features                 # see them, switch them (↑/↓, space, Return)
-omacvm enable scroll-momentum   # or straight away
+omacvm disable scroll-momentum  # or straight away
 omacvm disable gestures --vm "Omarchy ARM"
 ```
 

@@ -240,7 +240,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
   if [[ -f $H/.config/hypr/omacvm_glide.lua ]] && grep -qxF 'require("hypr.omacvm_glide")' "$H/.config/hypr/hyprland.lua"; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
-else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
+else skip "scroll momentum" "off (omacvm enable scroll-momentum turns it on: trackpads only)"; fi
 if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   if [[ $GESTURES == on ]]; then
     check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
