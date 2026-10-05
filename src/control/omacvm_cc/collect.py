@@ -315,7 +315,10 @@ def mac_sections(omacvm: str, root: str, vm: str = "", what: str = "", vm_type: 
     except (ValueError, KeyError, TypeError):
         table = ""
     logs = []
-    for name in ("omacvm-bridge.log", "omacvm-gestures.log", "omanotch.log"):
+    names = ("omacvm-bridge.log", "omacvm-gestures.log", "omanotch.log")
+    if os.environ.get("OMACVM_TEST_IDENTITY") == "1":   # the test helpers' logs (src/mac/install.sh)
+        names = ("omacvm-test-bridge.log", "omacvm-test-gestures.log")
+    for name in names:
         t = tail(os.path.expanduser(f"~/Library/Logs/{name}"))
         if t:
             logs.append(f"-- {name} --\n{t.rstrip()}")

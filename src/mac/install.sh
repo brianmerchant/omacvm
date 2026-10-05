@@ -51,15 +51,15 @@ done
 # run wants are started when they are not running yet, and that is all.
 if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   H=${OMACVM_HELPERS:-$HOME/Applications/OmacVM Test.app/Contents/Helpers}
-  test_helper() {   # NAME: start "NAME.app" from H unless it runs
+  test_helper() {   # NAME LOG: start "NAME.app" from H (output to ~/Library/Logs/LOG) unless it runs
     local app="$H/$1.app"
     [[ -d $app ]] || { echo "src/mac/install.sh: test identity: $app is missing" >&2; return 1; }
     pgrep -f "$app/Contents/MacOS/" >/dev/null && return 0
-    open -g -n "$app" && echo "==> test identity: started $1"
+    open -g -n --stdout ~/Library/Logs/"$2" --stderr ~/Library/Logs/"$2" "$app" && echo "==> test identity: started $1"
   }
   rc=0
-  (( BRIDGE )) && { test_helper "OmacVM Test Bridge" || rc=5; }
-  (( GESTURES != -1 )) && { test_helper "OmacVM Test Gestures" || rc=5; }
+  (( BRIDGE )) && { test_helper "OmacVM Test Bridge" omacvm-test-bridge.log || rc=5; }
+  (( GESTURES != -1 )) && { test_helper "OmacVM Test Gestures" omacvm-test-gestures.log || rc=5; }
   (( CLIP || NOTCH )) && echo "==> test identity: no test clipboard helper or Omanotch (left out)"
   exit "$rc"
 fi

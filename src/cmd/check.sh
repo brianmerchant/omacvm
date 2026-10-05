@@ -124,6 +124,9 @@ last_line() { grep -E "$2" "$1" 2>/dev/null | tail -1 | sed 's/^.*omacvm-[a-z]*:
 
 say_ "Mac"
 L=~/Library/Logs
+BRIDGE_LOG=$L/omacvm-bridge.log GESTURES_LOG=$L/omacvm-gestures.log
+# The test identity's helpers log there (src/mac/install.sh starts them so).
+[[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && BRIDGE_LOG=$L/omacvm-test-bridge.log GESTURES_LOG=$L/omacvm-test-gestures.log
 # The VM network's Mac address exists only while a VM of that type runs.
 if ! msg=$(vm_network_ok "$TYPE" "$IP" 2>&1); then
   bad "VM network" "$msg" human
@@ -238,10 +241,10 @@ if [[ $BRIDGE == on ]]; then
       *) bad "Bluetooth" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Bluetooth)" human ;;
     esac
   else bad "token" "missing (src/mac/install.sh)"; fi
-  m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
+  m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
   # The Bridge says which permissions it has (at start and on each change).
-  pm=$(last_line "$L/omacvm-bridge.log" 'omacvm-bridge: permissions: ')
+  pm=$(last_line "$BRIDGE_LOG" 'omacvm-bridge: permissions: ')
   case $pm in
     "") ;;   # a Bridge from before it said so
     *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
@@ -250,7 +253,7 @@ if [[ $BRIDGE == on ]]; then
   esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
   c=$OMA_BRIDGE_SUPPORT/config.json
-  if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
+  if [[ $(last_line "$BRIDGE_LOG" 'keyboard light: ') == *none* ]]; then
     skip "keyboard light" "this Mac has none (Shift + brightness keys stay macOS's)"
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
@@ -397,8 +400,8 @@ if [[ $GESTURES == on ]]; then
     # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
     # Gestures refuses it (and it tries again every 2 s) until it is updated.
     if [[ $TYPE != app ]]; then
-      r=$(grep -nF "omacvm-gestures: refused ${IP%:*} on " "$L/omacvm-gestures.log" 2>/dev/null | grep -F ": no token" | tail -1 | cut -d: -f1)
-      c=$(grep -nF "omacvm-gestures: guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1 | cut -d: -f1)
+      r=$(grep -nF "omacvm-gestures: refused ${IP%:*} on " "$GESTURES_LOG" 2>/dev/null | grep -F ": no token" | tail -1 | cut -d: -f1)
+      c=$(grep -nF "omacvm-gestures: guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | tail -1 | cut -d: -f1)
       (( ${r:-0} > ${c:-0} )) &&
         bad "Gestures for this VM" "refused: its trackpad daemon is from OmacVM 2.3 or older (omacvm update --vm \"$VM\")"
     fi
@@ -408,7 +411,7 @@ if [[ $GESTURES == on ]]; then
     fi
     # A Mac mini, iMac or Studio may have no trackpad yet: the helper waits for one.
     if [[ $GESTURES == on && $keysonly == 0 ]]; then
-      t=$(last_line "$L/omacvm-gestures.log" 'no trackpad found|trackpad: ')
+      t=$(last_line "$GESTURES_LOG" 'no trackpad found|trackpad: ')
       case $t in
         "no trackpad"*) skip "trackpad" "none connected: the swipes start when a Magic Trackpad connects" ;;
         trackpad:*) ok "trackpad" "${t#trackpad: }" ;;
@@ -417,8 +420,8 @@ if [[ $GESTURES == on ]]; then
     if [[ $GESTURES == on && $GLIDE == on ]]; then
       FEATURE=scroll-momentum
       # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
-      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
-      [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      g=$(grep "guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
+      [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "on (trackpad only): a trackpad's scrolling goes to this VM in full screen, mice scroll one to one"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
       FEATURE=gestures
@@ -427,13 +430,13 @@ if [[ $GESTURES == on ]]; then
     # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
     # Gestures says which of its two permissions it has (at start and on each
     # change); one from before that: its older lines.
-    p=$(last_line "$L/omacvm-gestures.log" 'omacvm-gestures: permissions: ')
+    p=$(last_line "$GESTURES_LOG" 'omacvm-gestures: permissions: ')
     if [[ $p == *MISSING* ]]; then
       miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
       bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security" human
     elif [[ -n $p ]]; then ok "keyboard/trackpad access" "Accessibility + Input Monitoring"
     else
-      p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
+      p=$(last_line "$GESTURES_LOG" 'permission|listening on')
       [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
         || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
     fi
