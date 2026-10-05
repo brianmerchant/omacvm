@@ -236,7 +236,7 @@ app_prebuilt_lookup() {
 }
 
 app_zip_url() { echo "$APP_DOWNLOADS/v$1/OmacVM-$1.zip"; }   # VERSION
-APP_KEYS=$(cd "$(dirname "${BASH_SOURCE[0]}")/../release" && pwd)/keys.py
+APP_KEYS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../release/keys.py
 # Who made the download: the release's update feed (OmacVM-appcast.json),
 # signed with OmacVM's release key (main or spare, src/release/keys.py),
 # gives the zip's SHA-256 and the Developer ID teams it may be signed by.
