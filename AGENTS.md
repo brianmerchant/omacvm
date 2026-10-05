@@ -455,6 +455,15 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   (gestures), none for Omanotch, Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
   first uses it), Microphone (the VM's app). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and `org.omacvm.gestures`,
   `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omacvm.<app>`.
+- **Test identity (one per Mac, granted once)**: macOS keys a grant on the bundle id and the signing team, so
+  every renamed or ad hoc test copy asks again. Test with only this one:
+  `OMACVM_SIGN_ID=<Developer ID> app/scripts/build-app.sh --test-identity --install` builds "OmacVM Test"
+  (`org.omacvm.app.test`) and copies it over `~/Applications/OmacVM Test.app`; its helpers in
+  `Contents/Helpers` are "OmacVM Test Bridge" (`org.omacvm.test.bridge`, port 47931,
+  `~/Library/Application Support/omacvm-test-bridge`) and "OmacVM Test Gestures" (`org.omacvm.test.gestures`,
+  port 47930, settings domain `org.omacvm.test.gestures`). Start a helper with `open` (so macOS checks its own
+  grant, not the Terminal's); small tools without a bundle run as children of your shell (the Terminal's grants).
+  Never `src/mac/install.sh` from a test: that installs over the user's helpers.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
   `journalctl --user -u omacvm-bridge-osd` (and `-u omacvm-bridge-events`, the shared event stream), `journalctl -u omacvm-gestures`,
   Omarchy shell `/run/user/1000/quickshell/by-id/*/log.log`.
