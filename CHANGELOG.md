@@ -15,6 +15,12 @@ in more words.
   median of 365 to 50. The sound's delay is the same. `omacvm check` shows
   it ("sound timing"); `defaults write org.omacvm.app audioClassic -bool
   true` goes back.
+- OmacVM.app: a Mac audio device that does not answer no longer hangs the
+  VM. Up to 2.9.1 QEMU waited for it without a limit at the start (no
+  window, the VM never ran) and whenever the VM started a sound. Now it opens
+  the device on a thread of its own; after 3 s the VM runs without sound,
+  `omacvm check` says so ("sound") with the fix, and the sound comes back
+  once the device answers again.
 
 ## 2.9.1
 

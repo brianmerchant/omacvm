@@ -506,3 +506,29 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `app/runtime/patches/qemu-hda-no-catch-up.patch`,
   `app/app/Sources/OmacVM/Runner.swift` (`audioClassic`), `src/cmd/check.sh`,
   the measurement tools in `app/runtime/Tests/audio/`, ADR 0034.
+
+## 25. app: the VM does not start (no window), or freezes when sound starts
+
+- **Symptom:** OmacVM.app starts the VM but no window comes, the VM never
+  boots and the app cannot reach it; or a running VM freezes the moment it
+  plays a sound. Other apps on the Mac play no sound either, or `afplay`
+  hangs. Seen on a Mac mini M4 with a USB audio interface (Scarlett 2i2) as
+  the output, coreaudiod up for 7 days.
+- **Cause:** the Mac's audio device did not answer: every `AudioQueueStart`
+  blocked. Up to 2.9.1 QEMU opened the sound device in its main thread (at
+  the start, and again whenever the VM starts a sound), and SDL waits for
+  the device without a time limit, so QEMU waited for good.
+- **Fix:** from 3.0.0 QEMU opens and closes the Mac's sound device on a
+  thread of its own (`app/runtime/patches/qemu-sdl-audio-playback-thread.patch`).
+  If it has not opened within 3 s the VM runs without sound, `qemu.log` says
+  "the Mac's audio device does not answer" and `omacvm check` warns
+  ("sound"). Sound comes back by itself once the device answers. To get it
+  answering: pick another output in System Settings > Sound, replug the
+  device, or `sudo killall coreaudiod` (macOS restarts it).
+- **For 2.9.0 and 2.9.1:** the same fixes for the device, then start the VM
+  again (quit the app first if it hangs). To start without sound meanwhile:
+  `launchctl setenv SDL_AUDIO_DRIVER dummy`, reopen the app, and
+  `launchctl unsetenv SDL_AUDIO_DRIVER` afterwards.
+- **Where:** `app/runtime/patches/qemu-sdl-audio-playback-thread.patch`,
+  `src/cmd/check.sh`, the test stub
+  `app/runtime/Tests/audio/wedged-output-start.c`.
