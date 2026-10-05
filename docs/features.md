@@ -5,14 +5,14 @@ The short version is the grid at the top of the [README](../README.md).
 | Feature | What it does |
 |---|---|
 | **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own ("Use the notch for the menu bar", on by default) |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc takes you back to macOS, and from macOS back into the VM. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥ Esc takes you back to macOS, and from macOS back into the VM. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling on a trackpad in every direction with your Mac's own acceleration and momentum, pinch included; mice scroll one to one. On by default ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
 | **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](how-it-works.md#the-mac-and-the-vm)). On UTM and Fusion it comes through OmacVM Bridge, which is then installed even with the Bridge turned off |
 | **External display brightness** | With the VM in front on an external display, the brightness keys set *that* display, over DDC/CI, in macOS's 16 steps (Option: small steps), with Omarchy's popup. So do Omarchy's own brightness keys, `omarchy brightness display` and its monitor panel in the VM. A Studio Display, Pro Display XDR or LG UltraFine goes through macOS's own control. OmacVM.app: also in a window; Parallels, UTM and VMware Fusion: in full screen. On the built-in display nothing changes. Some displays and connections have no DDC/CI (some Macs' HDMI ports, or DDC/CI switched off in the display's own menu): there the keys do what they did before, and `omacvm check` says so. Off: `omacvm disable external-brightness` ([how it works](#external-display-brightness)) |
-| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, with three dimmer steps below macOS's lowest, Option takes small steps, as in Omarchy |
+| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, with four dimmer steps below macOS's lowest (for night work), Option takes small steps, as in Omarchy |
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels and VMware Fusion also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept. Any Omarchy scale works on 4K, 5K, 6K and 8K displays; 2x is the sharp one ([what in-between scales cost](routes/app.md#display-scale-on-4k-5k-and-larger-displays)) |
 | **The GPU, in the desktop and the browsers** | Hyprland's animations, and pages and WebGL in Chromium, Chrome, Brave and Firefox, drawn by the Mac's GPU on every route (OmacVM fixes what each app gets wrong: [UTM](troubleshooting.md#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty), [Fusion](troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
 | **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
@@ -22,7 +22,11 @@ The short version is the grid at the top of the [README](../README.md).
 | **The Mac's clock** | Omarchy's clock at the far right of the bar, in your Mac's menu bar format (day, date, 12 or 24 hours, seconds, language) |
 | **The Mac's battery** | On a MacBook, Omarchy's battery icon and panel show the Mac's charge and charging, as on a laptop, plus time left and Omarchy's low-battery warning (not tested yet with the Mac on battery; the VM never suspends for it). Parallels does this itself; OmacVM adds it on UTM, VMware Fusion and OmacVM.app |
 | **Your keyboard layout** | Taken from the Mac |
-| **Fast network** *(experimental, OmacVM.app, off by default)* | The VM on macOS's own VM network (vmnet) instead of QEMU's built-in one: faster to and from the Mac, steady latency, an address of its own. A small system service, so macOS asks for your password once: `omacvm enable fast-network` ([how](routes/app.md#fast-network-experimental-off-by-default)). On it the VM is a machine on a network of the Mac (`192.168.77.0/24`, the Mac at `192.168.77.1`), as with Parallels and UTM: it reaches every service the Mac offers on all its addresses (Remote Login, File Sharing, a dev server on `0.0.0.0`), not only OmacVM's own as on QEMU's built-in network |
+| **Chromium video on the Mac** *(OmacVM.app, on by default)* | Omarchy's own Chromium decodes H.264 and VP9 (YouTube included) on the Mac's media engine, as Google Chrome and Brave do on their own: YouTube 4K takes about half the CPU it takes otherwise. A small kernel module and a sandboxed decoder service in the VM; a video it cannot take plays on the CPU. Off: `omacvm disable chromium-video` ([details](video-decode.md#chromium-from-arch-linux-arm)) |
+| **The control centre** | `omacvm` in Omarchy (the Omarchy menu, the bar's OmacVM item or a terminal) lists every feature with its live status: works, needs you (with the exact step on the Mac), failing, off, or not available on this Mac and why. Space switches a feature, `r` repairs it, `enter` shows its checks, version and log, `U` the updates (only the features a release changes, install now, weekly checks on or off), `!` reports a problem. The Mac does the work through a fixed list of requests to OmacVM Bridge; a failed switch puts the earlier features back. Theme colours come from the terminal, so it follows Omarchy's theme |
+| **Fast network** *(experimental, OmacVM.app, off by default)* | The VM on macOS's own VM network (vmnet) instead of QEMU's built-in one: faster to and from the Mac, steady latency, an address of its own. A small system service, so macOS asks for your password once: the app's **Fast network › Turn On…** button, or `omacvm enable fast-network` ([how](routes/app.md#fast-network-experimental-off-by-default)). On it the VM is a machine on a network of the Mac (`192.168.77.0/24`, the Mac at `192.168.77.1`), as with Parallels and UTM: it reaches every service the Mac offers on all its addresses (Remote Login, File Sharing, a dev server on `0.0.0.0`), not only OmacVM's own as on QEMU's built-in network |
+| **Graphics: OpenGL, Vulkan or Automatic** *(OmacVM.app, Automatic by default)* | Per VM, in the app's setup and VM window, `omacvm graphics` or the control centre. OpenGL: Omarchy and its apps draw with OpenGL on the Mac's GPU. Vulkan: the same plus Vulkan on the Mac's GPU for Vulkan apps (KosmicKrisp on macOS 26 and newer, MoltenVK before). Automatic picks the faster path on this Mac ([how](routes/app.md)) |
+| **WebGPU and GPU compute** *(experimental, OmacVM.app, off by default)* | WebGPU (Firefox, and Chromium from its "Chromium (WebGPU)" menu entry) and OpenCL (darktable, ffmpeg's OpenCL filters, Geekbench GPU) on the Mac's GPU: `omacvm enable vulkan`, then restart the VM. The VM builds a Mesa for it the first time (about 3 minutes, a 140 MB download) ([how](routes/app.md)) |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
 <p align="center">
@@ -48,7 +52,7 @@ Spotlight (⌘ Space), input sources (⌃ Space), ⌘ Tab, ⌘ \`, ⌘ Q/H/M/W (
 never quit or hide the VM's app) and F-keys with any modifier reach Omarchy.
 The top-row keys that macOS knows by their own code (Mission Control,
 Spotlight, Dictation, Do Not Disturb) arrive as F3 to F6. What stays macOS's:
-**⌃⌥⌘ Esc**, and the media keys with their rules (volume and brightness set
+**⌃⌥ Esc**, and the media keys with their rules (volume and brightness set
 the Mac's, else the VM's; play, next and previous go to the VM's players).
 The moment the VM's window loses the keyboard (another app, the escape
 combo, a click outside its window), macOS has its shortcuts again; macOS
@@ -58,31 +62,32 @@ mini the switch was not always handed back: `defaults delete org.omacvm.app
 macShortcuts` and a VM restart go back to macOS keeping them. `omacvm check`
 says which way it went.
 
-**⌃⌥⌘ Esc** (Control + Option + Command + Escape) in the VM takes you
+**⌃⌥ Esc** (Control + Option + Escape) in the VM takes you
 straight back to macOS: the trackpad and keys go back to macOS and the
-monitor under the pointer swipes to the Space beside the VM's, with macOS's
-own animation. Only that monitor changes; the keyboard goes to what it shows.
-No trackpad needed, so it works with a mouse too. Press **⌃⌥⌘ Esc** there
-again to swipe back into the VM: full screen as before, with the trackpad
-and keys. Coming back with a swipe or Mission Control works as well.
+monitor under the pointer moves to the Space beside the VM's, toward the one
+you came from, with macOS's own "Move left/right a space" shortcut (System
+Settings › Keyboard › Keyboard Shortcuts › Mission Control; ⌃← and ⌃→
+unless you changed them) and its own animation. The VM stays full screen in
+its Space. Only that monitor changes; the keyboard goes to what it shows.
+No trackpad needed, so it works with a mouse too. Press **⌃⌥ Esc** there
+again to go back into the VM, with the trackpad and keys. Coming back with
+a swipe or Mission Control works as well.
 
-OmacVM.app's **Escape combo** setting: *Swipe the monitor under the pointer*
-(the default) or *Swipe all monitors*, every monitor that shows the VM. For
+OmacVM.app's **Escape combo** setting: *This monitor* (the one under the
+pointer, the default) or *All monitors*, every monitor that shows the VM. For
 Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
 EscapeSwipe all` (or `pointer`).
 
-Never stuck: if the swipe cannot be made (the VM's Space has no neighbour,
-or macOS gives no Spaces information) or does not land, the app you were in
-before comes to the front instead, with its Space (Finder if it has quit).
-Every way out ends with a check: if the VM is still in front or its full
-screen still shows, its window leaves full screen and the VM's app is
-hidden, so macOS has the keyboard and the screen. ⌃⌥⌘ Esc brings it back,
-in full screen again.
+Never stuck, and never out of full screen: every move is checked. If the
+shortcut is off or the Space did not change, OmacVM tries a Dock swipe (the
+events a three-finger swipe makes); if that does not land either, or macOS
+gives no Spaces information, Mission Control opens and you pick a Space.
+Back in, if the shortcut does not land, the VM's window comes to the front
+and macOS shows its Space.
 
-In an OmacVM.app window, ⌃⌥⌘ Esc gives the keyboard back to macOS (the app
+In an OmacVM.app window, ⌃⌥ Esc gives the keyboard back to macOS (the app
 you were in before, else Finder); press it again in macOS to get the window
 back with the keyboard.
-The combo brings it back.
 
 Media keys while a VM is in front (OmacVM.app full screen or in a window;
 Parallels, UTM and Fusion full screen): volume and mute change the Mac's
@@ -93,7 +98,7 @@ Play/pause, next and previous go to the VM's players (OmacVM.app). Brightness
 keys change the display the VM is on (below).
 
 <p align="center">
-  <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
+  <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Escape opens the lock and moves the monitor one Space over to macOS with macOS's own animation; the VM stays full screen in its Space and the trackpad and keys belong to macOS. Pressed again, the monitor moves back into the VM, captured again. A setting chooses the monitor under the pointer or all monitors. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
 </p>
 
 ## External display brightness

@@ -2,16 +2,19 @@
 # Put OmacVM onto a running OmacVM.app VM: `omacvm apply` from the copy of
 # OmacVM inside the app (the Mac side its features need, the Bridge token,
 # the VM side), with the features in the VM's vm.env.
-#   apply-vm.sh VM_DIR [--no-mac] [--reset-host-key]
-#     --reset-host-key  the VM was rebuilt or reinstalled: forget its old SSH key
+#   apply-vm.sh VM_DIR [--no-mac | --image] [--reset-host-key]
+# --image: a VM for a prebuilt image (src/prebuilt/make-image.sh app): nothing
+# of this Mac, not even the Bridge token.
+# --reset-host-key: the VM was rebuilt or reinstalled: forget its old SSH key.
 set -euo pipefail
-VM_DIR=${1:?usage: apply-vm.sh VM_DIR [--no-mac] [--reset-host-key]}
+VM_DIR=${1:?usage: apply-vm.sh VM_DIR [--no-mac | --image] [--reset-host-key]}
 shift
 extra=()
 for a in "$@"; do
   case $a in
     --no-mac|--reset-host-key) extra+=("$a") ;;
-    *) echo "apply-vm.sh: unknown option $a (--no-mac, --reset-host-key)" >&2; exit 2 ;;
+    --image) extra+=(--no-mac --no-token --no-tools) ;;
+    *) echo "apply-vm.sh: unknown option $a (--no-mac, --image, --reset-host-key)" >&2; exit 2 ;;
   esac
 done
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -30,6 +33,11 @@ if [[ -d $HERE/../../Helpers ]]; then
   OMACVM_HELPERS=$(cd "$HERE/../../Helpers" && pwd)
   export OMACVM_HELPERS
 fi
+# This app's runtime: whether it has KosmicKrisp decides Graphics' Automatic
+# (src/lib/graphics.sh).
+for rt in "$HERE/../runtime/.build/qemu-gpu-runtime" "$HERE/../runtime"; do   # a dev tree, the app
+  [[ -d $rt/lib ]] && { OMACVM_APP_RUNTIME=$(cd "$rt" && pwd); export OMACVM_APP_RUNTIME; break; }
+done
 args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
 for f in ${FEATURES:-}; do args+=(--feature "$f"); done
 # A changed SSH host key: say how to forget it the app's way.

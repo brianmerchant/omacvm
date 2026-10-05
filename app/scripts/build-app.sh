@@ -3,21 +3,37 @@
 # first run and when its patches or build scripts change, about 70 seconds),
 # UEFI firmware, the VM scripts and OmacVM's VM side (src/ of the repo this
 # lives in, as committed). Signed ad hoc, or with OMACVM_SIGN_ID (below).
-#   scripts/build-app.sh [--name NAME] [--release]
+#   scripts/build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]
 #     --name     the app's name and Dock title (default OmacVM)
-#     --release  for a published zip: the whole repo must be committed
+#     --id       another bundle id (default org.omacvm.app): test builds that
+#                must not share settings, VMs or the running app with an
+#                installed OmacVM
+#     --release  for a published zip: the whole repo must be committed, and the
+#                runtime has KosmicKrisp (OMACVM_RUNTIME_KOSMICKRISP=1 unless set:
+#                Vulkan on macOS 26+; its tools: runtime/build-kosmickrisp.sh --check;
+#                or OMACVM_KOSMICKRISP_FROM=DIR, built on another Mac:
+#                runtime/import-kosmickrisp.sh)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$ROOT/.." && pwd)
-NAME=OmacVM; RELEASE=0
+NAME=OmacVM; ID=org.omacvm.app; RELEASE=0
 while (( $# )); do
   case $1 in
     --name) NAME=$2; shift 2 ;;
+    --id) ID=$2; shift 2 ;;
     --release) RELEASE=1; shift ;;
-    *) echo "usage: build-app.sh [--name NAME] [--release]" >&2; exit 2 ;;
+    *) echo "usage: build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]" >&2; exit 2 ;;
   esac
 done
+[[ $ID =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "not a bundle id: $ID" >&2; exit 2; }
+(( ! RELEASE )) || [[ $ID == org.omacvm.app ]] || { echo "a release keeps the bundle id org.omacvm.app" >&2; exit 2; }
 log() { printf '==> %s\n' "$*"; }
+# A release ships KosmicKrisp: Graphics' Automatic gives Vulkan with it on
+# macOS 26 and newer (MoltenVK stays for older macOS and as the fallback).
+if (( RELEASE )); then
+  : "${OMACVM_RUNTIME_KOSMICKRISP:=1}"
+  export OMACVM_RUNTIME_KOSMICKRISP
+fi
 
 # OmacVM's VM side as committed (git archive of HEAD), so the app always says
 # which commit it carries. Uncommitted changes in src/ would not be in it:
@@ -39,9 +55,14 @@ RT=$ROOT/runtime/.build
 # LLVM rebuilds it).
 KK_STAMP=
 if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-0} == 1 ]]; then
-  KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
+  # OMACVM_KOSMICKRISP_FROM: built on another Mac (runtime/import-kosmickrisp.sh).
+  if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+    KK_STAMP=$("$ROOT/runtime/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM" --stamp)
+  else
+    KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
+  fi
 fi
-INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h Tests/display/* Tests/keys/* Tests/net/*
+INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h Tests/display/* Tests/keys/* Tests/net/* boot-logo/*.py
   echo "firmware=${OMACVM_FIRMWARE:-omacvm}"
   echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}${KK_STAMP:+ $KK_STAMP}"; } | shasum -a 256 | cut -d' ' -f1)
 # A runtime built with OMACVM_RUNTIME_TEST_HOOKS=1 (test hooks) is never shipped.
@@ -70,7 +91,7 @@ log "launcher"
 cd "$ROOT/app"
 mkdir -p .build/mc/swift .build/mc/clang
 SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/mc/clang \
-  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none 2>&1 | { grep -v '^\[' || true; } ||
+  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none --product OmacVM 2>&1 | { grep -v '^\[' || true; } ||
   { echo "launcher build failed" >&2; exit 1; }
 LAUNCHER=$ROOT/app/.build/release/OmacVM
 [[ -x $LAUNCHER ]] || { echo "launcher build failed" >&2; exit 1; }
@@ -92,7 +113,8 @@ install -m644 "$ICON" "$C/Resources/OmacVM.icns"
 ditto "$RT/qemu-gpu-runtime" "$C/Resources/runtime"
 mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/OmacVM"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$RT/firmware/firmware-source" "$C/Resources/firmware/"
-install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" "$C/Resources/scripts/"
+install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/prebuilt-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" \
+  "$ROOT/scripts/update-swap.sh" "$C/Resources/scripts/"
 git -C "$REPO" archive "$COMMIT" src | tar -x -C "$C/Resources/omacvm"
 echo "$COMMIT" > "$C/Resources/omacvm/COMMIT"
 install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
@@ -143,7 +165,7 @@ cat > "$C/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>org.omacvm.app</string>
+  <key>CFBundleIdentifier</key><string>$ID</string>
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>$NAME</string>
   <key>CFBundleExecutable</key><string>OmacVM</string>
@@ -171,12 +193,12 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
     codesign "${SIGN[@]}" "$f"
   done
-  codesign "${SIGN[@]}" --identifier org.omacvm.app.qemu \
+  codesign "${SIGN[@]}" --identifier "$ID.qemu" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign "${SIGN[@]}" --identifier org.omacvm.netd "$NETD"
   codesign "${SIGN[@]}" --identifier org.omacvm.bridge --entitlements "$ROOT/app/OmacVMBridge.entitlements" "$C/Helpers/OmacVMBridge.app"
   codesign "${SIGN[@]}" --identifier org.omacvm.gestures "$C/Helpers/OmacVMGestures.app"
-  codesign "${SIGN[@]}" --identifier org.omacvm.app \
+  codesign "${SIGN[@]}" --identifier "$ID" \
     --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
   log "signing (ad hoc)"
@@ -185,11 +207,11 @@ else
   done
   # The designated requirement names the identifier, not the binary's hash, so
   # macOS keeps Accessibility and other grants across rebuilds (as OmacVM's helpers).
-  codesign --force --sign - --identifier org.omacvm.app.qemu -r='designated => identifier "org.omacvm.app.qemu"' \
+  codesign --force --sign - --identifier "$ID.qemu" -r="designated => identifier \"$ID.qemu\"" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign --force --sign - --identifier org.omacvm.netd "$NETD"
   # The helpers keep the signature their build gave them (src/lib/sign.sh: the same rule).
-  codesign --force --sign - --identifier org.omacvm.app -r='designated => identifier "org.omacvm.app"' "$APP"
+  codesign --force --sign - --identifier "$ID" -r="designated => identifier \"$ID\"" "$APP"
 fi
 codesign --verify --deep --strict "$APP"
 log "built $APP ($(du -sh "$APP" | cut -f1))"

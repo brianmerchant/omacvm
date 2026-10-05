@@ -3,6 +3,55 @@ log() { printf '\033[1;32m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Progress for the control centre's jobs (OMACVM_PROGRESS=json, set by the
+# Bridge): one JSON line per step, "step n of m". A command that runs another
+# passes its count on (OMACVM_STEP_BASE steps done, OMACVM_STEP_OF in all).
+OMA_STEP=${OMACVM_STEP_BASE:-0}; OMA_STEPS=${OMACVM_STEP_OF:-0}
+step() {   # NAME TEXT
+  OMA_STEP=$((OMA_STEP + 1)); (( OMA_STEP <= OMA_STEPS )) || OMA_STEPS=$OMA_STEP
+  [[ ${OMACVM_PROGRESS:-} == json ]] || return 0
+  local t=${2//\\/\\\\}; t=${t//\"/\\\"}
+  printf '{"omacvm_progress": 1, "step": "%s", "n": %d, "of": %d, "text": "%s"}\n' "$1" "$OMA_STEP" "$OMA_STEPS" "$t"
+}
+
+# failed_part PART TEXT [SIDE]: what failed in a job (PART a feature, or
+# empty; SIDE vm, the default, or mac), for the person and, as a JSON line,
+# for the control centre.
+failed_part() {
+  local t
+  t=$(printf '%s' "$2" | tr '\000-\037' ' ' | cut -c1-160)
+  info "what failed: $t"
+  [[ ${OMACVM_PROGRESS:-} == json ]] || return 0
+  t=${t//\\/\\\\}; t=${t//\"/\\\"}
+  printf '{"omacvm_failed": 1, "part": "%s", "text": "%s", "side": "%s"}\n' "$1" "$t" "${3:-vm}"
+}
+
+# mac_helper_feature HELPER: the feature a Mac helper is for (empty: none).
+mac_helper_feature() {
+  case $1 in
+    "OmacVM Bridge") echo bridge ;;
+    "OmacVM Gestures") echo gestures ;;
+    Omanotch) echo omanotch ;;
+  esac
+}
+
+# cli_for_bridge OMACVM: true when OMACVM (a checkout's omacvm, resolved) is
+# the one the omacvm command runs: install.sh links it into one of these. So
+# another clone or worktree that runs src/mac/install.sh never becomes what
+# the Bridge runs (and moves on an update). No omacvm command at all (a clone
+# run as ./omacvm): true. OMACVM_SET_CLI=1: true. OMACVM_CLI_LINKS: the links
+# to look at, for tests.
+cli_for_bridge() {
+  local b links=0
+  [[ ${OMACVM_SET_CLI:-} == 1 ]] && return 0
+  for b in ${OMACVM_CLI_LINKS:-/opt/homebrew/bin/omacvm /usr/local/bin/omacvm $HOME/.local/bin/omacvm}; do
+    [[ -e $b || -L $b ]] || continue
+    links=1
+    [[ $(realpath "$b" 2>/dev/null) == "$1" ]] && return 0
+  done
+  (( ! links ))
+}
+
 PRLCTL=/usr/local/bin/prlctl
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
@@ -57,6 +106,21 @@ bridge_token_ensure() {
   (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
 }
 
+# The control centre's key for one VM (TYPE NAME): the Bridge acts for a VM
+# only when its request carries this key, so a VM that takes another VM's
+# address cannot act for it (src/bridge/mac/control.swift reads it). Made at
+# the VM's first apply, again with "new" (apply --reset-host-key: a rebuilt VM).
+VM_KEYS="$HOME/Library/Application Support/omacvm/vm-keys"
+vm_key_file() { printf '%s/%s' "$VM_KEYS" "$(printf '%s/%s' "$1" "$2" | shasum -a 256 | cut -c1-32)"; }
+vm_key_ensure() {   # TYPE NAME [new] -> the key's file
+  local f; f=$(vm_key_file "$1" "$2")
+  if [[ ${3:-} == new || ! -s $f ]]; then
+    mkdir -p "$VM_KEYS" && chmod 700 "$VM_KEYS"
+    (umask 077; openssl rand -hex 32 > "$f.tmp") && mv -f "$f.tmp" "$f"
+  fi
+  echo "$f"
+}
+
 # Omanotch on this Mac serves OmacVM.app's VMs (on 127.0.0.1) only from the
 # version that knows the app's QEMU: 0 it does, 1 too old, 2 not installed.
 omanotch_serves_app() {
@@ -64,12 +128,20 @@ omanotch_serves_app() {
   [[ -d $b ]] || return 2
   grep -aqF /Contents/Resources/runtime/bin/OmacVM "$b"/* 2>/dev/null || return 1
 }
+# ... and on the app's fast network (192.168.77.1): 0 it does, 1 too old, 2 not installed.
+omanotch_serves_fast_network() {
+  local b=$HOME/Applications/Omanotch.app/Contents/MacOS
+  [[ -d $b ]] || return 2
+  grep -aqF "on OmacVM.app's fast network" "$b"/* 2>/dev/null || return 1
+}
 
 wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
-  local i
-  for ((i = 0; i < ${2:-600}; i += 5)); do
+  # By the clock: each try can take seconds of its own (connect and key scan).
+  local end=$((SECONDS + ${2:-600}))
+  while :; do
     gssh "$1" true 2>/dev/null && return 0
     hostkey_changed "$1" && { hostkey_error; return 3; }
+    (( SECONDS < end )) || break
     sleep 5
   done
   die "no SSH on $1 after ${2:-600} s"

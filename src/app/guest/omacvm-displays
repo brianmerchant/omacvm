@@ -52,6 +52,7 @@ here when Omarchy's panel changes with an update).
 
 from __future__ import annotations
 
+import ctypes
 import errno
 import json
 import os
@@ -59,6 +60,7 @@ from pathlib import Path
 import re
 import select
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -106,6 +108,70 @@ def config_mtime() -> float:
         return CONFIG.stat().st_mtime
     except OSError:
         return 0.0
+
+
+class ConfigWatch:
+    """Wakes the agent when displays.conf changes: inotify on its folder (a
+    write, a rename onto it, a delete). Not available (no inotify, the folder
+    cannot be watched): ok is False and the agent looks once a second."""
+
+    IN_MODIFY, IN_CLOSE_WRITE, IN_MOVED_FROM, IN_MOVED_TO = 0x2, 0x8, 0x40, 0x80
+    IN_CREATE, IN_DELETE, IN_DELETE_SELF, IN_MOVE_SELF = 0x100, 0x200, 0x400, 0x800
+    IN_IGNORED = 0x8000
+    IN_CLOEXEC, IN_NONBLOCK = 0o2000000, 0o4000
+    MASK = (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_CREATE | IN_DELETE
+            | IN_DELETE_SELF | IN_MOVE_SELF)
+    EVENT = struct.Struct("iIII")   # wd, mask, cookie, len (then the name)
+
+    def __init__(self, folder: Path) -> None:
+        self.fd = -1
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            libc = ctypes.CDLL(None, use_errno=True)
+            fd = libc.inotify_init1(self.IN_NONBLOCK | self.IN_CLOEXEC)
+            if fd < 0:
+                return
+            if libc.inotify_add_watch(fd, os.fsencode(folder), self.MASK) < 0:
+                os.close(fd)
+                return
+            self.fd = fd
+        except (OSError, AttributeError):
+            pass
+
+    @property
+    def ok(self) -> bool:
+        return self.fd >= 0
+
+    def fileno(self) -> int:
+        return self.fd
+
+    def drain(self) -> None:
+        """Reads the pending events. The folder gone or moved: the watch
+        ends (ok turns False) and the agent falls back to looking."""
+        gone = False
+        while self.fd >= 0:
+            try:
+                data = os.read(self.fd, 4096)
+            except BlockingIOError:
+                break
+            except OSError:
+                gone = True
+                break
+            if not data:
+                break
+            offset = 0
+            while offset + self.EVENT.size <= len(data):
+                _, mask, _, size = self.EVENT.unpack_from(data, offset)
+                if mask & (self.IN_IGNORED | self.IN_DELETE_SELF | self.IN_MOVE_SELF):
+                    gone = True
+                offset += self.EVENT.size + size
+        if gone:
+            self.close()
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
 
 
 def hypr_dir() -> Path | None:
@@ -357,6 +423,12 @@ def layout_event(data: bytes) -> bool:
     return False
 
 
+def shell_event(data: bytes) -> bool:
+    """A layer surface opened (socket2 "openlayer>>namespace"): the shell may
+    have (re)started; the agent then looks for it at once."""
+    return any(line.startswith(b"openlayer>>") for line in data.split(b"\n"))
+
+
 def run_sync() -> None:
     try:
         subprocess.run([SYNC, "--once"], timeout=20, check=False,
@@ -402,6 +474,10 @@ REPAIR_MAX = 3         # per run of the agent (a session)
 SETTLE = 3.0           # seconds without a layout change before checking
 CONFIRM = 4.0          # the same problem again after this long: repair
 SHELL_LOOKS = (10.0, 25.0)  # seconds after a shell (re)start to look
+# A report and a look for the shell at least this often, in case an event
+# slipped by: rarely while Hyprland's events come in, more often without.
+SAFETY_WITH_EVENTS = 30.0
+SAFETY_WITHOUT_EVENTS = 5.0
 
 
 class Agent:
@@ -425,6 +501,7 @@ class Agent:
         self.repairing: list[str] = []
         self.repaired_for: list[str] = []
         self.said: list[str] = []
+        self.config_watch = ConfigWatch(CONFIG.parent)
 
     def send(self, message: dict) -> None:
         self.outbox += json.dumps(message, separators=(",", ":")).encode() + b"\n"
@@ -568,16 +645,33 @@ class Agent:
         self.layout_changed()
         self.soon(0.3)
 
+    def safety_every(self) -> float:
+        return SAFETY_WITH_EVENTS if self.events else SAFETY_WITHOUT_EVENTS
+
+    def timeout(self, now: float) -> float:
+        """Seconds until the agent has something to do. Idle on the desktop
+        that is the safety report: the agent does not wake the VM every
+        second (events and the Mac's lines wake it)."""
+        due = [self.last_check + self.safety_every()]
+        if self.check_at:
+            due.append(self.check_at)
+        if self.looks:
+            due.append(min(self.looks))
+        if self.repair or not self.config_watch.ok:
+            due.append(now + 1.0)   # a shell restart under way; displays.conf without inotify
+        return max(0.0, min(due) - now)
+
     def run(self) -> None:
         self.send({"hello": 1, "external": self.external})
         while True:
             self.connect_events()
             readers = [self.fd] + ([self.events] if self.events else [])
+            if self.config_watch.ok:
+                readers.append(self.config_watch)
             writers = [self.fd] if self.outbox else []
-            now = time.monotonic()
-            # A report at least every 5 s, in case an event slipped by.
-            timeout = 1.0 if not self.check_at else max(0.0, min(1.0, self.check_at - now))
-            ready, writable, _ = select.select(readers, writers, [], timeout)
+            ready, writable, _ = select.select(readers, writers, [], self.timeout(time.monotonic()))
+            if self.config_watch in ready:
+                self.config_watch.drain()
             if writable:
                 self.flush()
             if self.fd in ready:
@@ -608,9 +702,12 @@ class Agent:
                 if not data:
                     self.events.close()
                     self.events = None
-                elif layout_event(data):
-                    self.layout_changed()
-                    self.soon(0.3)
+                else:
+                    if layout_event(data):
+                        self.layout_changed()
+                        self.soon(0.3)
+                    if shell_event(data):
+                        self.watch_shell()
             mtime = config_mtime()
             if mtime != self.mtime:
                 self.mtime = mtime
@@ -619,12 +716,12 @@ class Agent:
                     self.external = on
                     self.send({"external": on})
             now = time.monotonic()
-            if (self.check_at and now >= self.check_at) or now - self.last_check >= 5:
+            if (self.check_at and now >= self.check_at) or now - self.last_check >= self.safety_every():
                 self.check_at = 0.0
                 self.last_check = now
                 self.report()
                 self.watch_shell()
-                self.repair_done()
+            self.repair_done()
             self.check_desktop()
 
 

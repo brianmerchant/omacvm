@@ -1,6 +1,8 @@
 import Foundation
 
-/// Runs scripts/create-vm.sh and turns its output into progress for the UI.
+/// Runs scripts/create-vm.sh (or prebuilt-vm.sh: the VM from a prebuilt image)
+/// and turns its output into progress for the UI. Both take the same vm.env
+/// and password and print the same STEP and ==> lines.
 @MainActor
 final class Creator: ObservableObject {
     @Published var step = 0
@@ -17,7 +19,7 @@ final class Creator: ObservableObject {
     private var exitStatus: Int32?
     private var logURL: URL?
 
-    func start(config: VMConfig, password: String) {
+    func start(config: VMConfig, password: String, prebuilt: Bool = false, graphics: GraphicsChoice = .auto) {
         failed = nil; finished = false; step = 0
         reader?.readabilityHandler = nil
         reader = nil; run += 1; buffer = ""; exitStatus = nil
@@ -25,13 +27,16 @@ final class Creator: ObservableObject {
         title = "Preparing"
         do {
             try config.write()
+            // Read by omacvm apply at the end of the build (the VM's Venus driver).
+            try Graphics.write(graphics, folder: config.folder)
         } catch {
             failed = "Could not write the VM settings: \(error.localizedDescription)"
             return
         }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [Paths.scripts.appendingPathComponent("create-vm.sh").path, config.folder.path]
+        p.arguments = [Paths.scripts.appendingPathComponent(prebuilt ? "prebuilt-vm.sh" : "create-vm.sh").path,
+                       config.folder.path]
         let input = Pipe(), output = Pipe()
         p.standardInput = input
         p.standardOutput = output
@@ -134,5 +139,52 @@ final class Creator: ObservableObject {
                   line.contains("#") {
             detail = "Downloading \(pct)"
         }
+    }
+}
+
+/// A prebuilt VM the app can download instead of building one
+/// (scripts/prebuilt-vm.sh --lookup: the newest image for this version).
+struct PrebuiltImage: Equatable {
+    let release: String
+    let bytes: Int64
+    let omarchy: String
+
+    var size: String { String(format: "%.1f GB", Double(bytes) / 1e9) }
+
+    /// Where the setup screen's lookup is.
+    enum Lookup: Equatable {
+        case checking
+        case found(PrebuiltImage)
+        case none
+    }
+
+    /// Off the main thread; nil when there is none, no connection, or no
+    /// answer within 20 seconds (then the VM is built here).
+    static func lookup() async -> PrebuiltImage? {
+        let script = Paths.scripts.appendingPathComponent("prebuilt-vm.sh")
+        guard FileManager.default.fileExists(atPath: script.path) else { return nil }
+        return await Task.detached(priority: .utility) { () -> PrebuiltImage? in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/bash")
+            p.arguments = [script.path, "--lookup"]
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
+            p.standardInput = FileHandle.nullDevice
+            do { try p.run() } catch { return nil }
+            let deadline = Date().addingTimeInterval(20)
+            while p.isRunning {
+                if Date() > deadline { p.terminate(); return nil }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard p.terminationStatus == 0 else { return nil }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            // TAG BYTES OMARCHY_VERSION IMAGE_VERSION
+            let f = String(decoding: data.prefix(1024), as: UTF8.self).split(whereSeparator: \.isWhitespace)
+            guard f.count >= 3, let bytes = Int64(f[1]), bytes > 0,
+                  f[2].count <= 80, f[2].allSatisfy({ $0.isASCII && !$0.isWhitespace && $0.asciiValue! >= 0x21 })
+            else { return nil }
+            return PrebuiltImage(release: String(f[0]), bytes: bytes, omarchy: String(f[2]))
+        }.value
     }
 }

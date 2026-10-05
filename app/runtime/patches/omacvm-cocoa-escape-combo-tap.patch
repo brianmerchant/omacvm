@@ -1,0 +1,52 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the full-grab tap lets the escape combo through to OmacVM Gestures
+
+Applies after omacvm-cocoa-shortcuts-logic.patch (omacvm_is_escape_combo),
+omacvm-cocoa-system-shortcuts.patch (which includes its header) and
+omacvm-cocoa-keys-for-macos.patch.
+
+What: QEMU's full-grab event tap returns the escape combo (Ctrl+Option+Esc;
+through 3.0.x also the old Ctrl+Option+Cmd+Esc; exactly these modifiers)
+unhandled, key down and key up, instead of sending it to the guest.
+
+Why: a new event tap goes to the head of the HID chain. A VM started after
+OmacVM Gestures put QEMU's tap ahead of Gestures': QEMU sent the combo to the
+guest and swallowed it, so the way out of the full-screen VM did nothing
+(PR #39). Gestures creates its tap again when a VM comes to the front, but a
+combo pressed before that, or any other order, still went to the guest. Now
+the order does not matter: whichever tap comes first, Gestures gets it. When
+Gestures is not running the combo reaches our window the normal way, where
+omacvm-cocoa-system-shortcuts.patch's fallback hands the keyboard back to
+macOS in full screen (in a window it goes to the VM as before).
+
+Upstream: not applicable (OmacVM's helpers).
+Test: app/runtime/Tests/keys/test-shortcuts.sh (which keys are the combo,
+and that no macOS shortcut is); the build checks the patch is in
+ui/cocoa.m; src/gestures/mac/test-escape.c (Gestures' side, no QEMU).
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -688,6 +688,23 @@
+         return cgEvent;
+     }
+ 
++    /*
++     * OmacVM: the escape combo (ui/omacvm-shortcuts.h) is OmacVM Gestures'.
++     * A VM started after Gestures puts this tap ahead of Gestures' in the
++     * chain, so this tap lets the combo through instead of sending it to the
++     * guest: Gestures' tap takes it next, whichever came first. Without
++     * Gestures it reaches our window the normal way (handleEventLocked).
++     */
++    if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
++        CGEventFlags flags = CGEventGetFlags(cgEvent);
++        if (omacvm_is_escape_combo(
++                (int)CGEventGetIntegerValueField(cgEvent, kCGKeyboardEventKeycode),
++                flags & kCGEventFlagMaskControl, flags & kCGEventFlagMaskAlternate,
++                flags & kCGEventFlagMaskCommand, flags & kCGEventFlagMaskShift)) {
++            return cgEvent;
++        }
++    }
++
+     NSEvent *event = [NSEvent eventWithCGEvent:cgEvent];
+     if ([view isKeyboardCaptured] && [view handleEvent:event]) {
+         COCOA_DEBUG("Global events tap: qemu handled the event, capturing!\n");

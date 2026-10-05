@@ -75,3 +75,13 @@ instead of a black window. Guest Mesa reporting resets (gpu-robust's
 `mesa-virgl-reset-status.patch`, PR #60) would let browsers recover by
 themselves; Hyprland would then stop (whether start-hyprland starts it again
 is not tested).
+
+In 3.0.0 this meets two patches from `gpu-robust` (merged in rc-3.0.0):
+Venus (Vulkan) memory counts against the same budget
+(`virgl-venus-memory-budget.patch`, one shared atomic counter), and a GL
+resource the budget refused loses the context that attaches it at once
+(`virgl-resource-budget-context-loss.patch`). The pressure check covers GL
+resources only and runs before the budget charge; a pressure refusal does not
+mark the resource for that immediate loss (the context is lost at its first
+use, as before). Venus allocations stop at the budget, not at the pressure.
+The bytes in use in QEMU's log and the status file include Venus memory.

@@ -17,8 +17,11 @@ a new record replaces it and says so.
 | [0018](0018-gpu-safe-mode.md) | A hidden GPU safe mode that is exactly the old path | accepted, built (`gpu-native`) |
 | [0020](0020-frames-on-the-displays-refresh.md) | Show the guest's frames on the Mac display's refresh | accepted, built (`pacing-hdr`) |
 | [0021](0021-colour-deep-colour-hdr.md) | Colour-tagged frames, deep colour and HDR | accepted, built (`pacing-hdr`), HDR off by default, only on EDR displays |
+| [0022](0022-webgpu-and-opencl-on-venus.md) | WebGPU (Firefox, Chromium launcher) and OpenCL (rusticl) on Venus | accepted, built (`webgpu-compute`) |
 | [0023](0023-refresh-rate-follows-the-guest.md) | The refresh rate follows the guest (ProMotion) | accepted, built (`pacing-hdr`) |
 | [0026](0026-fence-tests-off-the-render-threads-lock.md) | Fence tests stay off Apple GL's lock while the render thread works | accepted, sync-thread part in 2.9.1 |
 | [0034](0034-gpu-memory-budget-for-runaway-vms.md) | The GPU memory budget stops a runaway VM, never a desktop | accepted, built (`fractional-scale`) |
+| [0035](0035-graphics-setting.md) | A Graphics setting per VM: OpenGL, Vulkan or Automatic; KosmicKrisp in release builds | accepted, built (`vk300`, 3.0.0) |
+| [0036](0036-sound-main-loop-qos.md) | Sound on a busy Mac: main loop at user-interactive QoS, no HDA catch-up | accepted, built (`audio-crackle`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

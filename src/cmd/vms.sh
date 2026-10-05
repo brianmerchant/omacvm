@@ -2,9 +2,10 @@
 # omacvm vms [--json]: your Parallels and UTM VMs and their OmacVM state (asks
 # the running ones over SSH; stopped VMs are not started).
 # --json: {"omacvm", "vms": [{"name", "type", "state", "ip", "omacvm",
-# "reachable", "features": {NAME: true|false}}]}; omacvm = the version in the
-# VM (null: none, or stopped), reachable = OmacVM's SSH key gets in; state
-# "unknown": UTM runs but does not answer this terminal (not allowed to
+# "reachable", "setup", "features": {NAME: true|false}}]}; omacvm = the version in the
+# VM (null: none, or stopped), reachable = OmacVM's SSH key gets in, setup =
+# OmacVM set it up from this Mac (its SSH host key is remembered, or OmacVM built it);
+# state "unknown": UTM runs but does not answer this terminal (not allowed to
 # control UTM yet, or over SSH).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -15,7 +16,7 @@ features_load
 JSON=0
 case ${1:-} in
   --json) JSON=1 ;;
-  -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 0 ;;
   "") ;;
   *) echo "omacvm vms: unknown option $1" >&2; exit 2 ;;
 esac
@@ -26,10 +27,11 @@ first=1
 (( JSON )) || printf '  %-24s %-10s %-8s %-15s %s\n' VM APP STATE ADDRESS OMACVM
 while IFS=$'\t' read -r name type state; do
   [[ -n $name ]] || continue
-  ip=""; version=""; reach=false; feats=""
+  ip=""; version=""; reach=false; feats=""; setup=false
   if [[ $state == running ]]; then
     ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) || ip=""
     vm_pin "$name" "$type"
+    { [[ -s $OMA_PIN ]] || vm_marked "$name" "$type"; } && setup=true
     if [[ -n $ip ]] && probe=$(vm_probe "$ip") && [[ -n $probe ]]; then
       reach=true
       version=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
@@ -42,9 +44,9 @@ while IFS=$'\t' read -r name type state; do
     fi
   fi
   if (( JSON )); then
-    printf '%s\n  {"name": %s, "type": "%s", "state": "%s", "ip": %s, "omacvm": %s, "reachable": %s, "features": %s}' \
+    printf '%s\n  {"name": %s, "type": "%s", "state": "%s", "ip": %s, "omacvm": %s, "reachable": %s, "setup": %s, "features": %s}' \
       "$( ((first)) || echo ,)" "$(json_str "$name")" "$type" "$state" "$( [[ -n $ip ]] && json_str "$ip" || echo null)" \
-      "$( [[ -n $version ]] && json_str "$version" || echo null)" "$reach" "$( [[ -n $feats ]] && echo "{$feats}" || echo null)"
+      "$( [[ -n $version ]] && json_str "$version" || echo null)" "$reach" "$setup" "$( [[ -n $feats ]] && echo "{$feats}" || echo null)"
   else
     if [[ $state == unknown ]]; then what="($UTM_NO_ANSWER)"
     elif [[ $state != running ]]; then what="(start it to see)"

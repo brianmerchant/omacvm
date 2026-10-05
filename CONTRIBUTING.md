@@ -57,14 +57,36 @@ git ls-files -z '*.py' | xargs -0 python3 -m py_compile
 src/gestures/mac/build.sh && src/bridge/mac/build.sh
 src/omanotch/mac/test.sh
 src/bridge/mac/test.sh && src/tests/external-brightness.sh
-src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
+src/tests/install-defaults.sh
 src/tests/vm-names.sh
-src/tests/prebuilt-manifest.sh
-src/tests/gestures-off.sh
+src/tests/mac-install.sh
+src/tests/release-keys.sh && src/tests/release-script.sh
+src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
+src/net/mac/test.sh
+src/gestures/mac/test.sh
+src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
+src/tests/venus-driver.sh
+src/tests/vulkan-feature.sh && src/tests/venus-build-tools.sh && src/tests/graphics-setting.sh
 src/tests/app-paths.sh
+app/runtime/Tests/display/test-pointer-guard.sh
+app/runtime/Tests/display/test-pointer-start.sh
 src/tests/app-notch.sh
+src/tests/keyboard-light.sh
+src/tests/features-off.sh
+src/tests/app-storage.sh
+(cd app/app && swift run update-tests)
+src/bridge/mac/tests/run.sh && python3 src/release/manifest.py parts > /dev/null
+(cd src/control && python3 -m pytest -q tests)   # in a venv with textual==8.2.8 and pytest
 src/tests/bench-docs.sh
+src/tests/app-idle.sh
+src/tests/app-battery.sh
+python3 src/app/guest/tests/test_omacvm_displays.py
+python3 src/app/guest/tests/test_idle_waits.py
+src/tests/audio-timing.sh
 ```
+
+`src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to
+PNGs from a fixture home, without a window (not in CI).
 
 The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`
 or `${var,,}`.
@@ -75,6 +97,7 @@ or `${var,,}`.
 |---|---|
 | Build questions, options | `./omacvm build --plan --json --vm-type app\|utm\|fusion\|parallels`: builds nothing |
 | VM side (`src/guest`, a feature's `guest/`) | `./omacvm apply --no-mac --vm "OmacVM Test-<topic>"`, then `./omacvm check --vm "OmacVM Test-<topic>"` |
+| A feature's off | `src/tests/features-off-vm.sh --vm "OmacVM Test-<topic>"`: nothing of an off feature runs or connects to the Mac |
 | Mac helpers (Bridge, Gestures, Omanotch) | `src/mac/install.sh --omanotch` (replaces the installed ones), then `./omacvm check` |
 | The build itself | `./omacvm build --no-mac --vm-type ROUTE --vm-name "OmacVM Test-<topic>"`: 30 to 70 minutes |
 | OmacVM.app | `cd app && scripts/build-app.sh`, then open `app/dist/OmacVM.app` |

@@ -1,5 +1,5 @@
 #!/bin/bash
-# omacvm update [--vm NAME [--vm-type T]] [--no-pull]: OmacVM up to date everywhere. This
+# omacvm update [--vm NAME [--vm-type T]] [--no-pull] [--commit C] [--transaction] [--yes]: OmacVM up to date everywhere. This
 # checkout (git pull, when it is a clean clone), the Mac side that is
 # installed (Omanotch with it), OmacVM.app when it is installed and a newer
 # one is published (not while it runs), then OmacVM in every running VM that
@@ -7,24 +7,44 @@
 # Each VM keeps its feature choices. Stopped VMs are listed, not started. Only
 # VMs OmacVM set up from this Mac (their SSH host key is remembered, or OmacVM
 # built them) get the update, and with it the Bridge's token.
+# --commit C (the control centre's update, the commit of a release manifest the
+# Bridge verified): this checkout moves to C, only forward, instead of git pull.
+# --transaction: each VM as omacvm apply --transaction (exit code 4: that VM
+# failed and went back to what it had). --yes: no questions (as apply --yes).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
-VM=""; TYPE=""; PULL=1; ARGS=("$@")
+VM=""; TYPE=""; PULL=1; ARGS=("$@"); COMMIT=""; APPLY_ARGS=()
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --no-pull) PULL=0; shift ;;
-    -h|--help) sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --commit) COMMIT=$2; shift 2
+              [[ $COMMIT =~ ^[0-9a-f]{40}$ ]] || { echo "omacvm update: --commit: 40 hex digits" >&2; exit 2; } ;;
+    --transaction) APPLY_ARGS+=(--transaction); shift ;;
+    --yes|-y) APPLY_ARGS+=(--yes); shift ;;
+    -h|--help) sed -n '2,17s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm update: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 export OMA_KEY=~/.ssh/omacvm
+# Steps for the control centre's progress (one VM: its apply's three follow).
+OMA_STEPS=$(( ${#COMMIT} ? 3 : 2 ))
+[[ -n $VM ]] && OMA_STEPS=$((OMA_STEPS + 3))
 
 # ---------- this checkout ----------
-if (( PULL )) && git -C "$R" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+[[ -n $COMMIT ]] && step release "the release"
+if [[ -n $COMMIT && $(git -C "$R" rev-parse HEAD) != "$COMMIT" ]]; then
+  [[ -z $(git -C "$R" status --porcelain --untracked-files=no) ]] || die "this checkout has local changes: not moved to the release ($R)"
+  log "OmacVM: the release (${COMMIT:0:12})"
+  git -C "$R" fetch -q origin || die "git fetch failed in $R"
+  git -C "$R" cat-file -e "$COMMIT^{commit}" 2>/dev/null || die "the release's commit is not in $R's origin"
+  git -C "$R" merge-base --is-ancestor HEAD "$COMMIT" || die "the release is not ahead of this checkout: not moved"
+  git -C "$R" merge -q --ff-only "$COMMIT" || die "git merge failed in $R"
+  exec "$R/omacvm" update --no-pull ${ARGS[@]+"${ARGS[@]}"}
+elif [[ -z $COMMIT ]] && (( PULL )) && git -C "$R" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
   if [[ -n $(git -C "$R" status --porcelain --untracked-files=no) ]]; then
     info "this checkout has local changes: not pulling ($R)"
   else
@@ -46,10 +66,30 @@ if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- -
 elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
 launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--skip-clip)
 launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
+step mac "the Mac side"
 log "OmacVM on the Mac"
-"$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
+# A helper that does not build keeps its last build running; the VMs still
+# get this OmacVM (a VM left older than the Mac could not switch features
+# until it is updated), and the run ends failed, naming the helper.
+MAC_FAILED=$(mktemp -t omacvm-mac); mac_failed=()
+mrc=0; OMACVM_MAC_FAILED_FILE=$MAC_FAILED "$R/src/mac/install.sh" ${args[@]+"${args[@]}"} || mrc=$?
+if (( mrc == 5 )); then
+  while IFS= read -r h; do [[ -n $h ]] && mac_failed+=("$h"); done < "$MAC_FAILED"
+elif (( mrc )); then
+  mac_failed+=("the Mac side")
+fi
+rm -f "$MAC_FAILED"
+mac_failure() {   # the failed line for the control centre, last (it shows the last one)
+  (( ${#mac_failed[@]} )) || return 0
+  local what
+  what="$(printf '%s, ' "${mac_failed[@]}" | sed 's/, $//') did not build on the Mac"
+  [[ ${mac_failed[0]} == "the Mac side" ]] && what="the Mac side did not install"
+  failed_part "$(mac_helper_feature "${mac_failed[0]}")" "$what" mac
+  echo "omacvm update: $what (see above; what was installed before keeps running). omacvm update tries again" >&2
+}
 
 # ---------- OmacVM.app ----------
+step app "OmacVM.app"
 # The version that goes with this OmacVM, from its release (curl: no
 # quarantine). Not while the app is open: it may run a VM.
 if app=$(app_bundle); then
@@ -73,8 +113,10 @@ fi
 
 # ---------- the VMs ----------
 if [[ -n $VM ]]; then
-  "$R/src/cmd/apply.sh" --vm "$VM" ${TYPE:+--vm-type "$TYPE"} --no-mac
-  exit
+  rc=0; OMACVM_STEP_BASE=$OMA_STEP OMACVM_STEP_OF=$OMA_STEPS "$R/src/cmd/apply.sh" --vm "$VM" ${TYPE:+--vm-type "$TYPE"} --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} || rc=$?
+  # The VM's own failure says more; with none, the Mac's.
+  if (( rc == 0 && ${#mac_failed[@]} )); then mac_failure; exit 1; fi
+  exit $rc
 fi
 done_any=0; stopped=(); unanswered=(); failed=()
 while IFS=$'\t' read -r name type state; do
@@ -95,7 +137,7 @@ while IFS=$'\t' read -r name type state; do
     continue
   fi
   log "VM '$name' (OmacVM $v)"
-  "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac < /dev/null || failed+=("$name")
+  "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} < /dev/null || failed+=("$name")
   done_any=1
 done < <(vms_list)
 (( done_any )) || info "no running VM with OmacVM"
@@ -105,6 +147,7 @@ if (( ${#stopped[@]} )); then
 fi
 (( ${#unanswered[@]} )) && info "not updated: $(printf '%s, ' "${unanswered[@]}" | sed 's/, $//'): $UTM_NO_ANSWER"
 (( ${failed_app:-0} )) && failed+=("OmacVM.app")
+(( ${#mac_failed[@]} )) && { mac_failure; failed+=("the Mac side"); }
 if (( ${#failed[@]} )); then
   echo "omacvm update: failed in $(printf '%s, ' "${failed[@]}" | sed 's/, $//') (see above)" >&2
   exit 1

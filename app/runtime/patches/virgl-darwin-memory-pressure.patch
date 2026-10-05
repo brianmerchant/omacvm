@@ -28,6 +28,10 @@ against a runaway guest) nothing is refused while macOS has memory to give.
 - OMACVM_GPU_MEMORY_PRESSURE=off|normal|warn|critical[:AVAILABLE_MB] fixes the
   level (and the available memory) instead of asking macOS; =file:PATH reads the
   level from PATH at each look, so a test can raise it while the VM runs: tests only.
+- Applied after virgl-venus-memory-budget.patch: the bytes in use (log, status
+  file) are the shared counter, so they include Venus memory, read atomically. A
+  GL resource is checked against the pressure first, then charged to the budget.
+  Venus allocations are not checked against the pressure, only the budget.
 Why: a fixed budget is either too small for real use (2.9.0's quarter of the Mac's
 memory, 4 GB on a 16 GB Mac mini, was reached at 5K with fractional scaling:
 Hyprland's next buffer was refused, its context lost, the VM black) or too big to
@@ -61,7 +65,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
  #include <stdio.h>
  #include <string.h>
  #include <errno.h>
-@@ -515,6 +525,10 @@ struct sysval_uniform_block {
+@@ -520,6 +530,10 @@ struct sysval_uniform_block {
  static struct global_renderer_state vrend_state;
  
  static void vrend_resource_budget_init(void);
@@ -72,7 +76,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
  
  bool vrend_renderer_video_available(void)
  {
-@@ -1270,6 +1284,7 @@ static void vrend_notify_context_lost(struct vrend_context *ctx)
+@@ -1275,6 +1289,7 @@ static void vrend_notify_context_lost(struct vrend_context *ctx)
                 ctx->ctx_id, ctx->debug_name,
                 res ? "the guest driver was told (context reset)"
                     : "the guest driver cannot be told, the app must be restarted");
@@ -80,7 +84,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
     if (res) {
        memcpy(res->ptr, &status, sizeof(status));
        if (res->iov)
-@@ -8447,6 +8462,7 @@ static bool do_wait(struct vrend_fence *fence, bool can_block)
+@@ -8452,6 +8467,7 @@ static bool do_wait(struct vrend_fence *fence, bool can_block)
  static void vrend_renderer_check_queries(void);
  
  void vrend_renderer_poll(void) {
@@ -88,7 +92,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
     if (vrend_state.use_async_fence_cb) {
        flush_eventfd(vrend_state.eventfd);
        mtx_lock(&vrend_state.poll_mutex);
-@@ -10324,6 +10340,362 @@ static void vrend_resource_budget_init(void)
+@@ -10326,6 +10342,362 @@ static void vrend_resource_budget_read(void)
                   (unsigned long long)(budget >> 20), from);
     else
        virgl_info("guest GPU memory budget: none (%s)\n", from);
@@ -314,7 +318,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
 +   len = snprintf(text, sizeof(text),
 +                  "in_use_mb=%llu\npeak_mb=%llu\nbudget_mb=%llu\npressure=%s\nrefused=%llu\n"
 +                  "lost=%llu\nlost_last=%s\nlost_recent=%s\n",
-+                  (unsigned long long)(vrend_state.resource_bytes >> 20),
++                  (unsigned long long)(virgl_gpu_budget_in_use() >> 20),
 +                  (unsigned long long)(vrend_memory.peak >> 20),
 +                  (unsigned long long)(vrend_state.resource_budget >> 20),
 +                  vrend_pressure_names[vrend_memory.handled_level],
@@ -331,13 +335,13 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
 +      unlink(tmp);
 +   vrend_memory.dirty = false;
 +   vrend_memory.written_ns = t;
-+   vrend_memory.written_bytes = vrend_state.resource_bytes;
++   vrend_memory.written_bytes = virgl_gpu_budget_in_use();
 +   vrend_memory.written_peak = vrend_memory.peak;
 +}
 +
 +static void vrend_memory_changed(void)
 +{
-+   uint64_t bytes = vrend_state.resource_bytes;
++   uint64_t bytes = virgl_gpu_budget_in_use();
 +   if (bytes > vrend_memory.peak)
 +      vrend_memory.peak = bytes;
 +   if (bytes > vrend_memory.written_bytes + VREND_MEMORY_STATUS_STEP ||
@@ -365,7 +369,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
 +   if (level != vrend_memory.handled_level) {
 +      virgl_info("macOS memory pressure: %s (guest GPU memory in use: %llu MB)%s\n",
 +                 vrend_pressure_names[level],
-+                 (unsigned long long)(vrend_state.resource_bytes >> 20),
++                 (unsigned long long)(virgl_gpu_budget_in_use() >> 20),
 +                 level > vrend_memory.handled_level ? "; freeing what the GL still holds" : "");
 +      if (level > vrend_memory.handled_level) {
 +         /* say what it freed: QEMU's footprint before and after */
@@ -424,7 +428,7 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
 +                 (unsigned long long)(available == UINT64_MAX ? 0 : available >> 20),
 +                 args->width, args->height, MAX2(args->depth, args->array_size),
 +                 (unsigned long long)(size >> 20),
-+                 (unsigned long long)(vrend_state.resource_bytes >> 20), (unsigned long long)n);
++                 (unsigned long long)(virgl_gpu_budget_in_use() >> 20), (unsigned long long)n);
 +   vrend_memory.refused_ns = vrend_memory_now_ns();
 +   vrend_memory.handled_level = MAX2(vrend_memory.handled_level, level);
 +   vrend_memory_status_write(true);
@@ -450,24 +454,34 @@ mini a fixed-cap A/B, two memory soaks and a desktop restart (PR #91).
 +   vrend_memory_status_write(true);
  }
  
- static bool vrend_resource_charge(struct vrend_resource *gr,
-@@ -10347,8 +10719,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
-                     (unsigned long long)n);
-       return false;
-    }
+ static once_flag vrend_resource_budget_once = ONCE_FLAG_INIT;
+@@ -10417,7 +10789,12 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
+                                   const struct vrend_renderer_resource_create_args *args)
+ {
+    uint64_t size = vrend_resource_estimated_size(args);
+-   uint64_t n = virgl_gpu_budget_charge(size, args->bind & VREND_RESOURCE_DISPLAY_BINDS);
++   uint64_t n;
++
++   /* the pressure first: it charges nothing, so its log and status count only what is in use */
 +   if (!vrend_memory_allows(size, args))
 +      return false;
++   n = virgl_gpu_budget_charge(size, args->bind & VREND_RESOURCE_DISPLAY_BINDS);
+ 
+    if (n) {
+       /* logged at the 1st, 2nd, 4th, 8th ... refusal: a guest in a loop cannot flood the log */
+@@ -10433,6 +10810,7 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
+       return false;
+    }
     gr->budget_bytes = size;
-    vrend_state.resource_bytes += size;
 +   vrend_memory_changed();
-    if (vrend_state.resource_bytes >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
-       vrend_state.resource_peak_logged = vrend_state.resource_bytes / VREND_RESOURCE_PEAK_STEP *
-                                          VREND_RESOURCE_PEAK_STEP;
-@@ -10363,6 +10738,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
+    /* the peak is read here, on the renderer thread, and includes Venus memory */
+    uint64_t in_use = virgl_gpu_budget_in_use();
+    if (in_use >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
+@@ -10448,6 +10826,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
  {
-    vrend_state.resource_bytes -= MIN2(gr->budget_bytes, vrend_state.resource_bytes);
+    virgl_gpu_budget_uncharge(gr->budget_bytes);
     gr->budget_bytes = 0;
 +   vrend_memory_changed();
  }
  
- static struct vrend_resource *
+ /* OmacVM: did the last vrend_renderer_resource_create fail on the memory budget? */

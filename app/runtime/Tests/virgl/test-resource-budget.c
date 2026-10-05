@@ -5,7 +5,9 @@
  * renderer starts. The budget modes run with the pressure check off, so a busy build
  * Mac cannot change their result; the pressure modes set the level themselves:
  *   test-resource-budget            runs every mode below as a child process
- *   test-resource-budget limit      OMACVM_GPU_MEMORY_MB=64: what fits and what is refused
+ *   test-resource-budget limit      OMACVM_GPU_MEMORY_MB=64: what fits and what is refused,
+ *                                   and the context that attaches a refused resource is lost
+ *                                   (virgl-resource-budget-context-loss.patch)
  *   test-resource-budget off        OMACVM_GPU_MEMORY_MB=0: no budget
  *   test-resource-budget default    unset: three quarters of the Mac's memory
  *   test-resource-budget critical   pressure critical: big resources refused after
@@ -23,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -138,6 +141,89 @@ static void expect_fit(const char *what, struct spec s, int want)
    unref(h, n);
 }
 
+/* A guest context with a status buffer (VIRGL_CCMD_SET_RESET_STATUS_BUFFER), as the
+ * guest's Mesa with mesa-virgl-reset-status.patch sets one up. */
+static uint32_t *status_context(int ctx_id, uint32_t handle)
+{
+   /* the renderer keeps the iovec array itself, so it lives as long as the buffer */
+   static struct iovec iovs[2];
+   uint32_t *status = calloc(1, 64);
+   struct iovec *iov = &iovs[ctx_id & 1];
+   *iov = (struct iovec){ status, 64 };
+   struct virgl_renderer_resource_create_args a = {
+      .handle = handle, .target = T_BUFFER, .format = VIRGL_FORMAT_R8_UNORM,
+      .bind = VIRGL_BIND_CUSTOM, .width = 64, .height = 1, .depth = 1, .array_size = 1,
+   };
+   uint32_t cmd[2] = { VIRGL_CMD0(VIRGL_CCMD_SET_RESET_STATUS_BUFFER, 0,
+                                  VIRGL_SET_RESET_STATUS_BUFFER_SIZE), handle };
+   if (virgl_renderer_context_create(ctx_id, 4, "test") ||
+       virgl_renderer_resource_create(&a, NULL, 0) ||
+       virgl_renderer_resource_attach_iov(handle, iov, 1))
+      return status;
+   virgl_renderer_ctx_attach_resource(ctx_id, handle);
+   virgl_renderer_submit_cmd(cmd, ctx_id, 2);
+   return status;
+}
+
+/* Names the context's status buffer again (changes nothing); a lost context refuses
+ * every submit. */
+static int submit_nothing(int ctx_id)
+{
+   uint32_t cmd[2] = { VIRGL_CMD0(VIRGL_CCMD_SET_RESET_STATUS_BUFFER, 0,
+                                  VIRGL_SET_RESET_STATUS_BUFFER_SIZE), 899 + ctx_id };
+   return virgl_renderer_submit_cmd(cmd, ctx_id, 2);
+}
+
+/* The guest's kernel makes a resource without waiting for the answer: the app learns
+ * of a refusal only through its context. The context that attaches a refused handle is
+ * lost and its status buffer says so; others, and a refused handle the guest freed
+ * before attaching it, are not touched. */
+static void run_refused_context(void)
+{
+   uint32_t *st2 = status_context(2, 901), *st3 = status_context(3, 902);
+   check(st2[0] == 0 && st3[0] == 0 && submit_nothing(2) == 0 && submit_nothing(3) == 0,
+         "two contexts with status buffers, both alive");
+   uint32_t h[64] = {0};
+   int n = 0;
+   while (n < 64 && (h[n] = tex2d(1024, 1024, 1)))
+      n++;
+   struct virgl_renderer_resource_create_args a = {
+      .handle = 950, .target = T_2D, .format = VIRGL_FORMAT_R8G8B8A8_UNORM,
+      .bind = VIRGL_BIND_SAMPLER_VIEW, .width = 1024, .height = 1024, .depth = 1,
+      .array_size = 1,
+   };
+   check(virgl_renderer_resource_create(&a, NULL, 0) != 0, "budget full: resource 950 refused");
+   a.handle = 951;
+   check(virgl_renderer_resource_create(&a, NULL, 0) != 0, "and resource 951");
+   virgl_renderer_ctx_attach_resource(3, 960);
+   check(st3[0] == 0 && submit_nothing(3) == 0,
+         "attaching a handle that was never made does not lose a context");
+   virgl_renderer_resource_unref(951);
+   virgl_renderer_ctx_attach_resource(3, 951);
+   check(st3[0] == 0 && submit_nothing(3) == 0,
+         "a refused handle the guest freed first does not lose a context");
+   virgl_renderer_ctx_attach_resource(2, 950);
+   check(st2[0] == VIRGL_RESET_STATUS_GUILTY,
+         "the context that attaches a refused resource reads GUILTY in its status buffer");
+   check(submit_nothing(2) != 0, "and its commands are refused from then on");
+   check(st3[0] == 0 && submit_nothing(3) == 0, "the other context keeps working");
+   virgl_renderer_ctx_attach_resource(3, 950);
+   check(st3[0] == 0, "a refused handle loses only the first context that attaches it");
+   unref(h, n);
+   virgl_renderer_resource_unref(950);
+   virgl_renderer_context_destroy(2);
+   virgl_renderer_context_destroy(3);
+   virgl_renderer_resource_unref(901);
+   virgl_renderer_resource_unref(902);
+   free(st2);
+   free(st3);
+   a.handle = 950;
+   uint32_t again = virgl_renderer_resource_create(&a, NULL, 0) ? 0 : 950;
+   check(again != 0, "with the budget free again, handle 950 is made");
+   if (again)
+      virgl_renderer_resource_unref(again);
+}
+
 static int run_limit(void)
 {
    uint32_t h[64] = {0};
@@ -232,6 +318,8 @@ static int run_limit(void)
    unref(h, n);
    memset(h, 0, sizeof h);
    next_handle += 8;
+
+   run_refused_context();
 
    /* staging buffers only use guest memory: 4 KB each */
    expect_fit("1 GB staging buffers", (struct spec){T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_STAGING,

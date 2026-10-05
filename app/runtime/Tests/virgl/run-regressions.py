@@ -46,7 +46,21 @@ def oracle_link_args(compiler):
     return ["-L" + str(output), "-lgl-oracle", "-Wl,-rpath," + str(output)]
 
 
-def run_api_test(name, frameworks=(), oracle=False):
+def vulkan_stub_link_args(compiler):
+    """A libvulkan.1.dylib with only vkGetInstanceProcAddr (it finds nothing): enough for a
+    Venus context to start, while any real Vulkan call fails. No Vulkan driver, no GPU."""
+    stub = output / "vulkan-stub"
+    stub.mkdir(exist_ok=True)
+    (stub / "vulkan-stub.c").write_text(
+        "void *vkGetInstanceProcAddr(void *instance, const char *name)\n"
+        "{ (void)instance; (void)name; return 0; }\n")
+    subprocess.run([compiler, "-dynamiclib", str(stub / "vulkan-stub.c"),
+                    "-install_name", "@rpath/libvulkan.1.dylib",
+                    "-o", str(stub / "libvulkan.1.dylib")], check=True)
+    return ["-Wl,-rpath," + str(stub)]
+
+
+def run_api_test(name, frameworks=(), oracle=False, vulkan_stub=False):
     """Link against the built libvirglrenderer and drive it through its public API.
     The tests run on Apple's software renderer (soft-gl.h), never on the GPU."""
     entry = next(item for item in entries if item["file"].endswith("/virglrenderer.c"))
@@ -55,8 +69,9 @@ def run_api_test(name, frameworks=(), oracle=False):
     source = (directory / entry["file"]).resolve().parent
     binary = output / name
     extra = oracle_link_args(command[0]) if oracle else []
+    extra += vulkan_stub_link_args(command[0]) if vulkan_stub else []
     subprocess.run([command[0], "-I" + str(source), "-I" + str(build / "src"),
-                    str(Path(__file__).with_name(name + ".c")),
+                    "-I" + str(build), str(Path(__file__).with_name(name + ".c")),
                     "-L" + str(build / "src"), "-lvirglrenderer",
                     "-Wl,-rpath," + str(build / "src"), *extra,
                     "-framework", "OpenGL", *[a for f in frameworks for a in ("-framework", f)],
@@ -94,6 +109,7 @@ run_api_test("test-context-loss")
 run_api_test("test-transform-feedback")
 run_api_test("test-gpu-ranges", oracle=True)
 run_api_test("test-resource-budget")
+run_api_test("test-venus-budget-storage", vulkan_stub=True)
 run_fuzz_replay()
 run_test("test-darwin-eventfd", "virgl_util.c")
 run_test("test-thread-sync-fallback", "vrend_renderer.c")

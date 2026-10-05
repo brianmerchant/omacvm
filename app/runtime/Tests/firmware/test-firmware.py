@@ -7,7 +7,9 @@ QEMU starts the firmware as OmacVM.app does (virt, HVF, virtio-gpu at
 1920 x 1080, an NVMe disk with serial omacvm) but with no window, an empty
 disk and fresh boot variables. Checks:
 - the boot logo: the screen (QMP screendump) shows exactly LOGO.bmp's pixels,
-  centred as edk2's BootLogoLib draws it;
+  centred as edk2's BootLogoLib draws it; and on a 640 x 480 screen (too
+  small for it) the same logo with 7-pixel cells (the biggest that fits)
+  instead of none;
 - the disk's boot entry: named "UEFI QEMU NVMe Ctrl omacvm 1", as QEMU's
   prebuilt firmware names it (patches/edk2-bootmanager-nvme-identify-align.patch).
 Exit 0 when both hold, 1 otherwise.
@@ -24,6 +26,7 @@ import tempfile
 import time
 
 WIDTH, HEIGHT = 1920, 1080
+SMALL = (640, 480, 7)       # a screen, and the logo's cell size there (640 // 81)
 NVME_ENTRY = "UEFI QEMU NVMe Ctrl omacvm 1"
 
 
@@ -55,10 +58,21 @@ def read_ppm(path):
     return w, h, pixels
 
 
-def logo_shown(shot, logo):
+def smaller(logo, cell):
+    """The logo with cells of CELL pixels (LOGO.bmp has 81 cells across)."""
+    lw, lh, rows = logo
+    big = lw // 81
+    cols, nrows = lw // big, lh // big
+    grid = [[rows[r * big + big // 2][(c * big + big // 2) * 3:][:3] for c in range(cols)]
+            for r in range(nrows)]
+    out = [b"".join(px * cell for px in line) for line in grid for _ in range(cell)]
+    return cols * cell, nrows * cell, out
+
+
+def logo_shown(shot, logo, size):
     w, h, pixels = shot
     lw, lh, rows = logo
-    if (w, h) != (WIDTH, HEIGHT):
+    if (w, h) != size:
         return False
     x0, y0 = (w - lw) // 2, (h - lh) // 2      # BootLogoLib's centre
     for y in range(lh):
@@ -127,11 +141,9 @@ class QMP:
         return message["return"]
 
 
-def main():
-    if len(sys.argv) != 4:
-        raise SystemExit(__doc__)
-    qemu, code, logo_path = sys.argv[1:]
-    logo = read_bmp(logo_path)
+def boot(qemu, code, size, logo, entries):
+    """Start the firmware on a size screen; wait for logo; with entries, check
+    the disk's boot entry too. 0 when all is right."""
     work = tempfile.mkdtemp(prefix="omacvm-fw.")
     vars_fd = os.path.join(work, "vars.fd")
     disk = os.path.join(work, "disk.img")
@@ -148,7 +160,7 @@ def main():
         "-drive", f"if=pflash,format=raw,file={vars_fd}",
         "-drive", f"if=none,id=disk,file={disk},format=raw",
         "-device", "nvme,serial=omacvm,drive=disk,bootindex=0",
-        "-device", f"virtio-gpu-pci,max_outputs=1,xres={WIDTH},yres={HEIGHT},romfile=",
+        "-device", f"virtio-gpu-pci,max_outputs=1,xres={size[0]},yres={size[1]},romfile=",
         "-display", "none", "-serial", "none", "-monitor", "none",
         "-qmp", f"unix:{qmp_path},server=on,wait=off",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -170,15 +182,19 @@ def main():
                 time.sleep(0.25)
                 continue
             try:
-                if logo_shown(read_ppm(shot_path), logo):
+                if logo_shown(read_ppm(shot_path), logo, size):
                     break
             except (OSError, ValueError):
                 pass                               # no whole dump this time
             time.sleep(0.25)
         else:
-            print("test-firmware: no boot logo on the screen after 30 seconds", file=sys.stderr)
+            print(f"test-firmware: no {logo[0]} x {logo[1]} boot logo on the {size[0]} x {size[1]} "
+                  "screen after 30 seconds", file=sys.stderr)
             return 1
-        print(f"test-firmware: the firmware shows the {logo[0]} x {logo[1]} logo, centred")
+        print(f"test-firmware: the firmware shows the {logo[0]} x {logo[1]} logo, centred on "
+              f"{size[0]} x {size[1]}")
+        if not entries:
+            return 0
         # The firmware writes the boot entries after it shows the logo; then
         # QEMU stops, so the variables are all on disk.
         deadline = time.monotonic() + 15
@@ -186,9 +202,9 @@ def main():
             time.sleep(0.5)
         qmp.call("quit")
         vm.wait(10)
-        entries = nvme_entries(vars_fd)
-        if entries != [NVME_ENTRY]:
-            print(f"test-firmware: the disk's boot entry is {entries}, not [{NVME_ENTRY!r}]", file=sys.stderr)
+        found = nvme_entries(vars_fd)
+        if found != [NVME_ENTRY]:
+            print(f"test-firmware: the disk's boot entry is {found}, not [{NVME_ENTRY!r}]", file=sys.stderr)
             return 1
         print(f"test-firmware: the disk's boot entry is {NVME_ENTRY!r}")
         return 0
@@ -196,6 +212,15 @@ def main():
         vm.kill()
         vm.wait()
         shutil.rmtree(work, ignore_errors=True)
+
+
+def main():
+    if len(sys.argv) != 4:
+        raise SystemExit(__doc__)
+    qemu, code, logo_path = sys.argv[1:]
+    logo = read_bmp(logo_path)
+    return (boot(qemu, code, (WIDTH, HEIGHT), logo, True) or
+            boot(qemu, code, SMALL[:2], smaller(logo, SMALL[2]), False))
 
 
 if __name__ == "__main__":

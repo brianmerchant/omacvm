@@ -1,6 +1,7 @@
 #!/bin/bash
 # Where OmacVM.app's VMs and the app itself are found: the omacvm command
-# (src/lib/app.sh) and the app (VMsFolder.swift) must agree. Runs in a
+# (src/lib/app.sh) and the app (VMsFolder.swift) must agree; every folder with
+# VMs (older ones, 2.9's) is searched. Runs in a
 # throwaway HOME with a throwaway settings domain; touches no real VM or app.
 #   src/tests/app-paths.sh
 set -uo pipefail
@@ -41,7 +42,7 @@ fresh() { case_n=$((case_n + 1)); H=$T/home$case_n; mkdir -p "$H"; OLD=$H/$APP_V
 vm() { mkdir -p "$1"; echo "NAME='$(basename "$1")'" > "$1/vm.env"; : > "$1/disk.img"; }
 
 fresh; check "nothing yet: ~/OmacVM" "$H/OmacVM"
-fresh; vm "$OLD/Omarchy"; check "VMs in the old place only: the old place" "$OLD"
+fresh; vm "$OLD/Omarchy"; check "VMs in the old place only: ~/OmacVM for new ones" "$H/OmacVM"
 fresh; vm "$OLD/Omarchy"; mkdir "$H/OmacVM"; check "~/OmacVM there: ~/OmacVM, old VMs or not" "$H/OmacVM"
 fresh; mkdir -p "$OLD/leftover"; check "old place without a VM: ~/OmacVM" "$H/OmacVM"
 fresh; vm "$OLD/Omarchy"; mkdir "$H/OmacVM"; check "the setting wins" "/Volumes/Some Drive/VMs" "/Volumes/Some Drive/VMs"
@@ -53,7 +54,7 @@ else check "~/omacvm on a case-sensitive drive: ~/OmacVM" "$H/OmacVM"; fi
 
 # First use: ~/OmacVM with .metadata_never_index; another folder is left alone.
 fresh; "$T/vmsf" prepare "$H" "$H/OmacVM"
-expect "first use makes ~/OmacVM, Spotlight off" yes "$([[ -d $H/OmacVM && -f $H/OmacVM/.metadata_never_index ]] && echo yes || echo no)"
+expect "first use makes ~/OmacVM with .metadata_never_index" yes "$([[ -d $H/OmacVM && -f $H/OmacVM/.metadata_never_index ]] && echo yes || echo no)"
 "$T/vmsf" prepare "$H" "$H/Elsewhere"
 expect "a picked folder is not made or marked" no "$([[ -e $H/Elsewhere ]] && echo yes || echo no)"
 
@@ -63,6 +64,31 @@ expect "omacvm lists a VM in ~/OmacVM" "Omarchy	app	stopped" "$(HOME=$H app_list
 expect "omacvm finds its folder" "$H/OmacVM/Omarchy" "$(HOME=$H app_dir Omarchy)"
 fresh; vm "$OLD/Omarchy"
 expect "omacvm still finds a VM in the old place" "$OLD/Omarchy" "$(HOME=$H app_dir Omarchy)"
+
+# Every folder with VMs: where new ones go, older folders the app keeps
+# (otherVMsRoots), the old place; each once.
+names() { HOME=$H app_list | cut -f1 | tr '\n' '|'; }
+expect "folders: ~/OmacVM, then the old place" "$H/OmacVM|$OLD|" "$(HOME=$H app_vms_roots | tr '\n' '|')"
+vm "$H/OmacVM/New"
+expect "VMs of both, the new folder first" "New|Omarchy|" "$(names)"
+vm "$T/ext$case_n/OmacVM/Ext"
+defaults write "$OMACVM_APP_ID" vmsRoot "$T/ext$case_n/OmacVM/"
+defaults write "$OMACVM_APP_ID" otherVMsRoots -array "$H/OmacVM" "$T/ext$case_n/OmacVM" "/Volumes/OmacVM-no-such-drive/VMs"
+expect "the folder set in the app, without a trailing /" "$T/ext$case_n/OmacVM" "$(HOME=$H app_vms_root)"
+expect "folders: set, older ones once each, the old place" "$T/ext$case_n/OmacVM|$H/OmacVM|/Volumes/OmacVM-no-such-drive/VMs|$OLD|" \
+  "$(HOME=$H app_vms_roots | tr '\n' '|')"
+expect "VMs of every folder" "Ext|New|Omarchy|" "$(names)"
+expect "a VM in an older folder by its folder name" "$H/OmacVM/New" "$(HOME=$H app_dir New)"
+for d in Ext New Omarchy; do f=$(HOME=$H app_dir "$d"); echo "SSH_PORT=5222$((${#d} % 7))" >> "$f/vm.env"; done
+p=$(HOME=$H app_free_port)
+expect "the SSH ports of every folder are taken" yes "$([[ $p =~ ^5[0-9]+$ && $p != 52220 && $p != 52223 && $p != 52224 ]] && echo yes || echo "$p")"
+echo mac=x > "$OLD/Omarchy/fast-network"
+HOME=$H app_any_fast_network; expect "the fast network of a VM in the old place counts" 0 $?
+defaults write "$OMACVM_APP_ID" vmsRoot "$OLD"; defaults delete "$OMACVM_APP_ID" otherVMsRoots
+expect "set to the old place: listed once" "$OLD|" "$(HOME=$H app_vms_roots | tr '\n' '|')"
+defaults delete "$OMACVM_APP_ID" >/dev/null 2>&1
+expect "a drive that is not connected" "OmacVM-no-such-drive" "$(app_missing_drive /Volumes/OmacVM-no-such-drive/VMs)"
+app_missing_drive "$H/OmacVM" >/dev/null; expect "the home folder is no drive" 1 $?
 
 # The app: ~/Applications first, then /Applications; new installs in ~/Applications.
 fakeapp() {   # DIR/NAME.app with the app's bundle id

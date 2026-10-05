@@ -153,7 +153,7 @@ ensure_vm_app() {
 
 # Releases before OmacVM.app was published have no zip.
 app_not_published() {   # VERSION
-  needs_person "there is no OmacVM.app download for OmacVM $1 ($(app_zip_url "$1") is missing): releases before the app have none. Run omacvm update for a newer OmacVM, or choose another app"
+  needs_person "there is no OmacVM.app download for OmacVM $1 ($(app_zip_url "$1") with its signed update feed is missing): releases before the app have none. Run omacvm update for a newer OmacVM, or choose another app"
 }
 
 fusion_install_help() {

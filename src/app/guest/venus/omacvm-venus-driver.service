@@ -1,0 +1,17 @@
+# OmacVM.app: the Venus (Vulkan) driver for the Mac's 16 KiB pages, built at
+# boot when the VM has Vulkan and still lacks it (vulkan-virtio.sh is silent
+# and quick otherwise). Installed by src/app/guest/install.sh.
+[Unit]
+Description=OmacVM: Vulkan (Venus) driver for the Mac's GPU memory pages
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh
+Nice=10
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=multi-user.target

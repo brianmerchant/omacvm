@@ -36,6 +36,9 @@
 //                          while started (macOS asks for the camera permission the first time)
 //   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
 //                          (both camera paths: 403 from 127.0.0.1 and the Mac's own addresses)
+//   /omacvm/...            the control centre's requests (control.swift, docs/adr/0031): hello, status,
+//                          updates, updates/check, settings/update-checks, jobs, jobs/<id>; OmacVM.app
+//                          relays its VMs' ones on the Unix socket omacvm-bridge/relay.sock (owner only)
 //   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
@@ -89,8 +92,8 @@ let supportDir = ProcessInfo.processInfo.environment["OMACVM_BRIDGE_SUPPORT_DIR"
   .appendingPathComponent("Library/Application Support/omacvm-bridge").path
 let tokenPath = supportDir + "/token"
 
-func loadToken() -> String {
-  if let s = try? String(contentsOfFile: tokenPath, encoding: .utf8) {
+func loadSecret(_ path: String) -> String {
+  if let s = try? String(contentsOfFile: path, encoding: .utf8) {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
     if t.count >= 32 { return t }
   }
@@ -99,12 +102,17 @@ func loadToken() -> String {
   let t = bytes.map { String(format: "%02x", $0) }.joined()
   try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true,
                                            attributes: [.posixPermissions: 0o700])
-  guard FileManager.default.createFile(atPath: tokenPath, contents: Data((t + "\n").utf8),
-                                       attributes: [.posixPermissions: 0o600]) else { fatalError("cannot write \(tokenPath)") }
-  log("created token \(tokenPath)")
+  guard FileManager.default.createFile(atPath: path, contents: Data((t + "\n").utf8),
+                                       attributes: [.posixPermissions: 0o600]) else { fatalError("cannot write \(path)") }
+  log("created \(path)")
   return t
 }
-let token = Array(loadToken().utf8)
+let token = Array(loadSecret(tokenPath).utf8)
+// OmacVM.app relays requests from its VMs' control port (virtio-serial
+// org.omacvm.control) with this key; unlike the token, no VM ever gets it
+// (control.swift: the app names the VM, a guest cannot).
+let relayKeyPath = supportDir + "/relay-key"
+let relayKey = Array(loadSecret(relayKeyPath).utf8)
 
 // ---- JSON helpers ----
 func nn(_ v: Any?) -> Any { v ?? NSNull() }
@@ -137,6 +145,9 @@ let hub = Hub([
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
+// OmacVM.app's relay (server.swift). A second Bridge on this Mac (tests) sets
+// OMACVM_BRIDGE_RELAY_SOCKET: two Bridges on one path remove each other's socket.
+let relaySocket = RelaySocket(path: env["OMACVM_BRIDGE_RELAY_SOCKET"] ?? supportDir + "/relay.sock")
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
@@ -155,8 +166,10 @@ audio.start()
 location.start()
 bluetooth.start()
 hub.start()
+control.start()
 osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
+relaySocket.check()
 mediaKeys.start()
 externalBrightness.onKey = { value, name in osdEvents.externalBrightnessSet(value, display: name, source: "keys") }
 externalBrightness.start()
@@ -167,7 +180,7 @@ log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(c
 log("keyboard light: \(KeyboardLight.get() != nil ? "found" : "none on this Mac")")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
 listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds, leeway: .seconds(1))
-listenerTimer.setEventHandler { servers.forEach { $0.check() } }
+listenerTimer.setEventHandler { servers.forEach { $0.check() }; relaySocket.check() }
 listenerTimer.resume()
 
 let ws = NSWorkspace.shared.notificationCenter

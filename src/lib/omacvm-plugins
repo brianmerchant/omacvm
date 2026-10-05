@@ -1,13 +1,22 @@
 #!/bin/bash
-# Enable the OmacVM bar widgets queued in ~/.local/state/omacvm/pending-plugins
-# (and set the clock queued in pending-clock) once the Omarchy shell answers. Run as the desktop user (at login by
+# Enable the OmacVM bar widgets queued in ~/.local/state/omacvm/pending-plugins,
+# disable the ones in pending-plugins-off (a feature switched off while nobody
+# was logged in) and set the clock queued in pending-clock, once the Omarchy
+# shell answers. Run as the desktop user (at login by
 # omacvm-plugins.service, or directly by lib/install-plugin.sh).
 set -uo pipefail
 [[ -n ${OMARCHY_PATH:-} ]] || source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
 Q=${XDG_STATE_HOME:-$HOME/.local/state}/omacvm/pending-plugins
 CL=${XDG_STATE_HOME:-$HOME/.local/state}/omacvm/pending-clock
-[[ -s $Q || -s $CL ]] || exit 0
+OFF=${XDG_STATE_HOME:-$HOME/.local/state}/omacvm/pending-plugins-off
+[[ -s $Q || -s $CL || -s $OFF ]] || exit 0
 for _ in $(seq 60); do omarchy-shell shell ping >/dev/null 2>&1 && break; sleep 1; done
+if [[ -s $OFF ]] && omarchy-shell shell ping >/dev/null 2>&1; then
+  while read -r id; do
+    [[ -n $id ]] && omarchy plugin disable "$id" >/dev/null 2>&1 && echo "plugin $id disabled"
+  done < "$OFF"
+  rm -f "$OFF"
+fi
 if [[ -s $CL ]]; then
   /usr/local/share/omacvm/clock/guest/clock.sh "$(id -un)" on "$(cat "$CL")" && rm -f "$CL"
 fi

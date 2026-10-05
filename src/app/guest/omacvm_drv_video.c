@@ -27,7 +27,14 @@
  * lock; such a process counts only its own contexts, up to half the limit,
  * and the shared slots are the other half. The VM stays within the limit as
  * long as at most one such process decodes. OMACVM_VA_DEBUG=1 prints the
- * limits. Everything else is Mesa's.
+ * limits.
+ *
+ * Images in another YUV layout: vaGetImage and vaPutImage between an NV12
+ * surface and an I420 or YV12 image (or back) are done here on the CPU, a
+ * plain reshuffle of the planes, so the picture is bit for bit the decoded
+ * one. Mesa does these on the GPU through its video compositor, which goes
+ * through RGB and resamples the chroma; on OmacVM it gave empty pictures
+ * (FFmpeg's -vf hwdownload,format=yuv420p). Everything else is Mesa's.
  *
  * Built in the VM by install.sh; used through LIBVA_DRIVER_NAME=omacvm.
  * MIT, part of OmacVM.
@@ -114,6 +121,290 @@ static VAStatus query_config_profiles(VADriverContextP ctx, VAProfile *list, int
         list[n++] = list[i];
     }
     *num = n;
+    return st;
+}
+
+/* ---- Images in another YUV layout (see the top) ---- */
+
+static VAStatus (*mesa_get_image)(VADriverContextP, VASurfaceID, int, int,
+                                  unsigned int, unsigned int, VAImageID);
+static VAStatus (*mesa_put_image)(VADriverContextP, VASurfaceID, VAImageID, int, int,
+                                  unsigned int, unsigned int, int, int,
+                                  unsigned int, unsigned int);
+static VAStatus (*mesa_destroy_surfaces)(VADriverContextP, VASurfaceID *, int);
+
+static int is_420(uint32_t fourcc)
+{
+    return fourcc == VA_FOURCC_NV12 || fourcc == VA_FOURCC_I420 || fourcc == VA_FOURCC_YV12;
+}
+
+/* Each surface's layout, as Mesa made it (asked once, by an export). */
+static pthread_mutex_t fmt_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct fmt {
+    VADriverContextP drv;
+    VASurfaceID id;
+    uint32_t fourcc;
+} fmts[256];
+static unsigned nfmts, next_fmt;
+
+static uint32_t surface_fourcc(VADriverContextP ctx, VASurfaceID surface)
+{
+    VADRMPRIMESurfaceDescriptor desc;
+    uint32_t fourcc = 0;
+    unsigned i;
+
+    pthread_mutex_lock(&fmt_lock);
+    for (i = 0; i < nfmts; i++)
+        if (fmts[i].drv == ctx && fmts[i].id == surface)
+            fourcc = fmts[i].fourcc;
+    pthread_mutex_unlock(&fmt_lock);
+    if (fourcc || !ctx->vtable->vaExportSurfaceHandle)
+        return fourcc;
+    memset(&desc, 0, sizeof(desc));
+    if (ctx->vtable->vaExportSurfaceHandle(ctx, surface, VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+                                           VA_EXPORT_SURFACE_READ_ONLY |
+                                           VA_EXPORT_SURFACE_SEPARATE_LAYERS,
+                                           &desc) != VA_STATUS_SUCCESS)
+        return 0;
+    for (i = 0; i < desc.num_objects && i < 4; i++)
+        close(desc.objects[i].fd);
+    fourcc = desc.fourcc;
+    pthread_mutex_lock(&fmt_lock);
+    if (nfmts < sizeof(fmts) / sizeof(fmts[0])) {
+        fmts[nfmts++] = (struct fmt){ ctx, surface, fourcc };
+    } else {
+        fmts[next_fmt] = (struct fmt){ ctx, surface, fourcc };
+        next_fmt = (next_fmt + 1) % nfmts;
+    }
+    pthread_mutex_unlock(&fmt_lock);
+    return fourcc;
+}
+
+/* A surface ID may come back for a new surface: forget the old one's (or,
+ * with n < 0, every surface of a display that closes). */
+static void forget_surfaces(VADriverContextP ctx, const VASurfaceID *ids, int n)
+{
+    unsigned i = 0;
+    int k;
+
+    pthread_mutex_lock(&fmt_lock);
+    while (i < nfmts) {
+        int hit = n < 0;
+
+        for (k = 0; k < n && !hit; k++)
+            hit = fmts[i].id == ids[k];
+        if (hit && fmts[i].drv == ctx) {
+            fmts[i] = fmts[--nfmts];
+            next_fmt = 0;
+        } else {
+            i++;
+        }
+    }
+    pthread_mutex_unlock(&fmt_lock);
+}
+
+static VAStatus destroy_surfaces(VADriverContextP ctx, VASurfaceID *list, int n)
+{
+    forget_surfaces(ctx, list, n);
+    return mesa_destroy_surfaces(ctx, list, n);
+}
+
+/* Where an image's planes are: Y, and U and V with their step (2 in NV12). */
+struct planes {
+    uint8_t *y, *u, *v;
+    unsigned ypitch, cpitch, step;
+};
+
+static int planes_of(const VAImage *img, uint8_t *base, struct planes *p)
+{
+    p->y = base + img->offsets[0];
+    p->ypitch = img->pitches[0];
+    p->cpitch = img->pitches[1];
+    switch (img->format.fourcc) {
+    case VA_FOURCC_NV12:
+        p->u = base + img->offsets[1];
+        p->v = p->u + 1;
+        p->step = 2;
+        return 1;
+    case VA_FOURCC_I420:
+        p->u = base + img->offsets[1];
+        p->v = base + img->offsets[2];
+        break;
+    case VA_FOURCC_YV12:
+        p->v = base + img->offsets[1];
+        p->u = base + img->offsets[2];
+        break;
+    default:
+        return 0;
+    }
+    p->step = 1;
+    /* Both chroma planes share a pitch in Mesa's images; refuse otherwise. */
+    return img->pitches[2] == img->pitches[1];
+}
+
+static void copy_420(const struct planes *s, const struct planes *d, unsigned w, unsigned h)
+{
+    unsigned x, r, cw = (w + 1) / 2, ch = (h + 1) / 2;
+
+    for (r = 0; r < h; r++)
+        memcpy(d->y + r * d->ypitch, s->y + r * s->ypitch, w);
+    for (r = 0; r < ch; r++) {
+        const uint8_t *su = s->u + r * s->cpitch, *sv = s->v + r * s->cpitch;
+        uint8_t *du = d->u + r * d->cpitch, *dv = d->v + r * d->cpitch;
+
+        for (x = 0; x < cw; x++) {
+            du[x * d->step] = su[x * s->step];
+            dv[x * d->step] = sv[x * s->step];
+        }
+    }
+}
+
+/* Copies w x h from image `from` to image `to` (other 4:2:0 layout) at 0,0. */
+static VAStatus convert_image(VADriverContextP ctx, const VAImage *from, const VAImage *to,
+                              unsigned w, unsigned h)
+{
+    void *src = NULL, *dst = NULL;
+    struct planes sp, dp;
+    VAStatus st;
+
+    if (w > from->width || h > from->height || w > to->width || h > to->height)
+        return VA_STATUS_ERROR_INVALID_PARAMETER;
+    st = ctx->vtable->vaMapBuffer(ctx, from->buf, &src);
+    if (st != VA_STATUS_SUCCESS)
+        return st;
+    st = ctx->vtable->vaMapBuffer(ctx, to->buf, &dst);
+    if (st == VA_STATUS_SUCCESS) {
+        if (planes_of(from, src, &sp) && planes_of(to, dst, &dp))
+            copy_420(&sp, &dp, w, h);
+        else
+            st = VA_STATUS_ERROR_OPERATION_FAILED;
+        ctx->vtable->vaUnmapBuffer(ctx, to->buf);
+    }
+    ctx->vtable->vaUnmapBuffer(ctx, from->buf);
+    return st;
+}
+
+/* The app's 4:2:0 images by ID (vaGetImage and vaPutImage name only the ID):
+ * recorded at vaCreateImage, dropped at vaDestroyImage. */
+static VAStatus (*mesa_create_image)(VADriverContextP, VAImageFormat *, int, int, VAImage *);
+static VAStatus (*mesa_destroy_image)(VADriverContextP, VAImageID);
+static struct img {
+    VADriverContextP drv;
+    VAImage image;
+} imgs[256];
+static unsigned nimgs;
+
+static VAStatus create_image(VADriverContextP ctx, VAImageFormat *format, int width,
+                             int height, VAImage *image)
+{
+    VAStatus st = mesa_create_image(ctx, format, width, height, image);
+
+    if (st == VA_STATUS_SUCCESS && is_420(image->format.fourcc)) {
+        pthread_mutex_lock(&fmt_lock);
+        if (nimgs < sizeof(imgs) / sizeof(imgs[0]))
+            imgs[nimgs++] = (struct img){ ctx, *image };
+        pthread_mutex_unlock(&fmt_lock);
+    }
+    return st;
+}
+
+static void forget_image(VADriverContextP ctx, VAImageID id, int all)
+{
+    unsigned i = 0;
+
+    pthread_mutex_lock(&fmt_lock);
+    while (i < nimgs) {
+        if (imgs[i].drv == ctx && (all || imgs[i].image.image_id == id))
+            imgs[i] = imgs[--nimgs];
+        else
+            i++;
+    }
+    pthread_mutex_unlock(&fmt_lock);
+}
+
+static VAStatus destroy_image(VADriverContextP ctx, VAImageID id)
+{
+    forget_image(ctx, id, 0);
+    return mesa_destroy_image(ctx, id);
+}
+
+static int find_image(VADriverContextP ctx, VAImageID id, VAImage *out)
+{
+    unsigned i;
+    int found = 0;
+
+    pthread_mutex_lock(&fmt_lock);
+    for (i = 0; i < nimgs && !found; i++)
+        if (imgs[i].drv == ctx && imgs[i].image.image_id == id) {
+            *out = imgs[i].image;
+            found = 1;
+        }
+    pthread_mutex_unlock(&fmt_lock);
+    return found;
+}
+
+/* A temporary image in the surface's own layout. Not recorded: the shim's
+ * own wrappers never see it. */
+static VAStatus temp_image(VADriverContextP ctx, uint32_t fourcc, int w, int h, VAImage *img)
+{
+    VAImageFormat f = { .fourcc = fourcc, .byte_order = VA_LSB_FIRST, .bits_per_pixel = 12 };
+
+    return mesa_create_image(ctx, &f, w, h, img);
+}
+
+/* The surface's layout when it and the image are different 4:2:0 layouts
+ * (the case done here), else 0 (Mesa's own path). */
+static uint32_t other_layout(VADriverContextP ctx, VASurfaceID surface, VAImageID id,
+                             VAImage *image)
+{
+    uint32_t s;
+
+    if (!find_image(ctx, id, image))
+        return 0;
+    s = surface_fourcc(ctx, surface);
+    return is_420(s) && s != image->format.fourcc ? s : 0;
+}
+
+static VAStatus get_image(VADriverContextP ctx, VASurfaceID surface, int x, int y,
+                          unsigned int width, unsigned int height, VAImageID id)
+{
+    VAImage image, tmp;
+    uint32_t s = other_layout(ctx, surface, id, &image);
+    VAStatus st;
+
+    if (!s)
+        return mesa_get_image(ctx, surface, x, y, width, height, id);
+    st = temp_image(ctx, s, image.width, image.height, &tmp);
+    if (st != VA_STATUS_SUCCESS)
+        return st;
+    st = mesa_get_image(ctx, surface, x, y, width, height, tmp.image_id);
+    if (st == VA_STATUS_SUCCESS)
+        st = convert_image(ctx, &tmp, &image, width, height);
+    mesa_destroy_image(ctx, tmp.image_id);
+    return st;
+}
+
+/* Only a 1:1 copy is done here; a scaled put stays Mesa's. */
+static VAStatus put_image(VADriverContextP ctx, VASurfaceID surface, VAImageID id,
+                          int src_x, int src_y, unsigned int src_w, unsigned int src_h,
+                          int dst_x, int dst_y, unsigned int dst_w, unsigned int dst_h)
+{
+    VAImage image, tmp;
+    uint32_t s = src_x == 0 && src_y == 0 && src_w == dst_w && src_h == dst_h ?
+                 other_layout(ctx, surface, id, &image) : 0;
+    VAStatus st;
+
+    if (!s)
+        return mesa_put_image(ctx, surface, id, src_x, src_y, src_w, src_h,
+                              dst_x, dst_y, dst_w, dst_h);
+    st = temp_image(ctx, s, image.width, image.height, &tmp);
+    if (st != VA_STATUS_SUCCESS)
+        return st;
+    st = convert_image(ctx, &image, &tmp, src_w, src_h);
+    if (st == VA_STATUS_SUCCESS)
+        st = mesa_put_image(ctx, surface, tmp.image_id, 0, 0, src_w, src_h,
+                            dst_x, dst_y, dst_w, dst_h);
+    mesa_destroy_image(ctx, tmp.image_id);
     return st;
 }
 
@@ -367,6 +658,8 @@ static VAStatus destroy_context(VADriverContextP ctx, VAContextID context)
 static VAStatus terminate(VADriverContextP ctx)
 {
     release(ctx, 0, 1);
+    forget_surfaces(ctx, NULL, -1);
+    forget_image(ctx, 0, 1);
     return mesa_terminate(ctx);
 }
 
@@ -411,6 +704,20 @@ static VAStatus shim_init(VADriverContextP ctx)
         if (!lim_read)
             read_limits(ctx);
         pthread_mutex_unlock(&lim_lock);
+    }
+    if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaGetImage &&
+        ctx->vtable->vaPutImage && ctx->vtable->vaCreateImage && ctx->vtable->vaDestroyImage &&
+        ctx->vtable->vaDestroySurfaces && ctx->vtable->vaMapBuffer && ctx->vtable->vaUnmapBuffer) {
+        mesa_get_image = ctx->vtable->vaGetImage;
+        mesa_put_image = ctx->vtable->vaPutImage;
+        mesa_create_image = ctx->vtable->vaCreateImage;
+        mesa_destroy_image = ctx->vtable->vaDestroyImage;
+        mesa_destroy_surfaces = ctx->vtable->vaDestroySurfaces;
+        ctx->vtable->vaGetImage = get_image;
+        ctx->vtable->vaPutImage = put_image;
+        ctx->vtable->vaCreateImage = create_image;
+        ctx->vtable->vaDestroyImage = destroy_image;
+        ctx->vtable->vaDestroySurfaces = destroy_surfaces;
     }
     return st;
 }

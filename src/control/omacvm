@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""omacvm in Omarchy: the OmacVM control centre.
+
+  omacvm                     the control centre (in its own terminal window
+                             from the Omarchy menu or the bar's OmacVM item)
+  omacvm status [--json]     the features and how they are, as text
+  omacvm report [--print | --save FILE]
+                             report a problem: what goes into the GitHub issue,
+                             without personal data, shown before the browser opens
+  omacvm --version
+  omacvm --window            what the menu, the bar item and the launcher run:
+                             as omacvm, and the window waits for Return before
+                             it closes when the control centre cannot start
+
+Switching features asks the Mac (OmacVM Bridge); on the Mac the same is
+`omacvm enable|disable FEATURE --vm NAME`."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+
+def report_cli(args: list) -> int:
+    from omacvm_cc import collect, report
+
+    mac = "--mac" in args
+    out = None
+    if "--save" in args:
+        i = args.index("--save")
+        if i + 1 >= len(args):
+            print("omacvm report: --save FILE", file=sys.stderr)
+            return 2
+        out = args[i + 1]
+    try:
+        if mac:
+            root = args[args.index("--root") + 1]
+            vm = args[args.index("--vm") + 1] if "--vm" in args else ""
+            vm_type = args[args.index("--vm-type") + 1] if "--vm-type" in args else ""
+            cli = os.path.join(root, "omacvm")
+            print("collecting: omacvm check, versions, logs ...", file=sys.stderr)
+            known = collect.mac_known(cli)
+            rep = report.build(collect.mac_sections(cli, root, vm, vm_type=vm_type), known, "Problem with OmacVM on the Mac")
+        else:
+            from omacvm_cc.controller import Controller
+            c = Controller()
+            print("collecting: checks, versions, logs ...", file=sys.stderr)
+            c.refresh_mac()
+            c.refresh_vm_checks()
+            rows = c.rows()
+            known = collect.vm_known(c.local, c.bridge if c.linked else None)
+            mac_checks = [ch for r in rows for ch in r.checks if ch.side == "mac"]
+            rep = report.build(collect.vm_sections(c.local, rows, (c.vm_checks or []) + mac_checks, c.hello),
+                               known, f"Problem in OmacVM {c.local.version} ({c.local.vm_type or 'VM'})")
+    except report.RedactionFailed as e:
+        print(f"omacvm report: redaction failed ({e}): nothing is shown or sent. Please report this as a bug.", file=sys.stderr)
+        return 1
+    if out:
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(f"# {rep.title}\n\n{rep.text}")
+        print(f"saved: {out}", file=sys.stderr)
+        return 0
+    print(f"# {rep.title}\n\n{rep.text}")
+    print(f"Taken out: {report.taken_out(rep.counts)}", file=sys.stderr)
+    if "--print" in args or not sys.stdin.isatty():
+        return 0
+    try:
+        a = input("\nOpen this as a GitHub issue in the browser (you submit it there)? [Y/n] ").strip().lower()
+    except EOFError:
+        return 0
+    if a not in ("", "y", "yes"):
+        return 0
+    url, cut = report.issue_url(rep)
+    import subprocess
+    copier = ["pbcopy"] if mac else ["wl-copy"]
+    if cut:
+        try:
+            subprocess.run(copier, input=rep.text, text=True, check=False)
+            print("The full report is on the clipboard: paste it into the issue.", file=sys.stderr)
+        except OSError:
+            pass
+    subprocess.Popen(["open" if mac else "xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 0
+
+
+def notify() -> int:
+    """The user timer's run: one notice per new OmacVM version (none while
+    update checks are off on the Mac), and the bar item's dot."""
+    import json
+    import subprocess
+
+    from omacvm_cc.bridge import BridgeError
+    from omacvm_cc.controller import Controller
+    from omacvm_cc.local import cache_file
+
+    c = Controller()
+    try:
+        c.hello = c.bridge.hello()
+        u = c.bridge.updates()
+    except BridgeError:
+        return 0
+    m = u.get("manifest") if isinstance(u.get("manifest"), dict) else None
+    c.updates = u
+    c.local.save_cache(updates=u)
+    c.write_attention(c.rows())
+    # Forward only: never a notice for a release older than this VM or the Mac.
+    if not u.get("checks_enabled", True) or not m or not c.update_offered():
+        return 0
+    seen = os.path.join(os.path.dirname(cache_file()), "notified")
+    try:
+        with open(seen, encoding="utf-8") as f:
+            if f.read().strip() == m["version"]:
+                return 0
+    except OSError:
+        pass
+    with open(seen, "w", encoding="utf-8") as f:
+        f.write(m["version"])
+    n = sum(1 for r in c.rows() if r.update)
+    r = subprocess.run(["notify-send", "-a", "OmacVM", "-A", "open=Open", "-i", "system-software-update",
+                        f"OmacVM {m['version']} is out",
+                        f"{n} feature{'s' if n != 1 else ''} change. Open OmacVM to install it."],
+                       capture_output=True, text=True)
+    if r.stdout.strip() == "open":
+        subprocess.Popen(["omarchy-launch-or-focus-tui", "omacvm", "--window"], start_new_session=True)
+    return 0
+
+
+def wait_in_window() -> None:
+    """Opened from the menu, the bar or the launcher: the window would close
+    with the text in it. It waits instead."""
+    if os.environ.get("OMACVM_WINDOW") == "1" and sys.stdin.isatty():
+        try:
+            input("\nPress Return to close.")
+        except EOFError:
+            pass
+
+
+def main(args: list) -> int:
+    if args[:1] == ["--window"]:
+        os.environ["OMACVM_WINDOW"] = "1"
+        args = args[1:]
+    cmd = args[0] if args else ""
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__.split("\n", 2)[2].rstrip())
+        return 0
+    if cmd in ("-v", "--version"):
+        here = os.path.dirname(os.path.realpath(__file__))
+        try:
+            with open(os.path.join(here, "..", "VERSION"), encoding="utf-8") as f:
+                print(f"OmacVM {f.read().strip()}")
+        except OSError:
+            print("OmacVM")
+        return 0
+    if cmd == "report":
+        return report_cli(args[1:])
+    if cmd == "notify":
+        return notify()
+    if cmd == "status":
+        from omacvm_cc import plain
+        return plain.status("--json" in args)
+    if cmd:
+        print(f"omacvm: no command '{cmd}' here (omacvm --help); the Mac's omacvm has the others", file=sys.stderr)
+        return 2
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        from omacvm_cc import plain
+        return plain.status(False)
+    try:
+        from omacvm_cc import tui
+    except Exception:   # Textual missing or broken: the same table as text, never an empty window
+        from omacvm_cc import plain
+        rc = plain.status(False, fallback=True)
+        wait_in_window()
+        return rc
+    try:
+        return tui.run()
+    except Exception as e:   # the screens failed: say why and show the table, never a window that just closes
+        print(f"omacvm: the control centre stopped ({type(e).__name__}: {e})", file=sys.stderr)
+        from omacvm_cc import plain
+        rc = plain.status(False, fallback=False)
+        wait_in_window()
+        return rc or 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)

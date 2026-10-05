@@ -24,13 +24,24 @@ picture. The GPU copy runs with the guest's conditional rendering paused
 (vrend_renderer.c exports the pause vrend's own blits use) and rasterizer
 discard off: either could drop the blit without a GL error and leave the
 guest's old picture.
+HEVC: VA-API gives parsed values, not parameter sets, so VPS, SPS and PPS are
+rebuilt and every slice header gets an explicit reference set. Mesa leaves
+NumPocTotalCurr, NumDeltaPocsOfRefRpsIdx and deblocking_filter_control_present
+at 0 (VA-API has no such fields): the reference list modification syntax
+(VideoToolbox's own encoder writes it, hevc_vaapi in the VM) is sized from the
+lists the guest marks, a slice's own set predicted from an SPS set is skipped
+by st_rps_bits, and the PPS's deblocking control is on whenever a value it
+guards is set (VideoToolbox's constant-QP streams override it per slice).
 Why: video in the VM decodes on the media engine instead of the VM's CPU
 (numbers in docs/video-decode.md).
 Upstream: not submitted (docs/video-decode.md, "UTM", lists what it needs).
 Tests: app/runtime/Tests/virgl/test-video-decode.c at build time (Apple's
 software OpenGL; H.264 pictures land in the guest's planes, also under the
 guest's conditional rendering and rasterizer discard, every decoder cap says
-32, the host's 48-decoder limit, a closed context freeing its decoders). In a
+32, the host's 48-decoder limit, a closed context freeing its decoders; HEVC
+from VideoToolbox's encoder, bitrate and constant QP, with an IDR mid-stream,
+also with slice sets predicted from the SPS's, bit for bit as VideoToolbox
+decodes it). In a
 VM: src/bench/video-bench.py and the checks in docs/video-decode.md.
 diff --git a/config.h.meson b/config.h.meson
 index da93f61..2fc6849 100644
@@ -179,10 +190,10 @@ index e954559..5a7f880 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..90b34a5
+index 0000000..a14d9ee
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,2401 @@
+@@ -0,0 +1,2453 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -1412,6 +1423,7 @@ index 0000000..90b34a5
 +    const struct virgl_h265_pps *p = &d->pps;
 +    const struct virgl_h265_sps *s = &p->sps;
 +    struct hwbits w;
++    bool deblock_control;
 +
 +    memset(&w, 0, sizeof(w));
 +    hw_u(&w, 4, 0);                     /* vps_video_parameter_set_id */
@@ -1525,8 +1537,15 @@ index 0000000..90b34a5
 +        hw_u(&w, 1, p->loop_filter_across_tiles_enabled_flag);
 +    }
 +    hw_u(&w, 1, p->pps_loop_filter_across_slices_enabled_flag);
-+    hw_u(&w, 1, p->deblocking_filter_control_present_flag);
-+    if (p->deblocking_filter_control_present_flag) {
++    /* VA-API has no deblocking_filter_control_present_flag (Mesa leaves it 0): it
++     * is on whenever a value it guards is set. VideoToolbox's constant-QP streams
++     * override the filter in their slice headers. */
++    deblock_control = p->deblocking_filter_control_present_flag ||
++                      p->deblocking_filter_override_enabled_flag ||
++                      p->pps_deblocking_filter_disabled_flag ||
++                      p->pps_beta_offset_div2 || p->pps_tc_offset_div2;
++    hw_u(&w, 1, deblock_control);
++    if (deblock_control) {
 +        hw_u(&w, 1, p->deblocking_filter_override_enabled_flag);
 +        hw_u(&w, 1, p->pps_deblocking_filter_disabled_flag);
 +        if (!p->pps_deblocking_filter_disabled_flag) {
@@ -1545,6 +1564,43 @@ index 0000000..90b34a5
 +    free(w.d);
 +}
 +
++/* Whether the guest's reference i goes into the set hevc_write_rps writes, with
++ * its POC delta and whether the current picture uses it. */
++static bool hevc_rps_entry(const struct virgl_h265_picture_desc *d, unsigned i,
++                           int *delta, bool *used)
++{
++    int64_t dpoc;
++
++    *used = false;
++    if (!d->ref[i] || d->IsLongTerm[i])
++        return false;
++    for (unsigned k = 0; k < d->NumPocStCurrBefore && k < 8; k++)
++        *used |= d->RefPicSetStCurrBefore[k] == i;
++    for (unsigned k = 0; k < d->NumPocStCurrAfter && k < 8; k++)
++        *used |= d->RefPicSetStCurrAfter[k] == i;
++    dpoc = (int64_t)d->PicOrderCntVal[i] - d->CurrPicOrderCntVal;
++    if (dpoc < -32768 || dpoc > 32768 || dpoc == 0)     /* not a valid stream */
++        return false;
++    *delta = (int)dpoc;
++    return true;
++}
++
++/* NumPicTotalCurr (H.265 7-55) of the rewritten slice header: the pictures the
++ * set hevc_write_rps writes marks used, plus the long-term ones the header keeps.
++ * Sizes the reference list modification syntax (VideoToolbox's own encoder
++ * writes it). Not the guest's NumPocTotalCurr: Mesa's VA-API driver leaves it 0. */
++static unsigned hevc_total_curr(const struct virgl_h265_picture_desc *d)
++{
++    unsigned n = d->NumPocLtCurr < 8 ? d->NumPocLtCurr : 8;
++    for (unsigned i = 0; i < 15; i++) {
++        int delta;
++        bool used;
++        if (hevc_rps_entry(d, i, &delta, &used) && used)
++            n++;
++    }
++    return n;
++}
++
 +/* The explicit short-term reference picture set for this picture. */
 +static void hevc_write_rps(struct hwbits *w, const struct virgl_h265_picture_desc *d)
 +{
@@ -1553,22 +1609,15 @@ index 0000000..90b34a5
 +    unsigned nn = 0, np = 0;
 +
 +    for (unsigned i = 0; i < 15; i++) {
-+        bool used = false;
-+        int64_t delta;
-+        if (!d->ref[i] || d->IsLongTerm[i])
-+            continue;
-+        for (unsigned k = 0; k < d->NumPocStCurrBefore && k < 8; k++)
-+            used |= d->RefPicSetStCurrBefore[k] == i;
-+        for (unsigned k = 0; k < d->NumPocStCurrAfter && k < 8; k++)
-+            used |= d->RefPicSetStCurrAfter[k] == i;
-+        delta = (int64_t)d->PicOrderCntVal[i] - d->CurrPicOrderCntVal;
-+        if (delta < -32768 || delta > 32768)   /* not a valid stream */
++        bool used;
++        int delta;
++        if (!hevc_rps_entry(d, i, &delta, &used))
 +            continue;
 +        if (delta < 0) {
-+            neg[nn] = (int)delta;
++            neg[nn] = delta;
 +            neg_used[nn++] = used;
-+        } else if (delta > 0) {
-+            pos[np] = (int)delta;
++        } else {
++            pos[np] = delta;
 +            pos_used[np++] = used;
 +        }
 +    }
@@ -1599,12 +1648,25 @@ index 0000000..90b34a5
 +    }
 +}
 +
-+/* Skips a short-term RPS in a slice header (inter prediction from the SPS's
-+ * sets is possible there: NumDeltaPocsOfRefRpsIdx says how many). */
++/* Skips a slice header's own short-term RPS. One predicted from an SPS set
++ * (inter_ref_pic_set_prediction_flag) has a flag pair per picture of that set,
++ * and the host does not have the SPS's sets: its size in bits comes from the
++ * guest (VA-API st_rps_bits, which FFmpeg, Chrome and GStreamer fill). Mesa
++ * leaves NumDeltaPocsOfRefRpsIdx at 0: it counts only without st_rps_bits. */
 +static void hevc_skip_rps(struct hbits *r, const struct virgl_h265_picture_desc *d)
 +{
 +    const struct virgl_h265_sps *s = &d->pps.sps;
++    size_t start = r->pos;
 +    if (s->num_short_term_ref_pic_sets != 0 && hb_u(r, 1)) {
++        uint32_t bits = d->NumShortTermPictureSliceHeaderBits;
++        if (bits) {
++            /* the guest's number: past the slice is an error, not a jump */
++            if (bits > r->size * 8 - start)
++                r->error = true;
++            else
++                r->pos = start + bits;
++            return;
++        }
 +        /* inter_ref_pic_set_prediction_flag; in a slice header idx == num */
 +        hb_ue(r);                       /* delta_idx_minus1 */
 +        hb_u(r, 1);                     /* delta_rps_sign */
@@ -1647,6 +1709,7 @@ index 0000000..90b34a5
 +                        s->log2_diff_max_min_luma_coding_block_size;
 +    uint64_t ctbs;
 +    unsigned chroma = s->separate_colour_plane_flag ? 0 : s->chroma_format_idc;
++    unsigned total_curr = hevc_total_curr(d);
 +
 +    if (ctb_log2 < 4 || ctb_log2 > 6)   /* CTBs are 16, 32 or 64 pixels */
 +        return res;
@@ -1713,8 +1776,8 @@ index 0000000..90b34a5
 +            }
 +            if (l0 > 14 || l1 > 14)     /* at most 15 references per list */
 +                goto out;
-+            if (p->lists_modification_present_flag && d->NumPocTotalCurr > 1) {
-+                unsigned bits = ceil_log2(d->NumPocTotalCurr);
++            if (p->lists_modification_present_flag && total_curr > 1) {
++                unsigned bits = ceil_log2(total_curr);
 +                if (hb_u(&r, 1))
 +                    for (unsigned i = 0; i <= l0; i++)
 +                        hb_u(&r, bits);

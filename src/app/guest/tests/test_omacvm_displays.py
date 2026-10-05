@@ -6,6 +6,7 @@
 import importlib.machinery
 import importlib.util
 import pathlib
+import sys
 import unittest
 from unittest import mock
 
@@ -325,6 +326,80 @@ class Agent(unittest.TestCase):
                 a.look_in(1)
                 self.run_for(a, od.REPAIR_EVERY)
         self.assertEqual(self.started, [])
+
+
+class Idle(unittest.TestCase):
+    """The agent sleeps until something is due: no once-a-second wake-up."""
+
+    def agent(self, events=True, watch_ok=True):
+        a = od.Agent.__new__(od.Agent)
+        a.events = object() if events else None
+        a.check_at = 0.0
+        a.last_check = 1000.0
+        a.looks = []
+        a.repair = None
+        a.config_watch = mock.Mock(ok=watch_ok)
+        return a
+
+    def test_idle_sleeps_until_the_safety_report(self):
+        self.assertEqual(self.agent().timeout(1000.0), od.SAFETY_WITH_EVENTS)
+        self.assertEqual(self.agent().timeout(1010.0), od.SAFETY_WITH_EVENTS - 10)
+
+    def test_without_hyprland_events_more_often(self):
+        self.assertEqual(self.agent(events=False).timeout(1000.0), od.SAFETY_WITHOUT_EVENTS)
+
+    def test_due_check_and_looks_come_first(self):
+        a = self.agent()
+        a.check_at = 1000.3
+        self.assertAlmostEqual(a.timeout(1000.0), 0.3)
+        a = self.agent()
+        a.looks = [1012.0, 1004.0]
+        self.assertEqual(a.timeout(1000.0), 4.0)
+
+    def test_overdue_is_zero(self):
+        a = self.agent()
+        a.looks = [990.0]
+        self.assertEqual(a.timeout(1000.0), 0.0)
+
+    def test_once_a_second_while_needed(self):
+        self.assertEqual(self.agent(watch_ok=False).timeout(1000.0), 1.0)   # no inotify
+        a = self.agent()
+        a.repair = object()                                                  # a shell restart runs
+        self.assertEqual(a.timeout(1000.0), 1.0)
+
+    def test_shell_event(self):
+        self.assertTrue(od.shell_event(b"activewindow>>a,b\nopenlayer>>omarchy-background\n"))
+        self.assertFalse(od.shell_event(b"closelayer>>notifications\nworkspace>>2\n"))
+        self.assertFalse(od.layout_event(b"openlayer>>omarchy-background\n"))
+
+
+class ConfigWatchTest(unittest.TestCase):
+    def test_wakes_on_a_change_or_falls_back(self):
+        import select
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = pathlib.Path(tmp) / "omacvm"
+            w = od.ConfigWatch(folder)
+            self.assertTrue(folder.is_dir())
+            if not w.ok:
+                # The guest is Linux: there a missing watch is a bug (CI runs
+                # this on Linux too). Elsewhere the agent's fallback is all there is.
+                self.assertNotEqual(sys.platform, "linux", "no inotify watch on Linux")
+                self.skipTest("no inotify here (the agent looks once a second)")
+            self.assertEqual(select.select([w], [], [], 0)[0], [])
+            conf = folder / "displays.conf"
+            tmpfile = folder / "displays.tmp"
+            tmpfile.write_text("external=off\n")
+            tmpfile.replace(conf)                       # what set_external does
+            self.assertEqual(select.select([w], [], [], 1)[0], [w])
+            w.drain()
+            self.assertTrue(w.ok)
+            self.assertEqual(select.select([w], [], [], 0)[0], [])
+            conf.unlink()
+            folder.rmdir()                              # the folder gone: the watch ends
+            select.select([w], [], [], 1)
+            w.drain()
+            self.assertFalse(w.ok)
 
 
 if __name__ == "__main__":

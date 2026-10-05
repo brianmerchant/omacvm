@@ -3,16 +3,24 @@
 # forwards the VM's SSH to 127.0.0.1:SSH_PORT, so its "IP" here is
 # 127.0.0.1:PORT (gssh understands that).
 #   app_list            NAME<TAB>app<TAB>running|stopped, one line per VM
-#   app_vms_root        the folder with the VM folders (~/OmacVM by default)
+#   app_vms_root        where new VMs go (~/OmacVM by default)
+#   app_vms_roots       every folder with VMs (older ones until their VMs move)
+#   app_missing_drive DIR  the drive DIR needs, when it is not connected
 #   app_dir NAME        the VM's folder
+#   app_features_write DIR FEATURES  the VM's features, for the app's Mac links
+#   app_links_stale DIR FEATURES on|off  links that differ from this start of the VM
 #   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address)
 #   app_any_fast_network  one of the VMs has the fast network on
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
 #   app_bundle          the installed OmacVM.app (any name it was installed under;
 #                       ~/Applications first, then /Applications)
-#   app_create DIR KEY=VALUE...  a new VM in DIR through the app's own create
-#                       script (the password on stdin), as when built in the app
+#   app_create [--prebuilt] DIR KEY=VALUE...  a new VM in DIR through the app's
+#                       own create script (the password on stdin), as when built
+#                       in the app; --prebuilt: from a prebuilt image
+#   app_has_prebuilt APP    that app can make a VM from a prebuilt image
+#   app_prebuilt_lookup APP the image that app would use (its own version):
+#                       sets PB_TAG PB_SIZE PB_OMARCHY PB_VERSION
 #   app_published VERSION   that OmacVM release has OmacVM-VERSION.zip
 #   app_install VERSION [APP]  download, check and install it (in ~/Applications,
 #                       or in place of APP, /Applications too); prints the path
@@ -27,22 +35,50 @@ APP_DOWNLOADS=https://github.com/gillesgoetsch/omacvm/releases/download
 # The app's settings (OMACVM_APP_ID: another bundle id, for tests only).
 APP_ID=${OMACVM_APP_ID:-org.omacvm.app}
 
-# The VMs folder, as the app finds it (app/app/Sources/OmacVM/VMsFolder.swift;
+# Where new VMs go, as the app decides (app/app/Sources/OmacVM/VMsFolder.swift;
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,
-# else ~/OmacVM when it is there, else the old place while it holds VMs
-# (nothing is moved), else ~/OmacVM (the app makes it on first use).
+# else ~/OmacVM (the app makes it on first use), unless that name is taken by
+# something else: then the old place, ~/Library/Application Support/OmacVM/VMs.
 APP_VMS_OLD="Library/Application Support/OmacVM/VMs"
 app_vms_root() {
-  local r d new=$HOME/OmacVM
+  local r new=$HOME/OmacVM
   r=$(defaults read "$APP_ID" vmsRoot 2>/dev/null)
-  [[ -n $r ]] && { echo "$r"; return; }
+  [[ -n $r ]] && { echo "${r%/}"; return; }
   app_vms_ours "$new" && { echo "$new"; return; }
-  for d in "$HOME/$APP_VMS_OLD"/*; do
-    [[ -f $d/vm.env ]] && { echo "$HOME/$APP_VMS_OLD"; return; }
-  done
   # Taken by something else (a file, ~/omacvm on a case-insensitive drive).
   [[ -e $new ]] && { echo "$HOME/$APP_VMS_OLD"; return; }
   echo "$new"
+}
+
+# Every folder with VMs, one per line: the one above first, then folders the
+# app still uses for VMs that did not move (its otherVMsRoots), then the old
+# place, whose VMs keep working there until they are moved.
+app_vms_roots() {
+  local r p i seen
+  r=$(app_vms_root); echo "$r"; seen=$'\n'"$r"$'\n'
+  p=$(defaults export "$APP_ID" - 2>/dev/null)
+  for ((i = 0; i < 64; i++)); do
+    r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
+    r=${r%/}
+    [[ -n $r && $seen != *$'\n'"$r"$'\n'* ]] && { echo "$r"; seen+="$r"$'\n'; }
+  done
+  [[ $seen == *$'\n'"$HOME/$APP_VMS_OLD"$'\n'* ]] || echo "$HOME/$APP_VMS_OLD"
+}
+
+app_vm_dirs() {   # every app VM folder (with vm.env), one per line
+  local r d
+  while IFS= read -r r; do
+    for d in "$r"/*; do [[ -f $d/vm.env ]] && echo "$d"; done
+  done < <(app_vms_roots)
+}
+
+app_missing_drive() {   # DIR -> the drive it needs when that is not connected
+  # (a stale empty /Volumes/NAME folder counts as not connected)
+  local v
+  [[ $1 == /Volumes/?* ]] || return 1
+  v=${1#/Volumes/}; v=${v%%/*}
+  [[ -d /Volumes/$v && $(stat -f %d "/Volumes/$v") != "$(stat -f %d /Volumes)" ]] && return 1
+  echo "$v"
 }
 app_vms_ours() {   # DIR: a folder under exactly that name, no git clone
   [[ -d $1 && ! -e $1/.git ]] && ls -1 "$(dirname "$1")" 2>/dev/null | grep -xF -- "$(basename "$1")" >/dev/null   # no -q: pipefail
@@ -62,19 +98,43 @@ app_running_dir() { [[ -n $(app_pid_dir "$1") ]]; }
 
 app_list() {
   local d n
-  for d in "$(app_vms_root)"/*; do
-    [[ -f $d/vm.env && -f $d/disk.img ]] || continue
+  while IFS= read -r d; do
+    [[ -f $d/disk.img ]] || continue
     n=$(app_env "$d" NAME); [[ -n $n ]] || n=$(basename "$d")
     printf '%s\tapp\t%s\n' "$n" "$(app_running_dir "$d" && echo running || echo stopped)"
+  done < <(app_vm_dirs)
+}
+
+# app_features_write DIR "bridge=on gestures=off ...": the VM's features for
+# the app, which reads them at each start of the VM (MacLinks.swift: a
+# feature that is off gets nothing of the Mac). Status 0 if they changed.
+app_features_write() {
+  [[ $(cat "$1/features" 2>/dev/null) != "$2" ]] || return 1
+  printf '%s\n' "$2" > "$1/features"
+}
+
+# app_links_stale DIR "bridge=on gestures=off ..." on|off: the Mac links the
+# app took at this start of the VM (its "Mac links" line in qemu.log) against
+# the features. "on": the features that are on but closed to the VM until its
+# next start; "off": the ones that are off but still served. As "Bridge,
+# camera"; nothing for an app from before the line. A feature not named is on.
+app_links_stale() {
+  local l x k n v out=""
+  l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
+  [[ -n $l ]] || return 0
+  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
+    k=${x%%:*} n=${x#*:} v=on
+    [[ " $2 " == *" $k=off "* ]] && v=off
+    [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
   done
+  echo "$out"
 }
 
 app_dir() {
   local d
-  for d in "$(app_vms_root)"/*; do
-    [[ -f $d/vm.env ]] || continue
+  while IFS= read -r d; do
     [[ $(app_env "$d" NAME) == "$1" || $(basename "$d") == "$1" ]] && { echo "$d"; return 0; }
-  done
+  done < <(app_vm_dirs)
   return 1
 }
 
@@ -92,7 +152,7 @@ app_vmnet_ip() {   # DIR -> the VM's address on vmnet's network (lease_ip, src/l
 
 app_any_fast_network() {   # one of this user's app VMs has the fast network on
   local d
-  for d in "$(app_vms_root)"/*; do [[ -s $d/fast-network ]] && return 0; done
+  while IFS= read -r d; do [[ -s $d/fast-network ]] && return 0; done < <(app_vm_dirs)
   return 1
 }
 
@@ -140,7 +200,7 @@ app_version() { defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/d
 
 app_free_port() {   # the VM's SSH port: free now, and in no other VM's vm.env
   local d p used=" "
-  for d in "$(app_vms_root)"/*; do used+="$(app_env "$d" SSH_PORT) "; done
+  while IFS= read -r d; do used+="$(app_env "$d" SSH_PORT) "; done < <(app_vm_dirs)
   for ((p = 52222; p < 52422; p++)); do
     [[ $used == *" $p "* ]] && continue
     nc -z -G1 127.0.0.1 "$p" >/dev/null 2>&1 || { echo "$p"; return 0; }
@@ -152,20 +212,39 @@ app_free_port() {   # the VM's SSH port: free now, and in no other VM's vm.env
 # KEY=VALUE: NAME CPUS MEM_MB DISK_GB SSH_PORT VM_USER VM_FULLNAME VM_HOSTNAME
 # VM_TZ VM_LANG KEYBOARD FEATURES ("bridge=on wallpaper=on ...").
 app_create() {
-  local dir=$1 a kv v q="'"; shift
+  local script=create-vm.sh dir a kv v q="'"
+  [[ $1 == --prebuilt ]] && { script=prebuilt-vm.sh; shift; }
+  dir=$1; shift
   a=$(app_bundle) || return 1
   mkdir -p "$dir"
   for kv in "$@"; do
     v=${kv#*=}; printf "%s='%s'\n" "${kv%%=*}" "${v//$q/$q\\$q$q}"
   done > "$dir/vm.env"
-  /bin/bash "$a/Contents/Resources/scripts/create-vm.sh" "$dir"
+  /bin/bash "$a/Contents/Resources/scripts/$script" "$dir"
+}
+
+app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
+
+# Asks the app's own script, so omacvm build offers the image the app then
+# downloads (the app looks with its version, not this omacvm's).
+app_prebuilt_lookup() {
+  local out
+  out=$(/bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
+  read -r PB_TAG PB_SIZE PB_OMARCHY PB_VERSION <<<"$out"
+  [[ $PB_TAG =~ ^[A-Za-z0-9._-]{1,80}$ && $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_OMARCHY =~ ^[!-~]{1,80}$ &&
+     ${PB_VERSION:-} =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]
 }
 
 app_zip_url() { echo "$APP_DOWNLOADS/v$1/OmacVM-$1.zip"; }   # VERSION
-# The release app is signed with OmacVM's Developer ID (team 722686Y34B). The
-# .sha256 comes from the same release, so it only shows the download is
-# whole; this shows who made it.
-APP_DEVID='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
+APP_KEYS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../release/keys.py
+# Who made the download: the release's update feed (OmacVM-appcast.json),
+# signed with OmacVM's release key (main or spare, src/release/keys.py),
+# gives the zip's SHA-256 and the Developer ID teams it may be signed by.
+app_devid() {   # TEAM...: Developer ID Application of one of the teams, issued by Apple
+  local t ou=""
+  for t in "$@"; do ou+="${ou:+ or }certificate leaf[subject.OU] = \"$t\""; done
+  echo "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and ($ou)"
+}
 
 app_version_lt() {   # A B: A is older than B (2.10.0 is newer than 2.9.1)
   awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, ".")
@@ -173,8 +252,8 @@ app_version_lt() {   # A B: A is older than B (2.10.0 is newer than 2.9.1)
     exit 1 }'
 }
 
-app_published() {   # VERSION: its checksum file is there (small; the zip is not fetched)
-  curl -fsSL --max-time 30 -o /dev/null "$(app_zip_url "$1").sha256" 2>/dev/null
+app_published() {   # VERSION: its signed update feed is there (small; the zip is not fetched)
+  curl -fsSL --max-time 30 -o /dev/null "$APP_DOWNLOADS/v$1/OmacVM-appcast.json.sig" 2>/dev/null
 }
 
 app_install_dir() { echo "$HOME/Applications"; }   # where a new OmacVM.app goes, as the app installs itself
@@ -186,26 +265,44 @@ app_install_cmd() {   # VERSION
 
 # curl sets no quarantine attribute (a browser does), so Gatekeeper does not
 # stop the app, notarized or not: the Developer ID check does that part.
-app_install() {   # VERSION [APP]
-  local v=$1 dest=${2:-} url tmp want got new name
+# app_download VERSION DIR: the release's OmacVM.app into DIR/x/OmacVM.app,
+# checked: the signed feed first (nothing of the release is used before it
+# checks out), then the zip against its SHA-256 and size, then the app: our
+# bundle id and the feed's version, intact, and signed with a Developer ID of
+# a team the feed names.
+app_download() {
+  local v=$1 tmp=$2 url want len got new feed teams_line teams=()
   url=$(app_zip_url "$v")
-  tmp=$(mktemp -d)
-  curl -fsL --max-time 30 -o "$tmp/sum" "$url.sha256" ||
-    { rm -rf "$tmp"; echo "no OmacVM.app $v to download ($url)" >&2; return 1; }
+  if ! curl -fsL --max-time 30 -o "$tmp/feed.json" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json" ||
+     ! curl -fsL --max-time 30 -o "$tmp/feed.json.sig" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json.sig"; then
+    echo "no signed update feed for OmacVM.app $v ($APP_DOWNLOADS/v$v/OmacVM-appcast.json): not installed" >&2; return 1
+  fi
+  feed=$(python3 "$APP_KEYS" app-feed "$tmp/feed.json" "$v") ||
+    { echo "the update feed of OmacVM.app $v does not check out: not installed" >&2; return 1; }
+  read -r want len teams_line <<<"$feed"
+  read -r -a teams <<<"$teams_line"
+  [[ $want =~ ^[0-9a-f]{64}$ && $len =~ ^[0-9]{1,10}$ && ${#teams[@]} -ge 1 ]] ||
+    { echo "the update feed of OmacVM.app $v names no Developer ID team: not installed" >&2; return 1; }
   printf 'Downloading OmacVM.app %s\n' "$v" >&2
-  curl -fL --progress-bar -o "$tmp/OmacVM.zip" "$url" ||
-    { rm -rf "$tmp"; echo "the download failed ($url)" >&2; return 1; }
-  want=$(awk '{ print $1; exit }' "$tmp/sum")
+  curl -fL --progress-bar -o "$tmp/OmacVM.zip" "$url" || { echo "the download failed ($url)" >&2; return 1; }
   got=$(shasum -a 256 "$tmp/OmacVM.zip" | awk '{ print $1 }')
-  [[ $want =~ ^[0-9a-f]{64}$ && $got == "$want" ]] ||
-    { rm -rf "$tmp"; echo "the download does not match its checksum: not installed" >&2; return 1; }
+  [[ $got == "$want" && $(stat -f %z "$tmp/OmacVM.zip") == "$len" ]] ||
+    { echo "the download does not match the signed feed's checksum: not installed" >&2; return 1; }
   new=$tmp/x/OmacVM.app
   if ! ditto -x -k "$tmp/OmacVM.zip" "$tmp/x" || [[ ! -d $new ]] || [[ $(defaults read "$new/Contents/Info" CFBundleIdentifier 2>/dev/null) != org.omacvm.app ]] ||
+     [[ $(defaults read "$new/Contents/Info" CFBundleShortVersionString 2>/dev/null) != "$v" ]] ||
      ! codesign --verify --deep --strict "$new" 2>/dev/null; then
-    rm -rf "$tmp"; echo "the download holds no intact OmacVM.app: not installed" >&2; return 1
+    echo "the download holds no intact OmacVM.app $v: not installed" >&2; return 1
   fi
-  codesign --verify -R="$APP_DEVID" "$new" 2>/dev/null ||
-    { rm -rf "$tmp"; echo "the download is not signed with OmacVM's Developer ID (team 722686Y34B): not installed" >&2; return 1; }
+  codesign --verify -R="$(app_devid "${teams[@]}")" "$new" 2>/dev/null ||
+    { echo "the download is not signed with a Developer ID the signed feed names (${teams[*]}): not installed" >&2; return 1; }
+}
+
+app_install() {   # VERSION [APP]
+  local v=$1 dest=${2:-} tmp new name
+  tmp=$(mktemp -d)
+  app_download "$v" "$tmp" || { rm -rf "$tmp"; return 1; }
+  new=$tmp/x/OmacVM.app
   if [[ -n $dest ]]; then
     # Installed under its own name (the app offers that): keep it, signed
     # again ad hoc as the app does when it installs itself.
