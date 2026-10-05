@@ -5,6 +5,14 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+- Release keys: OmacVM.app's update feed, the control centre's manifest and
+  the prebuilt images' manifests are signed with OmacVM's release key (a
+  main and a spare key ship in every copy; either one signs). The Developer
+  ID team the app must be signed by comes from that signed feed, not from
+  the code, so a new Developer ID can be announced; the app and
+  `omacvm build`/`omacvm update` refuse an app of a team it does not name.
+  Prebuilt images are only used with a signed manifest. Maintainers:
+  [docs/release-keys.md](docs/release-keys.md).
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.
