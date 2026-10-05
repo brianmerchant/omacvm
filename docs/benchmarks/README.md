@@ -444,11 +444,23 @@ app has KosmicKrisp: Vulkan apps get the faster, fuller driver, OpenGL stays on
 virgl (Zink is slower and ES 2.0 only), and Chrome keeps ANGLE on GL (ANGLE on
 Vulkan wins Aquarium but loses Basemark and needs X11 and flags).
 
-Vulkan windows present through a CPU copy (Mesa's software WSI,
-`MESA_VK_WSI_DEBUG=sw`, set for app VMs): a Venus image handed to Hyprland
-as a dma-buf cannot be imported by its OpenGL context on the Mac and ended
-that context (black desktop). The copy costs full-screen Vulkan frame rates
-(vkmark 387 full screen; with vkmark's headless output, no window, 4,700-5,200).
+Vulkan windows: a Venus image handed to Hyprland as a dma-buf cannot be
+imported by its OpenGL context on the Mac. Until 3.0.0 RC that import ended
+Hyprland's context (black desktop), so app VMs presented through a CPU copy
+(Mesa's software WSI, `MESA_VK_WSI_DEBUG=sw`). Now the Mac fills a GL texture
+from the image (virgl-set-type-without-egl.patch) and Vulkan apps keep Mesa's
+normal present path. vkmark (7 scenes x 5 s, mailbox, M4 Max, macOS 15,
+MoltenVK, bench lock, median of 3, test window hidden):
+
+| | normal WSI (now) | software WSI (before) |
+|---|---|---|
+| window 800x600 | 865 | 336 |
+| full screen 2592x1458 | 678 | 65 |
+
+These count the app's frames. The frames the screen shows are capped by the
+display's refresh; that was not measured here (the hidden test window paces
+Hyprland at ~12 Hz for both paths). With vkmark's headless output, no window:
+4,700-5,200.
 
 ## GPU compute with Venus (2026-10-04)
 

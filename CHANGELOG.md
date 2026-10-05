@@ -193,10 +193,14 @@ Pending (each line is decided at release: the lane landed, or it moves to
   a "Vulkan (Venus)" row.
 - Vulkan windows no longer take Omarchy's desktop down: a Vulkan app on
   Wayland (vkcube, vkmark) made Hyprland lose its GPU context for good (a
-  black desktop) when it took the app's frame as a dma-buf, which the Mac
-  cannot share with OpenGL. App VMs now present Vulkan frames through a
-  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which costs full-screen Vulkan frame
-  rates.
+  black desktop) when it took the app's frame as a dma-buf. macOS OpenGL
+  cannot import that memory (a Metal heap), and the failed import ended
+  the whole context. Now the Mac copies the Vulkan image into an OpenGL
+  texture each time Hyprland draws it, and an import that cannot work
+  leaves the window blank instead of ending the context. Vulkan apps keep Mesa's normal present
+  path (vkmark on an M4 Max, median of 3: 865 in a window and 678 full
+  screen, against 336 and 65 with the old CPU-copy workaround). With an
+  older app the VM still uses the CPU copy (`MESA_VK_WSI_DEBUG=sw`).
 - OmacVM.app: WebGPU and GPU compute, experimental and off by default:
   `omacvm enable vulkan --vm NAME`, then restart the VM. The VM gets OpenCL
   (darktable, ffmpeg's OpenCL filters, Geekbench GPU), WebGPU in Firefox,
