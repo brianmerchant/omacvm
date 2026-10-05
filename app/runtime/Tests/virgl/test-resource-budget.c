@@ -12,7 +12,9 @@
  *                                   trying again (the next one at once), small ones,
  *                                   screens and cursors not
  *   test-resource-budget warn       pressure warn, 100 MB left: what fits
- *   test-resource-budget status     the status file: in use, peak, a lost context */
+ *   test-resource-budget status     the status file: in use, peak, a lost context
+ *   test-resource-budget levelfile  the level read from a file at each look (the
+ *                                   test hook that raises it while a VM runs) */
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
 #include <spawn.h>
@@ -397,6 +399,38 @@ static int run_status(void)
    return 0;
 }
 
+/* OMACVM_GPU_MEMORY_PRESSURE=file:PATH: the level changes while the renderer runs */
+static void level_to(const char *level)
+{
+   FILE *f = fopen(getenv("OMACVM_TEST_LEVEL_FILE"), "w");
+   if (f) {
+      fprintf(f, "%s\n", level);
+      fclose(f);
+   }
+}
+
+static int run_levelfile(void)
+{
+   char text[64] = "";
+   uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB */
+   check(a != 0, "level file says normal: a 64 MB texture fits");
+   level_to("critical");
+   uint32_t b = tex2d(4096, 4096, 1);
+   check(b == 0, "level file says critical: the next 64 MB texture is refused");
+   usleep(1100000);                       /* the once-a-second look */
+   settle();
+   check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
+         "the status file follows: pressure=critical");
+   level_to("normal");
+   uint32_t c = tex2d(4096, 4096, 1);
+   check(c != 0, "back to normal: a 64 MB texture fits again");
+   if (a)
+      virgl_renderer_resource_unref(a);
+   if (c)
+      virgl_renderer_resource_unref(c);
+   return 0;
+}
+
 static int child(const char *mode)
 {
    setvbuf(stdout, NULL, _IONBF, 0);
@@ -421,6 +455,8 @@ static int child(const char *mode)
       run_warn();
    else if (!strcmp(mode, "status"))
       run_status();
+   else if (!strcmp(mode, "levelfile"))
+      run_levelfile();
    else
       run_default();
    virgl_renderer_cleanup(&cookie);
@@ -459,10 +495,21 @@ int main(int argc, char **argv)
    snprintf(status_file, sizeof status_file, "%s/omacvm-gpu-memory-test-%d",
             getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp", (int)getpid());
    setenv("OMACVM_GPU_MEMORY_STATUS", status_file, 1);
+   char level_file[300], level_env[310];
+   snprintf(level_file, sizeof level_file, "%s.level", status_file);
+   snprintf(level_env, sizeof level_env, "file:%s", level_file);
+   setenv("OMACVM_TEST_LEVEL_FILE", level_file, 1);
+   FILE *lf = fopen(level_file, "w");
+   if (lf) {
+      fputs("normal\n", lf);
+      fclose(lf);
+   }
    int bad = spawn(argv[0], "limit", "64", "off") + spawn(argv[0], "off", "0", "off") +
              spawn(argv[0], "default", NULL, "off") + spawn(argv[0], "critical", "0", "critical") +
-             spawn(argv[0], "warn", "0", "warn:100") + spawn(argv[0], "status", "0", "normal");
+             spawn(argv[0], "warn", "0", "warn:100") + spawn(argv[0], "status", "0", "normal") +
+             spawn(argv[0], "levelfile", "0", level_env);
    unlink(status_file);
+   unlink(level_file);
    printf("%s\n", bad ? "resource budget: FAILED" : "resource budget: all checks passed");
    return bad != 0;
 }
