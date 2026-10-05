@@ -32,8 +32,9 @@ logo and the animation off. The main window's layer now draws again when the
 window changes size (cheap; the still logo has no frames of its own).
 With frames shown as IOSurfaces (the default since 2.9.0) the still logo
 and the black are drawn into the surface at the view's size in pixels
-(updateUIInfo tells it, and a new size draws again); OMACVM_GL_PRESENT=layer
-draws them in the CAOpenGLLayer as before. The patch comes after the GPU,
+(updateUIInfo tells it, and a new size draws again), and the animation's
+layer goes over the surface layer as it did over the CAOpenGLLayer;
+OMACVM_GL_PRESENT=layer draws them in the CAOpenGLLayer as before. The patch comes after the GPU,
 shortcut, pointer and idle-refresh patches of ui/cocoa.m.
 
 Why: every start showed QEMU's text for a few seconds (before the firmware,
@@ -86,16 +87,18 @@ logo's to the pixel.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -210,6 +210,8 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -210,6 +210,10 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
                              DisplaySurface *new_surface);
  
  static void cocoa_gl_render(void);
 +/* OmacVM boot splash: the main view's size in pixels (BQL). */
 +static void omacvm_splash_view_size(uint32_t w, uint32_t h);
++/* GL frames are shown as IOSurfaces (the view's layer is a plain CALayer). */
++static bool cocoa_gl_present_on(void);
  
  static bool cocoa_gl_is_compatible_dcl(DisplayGLCtx *dgc,
                                         DisplayChangeListener *dcl);
-@@ -238,6 +240,8 @@ - (id)init
+@@ -238,6 +242,8 @@ - (id)init
      self = [super init];
      if (self) {
          [self setAsynchronous:NO];
@@ -104,7 +107,7 @@ logo's to the pixel.
      }
      return self;
  }
-@@ -1266,6 +1270,9 @@ - (void) updateUIInfoLocked
+@@ -1266,6 +1272,9 @@ - (void) updateUIInfoLocked
      info.yoff = 0;
      NSSize backingFrameSize = [self convertSizeToBacking:frameSize];
      CGFloat backingScale = [[self window] backingScaleFactor];
@@ -114,7 +117,7 @@ logo's to the pixel.
      /* Keep the corresponding Hyprland logical dimensions integral. */
      uint32_t cleanScaleDivisor = backingScale > 1.75 ? 2 :
                                   backingScale > 1.25 ? 3 : 1;
-@@ -3353,6 +3360,732 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
+@@ -3353,6 +3362,733 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
      CGLDestroyContext(ctx);
  }
  
@@ -834,7 +837,8 @@ logo's to the pixel.
 +    bool off = v && !strcmp(v, "0");
 +
 +    if (!omacvm_splash_enabled() || getenv("OMACVM_COCOA_HIDDEN") ||
-+        ![[cocoaView layer] isKindOfClass:[CAOpenGLLayer class]]) {
++        !(cocoa_gl_present_on() ||
++          [[cocoaView layer] isKindOfClass:[CAOpenGLLayer class]])) {
 +        return;
 +    }
 +    info_report("cocoa: start animation %s", reduce ? "still (Reduce motion)" :
@@ -847,7 +851,7 @@ logo's to the pixel.
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -3361,6 +4094,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
+@@ -3361,6 +4097,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
          gl_dirty = true;
      });
      cocoa_refresh_activity();
@@ -855,7 +859,7 @@ logo's to the pixel.
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -3374,6 +4108,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -3374,6 +4111,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -863,7 +867,7 @@ logo's to the pixel.
  }
  
  static void cocoa_gl_render(void)
-@@ -3451,6 +4186,8 @@ static void cocoa_gl_render(void)
+@@ -3451,6 +4189,8 @@ static void cocoa_gl_render(void)
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -872,7 +876,19 @@ logo's to the pixel.
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3823,6 +4560,7 @@ static bool cocoa_gl_present(void)
+@@ -3689,6 +4429,11 @@ static bool cocoa_gl_present_init(void)
+     return true;
+ }
+ 
++static bool cocoa_gl_present_on(void)
++{
++    return present_ctx != NULL;
++}
++
+ static void cocoa_gl_present_free(void)
+ {
+     for (int i = 0; i < present_nsurf; i++) {
+@@ -3823,6 +4568,7 @@ static bool cocoa_gl_present(void)
      bool flip;
      uint32_t w, h;
      GLint filter = qatomic_read(&zoom_interpolation) ? GL_LINEAR : GL_NEAREST;
@@ -880,7 +896,7 @@ logo's to the pixel.
  
      if (gl_scanout_borrow) {
          DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
-@@ -3834,6 +4572,13 @@ static bool cocoa_gl_present(void)
+@@ -3834,6 +4580,13 @@ static bool cocoa_gl_present(void)
          h = texture.height;
          /* The surface's first row is the top of the window. */
          flip = !texture.y_0_top;
@@ -894,7 +910,7 @@ logo's to the pixel.
      } else if (surface && surface->texture) {
          src = surface->texture;
          w = surface_width(surface);
-@@ -3852,9 +4597,11 @@ static bool cocoa_gl_present(void)
+@@ -3852,14 +4605,16 @@ static bool cocoa_gl_present(void)
  
      /* A 10-bit scanout keeps its depth: half-float surfaces. */
      GLint ifmt = 0;
@@ -909,7 +925,13 @@ logo's to the pixel.
      bool deep = ifmt == GL_RGB10_A2 || ifmt == GL_RGBA16F || ifmt == GL_RGB16F;
      static bool deep_failed;           /* half-float surfaces could not be made */
      deep = deep && !deep_failed;
-@@ -3911,13 +4658,18 @@ static bool cocoa_gl_present(void)
+     static int deep_logged = -1;
+-    if (deep != deep_logged) {
++    if (src && deep != deep_logged) {
+         info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
+                     deep ? "half-float" : "8-bit",
+                     deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
+@@ -3911,13 +4666,18 @@ static bool cocoa_gl_present(void)
      glClear(GL_COLOR_BUFFER_BIT);
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
@@ -935,7 +957,7 @@ logo's to the pixel.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-@@ -4531,6 +5283,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
+@@ -4531,6 +5291,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -943,7 +965,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout disable");
  }
-@@ -4543,8 +5296,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
+@@ -4543,8 +5304,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
@@ -957,7 +979,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -4555,6 +5313,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -4555,6 +5321,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
                                     uint32_t w, uint32_t h)
  {
      gl_dirty = true;
@@ -965,7 +987,7 @@ logo's to the pixel.
  
      /*
       * Show the guest's frame now, not on the next 30 ms refresh tick:
-@@ -5299,6 +6058,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
+@@ -5299,6 +6066,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -974,7 +996,7 @@ logo's to the pixel.
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -6332,6 +7093,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -6332,6 +7101,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          }
          info_report("cocoa: GL frames shown %s",
                      present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
