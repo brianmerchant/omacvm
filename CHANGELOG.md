@@ -12,11 +12,6 @@ a boot splash, any Omarchy scale on 5K and larger displays, less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
-Known issue: a Vulkan program that clears `MESA_VK_WSI_DEBUG` (or runs
-without the session's environment) can still end Hyprland's GPU context in
-an app VM set to Vulkan: the desktop goes black until you log out and in.
-OpenGL (and Automatic, which is OpenGL in 3.0.0) is not affected.
-
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy
@@ -196,8 +191,8 @@ OpenGL (and Automatic, which is OpenGL in 3.0.0) is not affected.
   next to OpenGL; OpenGL and the browsers stay on virgl either way, so
   Vulkan only adds Vulkan apps (on macOS 26 and newer on KosmicKrisp, which
   ran vkmark off-screen 29 % faster than MoltenVK on a Mac mini M4).
-  Automatic is OpenGL on every Mac in 3.0.0 (see the known issue below);
-  turning it to Vulkan on macOS 26 and newer later is one line. It applies
+  Automatic is OpenGL on every Mac in 3.0.0; turning it to Vulkan on
+  macOS 26 and newer later is one line. It applies
   at the VM's next start, and `omacvm check` says what a start got. The
   hidden `venus` switch of 2.9 is gone: if it was on, the app's first 3.0.0
   launch sets Graphics to Vulkan for each VM that had no choice of its own
@@ -223,13 +218,21 @@ OpenGL (and Automatic, which is OpenGL in 3.0.0) is not affected.
   apply)". In the VM a timer looks again 90 s after boot, after the desktop
   is up, so a build never holds up the boot or the desktop. `omacvm check`
   has a "Vulkan (Venus)" row.
-- Vulkan windows are copied through the CPU (`MESA_VK_WSI_DEBUG=sw` in app
-  VMs): a Vulkan app on Wayland (vkcube, vkmark) handed Hyprland its frame as
-  a dma-buf, which the Mac cannot share with OpenGL, and Hyprland lost its
-  GPU context for good (a black desktop). The copy is slow for full-screen
-  Vulkan: vkmark full screen 387 on an M4 Max (macOS 15) and 203 on a Mac
-  mini M4 at 5K (macOS 27); without a window it ran at 4,700-5,200 on the
-  M4 Max (not the same size or scenes, so only a rough idea of the cost).
+- Vulkan windows no longer take Omarchy's desktop down: a Vulkan app on
+  Wayland (vkcube, vkmark) made Hyprland lose its GPU context for good (a
+  black desktop) when it took the app's frame as a dma-buf. macOS OpenGL
+  cannot import that memory (a Metal heap), and the failed import ended
+  the whole context. Now the Mac copies the Vulkan image into an OpenGL
+  texture each time Hyprland draws it, and an import that cannot work
+  leaves that window blank instead of ending the context.
+  On macOS 15 (MoltenVK) Vulkan apps now use Mesa's normal present path
+  (vkmark on an M4 Max, median of 3: 865 in a window and 678 full screen,
+  against 336 and 65 with the CPU copy).
+  On macOS 26 and newer (KosmicKrisp) Vulkan windows still go through the
+  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which is slower, mostly full screen
+  (vkmark full screen 203 on a Mac mini M4 at 5K). The faster path is not
+  tested on KosmicKrisp yet. A VM started by an older app also keeps the
+  CPU copy.
 - OmacVM.app: WebGPU and GPU compute, experimental and off by default:
   `omacvm enable vulkan --vm NAME`, then restart the VM. The VM gets OpenCL
   (darktable, ffmpeg's OpenCL filters, Geekbench GPU), WebGPU in Firefox,

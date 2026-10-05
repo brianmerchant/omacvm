@@ -81,8 +81,11 @@ install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-vid
 # timer, after the desktop) when the VM has Venus and still lacks it.
 want=""; [[ $(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1) == vulkan ]] && want=--want
 venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
-# Vulkan windows present through a CPU copy (90-omacvm-vulkan.conf says why).
-install -Dm644 90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf
+# Vulkan windows: on the GPU when the Mac's app can show them, else through a
+# CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
+# environment.d file.
+rm -f /etc/environment.d/90-omacvm-vulkan.conf
+install -Dm755 omacvm-vulkan-present /usr/lib/systemd/user-environment-generators/90-omacvm-vulkan-present
 # Up to 3.0.0 RC2 the service itself was wanted by multi-user.target, after
 # network-online.target: the boot (and the desktop) waited for a build.
 # Now a timer starts it after the desktop is up.
