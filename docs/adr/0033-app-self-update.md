@@ -1,9 +1,9 @@
 # 0033: OmacVM.app updates itself (own updater, signed feed, rollback)
 
 Status: accepted, built and tested end to end (branch `app-self-update`).
-Live from the first release that carries `src/lib/release-key.pub`: who
-holds the private key is the user's decision (needs-user, shared with
-[0032](0032-per-feature-update-manifest.md)).
+Live from 3.0.0, the first release that carries the release keys
+(`src/lib/release-key.pub`, `release-key-spare.pub`; who holds them:
+[docs/release-keys.md](../release-keys.md)).
 
 ## Context
 
@@ -13,8 +13,8 @@ once a week, with one switch that silences it completely (no checks, no
 messages), shared with the control centre in Omarchy. It must never break a
 working install:
 
-- only OmacVM's own builds: a signed feed, a checksum, OmacVM's Developer ID
-  (team 722686Y34B) on the new app;
+- only OmacVM's own builds: a signed feed, a checksum, a Developer ID of a
+  team the signed feed names (`devid_teams`) on the new app;
 - never replace the bundle while a VM's QEMU runs from it (STANDARDS 20);
 - if the new version does not start, the old one comes back by itself; the
   previous version stays for one step back.
@@ -133,16 +133,27 @@ cannot get into the feed. Once releases are notarized, a stapled-ticket check
 becomes required from the version that adds it: a constant in the app, never
 a field in the feed.
 
-**Release key** (proposal for both feeds, needs-user): one Ed25519 key for the
-app feed and the control centre's manifest. Both are `{"schema": 1, ...}`
-JSON, so each carries a required `kind` (`app-feed`, `control-manifest`) and
-each parser refuses the other's: a signed manifest never passes as a feed. The private half only on the
-user's Mac, in the login Keychain (`org.omacvm.release-key`), plus one offline
-backup; the release step signs locally, where the Developer ID already lives.
-Not a GitHub Actions secret: anyone who can change a workflow could then sign
-a manifest that makes Macs check out another commit (0032), where the release
-key is the only guard. Rotation: the release that brings a new public key is
-signed with the old one. A lost key means one manual update for everyone.
+**Release keys** (decided 2026-10-05): two Ed25519 keys, main and spare, both
+public halves in every copy; a document signed by either is valid. They sign
+the app feed, the control centre's manifest and the prebuilt manifests. All
+are JSON, so each carries a required `kind` (`app-feed`, `control-manifest`,
+`prebuilt-manifest`) and each parser refuses the others. The main private
+key lives in the release Mac's Keychain (`org.omacvm.release-key`) and in
+1Password, the spare only in 1Password and offline; the release step signs
+locally, where the Developer ID already lives. Not a GitHub Actions secret:
+anyone who can change a workflow could then sign a manifest that makes Macs
+check out another commit (0032), where the release key is the only guard.
+Rotation: a signed feed may name a new spare (`next_spare_key`); the app keeps
+that signed feed (not a bare key) and trusts the key from then on. Losing the
+main key costs nothing but that rotation; losing both means one manual
+update for everyone. Steps: [docs/release-keys.md](../release-keys.md).
+
+**Developer ID team from the feed.** The team the new app must be signed by
+is not built into the app: the signed feed names one to four
+(`devid_teams`), and a missing or empty list refuses the update. A change of
+Developer ID is a feed signed with our key that names the old and the new
+team. The staged update keeps its signed feed and is checked against it again
+at the next launch.
 
 **Release channel.** A release is published as a pre-release first and its
 zip tried by hand; installed apps see it only once it is marked latest.
@@ -156,7 +167,7 @@ update path itself is tested with test builds.
   New VMs get the new app's copy.
 - `omacvm update` still replaces the app when it is closed (same checks, no
   rollback). Both paths keep working side by side.
-- Test hooks: `OMACVM_APPCAST_URL`, `OMACVM_APPCAST_KEY` (a test key),
+- Test hooks: `OMACVM_APPCAST_URL`, `OMACVM_APPCAST_KEY` (test keys, space-separated),
   `OMACVM_SETTINGS_DIR`, `OMACVM_COCOA_HIDDEN`; `build-app.sh --id` makes test
   builds that share nothing with an installed OmacVM. Only test builds read
   the first three: a build with the release id `org.omacvm.app` ignores them

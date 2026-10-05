@@ -1,9 +1,8 @@
 # 0032: Updates: one signed manifest per release, digests per part
 
 Status: accepted; tooling and checks built (round 1). Branch
-`control-centre`. Shares the release key question with the app self-update;
-until a key is in `src/lib/release-key.pub` the Bridge reports "no release
-key yet" and offers nothing.
+`control-centre`. Signed with the release keys the app's feed uses (main or
+spare, [docs/release-keys.md](../release-keys.md)), live from 3.0.0.
 
 ## Context
 
@@ -22,9 +21,10 @@ release says what changed per feature, and nothing is signed.
 ## Decision
 
 Option 2. Each release `v<version>` carries `omacvm-manifest.json` and an
-Ed25519 signature `omacvm-manifest.json.sig` (public key in
-`src/lib/release-key.pub`, checked with CryptoKit on the Mac before any field
-is used). `parts` maps each feature (plus `core` and `app`) to a sha256
+Ed25519 signature `omacvm-manifest.json.sig` (by the main or the spare
+release key, `src/lib/release-key.pub` and `release-key-spare.pub`, checked
+with CryptoKit on the Mac before any field is used). It lists the release's
+Developer ID teams (`devid_teams`, required). `parts` maps each feature (plus `core` and `app`) to a sha256
 digest over its paths (`src/release/parts.tsv`; CI fails on a file in no
 part or in two) and the release where that digest last changed. The manifest
 pins the release commit; the Mac checks out that commit.
@@ -42,13 +42,13 @@ settable from the control centre.
 
 - No version bumps by hand; the per-feature "2.8.0 → 2.9.1" comes from the
   digests.
-- Release scripts gain a manifest step and need the private key: who holds
-  it (the user's Mac or a CI secret) is the user's call.
-- Tests use `OMACVM_FEED_URL` and `OMACVM_FEED_KEY` (a test key) in the
-  Bridge's environment.
+- Release scripts gain a manifest step and need the private key: the release
+  Mac's Keychain (`manifest.py build --out` signs and reads it back).
+- Tests use `OMACVM_FEED_URL` and `OMACVM_FEED_KEY` (test keys,
+  space-separated) in the Bridge's environment.
 - Round 1 installs an update as one `omacvm update` (Mac and that VM); the
   list shows only the changed parts, and parts that did not change are left
   as they are where the installers already keep stamps (the Mac apps,
   Omanotch). Restarting only what changed everywhere is a follow-up.
-- Still to wire: the release step that runs `manifest.py build` against the
-  previous release's manifest, signs it and attaches both files.
+- Still to wire: the release step that runs `manifest.py build --out`
+  against the previous release's manifest and attaches both files.
