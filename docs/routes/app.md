@@ -439,14 +439,24 @@ and Hyprland scales the desktop. What a scale costs:
   frame, `tests/graphics/fractional-scale.sh --frames`, 60 Hz virtual
   display, M4 Max, benchmark lock held): at 5K every scale kept 60 fps
   (median 16.7 ms, no late frames). At 8K: 56 fps at 2x, 49 at 1.6 and
-  1.25, 39 at 1x. A Mac with a smaller GPU has less room; 2x is the
-  lightest.
+  1.25, 39 at 1x. On the Mac mini (M4, 10-core GPU, 16 GB; 8 GB VM):
+  4K and 5K keep 59.4 to 60 fps at every scale (5K on its LG UltraFine,
+  4K on a virtual display); 6K (virtual) only 36 to 39 fps at every scale,
+  2x included: there the GPU is the limit, not the scale. While the
+  scale changes, one frame takes 70 to 370 ms (the modeset) and 1 to 9
+  frames are late; at 6K about 150. A Mac with a smaller GPU has less
+  room; 2x is the lightest.
 - **A scale change** makes every screen-sized buffer again, Hyprland's and
   every app's (20 to 50 of them, 32 to 127 MB each from 4K to 8K): Hyprland
   sets the mode 2 or 3 times (Omarchy's scale command sets it, then its
   config reload sets it again) and for a moment old and new buffers both
-  count (the last column). Switching between 1.6 and 2 sixteen times
-  left the same memory in use each time: nothing leaks.
+  count (the last column). Omarchy's bar (quickshell) draws one frame at
+  the new size with the old scale: going from 1.6 to 1 on 5K it makes
+  8192×4608 buffers (150 MB each) for a moment. Switching between 1.6 and
+  2 sixteen times left the same memory in use each time, and so did a
+  35-minute session on the Mac mini (149 scale changes, 75 mode changes
+  like a window resize, 50 browser windows opened): back at 2 windows it
+  used 1.52 GB, as at the start (1.55 GB). Nothing leaks.
 - The VM's graphics memory has no fixed limit: it grows as long as macOS
   has memory to give ([Graphics memory and VM memory](#graphics-memory-and-vm-memory)).
   Up to 2.9.1 it had a budget of a quarter of the Mac's memory, which a 5K

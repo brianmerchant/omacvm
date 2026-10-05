@@ -473,7 +473,13 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   was lost: `logs/qemu.log` says `guest GPU memory budget of 4096 MB
   reached`, then `context ... (Hyprland) is lost`. It was not a loop and not
   a leak: switching between 1.6 and 2 sixteen times leaves the same memory
-  in use each time.
+  in use each time, and a 35-minute session with 149 scale changes and 50
+  browser windows came back to where it started. The refused 8192-wide
+  buffer was most likely Omarchy's bar (quickshell): for one frame after
+  a scale change it draws the new size at the old scale (8192×4608 from
+  1.6 to 1 at 5K). A desktop with more apps open than in our tests (each
+  browser window at 5K holds a few buffers of 30 to 90 MB) plus that
+  moment explains the 3993 MB in use.
 - **Fix:** no fixed limit any more. The VM's graphics memory grows as
   long as macOS has memory to give; new big buffers are refused only when
   macOS says its memory is critical, or would be nearly used up while it
