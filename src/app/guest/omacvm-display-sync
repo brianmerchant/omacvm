@@ -352,7 +352,10 @@ PY
 # rule; SHOWN is Hyprland's j/monitors. Exit 0: send it (and it is
 # counted); 1: Hyprland already shows exactly that (mode, rate, scale, place),
 # so a modeset would only make the screen flash and its buffers be made
-# again; 2: held. The hold is the guard against a loop: an output that
+# again; 2: held. With scale "auto" Hyprland picks the scale itself, so the
+# scale counts as shown when this same rule was the last one Hyprland took.
+# HDR is not in j/monitors: the HDR part counts as shown when the last rule
+# Hyprland took had it (sent_ok writes both after Hyprland said ok). The hold is the guard against a loop: an output that
 # changed 6 times in 10 s between only two states (ping-pong), or 12 times
 # in 10 s at all, keeps what it shows for 60 s and the reason is logged once
 # (journal, and the file "held" for omacvm check); then it looks once more
@@ -396,11 +399,14 @@ try:
     want_scale = float(scale) if scale != "auto" else None
 except (IndexError, ValueError, ZeroDivisionError):
     width = height = 0
-last_hdr = d / f"{output}.hdr"
 try:
-    shown_hdr = last_hdr.read_text()
+    shown_hdr = (d / f"{output}.hdr").read_text()
 except OSError:
     shown_hdr = None
+try:
+    last_sent = (d / f"{output}.sent").read_text().strip()
+except OSError:
+    last_sent = None
 try:
     monitors = json.loads(shown)
 except ValueError:
@@ -412,7 +418,8 @@ for m in monitors if isinstance(monitors, list) else []:
         same = (
             width and m["width"] == width and m["height"] == height
             and abs(float(m["refreshRate"]) - refresh) < 0.5
-            and want_scale is not None and abs(float(m["scale"]) - want_scale) < 0.001
+            and (abs(float(m["scale"]) - want_scale) < 0.001 if want_scale is not None
+                 else last_sent == digest)
             and shown_hdr == hdr
         )
         place = re.fullmatch(r"(-?\d+)x(-?\d+)", position)
@@ -450,8 +457,14 @@ if len(events) >= STORM or (len(events) >= PINGPONG and distinct <= 2):
                      stderr=subprocess.DEVNULL, start_new_session=True)
     raise SystemExit(2)
 history.write_text("".join(f"{t} {h}\n" for t, h in events))
-last_hdr.write_text(hdr)
 PY
+}
+
+# sent_ok OUTPUT HASH HDR: Hyprland took the rule; what follow_check compares
+# with next time (only now, so a rule Hyprland refused is sent again).
+sent_ok() {
+  printf '%s' "$3" > "$state_dir/$1.hdr"
+  printf '%s\n' "$2" > "$state_dir/$1.sent"
 }
 
 apply_preferred_modes() {
@@ -465,7 +478,7 @@ apply_preferred_modes() {
   local scale
   local position
   local i w h
-  local hdr
+  local hdr digest
   local -a outputs=() modes=() scales=() sizes=()
   local -A placed=()
 
@@ -533,7 +546,8 @@ apply_preferred_modes() {
     if [[ $output == Virtual-1 ]]; then
       notch_bar "$mode" "$scale"
     fi
-    follow_check "$output" "$(cksum <<<"$rule" | cut -d' ' -f1)" "$mode" "$scale" "$position" "$hdr" "$shown" ||
+    digest=$(cksum <<<"$rule" | cut -d' ' -f1)
+    follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" ||
       continue
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
@@ -541,6 +555,8 @@ apply_preferred_modes() {
     elif [[ $response != ok ]]; then
       printf 'omacvm-display-sync: Hyprland rejected %s for %s: %s\n' \
         "$mode" "$output" "$response" >&2
+    else
+      sent_ok "$output" "$digest" "$hdr"
     fi
   done
   [[ -z ${lock_fd:-} ]] || exec {lock_fd}>&-

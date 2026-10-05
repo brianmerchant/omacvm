@@ -38,16 +38,18 @@ def guest_bash() -> str | None:
 BASH = guest_bash()
 
 
-def displayid_edid(width: int, height: int, hz: float = 60.0) -> bytes:
-    """A base EDID plus a DisplayID 1.3 type I timing, as QEMU makes them."""
+def displayid_edid(width: int, height: int, hz: float = 60.0, size: bool = True) -> bytes:
+    """A base EDID plus a DisplayID 1.3 type I timing, as QEMU makes them
+    (size=False: no physical size, so the scale is Hyprland's "auto")."""
     hblank, hfront, hsync = 160, 48, 32
     vblank, vfront, vsync = 60, 3, 5
     clock = round((width + hblank) * (height + vblank) * hz / 10_000)  # 10 kHz units
     base = bytearray(128)
     base[0:8] = b"\x00\xff\xff\xff\xff\xff\xff\x00"
     # QEMU's density: 110 points per inch at 2x (the patch rounds to cm).
-    base[21] = min(255, max(1, round(width / 2 * 2.54 / 110)))
-    base[22] = min(255, max(1, round(height / 2 * 2.54 / 110)))
+    if size:
+        base[21] = min(255, max(1, round(width / 2 * 2.54 / 110)))
+        base[22] = min(255, max(1, round(height / 2 * 2.54 / 110)))
     base[126] = 1
     base[127] = (-sum(base[:127])) % 256
 
@@ -90,10 +92,13 @@ if args and args[0] == "eval":
     rule = args[1]
     with open(os.path.join(state, "evals"), "a") as f:
         f.write(rule + "\n")
+    if os.path.exists(os.path.join(state, "refuse")):
+        print("error: refused"); raise SystemExit(0)
     out = re.search(r'output = "([^"]+)"', rule)[1]
     m = re.search(r'mode = "modeline (\d+) (\d+) \d+ \d+ (\d+) (\d+) \d+ \d+ (\d+)', rule)
     clock, w, ht, h, vt = map(int, m.groups())
-    scale = float(re.search(r'scale = "([0-9.]+)"', rule)[1])
+    scale = re.search(r'scale = "([0-9.]+|auto)"', rule)[1]
+    scale = 2.0 if scale == "auto" else float(scale)   # Hyprland's own pick
     pos = re.search(r'position = "(-?\d+)x(-?\d+)"', rule)
     data = json.load(open(mons))
     data = [d for d in data if d["name"] != out]
@@ -147,11 +152,11 @@ class SyncCase(unittest.TestCase):
     def set_scale(self, scale: str):
         self.config.write_text(MONITORS_LUA.format(scale=scale))
 
-    def set_window(self, width: int, height: int, output: str = "Virtual-1"):
+    def set_window(self, width: int, height: int, output: str = "Virtual-1", size: bool = True):
         c = self.drm / f"card0-{output}"
         c.mkdir(exist_ok=True)
         (c / "status").write_text("connected\n")
-        (c / "edid").write_bytes(displayid_edid(width, height))
+        (c / "edid").write_bytes(displayid_edid(width, height, size=size))
 
     def run_sync(self) -> subprocess.CompletedProcess:
         env = dict(os.environ)
@@ -234,6 +239,38 @@ class ModeAndScale(SyncCase):
         self.run_sync()
         self.assertEqual(len(self.evals()), 2)
         self.assertEqual(self.shown()["width"], 5120)
+
+    def test_auto_scale_not_resent(self):
+        # No saved scale and no physical size: the rule says scale "auto" and
+        # Hyprland picks; the same rule is not sent again while it shows it.
+        self.set_window(5120, 2880, size=False)
+        self.config.write_text("-- no scale saved\n")
+        for _ in range(4):
+            r = self.run_sync()
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.evals()), 1, r.stderr)
+        self.assertIn('scale = "auto"', self.evals()[0])
+        self.set_window(3840, 2160, size=False)     # a new window size is sent
+        self.run_sync()
+        self.assertEqual(len(self.evals()), 2)
+
+    def test_refused_rule_is_sent_again(self):
+        # What a rule changed is only taken as shown once Hyprland said ok:
+        # a refused rule (here with Hyprland already at that mode and scale,
+        # where only the HDR part would differ) is tried again next time.
+        self.set_window(5120, 2880)
+        self.run_sync()
+        self.assertEqual(len(self.evals()), 1)
+        (self.state / "Virtual-1.hdr").write_text(", bitdepth = 10")  # HDR was on
+        (self.hypr / "refuse").write_text("")
+        r = self.run_sync()
+        self.assertIn("rejected", r.stderr)
+        self.assertEqual((self.state / "Virtual-1.hdr").read_text(), ", bitdepth = 10")
+        (self.hypr / "refuse").unlink()
+        self.run_sync()
+        self.assertEqual(len(self.evals()), 3)
+        self.run_sync()
+        self.assertEqual(len(self.evals()), 3)
 
     def test_users_own_rule_is_left_alone(self):
         self.set_window(5120, 2880)
