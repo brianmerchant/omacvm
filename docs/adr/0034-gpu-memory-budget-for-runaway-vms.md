@@ -55,8 +55,10 @@ follows macOS's memory pressure (dispatch source, and
 `kern.memorystatus_vm_pressure_level` when a big resource is made). Normal:
 everything goes through. Warn: Apple's GL frees what it holds for deleted
 resources, the app asks the VM to drop its file cache, and a new resource of
-16 MB or more is refused only if it would leave macOS less than a sixteenth
-of its memory (at least 512 MB) free, inactive or purgeable. Critical: new
+16 MB or more is refused only if it is bigger than all the free, inactive and
+purgeable memory macOS has left (a first version kept a sixteenth of the
+Mac's memory free; the user would rather swap than see a black desktop, so
+only what cannot fit at all is refused). Critical: new
 big resources are refused, after a glFinish and three more looks over
 100 ms. Screens, cursors and small resources are never refused for pressure.
 

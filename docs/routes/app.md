@@ -491,8 +491,9 @@ peak of this run, and macOS's memory pressure.
 - When macOS warns (yellow), QEMU lets the Mac's GPU driver free what it
   still holds for deleted textures, and the app asks the VM to drop its file
   cache (at most every 10 minutes), which Linux then gives back to the Mac.
-  A new big buffer (16 MB or more) that would leave macOS less than a
-  sixteenth of its memory free is refused.
+  Everything still goes through, unless a new big buffer (16 MB or more)
+  is bigger than all the memory macOS has left: more swapping is better
+  than a black desktop.
 - When macOS is critical (red), new big buffers are refused. Before a
   refusal QEMU frees what it can and looks again three times (100 ms).
   Screens, cursors and small buffers are never refused for this, so the

@@ -9,9 +9,9 @@ against a runaway guest) nothing is refused while macOS has memory to give.
   for deleted textures and buffers (glFinish on context 0).
 - A new resource of 16 MB or more (not a screen or cursor) is checked against the
   level macOS has right now (kern.memorystatus_vm_pressure_level): refused at
-  "critical", and at "warn" when it would leave macOS less than a reserve (a
-  sixteenth of its memory, at least 512 MB) of free, inactive and purgeable memory
-  (host_statistics64). Before a refusal the renderer finishes its GL work (on the
+  "critical", and at "warn" only when it is bigger than all the free, inactive and
+  purgeable memory macOS has left (host_statistics64): short of that, more swapping
+  beats a black desktop. Before a refusal the renderer finishes its GL work (on the
   context that is current: this can be in the middle of a guest's commands) and
   looks again three times over 100 ms. Small resources, screens and cursors are
   never refused for pressure.
@@ -32,8 +32,7 @@ the renderer thread (QEMU's main loop), like the budget.
 Upstream: not sent (macOS only; upstream has no host memory limit).
 Tests: Tests/virgl/test-resource-budget.c (build time, Apple's software renderer):
 critical refuses a 64 MB texture after trying again (>= 90 ms) but not an 8 MB
-texture or a 5K screen; warn with the reserve + 100 MB free fits 64 MB and refuses
-128 MB; the status file's in use, peak, pressure, refusals and a lost context
+texture or a 5K screen; warn with 100 MB left fits 64 MB and refuses 128 MB; the status file's in use, peak, pressure, refusals and a lost context
 with a sanitised name. In a VM: tests/graphics/fractional-scale.sh and the
 memory soak in docs/routes/app.md.
 --- a/src/vrend/vrend_renderer.c
@@ -82,7 +81,7 @@ memory soak in docs/routes/app.md.
     if (vrend_state.use_async_fence_cb) {
        flush_eventfd(vrend_state.eventfd);
        mtx_lock(&vrend_state.poll_mutex);
-@@ -10324,6 +10340,299 @@ static void vrend_resource_budget_init(void)
+@@ -10324,6 +10340,293 @@ static void vrend_resource_budget_init(void)
                   (unsigned long long)(budget >> 20), from);
     else
        virgl_info("guest GPU memory budget: none (%s)\n", from);
@@ -100,10 +99,11 @@ memory soak in docs/routes/app.md.
 + *   textures and buffers (glFinish).
 + * - A new big resource (VREND_MEMORY_BIG or more; never a screen or cursor) is
 + *   checked against the pressure macOS has right now: refused at "critical", and
-+ *   at "warn" when it would leave macOS less than a reserve (a sixteenth of the
-+ *   Mac's memory, at least 512 MB) of free, inactive or purgeable memory. Before a
-+ *   refusal the renderer finishes its GL work and looks again three times over
-+ *   100 ms. Small resources, screens and cursors are never refused for pressure.
++ *   at "warn" only when it is bigger than all the free, inactive and purgeable
++ *   memory macOS has left (swapping more is better than a black desktop, short
++ *   of that). Before a refusal the renderer finishes its GL work and looks again
++ *   three times over 100 ms. Small resources, screens and cursors are never
++ *   refused for pressure.
 + * - OMACVM_GPU_MEMORY_STATUS names a file the app and omacvm check read: memory in
 + *   use, its peak since the VM started, the budget, the pressure, refusals and lost
 + *   GPU contexts. Written at most four times a second (on the renderer thread, by
@@ -183,13 +183,6 @@ memory soak in docs/routes/app.md.
 +      return ((uint64_t)vm.free_count + vm.inactive_count + vm.purgeable_count) * vm_kernel_page_size;
 +#endif
 +   return UINT64_MAX;
-+}
-+
-+static uint64_t vrend_memory_reserve(void)
-+{
-+   long pages = sysconf(_SC_PHYS_PAGES), page_size = sysconf(_SC_PAGESIZE);
-+   uint64_t total = pages > 0 && page_size > 0 ? (uint64_t)pages * (uint64_t)page_size : 0;
-+   return MAX2(total / 16, 512ull << 20);
 +}
 +
 +static void vrend_memory_init(void)
@@ -329,7 +322,7 @@ memory soak in docs/routes/app.md.
 +   *available = *level == VREND_PRESSURE_NORMAL ? UINT64_MAX : vrend_memory_available();
 +   if (*level == VREND_PRESSURE_CRITICAL)
 +      return false;
-+   return *available >= size && *available - size >= vrend_memory_reserve();
++   return *available >= size;
 +}
 +
 +static bool vrend_memory_allows(uint64_t size, const struct vrend_renderer_resource_create_args *args)
@@ -382,7 +375,7 @@ memory soak in docs/routes/app.md.
  }
  
  static bool vrend_resource_charge(struct vrend_resource *gr,
-@@ -10347,8 +10656,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
+@@ -10347,8 +10650,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
                      (unsigned long long)n);
        return false;
     }
@@ -394,7 +387,7 @@ memory soak in docs/routes/app.md.
     if (vrend_state.resource_bytes >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
        vrend_state.resource_peak_logged = vrend_state.resource_bytes / VREND_RESOURCE_PEAK_STEP *
                                           VREND_RESOURCE_PEAK_STEP;
-@@ -10363,6 +10675,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
+@@ -10363,6 +10669,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
  {
     vrend_state.resource_bytes -= MIN2(gr->budget_bytes, vrend_state.resource_bytes);
     gr->budget_bytes = 0;

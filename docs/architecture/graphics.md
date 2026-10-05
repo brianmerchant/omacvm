@@ -367,8 +367,8 @@ Rules:
   `virgl-darwin-memory-pressure.patch` follows macOS's memory pressure (a
   dispatch source; its handler only stores the level, the renderer thread
   acts in `virgl_renderer_poll`): big new resources (16 MB+, not screens or
-  cursors) are refused only at "critical", or at "warn" when they would eat
-  macOS's reserve, after a glFinish and three more looks. It writes
+  cursors) are refused only at "critical", or at "warn" when they are bigger
+  than all macOS has left, after a glFinish and three more looks. It writes
   `logs/gpu-memory` for the app and `omacvm check`. A desktop takes
   1.1 GB at 4K to 3.1 GB at 8K, up to 6.2 GB for a moment while the scale
   changes (every screen-sized buffer is made again). QEMU's log notes each

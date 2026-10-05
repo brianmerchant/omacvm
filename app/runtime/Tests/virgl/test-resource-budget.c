@@ -10,7 +10,7 @@
  *   test-resource-budget default    unset: three quarters of the Mac's memory
  *   test-resource-budget critical   pressure critical: big resources refused after
  *                                   trying again, small ones, screens and cursors not
- *   test-resource-budget warn       pressure warn with little memory left: what fits
+ *   test-resource-budget warn       pressure warn, 100 MB left: what fits
  *   test-resource-budget status     the status file: in use, peak, a lost context */
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
@@ -276,13 +276,6 @@ static uint64_t mac_memory(void)
    return mem;
 }
 
-/* The pressure check's reserve: a sixteenth of the Mac's memory, at least 512 MB. */
-static uint64_t reserve_mb(void)
-{
-   uint64_t r = mac_memory() / 16 / MB;
-   return r < 512 ? 512 : r;
-}
-
 static double now_s(void)
 {
    struct timespec ts;
@@ -349,11 +342,11 @@ static int run_critical(void)
 
 static int run_warn(void)
 {
-   /* the parent set the available memory to the reserve + 100 MB */
-   uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB: leaves 36 MB over the reserve */
-   check(a != 0, "pressure warn: a 64 MB texture fits while it leaves macOS its reserve");
-   uint32_t b = tex2d(8192, 4096, 1);     /* 128 MB: would go into the reserve */
-   check(b == 0, "a 128 MB texture that would go into macOS's reserve is refused");
+   /* the parent set macOS's free, inactive and purgeable memory to 100 MB */
+   uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB */
+   check(a != 0, "pressure warn: a 64 MB texture fits into the 100 MB macOS has left");
+   uint32_t b = tex2d(8192, 4096, 1);     /* 128 MB */
+   check(b == 0, "a 128 MB texture, more than macOS has left, is refused");
    if (a)
       virgl_renderer_resource_unref(a);
    if (b)
@@ -446,14 +439,13 @@ int main(int argc, char **argv)
    if (argc > 1)
       return child(argv[1]);
    setvbuf(stdout, NULL, _IONBF, 0);
-   char status_file[256], warn[64];
+   char status_file[256];
    snprintf(status_file, sizeof status_file, "%s/omacvm-gpu-memory-test-%d",
             getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp", (int)getpid());
    setenv("OMACVM_GPU_MEMORY_STATUS", status_file, 1);
-   snprintf(warn, sizeof warn, "warn:%llu", (unsigned long long)(reserve_mb() + 100));
    int bad = spawn(argv[0], "limit", "64", "off") + spawn(argv[0], "off", "0", "off") +
              spawn(argv[0], "default", NULL, "off") + spawn(argv[0], "critical", "0", "critical") +
-             spawn(argv[0], "warn", "0", warn) + spawn(argv[0], "status", "0", "normal");
+             spawn(argv[0], "warn", "0", "warn:100") + spawn(argv[0], "status", "0", "normal");
    unlink(status_file);
    printf("%s\n", bad ? "resource budget: FAILED" : "resource budget: all checks passed");
    return bad != 0;
