@@ -349,6 +349,19 @@ def open_camera() -> int:
             time.sleep(2)
 
 
+def wait_ms(active: bool, now: float, quiet_until: float) -> int:
+    """How long the loop may sleep. While an app reads: 200 ms (black frames
+    while the Mac is not there yet, Bridge reconnects). Otherwise only the
+    camera's reader events and the Mac's lines wake it (-1: no timeout), so
+    an unused camera does not wake the VM; a quiet port is looked at again
+    once its time is up."""
+    if active:
+        return 200
+    if quiet_until > now:
+        return max(1, int((quiet_until - now) * 1000) + 1)
+    return -1
+
+
 def main() -> int:
     values = env()
     kind = values.get("OMACVM_VM_TYPE", "")
@@ -412,7 +425,7 @@ def main() -> int:
             poller.register(camera, select.POLLPRI)
             if link.fd >= 0 and now >= quiet_until:
                 poller.register(link.fd, select.POLLIN)
-            for fd, events in poller.poll(200 if active else 1000):
+            for fd, events in poller.poll(wait_ms(active, now, quiet_until if link.fd >= 0 else 0.0)):
                 if fd == camera:
                     n = readers(camera)
                     if n < 0 or (n > 0) == active:

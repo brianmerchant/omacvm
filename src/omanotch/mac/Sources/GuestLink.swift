@@ -176,6 +176,7 @@ final class GuestLink {
     func start() {
         rescan()
         scanTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.rescan() }
+        scanTimer?.tolerance = 1   // lets macOS batch it with other wake-ups
     }
 
     private func rescan() {

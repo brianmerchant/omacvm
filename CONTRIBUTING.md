@@ -77,6 +77,9 @@ src/bridge/mac/tests/run.sh && python3 src/release/manifest.py parts > /dev/null
 (cd src/control && python3 -m pytest -q tests)   # in a venv with textual==8.2.8 and pytest
 src/tests/bench-docs.sh
 src/tests/app-idle.sh
+src/tests/app-battery.sh
+python3 src/app/guest/tests/test_omacvm_displays.py
+python3 src/app/guest/tests/test_idle_waits.py
 ```
 
 `src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to

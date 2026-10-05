@@ -124,16 +124,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in self?.evaluate() }
-        // Entering and leaving full screen has no public notification for other
-        // apps' windows; a cheap once-a-second poll covers it (Space, app and
-        // screen changes are handled at once through the notifications above).
-        // Timer tolerance lets macOS batch the wake-ups with others.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
-        pollTimer?.tolerance = 0.2
-        // The guest notices a vanished helper through the connection itself;
-        // this only has to beat its watchdog (15 s) comfortably.
-        beatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.heartbeat() }
-        beatTimer?.tolerance = 0.5
+        updateTimers()
         evaluate()
         Log.info("started")
     }
@@ -276,7 +267,32 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
     }
 
+    /// The poll and the heartbeat run only while a guest is connected: with
+    /// no VM there is nothing to show, and Omanotch does not wake the Mac.
+    private func updateTimers() {
+        guard link.connectedIDs.isEmpty else {
+            if pollTimer == nil {
+                // Entering and leaving full screen has no public notification for
+                // other apps' windows; a cheap once-a-second poll covers it (Space,
+                // app and screen changes are handled at once through the
+                // notifications). Timer tolerance lets macOS batch the wake-ups.
+                pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
+                pollTimer?.tolerance = 0.2
+            }
+            if beatTimer == nil {
+                // The guest notices a vanished helper through the connection itself;
+                // this only has to beat its watchdog (15 s) comfortably.
+                beatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.heartbeat() }
+                beatTimer?.tolerance = 0.5
+            }
+            return
+        }
+        pollTimer?.invalidate(); pollTimer = nil
+        beatTimer?.invalidate(); beatTimer = nil
+    }
+
     private func connectionChanged(_ id: Int, _ connected: Bool) {
+        updateTimers()
         // A new session (also a takeover from the same address) starts over:
         // the guest starts unparked.
         state.reset(id, gone: !connected)

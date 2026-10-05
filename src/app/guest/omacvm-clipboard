@@ -251,6 +251,16 @@ def open_port() -> int:
             time.sleep(1)
 
 
+def exit_fd(pid: int) -> int | None:
+    """A descriptor that becomes readable when `pid` exits (Linux pidfd), so
+    the loop needs no timeout to notice the watcher going away. None where
+    there is no pidfd: the loop then looks once a second."""
+    try:
+        return os.pidfd_open(pid)
+    except (AttributeError, OSError):
+        return None
+
+
 def parse_watch_line(line: bytes) -> tuple[str, bytes] | None:
     mime, separator, encoded = line.partition(b"\t")
     if not separator:
@@ -295,12 +305,18 @@ def main() -> int:
     watch_fd = watcher.stdout.fileno()
     os.set_blocking(watch_fd, False)
 
+    # Idle, the loop sleeps until the Mac, the watcher or the watcher's exit
+    # wakes it: no timeout that would wake the VM once a second.
+    watcher_exit = exit_fd(watcher.pid)
+    readers = [descriptor, watch_fd] + ([watcher_exit] if watcher_exit is not None else [])
+    timeout = None if watcher_exit is not None else 1.0
+
     port_buffer = bytearray()
     watch_buffer = bytearray()
     send(json.dumps({"type": "sync"}, separators=(",", ":")).encode() + b"\n")
     try:
         while True:
-            ready, _, _ = select.select([descriptor, watch_fd], [], [], 1.0)
+            ready, _, _ = select.select(readers, [], [], timeout)
             if watcher.poll() is not None:
                 raise RuntimeError("wl-paste watcher exited")
             if descriptor in ready:
@@ -323,7 +339,10 @@ def main() -> int:
                 try:
                     chunk = os.read(watch_fd, 65536)
                 except BlockingIOError:
-                    chunk = b""
+                    chunk = None
+                if chunk == b"":
+                    # End of file: the watcher closed its output, it is gone.
+                    raise RuntimeError("wl-paste watcher closed its output")
                 if chunk:
                     watch_buffer.extend(chunk)
                     if len(watch_buffer) > MAX_LINE_BYTES:
@@ -342,6 +361,8 @@ def main() -> int:
                 watcher.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 watcher.kill()
+        if watcher_exit is not None:
+            os.close(watcher_exit)
         os.close(descriptor)
 
 

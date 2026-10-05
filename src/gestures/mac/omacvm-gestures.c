@@ -445,7 +445,11 @@ static CGWindowID frontWindow(pid_t pid) {
 
 // The capture check runs every 0.2 s while a VM app is in front (to see its
 // window go full screen), else every 2 s plus on every app switch. The pointer
-// check runs at 120 Hz only while a full-screen VM is in front.
+// check runs only while a full-screen VM is in front: at 120 Hz while the
+// pointer moves, at 20 Hz once it has rested a second (an idle desktop then
+// costs 20 wake-ups a second here, not 120).
+#define CURSOR_REST_AFTER 1.0
+#define CURSOR_REST_EVERY 0.05
 static CFRunLoopTimerRef captureTimer, cursorTimer;
 static void updateCursor(CFRunLoopTimerRef t, void *info);
 
@@ -601,7 +605,12 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   int other = isOther(pid, net, name, net < 0 && pid > 0 && ns_is_regular(pid));
   if (other || (net == NET_APP && !front)) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
-  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
+  if (t) {
+    // Every 0.2 s while a VM app is in front, else every 2 s; the slow look
+    // may come up to 0.5 s late so macOS can batch it with other wake-ups.
+    CFRunLoopTimerSetTolerance(t, net >= 0 ? 0.02 : 0.5);
+    CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
+  }
 }
 
 // ---- the macOS pointer over the full-screen VM ----
@@ -678,7 +687,7 @@ static int vmWindowAt(CGPoint p, pid_t pid) {
 static void updateCursor(CFRunLoopTimerRef t, void *info) {
   (void)t; (void)info;
   static CGPoint last = { -1, -1 };
-  static CFAbsoluteTime lastCheck;
+  static CFAbsoluteTime lastCheck, lastMove;
   if (cursorControl < 0) {
     cursorControl = enableCursorControl();
     if (!cursorControl) logf_("cannot hide the macOS pointer from the background");
@@ -689,9 +698,14 @@ static void updateCursor(CFRunLoopTimerRef t, void *info) {
   CGPoint p = CGEventGetLocation(e);
   CFRelease(e);
   CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+  int moved = p.x != last.x || p.y != last.y;
+  if (moved) lastMove = now;
+  // At rest: the next look in 50 ms instead of 8 (the timer goes back to
+  // 120 Hz by itself after the first look that sees it move).
+  if (t && now - lastMove > CURSOR_REST_AFTER) CFRunLoopTimerSetNextFireDate(t, now + CURSOR_REST_EVERY);
   // The window list only when the pointer moved, and every half second for
   // windows that appear under a pointer at rest (the Dock, a notification).
-  if (p.x == last.x && p.y == last.y && now - lastCheck < 0.5) return;
+  if (!moved && now - lastCheck < 0.5) return;
   last = p; lastCheck = now;
   int h = vmWindowAt(p, pid);
   if (verbose && h != cursorHidden)

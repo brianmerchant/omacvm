@@ -1,6 +1,6 @@
 # Quick checks on every pull request and on main: syntax, ShellCheck errors,
-# the app's and the Mac helpers' builds, Omanotch's offline tests and the
-# control centre's tests. No signing beyond ad hoc, no VMs.
+# the app's and the Mac helpers' builds and offline tests (the guest agents'
+# also on Linux) and the control centre's tests. No signing beyond ad hoc, no VMs.
 name: check
 
 on:
@@ -103,6 +103,9 @@ jobs:
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
 
+      - name: App battery bridge's notification thread ends on stop
+        run: src/tests/app-battery.sh
+
       - name: Gestures offline test (which VM gets them)
         run: src/gestures/mac/test.sh
 
@@ -147,3 +150,21 @@ jobs:
 
       - name: OmacVM.app while the VM idles (guest agent connection, clipboard poll)
         run: src/tests/app-idle.sh
+
+      - name: Guest agents offline tests (desktop check, idle waits)
+        run: |
+          python3 src/app/guest/tests/test_omacvm_displays.py
+          python3 src/app/guest/tests/test_idle_waits.py
+
+  # The guest agents are Linux programs: their inotify and pidfd waits only
+  # run here (on the Mac those tests skip). Arm, like the guest.
+  guest:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guest agents tests on Linux (inotify, pidfd, idle waits)
+        run: |
+          python3 src/app/guest/tests/test_omacvm_displays.py -v
+          python3 src/app/guest/tests/test_idle_waits.py -v
