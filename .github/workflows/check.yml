@@ -93,6 +93,9 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: omacvm vms never waits on UTM's data
+        run: src/tests/vms-no-container.sh < /dev/null
+
       - name: A Mac helper that does not build
         run: src/tests/mac-install.sh
 

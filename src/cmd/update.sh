@@ -119,7 +119,7 @@ if [[ -n $VM ]]; then
   exit $rc
 fi
 done_any=0; stopped=(); unanswered=(); failed=()
-while IFS=$'\t' read -r name type state; do
+while IFS=$'\t' read -r name type state _; do
   [[ -n $name ]] || continue
   if [[ $state == unknown ]]; then unanswered+=("$name"); continue; fi
   if [[ $state != running ]]; then stopped+=("$name"); continue; fi

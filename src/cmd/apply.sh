@@ -219,7 +219,7 @@ if (( MAC )); then
   fi
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
-    case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
+    case $(utm_data defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
       0|2) ;;
       *) defaults write com.utmapp.UTM QEMURendererBackend -int 0
          log "UTM renderer set to Default: quit UTM and start the VM again for the GPU in Chrome" ;;

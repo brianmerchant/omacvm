@@ -24,8 +24,8 @@ res_get() {   # NAME TYPE
                c=$(python3 "$PVS" "$b/config.pvs" get Hardware/Cpu/Number 2>/dev/null)
                m=$(python3 "$PVS" "$b/config.pvs" get Hardware/Memory/RAM 2>/dev/null) ;;
     utm) b=$(utm_bundle "$1") || return 1
-         c=$(plutil -extract System.CPUCount raw "$b/config.plist" 2>/dev/null)
-         m=$(plutil -extract System.MemorySize raw "$b/config.plist" 2>/dev/null) ;;
+         c=$(utm_data plutil -extract System.CPUCount raw "$b/config.plist" 2>/dev/null)
+         m=$(utm_data plutil -extract System.MemorySize raw "$b/config.plist" 2>/dev/null) ;;
     fusion) x=$(fusion_vmx "$1") || return 1
             c=$(vmx_get "$x" numvcpus); m=$(vmx_get "$x" memsize) ;;
     app) d=$(app_dir "$1") || return 1

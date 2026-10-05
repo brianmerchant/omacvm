@@ -22,6 +22,15 @@ itself. Details below.
   started first. OmacVM.app's *Escape combo* setting is now *This monitor*
   or *All monitors*. Parallels, UTM and Fusion: `omacvm update` brings the
   new Gestures (until then the old combo keeps working).
+- `omacvm vms` (and the control centre's Bridge, which runs it) no longer
+  hangs or brings up a macOS prompt on a Mac with UTM installed. macOS 14
+  and later ask before an app reads another app's data, and the read waits
+  until someone answers. OmacVM now leaves UTM alone unless you use UTM
+  with OmacVM, reads UTM's own files only when you run omacvm in a terminal
+  (or act on a UTM VM), and gives up after 2 seconds: the UTM VM then shows
+  as "unknown (UTM data not readable)". OmacVM.app VMs never touch UTM.
+- Control centre: the graphics memory check is on the Graphics memory row
+  only (it showed on the Graphics row too).
 - `base-install.sh` keeps pacstrap's whole output in its log, so a failed
   package install shows its real cause.
 - OmacVM.app: the pointer moves in Omarchy right after the VM starts, and

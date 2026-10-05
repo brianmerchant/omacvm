@@ -516,9 +516,13 @@ parallels)
   parallels_profile_emptied && ok "Cmd+C/V/X as Super" "Parallels' Linux profile emptied" \
     || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;
 utm)
-  [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
-    || bad "UTM speed settings" "QEMUVulkanDriver is not 1: omacvm build sets it, or run defaults write com.utmapp.UTM QEMUVulkanDriver -int 1; restart UTM after"
-  case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
+  # UTM's settings are in its container (lib/mac.sh utm_data): a read that
+  # macOS holds back says so instead of failing.
+  v=$(utm_data defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null); rc=$?
+  if (( rc > 128 )); then skip "UTM speed settings" "$UTM_UNREADABLE_HINT" human
+  elif [[ $v == 1 ]]; then ok "UTM speed settings" "no Vulkan driver (fast page size)"
+  else bad "UTM speed settings" "QEMUVulkanDriver is not 1: omacvm build sets it, or run defaults write com.utmapp.UTM QEMUVulkanDriver -int 1; restart UTM after"; fi
+  case $(utm_data defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
     0|2) ok "UTM renderer" "ANGLE on Metal (GPU in Chrome)" ;;
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
