@@ -25,13 +25,13 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/d
 # back until it is rebased onto the filtered history.
 [[ -z $(git -C "$REPO" rev-list --objects HEAD | grep '\.build-runtime\.log$') ]] ||
   die "runtime/.build-runtime.log is in this history: rebase the branches made from the old app-in first"
-# Releases are signed with OmacVM's Developer ID (team 722686Y34B), as
-# omacvm build --vm-type app and omacvm update check: no ad hoc build.
-TEAM=722686Y34B
-DEVID="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$TEAM\""
+# Releases are signed with OmacVM's Developer ID (the team goes into the
+# signed update feed, which omacvm build --vm-type app, omacvm update and the
+# app's own updates check): no ad hoc build.
 codesign --verify --deep --strict "$APP" || die "the app's signature does not verify"
-codesign --verify -R="$DEVID" "$APP" 2>/dev/null ||
-  die "the app is not signed with the Developer ID of team $TEAM: build it with OMACVM_SIGN_ID"
+TEAM=$("$REPO/src/release/release-key.sh" team "$APP") ||
+  die "the app is not signed with a Developer ID: build it with OMACVM_SIGN_ID"
+echo "==> signed with the Developer ID of team $TEAM"
 
 rm -f "$ZIP" "$ZIP.sha256"
 ditto -c -k --keepParent "$APP" "$ZIP"

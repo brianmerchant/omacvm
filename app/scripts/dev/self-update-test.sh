@@ -24,7 +24,7 @@ REPO=$(cd "$HERE/.." && pwd)
 ID=org.omacvm.sutest
 NAME="OmacVM SU-test"
 PORT=${PORT:-18765}
-SIGN_ID=${OMACVM_SIGN_ID:?set OMACVM_SIGN_ID (a Developer ID of team 722686Y34B)}
+SIGN_ID=${OMACVM_SIGN_ID:?set OMACVM_SIGN_ID (a Developer ID Application identity)}
 die() { echo "ERROR: $*" >&2; exit 1; }
 [[ ! -e $HOME/.omacvm-user-testing ]] || die "the user is testing (~/.omacvm-user-testing): no VMs on this Mac now"
 SRC=$(cd "$(dirname "$SRC")" && pwd)/$(basename "$SRC")
@@ -94,7 +94,10 @@ printf 'int main(void) { return 3; }\n' > "$WORK/v/exit3.c"
 cc -o "$WORK/v/2.7.3/$NAME.app/Contents/MacOS/OmacVM" "$WORK/v/exit3.c"
 codesign --force --sign "$SIGN_ID" --options runtime --timestamp=none "$WORK/v/2.7.3/$NAME.app/Contents/MacOS/OmacVM"
 for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5; do resign "$WORK/v/$v/$NAME.app" || die "signing $v"; done
-DEVID='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
+# The team of the identity the test versions are signed with: the feed names it.
+TEAM=$(codesign -dv "$WORK/v/2.7.0/$NAME.app" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+[[ $TEAM =~ ^[A-Z0-9]{10}$ ]] || die "OMACVM_SIGN_ID is not a Developer ID (no team)"
+DEVID="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$TEAM\""
 for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5; do
   check "$v is signed with the Developer ID" 'codesign --verify --deep --strict -R="$DEVID" "$WORK/v/$v/$NAME.app" 2>/dev/null'
 done
@@ -102,16 +105,19 @@ ditto "$WORK/v/2.7.0/$NAME.app" "$APP"
 UPD="$UPD_ROOT/$(ukey "$APP")"
 
 # ---- feed ----
-swift "$SIGN" keygen "$WORK/test-key" > "$WORK/test-key.pub" || die keygen
-publish() {   # VERSION: the feed offers it
-  local z=$FEED/$NAME-$1.zip
+# Throwaway keys: test-key and spare-key play the main and the spare release
+# key (the app gets both), stranger-key is neither.
+for k in test-key spare-key stranger-key; do swift "$SIGN" keygen "$WORK/$k" > "$WORK/$k.pub" || die keygen; done
+publish() {   # VERSION [TEAMS (JSON strings)] [KEY]: the feed offers it
+  local z=$FEED/$NAME-$1.zip teams=${2:-\"$TEAM\"} key=${3:-$WORK/test-key}
   rm -f "$FEED"/*.zip
   ditto -c -k --keepParent "$WORK/v/$1/$NAME.app" "$z"
   cat > "$FEED/OmacVM-appcast.json" <<EOF
 {"schema": 1, "kind": "app-feed", "version": "$1", "url": "http://127.0.0.1:$PORT/$(basename "$z" | sed 's/ /%20/g')",
- "length": $(stat -f %z "$z"), "sha256": "$(shasum -a 256 "$z" | cut -d' ' -f1)", "minimum_macos": "15.0"}
+ "length": $(stat -f %z "$z"), "sha256": "$(shasum -a 256 "$z" | cut -d' ' -f1)", "minimum_macos": "15.0",
+ "devid_teams": [$teams]}
 EOF
-  swift "$SIGN" sign "$WORK/test-key" "$FEED/OmacVM-appcast.json" > "$FEED/OmacVM-appcast.json.sig"
+  swift "$SIGN" sign "$key" "$FEED/OmacVM-appcast.json" > "$FEED/OmacVM-appcast.json.sig"
 }
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$FEED" > "$WORK/server.log" 2>&1 &
 SERVER=$!
@@ -124,7 +130,7 @@ defaults write "$ID" vmsRoot "$WORK/VMs"
 defaults write "$ID" installedPath "$APP"
 defaults write "$ID" startFullScreen -bool false
 days_ago() { mkdir -p "$UPD"; date -u -v-"$1"d '+%Y-%m-%dT%H:%M:%SZ' > "$UPD/last-check"; }
-ENV=(--env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$WORK/test-key.pub")"
+ENV=(--env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$WORK/test-key.pub") $(cat "$WORK/spare-key.pub")"
      --env "OMACVM_SETTINGS_DIR=$SETTINGS" --env OMACVM_COCOA_HIDDEN=1 --env OMACVM_UPDATE_WAIT=20)
 start_app() { open -n "${ENV[@]}" "$1" --args "${@:2}"; }
 launcher_pid() { pgrep -f "$1/Contents/MacOS/OmacVM" | head -1; }
@@ -138,18 +144,33 @@ wait_for() {   # SECONDS CONDITION
 }
 logtail() { tail -3 "$UPD/update.log" 2>/dev/null | sed 's/^/    /'; }
 
+# ---- 0. release keys and Developer ID teams ----
+log "0. the feed names another team only: not staged; signed by a stranger: refused"
+publish 2.7.1 '"0000000000"'
+days_ago 8
+start_app "$APP"
+check "another team only: refused" 'wait_for 60 "grep -q \"is not signed with a Developer ID the update feed allows\" \"\$UPD/update.log\""'
+check "nothing staged" '[[ ! -d $UPD/staged/2.7.1 ]]'
+quit_app "$APP"
+publish 2.7.1 "" "$WORK/stranger-key"
+days_ago 8
+start_app "$APP"
+check "signed by a stranger: refused" 'wait_for 60 "grep -q \"does not match OmacVM.s release keys\" \"\$UPD/update.log\""'
+quit_app "$APP"; logtail
+
 # ---- 1. weekly schedule ----
-log "1. weekly: checked a day ago -> no check; 8 days ago -> check, download, offer"
-publish 2.7.1
+log "1. weekly: checked a day ago -> no check; 8 days ago -> check, download, offer (feed signed with the spare)"
+publish 2.7.1 "" "$WORK/spare-key"
+n0=$(requests OmacVM-appcast.json) s0=$(requests OmacVM-appcast.json.sig)
 days_ago 1
 start_app "$APP"
 sleep 30
-check "checked a day ago: no request" '[[ $(requests OmacVM-appcast.json) == 0 ]]'
+check "checked a day ago: no request" '[[ $(requests OmacVM-appcast.json) == "$n0" ]]'
 quit_app "$APP"
 days_ago 8
 start_app "$APP"
-check "8 days ago: feed fetched within 40 s" 'wait_for 40 "[[ \$(requests OmacVM-appcast.json.sig) -ge 1 ]]"'
-check "2.7.1 downloaded, checked and offered" 'wait_for 30 "grep -q \"ready: 2.7.1\" \"\$UPD/update.log\""'
+check "8 days ago: feed fetched within 40 s" 'wait_for 40 "[[ \$(requests OmacVM-appcast.json.sig) -gt $s0 ]]"'
+check "signed with the spare key: 2.7.1 downloaded, checked and offered" 'wait_for 30 "grep -q \"ready: 2.7.1\" \"\$UPD/update.log\""'
 check "the staged app has no quarantine flag" '! xattr -r "$UPD/staged" 2>/dev/null | grep -q quarantine'
 check "nothing replaced without asking" '[[ $(version "$APP") == 2.7.0 ]]'
 quit_app "$APP"; logtail
@@ -242,7 +263,7 @@ quit_app "$APP"; logtail
 
 # ---- 6. one step back (the menu's Go Back runs this) ----
 log "6. go back to 2.7.0"
-OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS OMACVM_APPCAST_KEY=$(cat "$WORK/test-key.pub") \
+OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS OMACVM_APPCAST_KEY="$(cat "$WORK/test-key.pub") $(cat "$WORK/spare-key.pub")" \
   OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json \
   bash "$APP/Contents/Resources/scripts/update-swap.sh" rollback "$APP" - "$UPD" 99999 "$(openssl rand -hex 16)" \
   >> "$UPD/update.log" 2>&1 &
@@ -316,7 +337,7 @@ mkdir -p "$UPD/previous/$NAME.app/Contents/MacOS"
 cc -include unistd.h -o "$UPD/previous/$NAME.app/Contents/MacOS/sleeper" "$WORK/v/sleep.c"
 "$UPD/previous/$NAME.app/Contents/MacOS/sleeper" & SLEEPER=$!
 rm -rf "$UPD/incoming"; mkdir -p "$UPD/incoming"; ditto "$WORK/v/2.7.1/$NAME.app" "$UPD/incoming/$NAME.app"
-OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS OMACVM_APPCAST_KEY=$(cat "$WORK/test-key.pub") \
+OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS OMACVM_APPCAST_KEY="$(cat "$WORK/test-key.pub") $(cat "$WORK/spare-key.pub")" \
   OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json \
   bash "$APP/Contents/Resources/scripts/update-swap.sh" install "$APP" "$UPD/incoming/$NAME.app" "$UPD" 99999 "$(openssl rand -hex 16)" \
   >> "$UPD/update.log" 2>&1

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Prebuilt manifests and images are untrusted: bad values must fail the lookup
+# Prebuilt manifests and images are untrusted: a manifest not signed with a
+# release key (throwaway test keys here) or bad values must fail the lookup
 # (the build then happens here), nothing from a manifest may run as code on
 # the Mac, and OmacVM.app's image gives a plain disk.img or nothing. Also the
 # seed's file mode and the free-space check. No network, no VM:
@@ -13,6 +14,7 @@ fail=0
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 PREBUILT_CACHE=$T/cache
+source "$R/src/tests/release-test-keys.sh"
 export OMACVM_PREBUILT_SOURCE=$T/src
 mkdir -p "$OMACVM_PREBUILT_SOURCE"
 VERSION=$(cat "$R/src/VERSION")
@@ -24,18 +26,23 @@ expect() {   # WHAT WANT GOT
   if [[ $2 == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: want '$2', got '$3'"; fail=1; fi
 }
 
-# manifest KEY JSON-VALUE: a good manifest with one value replaced.
+# manifest KEY JSON-VALUE [SIGNING-KEY]: a good manifest with one value
+# replaced ("null": left out), signed with test-key or SIGNING-KEY.
 manifest() {
   python3 - "$M" "$VERSION" "$1" "$2" <<'PY'
 import json, sys
-m = {"format": 1, "route": "parallels", "omacvm": sys.argv[2], "omarchy": "4.0.3 (omarchy-mac abc1234)",
+m = {"format": 1, "kind": "prebuilt-manifest", "devid_teams": ["722686Y34B"],
+     "route": "parallels", "omacvm": sys.argv[2], "omarchy": "4.0.3 (omarchy-mac abc1234)",
      "bundle": "Omarchy.pvm", "unpacked_kb": 7000000, "disk_gb": 64, "compression": "tar + zstd --long=27",
      "created": "2026-10-05T03:44:00Z", "size": 3600000000,
      "parts": [{"name": "omacvm-prebuilt-%s-parallels.tar.zst.part-aa" % sys.argv[2], "size": 3600000000, "sha256": "0" * 64}]}
 if sys.argv[3]:
     m[sys.argv[3]] = json.loads(sys.argv[4])
+    if m[sys.argv[3]] is None:
+        del m[sys.argv[3]]
 json.dump(m, open(sys.argv[1], "w"))
 PY
+  sign_doc "$M" "${3:-}"
 }
 
 lookup() { (prebuilt_lookup parallels 2>/dev/null && echo "found $PB_DISK_GB $PB_BUNDLE $PB_SIZE") || echo refused; }
@@ -45,6 +52,35 @@ expect "a good manifest" "found 64 Omarchy.pvm 3600000000" "$(lookup)"
 expect "a good manifest: omarchy" "4.0.3 (omarchy-mac abc1234)" "$(python3 "$R/src/prebuilt/manifest.py" get "$M" omarchy)"
 expect "a good manifest: parts" "omacvm-prebuilt-$VERSION-parallels.tar.zst.part-aa 3600000000 $SUM" \
   "$(python3 "$R/src/prebuilt/manifest.py" parts "$M")"
+
+# The signature comes first: either release key, nothing else.
+manifest "" "" spare-key
+expect "signed with the spare key" "found 64 Omarchy.pvm 3600000000" "$(lookup)"
+manifest "" "" stranger-key
+expect "signed with another key: refused" refused "$(lookup)"
+python3 "$R/src/prebuilt/manifest.py" parts "$M" >/dev/null 2>&1; expect "signed with another key: no parts" 1 $?
+manifest "" ""
+rm -f "$OMACVM_PREBUILT_SOURCE/$(basename "$M").sig"
+expect "no signature: refused" refused "$(lookup)"
+manifest "" ""
+printf ' ' >> "$M"
+expect "changed after signing: refused" refused "$(lookup)"
+( unset OMACVM_RELEASE_TEST_KEYS; manifest "" ""; lookup ) > "$T/out"
+expect "signed with a test key, checked with the shipped keys: refused" refused "$(cat "$T/out")"
+while IFS='|' read -r what key value; do
+  manifest "$key" "$value"
+  expect "$what: refused" refused "$(lookup)"
+done <<'EOF'
+no kind|kind|null
+the app's feed|kind|"app-feed"
+the control centre's manifest|kind|"control-manifest"
+no devid_teams|devid_teams|null
+empty devid_teams|devid_teams|[]
+a bad team|devid_teams|["722686y34b"]
+next_spare_key not a key|next_spare_key|"bm90IGEga2V5"
+EOF
+manifest devid_teams '["722686Y34B", "ABCDE12345"]'
+expect "two teams" "found 64 Omarchy.pvm 3600000000" "$(lookup)"
 
 # The payload from the review: bash arithmetic on "BASH_VERSINFO[$(cmd)0]" runs cmd.
 for key in disk_gb size unpacked_kb; do
@@ -117,8 +153,9 @@ archive() {
   mkdir -p "$PREBUILT_CACHE/app"
   COPYFILE_DISABLE=1 tar -cf - -C "$T/a" . | zstd -q -c > "$PREBUILT_CACHE/app/$part"
   PB_MANIFEST=$PREBUILT_CACHE/app/m.json PB_BUNDLE=Omarchy
-  printf '{"parts": [{"name": "%s", "size": %s, "sha256": "%s"}]}' "$part" \
+  printf '{"kind": "prebuilt-manifest", "devid_teams": ["722686Y34B"], "parts": [{"name": "%s", "size": %s, "sha256": "%s"}]}' "$part" \
     "$(stat -f %z "$PREBUILT_CACHE/app/$part")" "$SUM" > "$PB_MANIFEST"
+  sign_doc "$PB_MANIFEST"
 }
 take() { rm -f "$T/disk.img"; (prebuilt_unpack_disk "$T/u" "$T/disk.img") >/dev/null 2>&1 && echo taken || echo refused; }
 if command -v zstd >/dev/null; then

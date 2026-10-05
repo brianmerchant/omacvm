@@ -84,6 +84,9 @@ public struct SharedSettings: Sendable {
         return o
     }
 
+    /// Documents that named a new spare release key (ReleaseKeys).
+    public var releaseKeysFolder: URL { file.deletingLastPathComponent().appendingPathComponent("release-keys") }
+
     public var updateChecks: Bool {
         guard let n = object()["update_checks"] as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return true }
         return n.boolValue

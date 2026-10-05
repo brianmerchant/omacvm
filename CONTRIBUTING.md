@@ -60,6 +60,7 @@ src/bridge/mac/test.sh && src/tests/external-brightness.sh
 src/tests/install-defaults.sh
 src/tests/vm-names.sh
 src/tests/mac-install.sh
+src/tests/release-keys.sh
 src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
 src/net/mac/test.sh
 src/gestures/mac/test.sh

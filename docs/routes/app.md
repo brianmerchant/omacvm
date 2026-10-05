@@ -199,8 +199,9 @@ connected stops it, exit 3). Then:
    (`org.omacvm.app`, under any name it was installed as). Not installed:
    after asking, it downloads `OmacVM-<version>.zip` (this OmacVM's version)
    from the GitHub release `v<version>` with curl, checks it against the
-   `.sha256` next to it and that the app is signed with OmacVM's Developer
-   ID (team 722686Y34B), and puts it in ~/Applications. curl sets no quarantine attribute, so
+   release's signed update feed (`OmacVM-appcast.json`, release key: SHA-256,
+   size, and the Developer ID teams the app must be signed by), and puts it in
+   ~/Applications. curl sets no quarantine attribute, so
    Gatekeeper does not stop the app. Releases from before the app have no
    zip: it says so and stops (exit 3). With `--yes` it installs nothing and
    stops with the command to run (exit 3).

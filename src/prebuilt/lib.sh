@@ -27,6 +27,7 @@ prebuilt_lookup() {
     [[ -n ${name:-} ]] || return 1
     PB_MANIFEST=$PREBUILT_CACHE/$type/$name
     cp "$OMACVM_PREBUILT_SOURCE/$name" "$PB_MANIFEST"
+    cp "$OMACVM_PREBUILT_SOURCE/$name.sig" "$PB_MANIFEST.sig" 2>/dev/null || rm -f "$PB_MANIFEST.sig"
     PB_TAG=local; PB_SOURCE=$OMACVM_PREBUILT_SOURCE
   else
     rel=$(mktemp)
@@ -44,9 +45,13 @@ PY2
     [[ -n ${url:-} ]] || return 1
     PB_MANIFEST=$PREBUILT_CACHE/$type/${url##*/}
     curl -fsSL --max-time 30 "$url" -o "$PB_MANIFEST" || return 1
+    # Its signature (one of OmacVM's release keys): manifest.py checks it
+    # before it gives out any value.
+    curl -fsSL --max-time 30 "$url.sig" -o "$PB_MANIFEST.sig" || { rm -f "$PB_MANIFEST.sig"; return 1; }
     PB_SOURCE=${url%/*}
   fi
-  # manifest.py get checks the whole manifest and fails on anything odd. Each
+  # manifest.py get checks the signature, then the whole manifest, and fails
+  # on anything odd. Each
   # step needs its own "|| return 1": callers use "prebuilt_lookup && ...",
   # where set -e is off.
   local route

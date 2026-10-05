@@ -16,6 +16,7 @@ T=$(mktemp -d)
 T=$(cd "$T" && pwd -P)
 trap 'chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"' EXIT
 export OMACVM_PREBUILT_SOURCE=$T/src
+source "$R/src/tests/release-test-keys.sh"
 VERSION=$(cat "$R/src/VERSION")
 mkdir -p "$T/outside"
 echo secret > "$T/outside/secret"
@@ -175,7 +176,8 @@ image() {
   zstd -q -3 --long=27 -c "$T/img.tar" > "$OMACVM_PREBUILT_SOURCE/$base.tar.zst.part-aa"
   python3 "$R/src/prebuilt/manifest.py" write "$OMACVM_PREBUILT_SOURCE/$base.json" --route "$route" --omacvm "$VERSION" \
     --omarchy "4.0.3 (test)" --bundle "${3:-Omarchy$(case $route in (parallels) echo .pvm ;; (utm) echo .utm ;; (*) echo .vmwarevm ;; esac)}" \
-    --unpacked 100 --disk-gb 64 "$OMACVM_PREBUILT_SOURCE/$base.tar.zst.part-aa" > /dev/null
+    --unpacked 100 --disk-gb 64 --teams '["722686Y34B"]' "$OMACVM_PREBUILT_SOURCE/$base.tar.zst.part-aa" > /dev/null
+  sign_doc "$OMACVM_PREBUILT_SOURCE/$base.json"
 }
 
 # try_install ROUTE: lookup, download, unpack and check, as vm.sh does: ok or refused.
