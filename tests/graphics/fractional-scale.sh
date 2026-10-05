@@ -33,10 +33,12 @@ ssh_vm() {
   ssh -i "$key" -p "$port" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@"
 }
-# A command in the desktop user's Hyprland session.
+# A command line (all of it, also after ";") in the desktop user's Hyprland session.
 as_user() {
+  local c
+  c=$(printf '%q' "$*")
   ssh_vm "uid=\$(id -u $user); sig=\$(ls -t /run/user/\$uid/hypr | head -1); cd /tmp; sudo -u $user env \
-XDG_RUNTIME_DIR=/run/user/\$uid WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE=\$sig $*"
+XDG_RUNTIME_DIR=/run/user/\$uid WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE=\$sig bash -c $c"
 }
 monitor() {
   as_user hyprctl -j monitors | python3 -c '
@@ -56,7 +58,7 @@ if ((frames)); then
       "$here/pacing/pacing.html" "$here/pacing/srv.py" "$here/pacing/stats.py" root@127.0.0.1:/tmp/omacvm-pacing/ &&
     ssh_vm "chmod -R a+rX /tmp/omacvm-pacing"
   as_user "setsid -f python3 /tmp/omacvm-pacing/srv.py >/dev/null 2>&1 </dev/null"
-  trap 'as_user "pkill -f /tmp/omacvm-pacing/srv.py" >/dev/null 2>&1' EXIT INT TERM
+  trap 'as_user "pkill -f /tmp/omacvm-pacing/srv.py; rm -rf /tmp/omacvm-pacing-profile" >/dev/null 2>&1' EXIT INT TERM
 fi
 
 read -r w0 h0 s0 < <(monitor) || { echo "no Virtual-1 in Hyprland" >&2; exit 1; }
@@ -83,10 +85,10 @@ for s in $scales; do
   ft="null"
   if ((frames)); then
     as_user "rm -f /tmp/pacing-stats.json; setsid -f chromium --ozone-platform=wayland --kiosk --no-first-run \
---user-data-dir=/tmp/omacvm-pacing/profile 'http://127.0.0.1:8765/pacing.html?secs=$frames&hz=$hz' >/dev/null 2>&1 </dev/null"
+--user-data-dir=/tmp/omacvm-pacing-profile 'http://127.0.0.1:8765/pacing.html?secs=$frames&hz=$hz' >/dev/null 2>&1 </dev/null"
     for _ in $(seq $((frames + 30))); do ssh_vm test -s /tmp/pacing-stats.json && break; sleep 1; done
     ft=$(ssh_vm "python3 /tmp/omacvm-pacing/stats.py /tmp/pacing-stats.json $(awk -v h="$hz" 'BEGIN { print 1000 / h }')" 2>/dev/null || echo null)
-    as_user "pkill -f -- '--user-data-dir=/tmp/omacvm-pacing/profile'" >/dev/null 2>&1
+    as_user "pkill -f -- '--user-data-dir=/tmp/omacvm-pacing-profile'" >/dev/null 2>&1
     sleep 2
   fi
   ok=true; ((${#why[@]})) && { ok=false; fail=1; }
