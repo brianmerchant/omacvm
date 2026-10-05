@@ -24,7 +24,7 @@ from textual.widgets import DataTable, Static, TextArea
 from . import collect, look, report
 from . import state as S
 from .bridge import BridgeError
-from .controller import ACTION_FOR, Controller
+from .controller import ACTION_FOR, Controller, local_time
 from .local import log_tail
 
 # Job polls (one a second) that may fail in a row before the job counts as
@@ -38,6 +38,10 @@ GPU_MEMORY_EVERY = 2.0
 # match, "looking"): the Mac looks at its VMs again in the background (at
 # most once a minute, and a run can take a while), so ask again for 100 s.
 UNKNOWN_TRIES, UNKNOWN_WAIT = 20, 5.0
+# While the control centre is open: every 5 s it re-reads the VM's env (a
+# change from another window or the Mac) and asks the Mac again, also after
+# "no such OmacVM.app VM". Nothing runs while it is closed.
+LIVE_EVERY = 5.0
 
 THEME = Theme(
     name="omacvm-ansi", ansi=True, dark=True,
@@ -369,7 +373,7 @@ class UpdatesScreen(Screen):
         u = app.c.updates or {}
         m = u.get("manifest") if isinstance(u.get("manifest"), dict) else None
         box = self.query_one(".box")
-        box.border_subtitle = f"checked {u['checked_at'][:16].replace('T', ' ')}" if u.get("checked_at") else "not checked yet"
+        box.border_subtitle = f"checked {local_time(u['checked_at'])}" if u.get("checked_at") else "not checked yet"
         t = Text()
         if not app.c.linked and not u:
             t.append(f"The Mac does not answer: {app.c.mac_problem()}\n", style="yellow")
@@ -580,9 +584,30 @@ class ControlCentre(App):
         self.ask_mac()
         self.run_checks()
         self.set_interval(0.12, self.spin)
+        self.stamp = self.c.local_stamp()
+        self.set_interval(LIVE_EVERY, self.live)
         self.set_interval(GPU_MEMORY_EVERY, self.look_gpu_memory)
 
     # ---- data ----
+    def live(self) -> None:
+        from textual.worker import WorkerState
+        if any(w.group in ("mac", "job", "live") and w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+               for w in self.workers):
+            return   # a first look or a job is on it; it refreshes when done
+        self.live_refresh()
+
+    @work(thread=True, exclusive=True, group="live")
+    def live_refresh(self) -> None:
+        stamp = self.c.local_stamp()
+        changed = stamp != self.stamp
+        self.stamp = stamp
+        if changed:
+            self.c.reload_local()
+        self.c.refresh_mac()
+        if changed:
+            self.c.refresh_vm_checks()
+        self.call_from_thread(self.refresh_all)
+
     @work(thread=True, exclusive=True, group="mac")
     def ask_mac(self) -> None:
         from textual.worker import get_current_worker
@@ -674,7 +699,7 @@ class ControlCentre(App):
             return "The Mac runs an older OmacVM: run omacvm update on the Mac to switch features from here."
         if c.mac_error.kind == "offline":
             if c.local.vm_type == "app":
-                return "OmacVM.app does not answer on this VM's control port (update OmacVM.app): showing this VM's side."
+                return "OmacVM.app does not answer on this VM's control port: showing this VM's side."
             return "The Mac does not answer (VM network, or OmacVM Bridge not running): showing this VM's side."
         return f"The Mac: {c.mac_error}"
 

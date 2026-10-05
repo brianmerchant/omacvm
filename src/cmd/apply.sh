@@ -387,7 +387,8 @@ gssh "$IP" "rm -rf $S.old" < /dev/null || true
 step finish "finishing"
 # What it has now, per part (src/release/parts.tsv): the control centre
 # compares it with an update's manifest.
-"$R/src/release/manifest.py" digests --src "$R/src" 2>/dev/null |
+# A part the last verified manifest has unchanged keeps its own release.
+"$R/src/release/manifest.py" digests --src "$R/src" --manifest "$OMA_SUPPORT/updates.json" 2>/dev/null |
   gssh "$IP" "install -Dm644 /dev/stdin /etc/omacvm/installed.json" || info "installed.json not written (the update list may show every part)"
 # OmacVM.app: this VM now draws Omarchy's own pointer. The app hides the Mac's
 # over the window only for a VM with this file; VMs set up by older versions

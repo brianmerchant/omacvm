@@ -353,6 +353,9 @@ def not_a_secret(name: str, v: str) -> bool:
 PATTERNS = [
     ("key", re.compile(r"-----BEGIN [A-Z0-9 ]+-----.*?-----END [A-Z0-9 ]+-----", re.S), "<key>"),
     ("key", re.compile(r"\b(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+)\s+[A-Za-z0-9+/=]{16,}(?:\s+\S+)?"), "<ssh-key>"),
+    # A login in a URL (https://user:password@host, ssh://user@host): both go.
+    ("secret", re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@:]+:[^\s/@]+@"), r"\1<user>:<secret>@"),
+    ("user", re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)(?!<)[^\s/@:]+@"), r"\1<user>@"),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
     ("secret", re.compile(r"(?i)\b(Bearer)\s+[^\s\"']+"), r"\1 <secret>"),
     # GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_).
@@ -645,8 +648,8 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
         bump("home", n)
     text, n = HOMES.subn("~", text)
     bump("home", n)
-    # Keys and e-mail addresses whole, before their parts match a name.
-    for kind, rx, repl in PATTERNS[:3]:
+    # Keys, URL logins and e-mail addresses whole, before their parts match a name.
+    for kind, rx, repl in PATTERNS[:5]:
         text, n = rx.subn(repl, text)
         bump(kind, n)
     # The names in the Bridge's own log lines, known or not.
@@ -671,7 +674,7 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
     # break up "iPhone-de-Jean-Luc" before this.)
     text, n = device_owners(text)
     bump("user", n)
-    for kind, rx, repl in PATTERNS[3:]:
+    for kind, rx, repl in PATTERNS[5:]:
         text, n = rx.subn(repl, text)
         bump(kind, n)
 

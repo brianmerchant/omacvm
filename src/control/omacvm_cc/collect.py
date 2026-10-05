@@ -149,10 +149,21 @@ def open_text(path: str) -> str:
         return ""
 
 
+# The check service (omacvm-check@) runs its probes with sudo: each run
+# logs "sudo[pid]: ... COMMAND=..." and pam session lines, which can fill
+# the whole excerpt. They say nothing about a problem: left out.
+NOISE = re.compile(r"^\S+ (?:sudo\[\d+\]:|\S+\[\d+\]: pam_unix\(sudo(?:-i)?:session\))")
+
+
+def quiet(lines: list, n: int) -> list:
+    """The last n lines without the check service's sudo noise."""
+    return [x for x in lines if not NOISE.match(x)][-n:]
+
+
 def vm_logs(n: int = 40) -> str:
     out = []
     for scope in ("system", "user"):
-        cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", str(n), "-u", "omacvm-*", "-u", "notchcast.service"]
+        cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", str(n * 5), "-u", "omacvm-*", "-u", "notchcast.service"]
         if scope == "user":
             cmd.insert(1, "--user")
         text = run(cmd, 10).strip()
@@ -162,6 +173,9 @@ def vm_logs(n: int = 40) -> str:
             for line in text.splitlines():
                 p = line.split(" ", 2)
                 lines.append(f"{p[0]} {p[2]}" if len(p) == 3 else line)
+            lines = quiet(lines, n)
+            if not lines:
+                continue
             out.append(f"-- {scope} --\n" + "\n".join(lines))
     return "\n".join(out)
 

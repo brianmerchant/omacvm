@@ -939,3 +939,16 @@ struct ConnectionGate {
 
   var sharedInUse: Int { shared }
 }
+
+// ---- the update feed's fetch: offline or not signed ----
+
+/// How a manifest fetch ended. The manifest came but its .sig is missing on
+/// the server (404/403/410): an unsigned release, refused, not "offline".
+enum FeedFetch: Equatable { case got, offline(String), unsigned }
+
+func feedFetch(manifest: Data?, manifestError: String?, sig: Data?, sigError: String?) -> FeedFetch {
+  guard manifest != nil else { return .offline(manifestError ?? "no answer") }
+  if sig != nil { return .got }
+  if let e = sigError, ["HTTP 404", "HTTP 403", "HTTP 410"].contains(e) { return .unsigned }
+  return .offline(sigError ?? "no answer")
+}

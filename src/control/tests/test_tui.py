@@ -736,6 +736,30 @@ def test_no_graphics_row_on_other_routes(world):
     asyncio.run(go())
 
 
+def test_live_refresh_while_open(world, monkeypatch):
+    """An open control centre re-reads the VM's env when another window or
+    the Mac changed it, and asks the Mac again (also after it failed)."""
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "LIVE_EVERY", 0.3)
+
+    async def go():
+        a = app()
+        asks = []
+        real = a.c.refresh_mac
+        monkeypatch.setattr(a.c, "refresh_mac", lambda: (asks.append(1), real())[1])
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.vm_checks is not None)
+            before, n = a.c.local, len(asks)
+            assert await settle(pilot, lambda: len(asks) >= n + 2, 5)
+            assert a.c.local is before                   # nothing changed: not re-read
+            path = os.environ["OMACVM_ENV"]
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n# changed from another window\n")
+            os.utime(path, (time.time() + 5, time.time() + 5))
+            assert await settle(pilot, lambda: a.c.local is not before, 5)
+    asyncio.run(go())
+
+
 def gpu_world(tmp_path, monkeypatch, vm_type="app", gpu=True):
     mac, checks = FakeMac(version="3.0.0"), FakeChecks()
     if gpu:

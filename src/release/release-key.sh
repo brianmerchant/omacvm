@@ -8,7 +8,13 @@
 #                                OMACVM_RELEASE_KEY_FILE (the spare, when the main
 #                                key is lost); then checked against the public
 #                                keys the apps ship: a signature they would
-#                                refuse never stays
+#                                refuse never stays. The Keychain key signs
+#                                only inside a release run: release.sh sets
+#                                OMACVM_RELEASE_RUN=VERSION, and this copy of
+#                                the repo must be at that version (src/VERSION),
+#                                with no changed tracked files, and at the tag
+#                                vVERSION if it exists. Test documents are
+#                                signed with a test key (src/tests), never this.
 #   release-key.sh team [APP]    the Developer ID team the release is signed with:
 #                                APP's (the release build), else that of the
 #                                identity OMACVM_SIGN_ID names
@@ -46,6 +52,24 @@ team() {
   echo "$t"
 }
 
+# The real key only for a real release run (see sign above). A test build
+# or a dev checkout that calls sign by mistake stops here, before the
+# Keychain is read.
+release_run() {
+  local v=${OMACVM_RELEASE_RUN:-} repo cur tag
+  [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    die "not a release run (OMACVM_RELEASE_RUN unset): the release key signs only from release.sh; sign test documents with a test key"
+  repo=$(cd "$HERE/../.." && pwd)
+  cur=$(cat "$repo/src/VERSION" 2>/dev/null || true)
+  [[ $cur == "$v" ]] || die "release run $v, but $repo is at version ${cur:-?}: not signing"
+  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git checkout: not signing"
+  [[ -z $(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null) ]] ||
+    die "$repo has changed tracked files: the release key signs only a clean tree"
+  if tag=$(git -C "$repo" rev-parse -q --verify "refs/tags/v$v^{commit}" 2>/dev/null); then
+    [[ $tag == "$(git -C "$repo" rev-parse HEAD)" ]] || die "tag v$v is not this checkout's HEAD: not signing"
+  fi
+}
+
 case ${1:-} in
   sign)
     f=${2:?usage: release-key.sh sign FILE}
@@ -54,6 +78,7 @@ case ${1:-} in
     if [[ -n ${OMACVM_RELEASE_KEY_FILE:-} ]]; then
       swift "$HERE/sign.swift" sign "$OMACVM_RELEASE_KEY_FILE" "$f" > "$f.sig" || { rm -f "$f.sig"; die "signing with OMACVM_RELEASE_KEY_FILE failed"; }
     else
+      release_run
       security find-generic-password -s org.omacvm.release-key -w 2>/dev/null | swift "$HERE/sign.swift" sign - "$f" > "$f.sig" ||
         { rm -f "$f.sig"; die "no release key: Keychain item org.omacvm.release-key, or OMACVM_RELEASE_KEY_FILE"; }
     fi
@@ -85,5 +110,5 @@ case ${1:-} in
     done
     [[ -z $out ]] || printf ', "revoked_keys": [%s]' "$out"
     ;;
-  *) sed -n '2,24s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,30s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac
