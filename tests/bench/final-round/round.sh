@@ -34,7 +34,8 @@
 # unset: the RC2 steps are skipped with a note), RC2_VM ("Bench OmacVM RC2",
 # its Graphics setting on Vulkan), RC2_PORT, RC2_APP_ENV ("K=V ..." for the
 # app's environment), RC2_LABEL (its name in the chart, default from its
-# version + " · Vulkan"); UTM_VM, UTM_IP, FUSION_VMX, PARALLELS_VM; WALLPAPER (default:
+# version + " · Vulkan"); APP_LABEL (the app's name in the chart, e.g. "OmacVM
+# 3.0.0 · Vulkan" when APP_291 is another build); UTM_VM, UTM_IP, FUSION_VMX, PARALLELS_VM; WALLPAPER (default:
 # the Mac's current desktop picture); GEEKBENCH_SCORES (a {url: score} file;
 # default: read from Geekbench's pages at the end, FETCH_GEEKBENCH=0 skips it). The steps' times: EST_<step> (minutes).
 set -uo pipefail
@@ -63,6 +64,7 @@ done
 
 APP_291=${APP_291:-$HOME/Applications/OmacVM Bench 2.9.1.app}
 APP_VM=${APP_VM:-Bench OmacVM} APP_PORT=${APP_PORT:-52224}
+APP_LABEL=${APP_LABEL:-}
 RC2_APP=${RC2_APP:-} RC2_LABEL=${RC2_LABEL:-} RC2_VM=${RC2_VM:-Bench OmacVM RC2} RC2_PORT=${RC2_PORT:-52225} RC2_APP_ENV=${RC2_APP_ENV:-}
 UTM_VM=${UTM_VM:-Bench UTM} PARALLELS_VM=${PARALLELS_VM:-Bench Parallels}
 FUSION_VMX=${FUSION_VMX:-$HOME/Virtual Machines.localized/Bench Fusion.vmwarevm/Bench Fusion.vmx}
@@ -109,6 +111,17 @@ wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 a
   return 0
 }
 
+# A desktop Mac (Mac mini, Studio): no battery, so no idle-power rows (the
+# rule of the rounds: idle power is a laptop's number), and its one display
+# instead of a built-in one. FINAL_ROUND_IDLE_DESKTOP=1 keeps the idle rows
+# (macOS still reports SystemPowerIn on an M4 Mac mini).
+desktop_mac() { ioreg -rw0 -c AppleSmartBattery 2>/dev/null | grep -q '"BatteryInstalled" = Yes' && return 1; return 0; }
+NO_IDLE=""
+if desktop_mac && [ "${FINAL_ROUND_IDLE_DESKTOP:-0}" != 1 ]; then
+  NO_IDLE=$(echo "$STEPS" | awk '$3 == "idle" { print $1 }' | paste -sd, -)
+  SKIP="${SKIP:+$SKIP,}$NO_IDLE"
+fi
+
 STATE=$DIR/steps.state LOG=$DIR/round.log
 [ "$MODE" = plan ] || { mkdir -p "$DIR/failed" && touch "$STATE"; } || die "cannot write $DIR"
 log() { echo "$(date +%T) $*" | tee -a "$LOG" >&2; }
@@ -149,7 +162,11 @@ fi
 # ---------- the Mac and its desktop ----------
 hid_idle() { ioreg -c IOHIDSystem | awk '/HIDIdleTime/ { print int($NF / 1000000000); exit }'; }
 displays() { system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Resolution:'; }
-builtin_only() { [ "$(displays)" = 1 ] && system_profiler SPDisplaysDataType 2>/dev/null | grep -q 'Built-in'; }
+# One display: the built-in one on a laptop; on a desktop Mac, its one display.
+builtin_only() {
+  [ "$(displays)" = 1 ] || return 1
+  system_profiler SPDisplaysDataType 2>/dev/null | grep -q 'Built-in' || desktop_mac
+}
 picture() {   # the Mac's desktop picture (the round's wallpaper everywhere)
   [ -n "${WALLPAPER:-}" ] && { echo "$WALLPAPER"; return; }
   osascript -e 'tell application "System Events" to get picture of current desktop' 2>/dev/null
@@ -166,7 +183,7 @@ gs() { gsi "$@" </dev/null; }
 widths() { gs "$1" 'U=$(id -nu 1000); sig=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
   sudo -u $U env XDG_RUNTIME_DIR=/run/user/1000 HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl monitors -j 2>/dev/null |
   python3 -c "import json,sys; print(\" \".join(str(m[\"width\"]) for m in json.load(sys.stdin)))"' 2>/dev/null; }
-wide() { local w x; w=$(widths "$1"); [ -n "$w" ] || return 1; for x in $w; do [ "$x" -ge 3000 ] || return 1; done; }
+wide() { local w x; w=$(widths "$1"); [ -n "$w" ] || return 1; for x in $w; do [ "$x" -ge "${FINAL_ROUND_MIN_GUEST_WIDTH:-3000}" ] || return 1; done; }
 wait_desktop() {   # host [seconds]: SSH and the user's Hyprland session
   local i n=$(( ${2:-300} / 5 ))
   for ((i = 0; i < n; i++)); do gs "$1" 'ls /run/user/1000/hypr' >/dev/null 2>&1 && return 0; sleep 5; done
@@ -206,6 +223,8 @@ vm_up() {   # target: start it in full screen, wait for its desktop, check the w
       open -n --env OMACVM_TEST_PASTEBOARD=org.omacvm.bench-test ${envs[@]+"${envs[@]}"} "$app" --args --start --vm "$name" -startFullScreen YES || return 1
       HOST=127.0.0.1:$([ "$t" = app ] && echo "$APP_PORT" || echo "$RC2_PORT") ;;
     utm)
+      # UTM takes no orders over SSH (macOS's Automation permission is the terminal app's).
+      [ -n "${SSH_CONNECTION:-}" ] && { log "utm: UTM takes no orders over SSH: run the round in Terminal on this Mac"; return 1; }
       open -a UTM; sleep 5
       "$UTMCTL" start "$name" >/dev/null 2>&1 || { log "utm: utmctl start failed"; return 1; }
       for ((i = 0; i < 60; i++)); do HOST=$("$UTMCTL" ip-address "$name" 2>/dev/null | grep -E '^[0-9]+\.' | head -1); [ -n "$HOST" ] && break; sleep 5; done
@@ -304,7 +323,7 @@ gate() {   # target pattern, seconds
   local why i
   for ((i = 0; i <= $2; i += 30)); do
     why=$(OUT=$DIR/x bash -c ". '$FR/common.sh'; preflight_why '$1'" 2>/dev/null)
-    builtin_only || why="${why:+$why; }an external display is connected (the round uses the built-in display only)"
+    builtin_only || why="${why:+$why; }more than one display is connected (the round uses one: the built-in display, or a desktop Mac's only one)"
     [ -z "$why" ] && return 0
     [ $i -lt "$2" ] && sleep 30
   done
@@ -321,6 +340,7 @@ summary() {
   [ -n "${GEEKBENCH_SCORES:-}" ] && gb=(--geekbench-scores "$GEEKBENCH_SCORES")
   [ "${FETCH_GEEKBENCH:-1}" = 0 ] && [ -z "${GEEKBENCH_SCORES:-}" ] && gb=()
   [ -n "$RC2_LABEL" ] && lb=(--label "app-rc2=$RC2_LABEL")
+  [ -n "$APP_LABEL" ] && lb+=(--label "app=$APP_LABEL")
   python3 "$FR/summarize.py" "${fl[@]}" ${gb[@]+"${gb[@]}"} ${lb[@]+"${lb[@]}"} --json "$DIR/chart.json" > "$DIR/table.md" ||
     { log "summary: Geekbench scores not read, without them"; python3 "$FR/summarize.py" "${fl[@]}" ${lb[@]+"${lb[@]}"} --json "$DIR/chart.json" > "$DIR/table.md"; } ||
     { log "summary: summarize.py failed"; return 1; }
@@ -428,6 +448,10 @@ SIM=""   # the dry run's clock: each step takes its estimate
 now() { if [ -n "$SIM" ]; then echo "$SIM"; else date +%s; fi; }
 left() { echo $(( (DEADLINE - $(now)) / 60 )); }
 log "round in $DIR: budget until $(date -r "$DEADLINE" +%H:%M) ($(left) min), idle windows ${IDLE_S}s, wallpaper $PIC"
+if [ -n "$NO_IDLE" ]; then
+  log "a desktop Mac (no battery): no idle-power rows"
+  for s in $(echo "$NO_IDLE" | tr ',' ' '); do pending "$s" && mark "$s" skipped "a desktop Mac: no idle-power rows"; done
+fi
 if [ -z "$RC2_APP" ]; then
   log "RC2_APP not set: the OmacVM 3.0.0 RC2 rows are skipped"
   for s in rc2-vulkan rc2-gl; do pending "$s" && mark "$s" skipped "RC2_APP not set"; done

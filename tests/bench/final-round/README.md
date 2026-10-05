@@ -54,12 +54,12 @@ The round uses only VMs made for it, one per hypervisor, named:
 | Parallels Desktop | `Bench Parallels` |
 
 **Never** the user's own VMs: Parallels' "Omarchy" (production) and
-"Omarchy ARM", OmacVM.app's "OmacVM Test", UTM's "Windows" on the Mac mini,
-or anything on the mini. `vm.sh` refuses any name that does not start with
+"Omarchy ARM", OmacVM.app's "OmacVM Test", and on the Mac mini Parallels'
+"Omarchy", the app's ~/OmacVM/Omarchy and UTM's "Windows". `vm.sh` refuses any name that does not start with
 `Bench `, and refuses unless that VM is the one VM running on its
 hypervisor (and, for OmacVM.app, the SSH port is that VM's).
 
-Each VM: 16 CPUs, 48 GB, Google Chrome installed (pacman/AUR, or
+Each VM: 16 CPUs, 48 GB (on the 16 GB Mac mini: 6 CPUs, 8 GB), Google Chrome installed (pacman/AUR, or
 `src/bench/install-chrome.sh`: fine here, these are our VMs), the screensaver
 and lock off (`omacvm disable idle-lock --vm NAME`), the same dark wallpaper
 as the Mac (the built-in display dims per zone, so a bright desktop draws
@@ -161,6 +161,36 @@ RC2_APP=~/Applications/"OmacVM 3.0.0 RC2.app" \
   screen, `--summary` redraws the table and chart, `--prepare-rc2` (before
   the round) makes the RC2's Bench VM: a clone of "Bench OmacVM" with the
   Graphics setting on Vulkan and the RC2's Venus driver.
+
+## On a desktop Mac (the Mac mini)
+
+The same kit runs on a Mac without a battery or a built-in display, e.g. the
+M4 Mac mini with its 5K LG UltraFine. What changes:
+
+- No idle-power rows: `round.sh` skips them on a Mac with no battery
+  (`BatteryInstalled = No`), noted in `steps.state`.
+  (`FINAL_ROUND_IDLE_DESKTOP=1` keeps them: an M4 Mac mini still reports
+  `SystemPowerIn`.) The charger checks pass by themselves there.
+- One display: the round's display is the Mac's only one, not a built-in one.
+- Full screen on that display at its native pixels: on the 5K LG the guest is
+  5120x2880 at scale 2 and Chrome's full-screen page 2560x1440 at 2x. Set
+  `FINAL_ROUND_MIN_GUEST_WIDTH=5120` and `FINAL_ROUND_VIEWPORT="2560x1440 at 2x"`.
+- Run it in Terminal on the mini, not over SSH: UTM takes no orders from an
+  SSH session (macOS's Automation permission belongs to the terminal app),
+  and `round.sh` refuses the UTM step there. From the MacBook, start it with
+  `open -a Terminal round.command` over SSH.
+- The VMs are sized for 16 GB: 6 vCPUs and 8 GB each (all four the same).
+- The app is the test identity, `~/Applications/OmacVM Test.app`
+  (org.omacvm.app.test), with its VMs folder set to the Bench VM's:
+  `defaults write org.omacvm.app.test vmsRoot ~/omacvm-bench-vms`. Its
+  "Bench OmacVM" has the Graphics setting on Vulkan (KosmicKrisp on macOS
+  26+), so the app's Vulkan and OpenCL rows run in the same VM; no RC2 step.
+
+```bash
+APP_291="$HOME/Applications/OmacVM Test.app" APP_PORT=52260 APP_LABEL="OmacVM 3.0.0 · Vulkan" \
+FINAL_ROUND_MIN_GUEST_WIDTH=5120 FINAL_ROUND_VIEWPORT="2560x1440 at 2x" WALLPAPER=<the Bench VMs' picture> \
+  tests/bench/final-round/round.sh --budget 120 --dir ~/bench/mini-gpu-$(date +%Y%m%d)
+```
 
 ## Run it step by step
 
