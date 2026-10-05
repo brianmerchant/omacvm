@@ -513,7 +513,7 @@ struct GraphicsPicker: View {
             }
             .help("OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before). Automatic picks what is faster on this Mac.")
             if let p = plan {
-                Text("This start: \(p.venus ? "OpenGL and Vulkan" : "OpenGL") (\(p.why)).")
+                Text("Next start: \(p.venus ? "OpenGL and Vulkan" : "OpenGL") (\(p.why)).")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
