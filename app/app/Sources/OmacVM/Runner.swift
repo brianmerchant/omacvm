@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import OmacVMNet
 
 /// Runs one VM: QEMU with its own Cocoa window (VirGL), a QMP socket for
 /// power and pause, and the Mac's sleep and wake.
@@ -62,7 +63,9 @@ final class Runner {
             // starts meanwhile waits too).
             "-audiodev", "sdl,id=snd0,timer-period=1000,out.buffer-count=8\(Runner.micAllowed ? "" : ",in.voices=0")",
             "-device", "intel-hda,id=hda0,romfile=",
-            "-device", "hda-micro,bus=hda0.0,audiodev=snd0",
+            // The codec paces the guest's sound (no catch-up after a stalled
+            // main loop); audioClassic keeps QEMU's own timing.
+            "-device", "hda-micro,bus=hda0.0,audiodev=snd0\(Settings.audioClassic ? ",pace=off" : "")",
             "-serial", "none",
             "-monitor", "none",
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
@@ -201,6 +204,11 @@ final class Runner {
         if Settings.hdrActive {
             env["OMACVM_GL_HDR"] = "1"
         }
+        // QEMU puts its main loop (sound card timers, virgl) at user-interactive
+        // QoS and logs which one it got; audioClassic keeps the default.
+        if Settings.audioClassic {
+            env["OMACVM_MAIN_LOOP_QOS"] = "default"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"
@@ -266,8 +274,11 @@ final class Runner {
     /// to connect again and again, and the VM has no network. Watched for the
     /// whole run: when vmnet stays down, QEMU's user network takes over
     /// (switchNetwork); when it is back for a whole window, vmnet takes over
-    /// again. A switch that fails or is only half done (QMP busy or timed
-    /// out) is tried again at the next poll: switching is safe to repeat.
+    /// again, make before break: the user network stays up until the guest
+    /// has had time for its vmnet address (FastNetworkWatch, tested by
+    /// `swift run net-tests`). A switch that fails or is only half done (QMP
+    /// busy or timed out) is tried again at the next poll: switching is safe
+    /// to repeat.
     /// logs/network and qemu.log say what the VM has now (omacvm check,
     /// app_ip). launchd accepts every connect at first, so one "connected"
     /// poll proves nothing: most of the last polls must see it.
@@ -277,29 +288,18 @@ final class Runner {
         let pid = process?.processIdentifier
         // Polls and switches off the main thread (QMP blocks); the verdicts back here.
         Task { [weak self] in
-            var recent: [Bool] = []
-            var toUser = false     // the network the VM should be on: the user network, else vmnet
-            var done = true        // ... and the last switch to it went through
+            var watch = FastNetworkWatch()
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             while self?.isRun(pid) == true {
-                if let up = await Task.detached(operation: { Runner.fastLinkUp(qmpPath: qmpPath) }).value {
-                    recent.append(up)
-                    if recent.count > Runner.watchWindow { recent.removeFirst() }
-                }
-                let ups = recent.filter { $0 }.count
-                if recent.count == Runner.watchWindow {
-                    if !toUser, ups * 2 < recent.count { toUser = true; done = false }
-                    else if toUser, ups == recent.count { toUser = false; done = false }
-                }
-                if !done {
-                    let user = toUser
+                let up = await Task.detached(operation: { Runner.fastLinkUp(qmpPath: qmpPath) }).value
+                let step = watch.poll(up)
+                if step != .none {
                     let links = await Task.detached(operation: {
-                        Runner.switchNetwork(qmpPath: qmpPath, sshPort: sshPort, toUser: user)
+                        Runner.switchNetwork(qmpPath: qmpPath, sshPort: sshPort, step: step)
                     }).value
                     guard let self, self.isRun(pid) else { return }
-                    done = links.error == nil
-                    if done { recent.removeAll() }
-                    if let line = Runner.networkRecord(links, toUser: user) {
+                    watch.finished(step, ok: links.error == nil)
+                    if step != .userDown, let line = Runner.networkRecord(links, toUser: step == .toUser) {
                         self.recordNetwork(line, note: line == "vmnet" ? "the fast network is back" : nil)
                     }
                 }
@@ -339,10 +339,6 @@ final class Runner {
     /// QEMU of the run with this pid still runs.
     private func isRun(_ pid: Int32?) -> Bool { isRunning && process?.processIdentifier == pid }
 
-    /// Polls in the watch window (one every 3 s): a daemon restart (about a
-    /// second) never fills it, a refusing or missing daemon does in 9-15 s.
-    nonisolated static let watchWindow = 5
-
     /// Is QEMU connected to omacvm-netd? nil when QMP did not answer (busy).
     /// "info network" shows "fast: index=0,type=stream,unix:<path>" while
     /// connected, "connecting" or an error while not.
@@ -367,9 +363,11 @@ final class Runner {
     /// later its link goes up again. The vmnet NIC's link goes down, so its
     /// address and route go. Its netdev stays: QEMU keeps a NIC's netdev until
     /// the NIC goes (and cannot unplug this one), and its reconnects are what
-    /// tells that vmnet is back. Back: the vmnet NIC's link up (the guest asks
-    /// DHCP), the user network's down.
-    nonisolated static func switchNetwork(qmpPath: String, sshPort: Int, toUser: Bool) -> NetLinks {
+    /// tells that vmnet is back. Back (toVmnet): the vmnet NIC's link up (the
+    /// guest asks DHCP); the user network's NIC stays up until userDown, a few
+    /// polls later, so the guest is never without a network meanwhile (at
+    /// once, its DHCP on vmnet left it without one for about 8 s).
+    nonisolated static func switchNetwork(qmpPath: String, sshPort: Int, step: FastNetworkWatch.Step) -> NetLinks {
         var l = NetLinks()
         guard let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-net") else {
             l.error = "QEMU's monitor did not answer"
@@ -378,7 +376,8 @@ final class Runner {
         defer { qmp.close() }
         do {
             let have = networkNames(try qmp.execute("human-monitor-command", arguments: ["command-line": "info network"])["text"] as? String ?? "")
-            if toUser {
+            switch step {
+            case .toUser:
                 if !have.contains("slow") {
                     _ = try qmp.execute("netdev_add", arguments: [
                         "type": "user", "id": "slow", "hostfwd": [["str": "tcp:127.0.0.1:\(sshPort)-:22"]]])
@@ -393,11 +392,14 @@ final class Runner {
                 l.user = true
                 _ = try qmp.execute("set_link", arguments: ["name": "nic0", "up": false])
                 l.fast = false
-            } else {
+            case .toVmnet:
                 _ = try qmp.execute("set_link", arguments: ["name": "nic0", "up": true])
                 l.fast = true
+            case .userDown:
                 if have.contains("nic1") { _ = try qmp.execute("set_link", arguments: ["name": "nic1", "up": false]) }
                 l.user = false
+            case .none:
+                break
             }
         } catch {
             l.error = error.localizedDescription

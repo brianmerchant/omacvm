@@ -609,6 +609,9 @@ verify_file_sha "Try Omarchy HDA full-ring recovery patch" \
   "$audio_recovery_patch" "$audio_recovery_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$audio_device_patch"
 patch -d "$source_dir" -p1 -f -i "$audio_recovery_patch"
+# OmacVM: no catch-up after a stalled main loop (the guest's sound clock pauses;
+# QEMU's ring covers the stall instead of the guest under-running).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hda-no-catch-up.patch"
 patch -d "$source_dir" -p1 -f -i "$shared_folder_patch"
 patch -d "$source_dir" -p1 -f -i "$strchrnul_patch"
 patch -d "$source_dir" -p1 -f -i "$memory_reclaim_patch"
@@ -632,6 +635,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input-only.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
+# OmacVM: the playback device opens and closes off the BQL too: a Mac audio
+# device that does not answer no longer hangs the VM, it runs without sound.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-thread.patch"
+# OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
+# busy guest on a busy Mac no longer delays it and the sound stays clean.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 # OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window

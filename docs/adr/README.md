@@ -21,5 +21,6 @@ a new record replaces it and says so.
 | [0023](0023-refresh-rate-follows-the-guest.md) | The refresh rate follows the guest (ProMotion) | accepted, built (`pacing-hdr`) |
 | [0026](0026-fence-tests-off-the-render-threads-lock.md) | Fence tests stay off Apple GL's lock while the render thread works | accepted, sync-thread part in 2.9.1 |
 | [0035](0035-graphics-setting.md) | A Graphics setting per VM: OpenGL, Vulkan or Automatic; KosmicKrisp in release builds | accepted, built (`vk300`, 3.0.0) |
+| [0036](0036-sound-main-loop-qos.md) | Sound on a busy Mac: main loop at user-interactive QoS, no HDA catch-up | accepted, built (`audio-crackle`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).
