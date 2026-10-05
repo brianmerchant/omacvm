@@ -395,8 +395,9 @@ Patches (all in `app/runtime/patches`, one per concern):
   texture, filled from the heap when a draw samples it (Metal blit into a
   shared buffer, then `glTexSubImage2D`, once per command buffer); memory
   that cannot be read leaves it blank. The app says so at start (OEM string
-  `omacvm.vkwindows=1`); the guest then keeps Mesa's normal WSI, otherwise
-  (older app) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
+  `omacvm.vkwindows=1`, only with MoltenVK: KosmicKrisp's exported memory is
+  not tested yet); the guest then keeps Mesa's normal WSI, otherwise (older
+  app, KosmicKrisp) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
 
 Switch: `defaults write org.omacvm.app venus -bool true` adds
 `blob=true,venus=true,hostmem=4G` to the GPU device. Off by default: the

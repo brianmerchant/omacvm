@@ -199,8 +199,9 @@ Pending (each line is decided at release: the lane landed, or it moves to
   texture each time Hyprland draws it, and an import that cannot work
   leaves the window blank instead of ending the context. Vulkan apps keep Mesa's normal present
   path (vkmark on an M4 Max, median of 3: 865 in a window and 678 full
-  screen, against 336 and 65 with the old CPU-copy workaround). With an
-  older app the VM still uses the CPU copy (`MESA_VK_WSI_DEBUG=sw`).
+  screen, against 336 and 65 with the old CPU-copy workaround). This is
+  on with MoltenVK (macOS 15); with KosmicKrisp (macOS 26 and newer) and
+  with an older app the VM still uses the CPU copy (`MESA_VK_WSI_DEBUG=sw`).
 - OmacVM.app: WebGPU and GPU compute, experimental and off by default:
   `omacvm enable vulkan --vm NAME`, then restart the VM. The VM gets OpenCL
   (darktable, ffmpeg's OpenCL filters, Geekbench GPU), WebGPU in Firefox,

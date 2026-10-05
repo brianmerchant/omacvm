@@ -80,7 +80,11 @@ final class Runner {
         }
         // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch):
         // the guest then presents Vulkan on the GPU, not through a CPU copy (omacvm-vulkan-present).
-        a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
+        if Graphics.vulkanWindowsOnGPU(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                                       kosmicKrisp: Runner.runtimeHasKosmicKrisp,
+                                       driver: ProcessInfo.processInfo.environment["OMACVM_VULKAN_DRIVER"]) {
+            a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
+        }
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
@@ -136,16 +140,21 @@ final class Runner {
     /// The graphics this start got (Graphics.swift).
     private(set) var graphics: GraphicsPlan?
 
+    /// The runtime has KosmicKrisp (release builds; Venus uses it on macOS 26+).
+    static var runtimeHasKosmicKrisp: Bool {
+        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
+        return FileManager.default.fileExists(atPath: lib.path)
+    }
+
     /// The VM's Graphics setting on this Mac now: the macOS version, whether
     /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
     static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
-        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
         let forced = Settings.venus || FileManager.default.fileExists(
             atPath: c.folder.appendingPathComponent("vulkan").path)
         return Graphics.plan(choice: Graphics.read(folder: c.folder),
                              macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-                             kosmicKrisp: FileManager.default.fileExists(atPath: lib.path),
+                             kosmicKrisp: runtimeHasKosmicKrisp,
                              driverReady: Graphics.driverReady(folder: c.folder), forced: forced,
                              macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024)
     }

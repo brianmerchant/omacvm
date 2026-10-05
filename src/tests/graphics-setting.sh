@@ -90,4 +90,18 @@ grep -q 'g.venus ? ",blob=true,venus=true,hostmem=\\(g.hostmemGB)G"' "$R/app/app
   ok "Runner's Venus options come from the plan" || bad "Runner.swift does not use the plan"
 grep -q 'GI_ARGS+=" --graphics $GRAPHICS"' "$R/src/cmd/apply.sh" && ok "apply passes --graphics" || bad "apply.sh: no --graphics"
 grep -q 'vulkan-virtio.sh --ready' "$R/src/cmd/apply.sh" && ok "apply writes venus-ready from the VM" || bad "apply.sh: no venus-ready"
+# Vulkan windows on the GPU (omacvm.vkwindows): MoltenVK yes, KosmicKrisp not yet (untested there).
+mkdir -p "$T/vkw"
+cat > "$T/vkw/main.swift" <<'EOF2'
+let cases: [(Int, Bool, String?)] = [(15, false, nil), (15, true, nil), (26, false, nil), (26, true, nil),
+                                     (27, true, "moltenvk"), (15, true, "kosmickrisp")]
+for (m, k, d) in cases {
+    print("\(m) \(k) \(d ?? "-") \(Graphics.vulkanWindowsOnGPU(macOSMajor: m, kosmicKrisp: k, driver: d))")
+}
+EOF2
+swiftc -O -o "$T/vkw/run" "$R/app/app/Sources/OmacVM/Graphics.swift" "$T/vkw/main.swift" &&
+  expect "Vulkan windows on the GPU: MoltenVK only" \
+    "15 false - true|15 true - true|26 false - true|26 true - false|27 true moltenvk true|15 true kosmickrisp false" \
+    "$("$T/vkw/run" | paste -sd'|' -)" || bad "vulkanWindowsOnGPU does not build"
+
 exit $fail
