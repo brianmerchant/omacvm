@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Prebuilt VM (5 min) | ✅ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic); macOS 26 or newer: Vulkan apps run on KosmicKrisp (vkmark +29 % over MoltenVK on a Mac mini M4) and Automatic turns Vulkan on; macOS 15: the OpenGL path, fully supported, with Vulkan on MoltenVK when you pick it; WebGPU and OpenCL opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL in 3.0.0); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows are copied through the CPU, so full-screen Vulkan is slow; OpenGL and browsers are the same either way; WebGPU and OpenCL opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
 
 <!-- 3.0.0 benchmark chart: the final round (bare macOS = 100 %, OmacVM.app first) replaces docs/images/benchmarks.svg and this alt text. -->
 <p align="center">

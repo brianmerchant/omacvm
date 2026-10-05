@@ -87,12 +87,39 @@ grep -q '^venus/vulkan-virtio.sh $want ||' src/app/guest/install.sh && pass "app
 grep -q 'OMACVM_GRAPHICS=//p' src/app/guest/install.sh && pass "app install builds ahead for Graphics Vulkan" || fail "app install ignores OMACVM_GRAPHICS"
 grep -q 'ExecStart=/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh$' "$D/omacvm-venus-driver.service" &&
   grep -q 'omacvm-venus-driver.service' src/app/guest/install.sh && pass "boot unit runs it" || fail "no boot unit"
+# Never in the boot's critical chain: a timer after the desktop, no
+# network-online.target and no [Install] on the service (a build at boot made
+# multi-user.target, and with it the desktop, wait for it).
+svc=$D/omacvm-venus-driver.service tmr=$D/omacvm-venus-driver.timer
+if ! grep -v '^#' "$svc" | grep -q 'network-online' && ! grep -q '^\[Install\]' "$svc" && grep -q '^OnBootSec=' "$tmr" &&
+   grep -q '^WantedBy=timers.target' "$tmr" && grep -q 'systemctl enable omacvm-venus-driver.timer' src/app/guest/install.sh &&
+   grep -q 'rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service' src/app/guest/install.sh; then
+  pass "driver unit runs from a timer after boot, without network-online"
+else
+  fail "driver unit can delay the boot (network-online, [Install] on the service, or no timer)"
+fi
 grep -q 'app/guest/venus/vulkan-virtio.sh --status' src/guest/check.sh && pass "check has the Vulkan (Venus) row" || fail "no check row"
 
-# Vulkan windows present through a CPU copy: a dma-buf from Venus imported by
-# Hyprland's virgl context loses that context (PIPE_RESOURCE_SET_TYPE EINVAL).
-grep -qx 'MESA_VK_WSI_DEBUG=sw' src/app/guest/90-omacvm-vulkan.conf &&
-  grep -q 'environment.d/90-omacvm-vulkan.conf' src/app/guest/install.sh && pass "Vulkan presents in software WSI" ||
-  fail "no software WSI for Vulkan (Hyprland would lose its GPU context)"
+# Vulkan windows: Mesa's normal WSI when the app says it shows them (omacvm.vkwindows=1),
+# else the software WSI (an older app ended Hyprland's GPU context on the import).
+G=src/app/guest/omacvm-vulkan-present
+d=$(mktemp -d)
+sed "s#/run/omacvm/host.env#$d/host.env#" "$G" > "$d/gen"
+[[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "no host.env: software WSI" || fail "no host.env: not software WSI"
+echo OMACVM_VKWINDOWS=1 > "$d/host.env"
+[[ -z $(sh "$d/gen") ]] && pass "app shows Vulkan windows: normal WSI" || fail "app shows Vulkan windows: still software WSI"
+printf 'OMACVM_NOTCH=64\nOMACVM_VKWINDOWS=0\n' > "$d/host.env"
+[[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "flag 0: software WSI" || fail "flag 0: not software WSI"
+rm -rf "$d"
+grep -q 'user-environment-generators/90-omacvm-vulkan-present' src/app/guest/install.sh &&
+  grep -q 'rm -f /etc/environment.d/90-omacvm-vulkan.conf' src/app/guest/install.sh && pass "installed as a session generator" ||
+  fail "generator not installed (or the old fixed file kept)"
+grep -q 'value=omacvm.vkwindows=1' app/app/Sources/OmacVM/Runner.swift &&
+  grep -q 'Graphics.vulkanWindowsOnGPU' app/app/Sources/OmacVM/Runner.swift && pass "the app sends omacvm.vkwindows (MoltenVK only)" ||
+  fail "the app does not send omacvm.vkwindows"
+grep -q '^Before=systemd-user-sessions.service' src/app/guest/omacvm-app-host.service && pass "host.env is written before sessions" ||
+  fail "host.env may come after the session starts"
+grep -q 'virgl-set-type-without-egl.patch' app/runtime/build-qemu-gpu-runtime.sh && pass "the runtime has the import patch" ||
+  fail "the runtime lacks virgl-set-type-without-egl.patch"
 
 (( fails == 0 )) && echo "venus-driver: all ok" || { echo "venus-driver: $fails failed"; exit 1; }

@@ -1,0 +1,11 @@
+# OmacVM.app: the Venus driver check once per boot, 90 s in (after the
+# desktop), so it never sits in the boot's critical chain.
+[Unit]
+Description=OmacVM: Vulkan (Venus) driver check after the desktop is up
+
+[Timer]
+OnBootSec=90s
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

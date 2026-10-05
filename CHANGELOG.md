@@ -188,12 +188,15 @@ itself. Details below.
   **Automatic** (the default), in the app's setup and VM window, with
   `omacvm graphics --vm NAME opengl|vulkan|auto`, and on the control
   centre's Graphics row. Vulkan gives the VM Vulkan on the Mac's GPU (Venus)
-  next to OpenGL; Automatic picks it where it is the faster path on this
-  Mac: on macOS 26 and newer with KosmicKrisp, where Vulkan apps get the
-  faster driver (vkmark +29 % over MoltenVK); on macOS 15 it stays OpenGL,
-  because MoltenVK cannot carry OpenGL or WebGL (ES 2.0 only; numbers in
-  docs/benchmarks). OpenGL stays on virgl either way. It applies at the
-  VM's next start, and `omacvm check` says what a start got. The hidden `venus` switch stays for development.
+  next to OpenGL; OpenGL and the browsers stay on virgl either way, so
+  Vulkan only adds Vulkan apps (on macOS 26 and newer on KosmicKrisp, which
+  ran vkmark off-screen 29 % faster than MoltenVK on a Mac mini M4).
+  Automatic is OpenGL on every Mac in 3.0.0; turning it to Vulkan on
+  macOS 26 and newer later is one line. It applies
+  at the VM's next start, and `omacvm check` says what a start got. The
+  hidden `venus` switch of 2.9 is gone: if it was on, the app's first 3.0.0
+  launch sets Graphics to Vulkan for each VM that had no choice of its own
+  (OpenGL stays OpenGL) and says so in its log.
 - KosmicKrisp is in the app (about 13 MB, its licences in the app's
   licences folder): on macOS 26 and newer Vulkan runs on it, on older macOS
   on MoltenVK. A Mac where KosmicKrisp cannot run falls back to MoltenVK
@@ -209,15 +212,27 @@ itself. Details below.
   whose Venus driver does not size GPU memory to the Mac's 16 KiB pages
   (every Vulkan app failed with `ERROR_OUT_OF_HOST_MEMORY`), `omacvm apply`
   builds Mesa 26.2.4's Venus driver as Arch's `vulkan-virtio` package when
-  the setting gives the VM Vulkan, and the VM builds it at its next start
-  when Vulkan was picked since. Automatic waits for it. `omacvm check` has
-  a "Vulkan (Venus)" row.
+  the setting gives the VM Vulkan. Until it is built, a VM set to Vulkan
+  starts with OpenGL only, and the app, `omacvm graphics` and the control
+  centre say "Vulkan (driver not built yet: runs on OpenGL until the next
+  apply)". In the VM a timer looks again 90 s after boot, after the desktop
+  is up, so a build never holds up the boot or the desktop. `omacvm check`
+  has a "Vulkan (Venus)" row.
 - Vulkan windows no longer take Omarchy's desktop down: a Vulkan app on
   Wayland (vkcube, vkmark) made Hyprland lose its GPU context for good (a
-  black desktop) when it took the app's frame as a dma-buf, which the Mac
-  cannot share with OpenGL. App VMs now present Vulkan frames through a
-  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which costs full-screen Vulkan frame
-  rates.
+  black desktop) when it took the app's frame as a dma-buf. macOS OpenGL
+  cannot import that memory (a Metal heap), and the failed import ended
+  the whole context. Now the Mac copies the Vulkan image into an OpenGL
+  texture each time Hyprland draws it, and an import that cannot work
+  leaves that window blank instead of ending the context.
+  On macOS 15 (MoltenVK) Vulkan apps now use Mesa's normal present path
+  (vkmark on an M4 Max, median of 3: 865 in a window and 678 full screen,
+  against 336 and 65 with the CPU copy).
+  On macOS 26 and newer (KosmicKrisp) Vulkan windows still go through the
+  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which is slower, mostly full screen
+  (vkmark full screen 203 on a Mac mini M4 at 5K). The faster path is not
+  tested on KosmicKrisp yet. A VM started by an older app also keeps the
+  CPU copy.
 - OmacVM.app: WebGPU and GPU compute, experimental and off by default:
   `omacvm enable vulkan --vm NAME`, then restart the VM. The VM gets OpenCL
   (darktable, ffmpeg's OpenCL filters, Geekbench GPU), WebGPU in Firefox,

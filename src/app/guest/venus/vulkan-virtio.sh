@@ -60,6 +60,13 @@ case ${s%% *} in
 esac
 (( EUID == 0 )) || { echo "vulkan-virtio.sh: run as root" >&2; exit 1; }
 
+# From the boot timer (OMACVM_VENUS_BOOT): the unit does not wait for the
+# network or for the user's own pacman, so this does, for a while.
+if [[ -n ${OMACVM_VENUS_BOOT:-} ]]; then
+  for _ in $(seq 60); do getent hosts archive.mesa3d.org >/dev/null && break; sleep 5; done
+  for _ in $(seq 120); do [[ -e /var/lib/pacman/db.lck ]] || break; sleep 5; done
+  [[ -e /var/lib/pacman/db.lck ]] && { echo "Vulkan (Venus): pacman is busy, trying again at the next boot"; exit 0; }
+fi
 echo "Vulkan (Venus): building Mesa's vulkan-virtio ${FIXED#*:} (a few minutes, log $LOG)"
 # Build tools this VM lacks are added for the build and removed after.
 deps=(base-devel)
