@@ -625,6 +625,9 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input-only.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
+# OmacVM: the playback device opens and closes off the BQL too: a Mac audio
+# device that does not answer no longer hangs the VM, it runs without sound.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-thread.patch"
 # OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
 # busy guest on a busy Mac no longer delays it and the sound stays clean.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"

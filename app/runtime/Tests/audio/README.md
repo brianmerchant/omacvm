@@ -29,6 +29,11 @@ them (`out.buffer-count=8`, 93 ms).
   `disable-library-validation`) that records what QEMU really hands SDL, and
   can loop playback back into a fake recording device for a round trip
   without a microphone (`jack_iodelay` through `pipewire-jack` in the guest).
+- `wedged-output-start.c`: a library that makes `AudioQueueStart` block, as
+  it does when coreaudiod stops answering (forever, after the first N
+  starts, or until a file exists, then start or fail). For the start-hang
+  fix (`qemu-sdl-audio-playback-thread.patch`, troubleshooting finding 25):
+  the VM must boot and play to nobody instead of hanging.
 
 ## Results (MacBook Pro M4 Max, 8 vCPUs, 10 minutes each, bench lock held)
 
