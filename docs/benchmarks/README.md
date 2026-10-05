@@ -433,6 +433,11 @@ kosmickrisp track (unlocked, median of 3 unless said; tracks/kosmickrisp.md):
 | WebGL Aquarium 30k, Chrome 154 | 21.9 fps (ANGLE on GL) | 26.9 fps (ANGLE on Vulkan, X11 and flags) |
 | Basemark Web 3.0 | 1,654 | 1,511 (ANGLE on Vulkan) |
 
+The 3.0.0 build on that mini (2026-10-05, unlocked) picked Vulkan on
+KosmicKrisp under Automatic and gave the same picture: Aquarium 30k 18.9 fps
+on ANGLE on GL against 26.9-27.0 on ANGLE on Vulkan (X11, flags); vkpeak
+fp32 3.9 TFLOPS (MacBook M4 Max on MoltenVK: 15.8).
+
 KosmicKrisp also has `nullDescriptor`, `robustBufferAccess2` and `logicOp`,
 which MoltenVK lacks. **Automatic = Vulkan on macOS 26 and newer** when the
 app has KosmicKrisp: Vulkan apps get the faster, fuller driver, OpenGL stays on
