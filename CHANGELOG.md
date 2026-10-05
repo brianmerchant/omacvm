@@ -5,6 +5,16 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+- The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
+  with one hand (brianmerchant, #42). Only exactly these keys count: with
+  Shift (or another key) added they go on as ordinary keys. Neither Omarchy
+  nor macOS uses Ctrl+Option+Esc. The old ⌃⌥⌘ Esc
+  still works through 3.0.x; the first time it is used in a VM, Omarchy shows
+  "New shortcut: ⌃⌥ Esc". It is removed in a later version. OmacVM.app's QEMU
+  now lets the combo through to OmacVM Gestures, whichever of the two
+  started first. OmacVM.app's *Escape combo* setting is now *This monitor*
+  or *All monitors*. Parallels, UTM and Fusion: `omacvm update` brings the
+  new Gestures (until then the old combo keeps working).
 - OmacVM.app: the pointer moves in Omarchy right after the VM starts, and
   after a reboot in the VM, without a click into the window first, in a
   window and in full screen, on any display. Coming back to the VM's window
