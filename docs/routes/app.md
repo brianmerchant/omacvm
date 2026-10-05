@@ -373,30 +373,44 @@ What is missing before it can become the default: [below](#fast-network-not-done
     interfaces it saw when it started: a tunnel that came up later got the
     VM's packets with their `192.168.77.x` source untranslated, which a real
     VPN server drops. Fixed by the service's VPN NAT (above).
-- VPN NAT on the Mac mini (macOS 27, 2026-10-05; a test tunnel `utun-sink`
-  that answers pings and DNS, with split routes for `203.0.113.7` and
-  `2001:db8:77::7`, and a resolver for one domain through it):
-  - Tunnel up while a VM runs: the NAT is on within a second; the VM reaches
-    both addresses through the tunnel, which sees the tunnel's own addresses
-    as source (`10.99.0.1`, `2001:db8:99::1`), not the VM's. The VM's DNS
-    (`192.168.77.1`) answers a name only the tunnel's DNS server knows.
-  - Tunnel down: its rule goes; up again (a new `utun`): back within a
-    second. The VM stopping: everything goes, pf's references are as
-    before. A VM starting with the tunnel up: NAT in the same second.
+- VPN NAT on the Mac mini (macOS 27, 2026-10-05; an app VM's QEMU on the
+  fast network, the service installed by `install.sh`; a test tunnel
+  `utun-sink` that answers pings and DNS, with split routes for
+  `203.0.113.7` and `2001:db8:77::7`, and a resolver for one domain through
+  it):
+  - Tunnel up while the VM runs: the NAT is on within a second
+    (`install.sh --status`: `vpn-nat: utun0`); the VM reaches both addresses
+    through the tunnel, which sees the tunnel's own addresses as source
+    (`10.99.0.1`, `2001:db8:99::1`), not the VM's. In the VM a name only the
+    tunnel's DNS server knows resolves (the VM asks `192.168.77.1`).
+  - A full tunnel (`0/1` and `128/1` into the tunnel for 20 s): the VM's
+    pings to `1.1.1.1` and `9.9.9.9` went through it, NATed. Afterwards the
+    internet as before.
+  - Tunnel down: its rule goes, the VM's internet stays; up again (a new
+    `utun`): back within a second. The VM stopping: everything goes, pf's
+    references are as before. A VM starting with the tunnel up: NAT in the
+    same second.
+  - A real sleep and wake (2 minutes) with the tunnel up, twice: the rules
+    stay, the VM reaches the tunnel (IPv4 and IPv6) and the internet once the
+    Mac has its own back (about 10 s after the wake).
   - The service killed (`kill -9`) with the NAT on: rules and reference
-    stay, the next start removes both; stopped normally: removed at once.
-  - Untouched throughout: macOS's main ruleset, its own anchors (sharing,
-    AirDrop, firewall), Parallels' `10.211.55.2`/`10.37.129.2`, Tailscale
-    (the VM reaches the other Mac through it with macOS's own NAT).
-  - These runs used a stand-in for the VM (a small program that connects to
-    the service as QEMU does, `vmclient.c` in the track's test folder), not
-    a Linux guest.
+    stay, the next start removes both; stopped or removed (`install.sh
+    --remove`): removed at once.
+  - Untouched: macOS's main ruleset, its own anchors (sharing, AirDrop,
+    firewall), Tailscale (the VM reaches the other Mac through it with
+    macOS's own NAT), and Parallels' `10.211.55.2`/`10.37.129.2` while
+    awake. After a wake with the test tunnel up, Parallels' two networks
+    came back as `192.168.18.1`/`192.168.19.1`; that happened with only the
+    tunnel too (no VM, no service), and not without it: Parallels' (or
+    macOS's) doing with a tunnel present, not the NAT. Quit and reopen
+    Parallels Desktop, or `sudo killall prl_naptd`, brings them back.
 - Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
-  VM runs, a full tunnel, real trackpad gestures over the fast network
+  VM runs (the test tunnel is a `utun` as theirs), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
-  `src/net/mac/test.sh`), and the MacBook (numbers there too).
+  `src/net/mac/test.sh`), and the MacBook (macOS 15: the VPN NAT, and
+  numbers).
 - SMAppService would give macOS's own approval (System Settings) instead of
   a password dialog; not done.
 
