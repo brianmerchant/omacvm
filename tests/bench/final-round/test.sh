@@ -215,6 +215,12 @@ ARGS="$OMQ -name Bench OmacVM -machine virt -netdev user,id=n,hostfwd=tcp:127.0.
 check "app: the named VM runs and the port is its SSH" 'STUB_ARGS="$ARGS" C "vm_running app \"Bench OmacVM\" 52222"'
 check "app: another VM's port is refused" '! STUB_ARGS="$ARGS" C "vm_running app \"Bench OmacVM\" 52223" >/dev/null'
 check "app: the user's VM is not the bench VM" '! STUB_ARGS="${ARGS/Bench OmacVM/OmacVM Test}" C "vm_running app \"Bench OmacVM\" 52222" >/dev/null'
+# The released app runs QEMU as Contents/Resources/runtime/bin/OmacVM.
+REL=$'/Users/x/Applications/OmacVM Bench 2.9.1.app/Contents/Resources/runtime/bin/OmacVM'
+check "app: the release app's QEMU (runtime/bin/OmacVM) is found" \
+  'STUB_ARGS="$REL -name Bench OmacVM -machine virt -netdev user,id=n,hostfwd=tcp:127.0.0.1:52222-:22" C "vm_running app \"Bench OmacVM\" 52222"'
+check "busy: two VMs of the release app count as two" \
+  '[[ $(STUB_PS="$REL"$'"'"'\n'"'"'"$REL" C "busy_check \"OmacVM[^/]*\\.app/\"") == *"\"target_vms\":2"* ]]'
 
 # ---------- bench.sh: Geekbench GPU only on a GPU device ----------
 cat > "$S/clinfo" <<'EOF'
