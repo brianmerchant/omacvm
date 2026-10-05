@@ -119,6 +119,9 @@ final class GPUMemoryWatch {
 
     private func poll() {
         guard let m = GPUMemory.read(for: config) else { return }
+        // macOS tells only some processes about a warning, one at a time; QEMU
+        // also looks for itself once a second and writes what it sees.
+        if m.pressure != "normal" { macOSShort(critical: m.pressure == "critical") }
         if m.lost > lostSeen {
             lostSeen = m.lost
             if GPUMemory.compositors.contains(m.lostLast) { desktopLost(m) }

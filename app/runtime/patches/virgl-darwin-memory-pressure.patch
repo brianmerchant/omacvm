@@ -4,9 +4,11 @@ What: below the budget of virgl-resource-memory-budget.patch (now only a guard
 against a runaway guest) nothing is refused while macOS has memory to give.
 - A dispatch source (DISPATCH_SOURCE_TYPE_MEMORYPRESSURE) follows macOS's memory
   pressure. Its handler runs on a libdispatch thread and only stores the level;
-  the renderer thread acts on it from virgl_renderer_poll: it logs each change
-  and, when the pressure rises, lets Apple's GL free the storage it still holds
-  for deleted textures and buffers (glFinish on context 0).
+  the renderer thread acts on it from virgl_renderer_poll, where it also reads
+  the level itself once a second (macOS tells only some processes about a
+  warning, one at a time: on a Mac mini at "warn" no event came for minutes);
+  it logs each change and, when the pressure rises, lets Apple's GL free the
+  storage it still holds for deleted textures and buffers (glFinish on context 0).
 - A new resource of 16 MB or more (not a screen or cursor) is checked against the
   level macOS has right now (kern.memorystatus_vm_pressure_level): refused at
   "critical", and at "warn" only when it is bigger than all the free, inactive and
@@ -81,7 +83,7 @@ memory soak in docs/routes/app.md.
     if (vrend_state.use_async_fence_cb) {
        flush_eventfd(vrend_state.eventfd);
        mtx_lock(&vrend_state.poll_mutex);
-@@ -10324,6 +10340,293 @@ static void vrend_resource_budget_init(void)
+@@ -10324,6 +10340,304 @@ static void vrend_resource_budget_init(void)
                   (unsigned long long)(budget >> 20), from);
     else
        virgl_info("guest GPU memory budget: none (%s)\n", from);
@@ -94,7 +96,9 @@ memory soak in docs/routes/app.md.
 + * refused only when macOS itself is short of memory:
 + * - A dispatch source follows macOS's memory pressure. Its handler runs on a
 + *   libdispatch thread and only stores the level; the renderer thread acts on it
-+ *   in vrend_memory_tick (from virgl_renderer_poll): it logs each change and, when
++ *   in vrend_memory_tick (from virgl_renderer_poll), which also reads the level
++ *   itself once a second (macOS notifies only some processes of a warning, one at
++ *   a time): it logs each change and, when
 + *   the pressure rises, lets Apple's GL free what it still holds for deleted
 + *   textures and buffers (glFinish).
 + * - A new big resource (VREND_MEMORY_BIG or more; never a screen or cursor) is
@@ -114,6 +118,7 @@ memory soak in docs/routes/app.md.
 +#define VREND_MEMORY_BIG            (16ull << 20)
 +#define VREND_MEMORY_STATUS_STEP    (8ull << 20)
 +#define VREND_MEMORY_STATUS_NS      250000000ull
++#define VREND_MEMORY_CHECK_NS       1000000000ull
 +
 +enum vrend_pressure { VREND_PRESSURE_NORMAL, VREND_PRESSURE_WARN, VREND_PRESSURE_CRITICAL };
 +static const char *const vrend_pressure_names[] = { "normal", "warn", "critical" };
@@ -126,6 +131,7 @@ memory soak in docs/routes/app.md.
 +   uint64_t fixed_available;
 +   /* the renderer thread only, from here on */
 +   unsigned seen_events;
++   uint64_t checked_ns;
 +   int handled_level;
 +   uint64_t peak;
 +   uint64_t refusals;
@@ -296,20 +302,27 @@ memory soak in docs/routes/app.md.
 +static void vrend_memory_tick(void)
 +{
 +   unsigned events = atomic_load(&vrend_memory.events);
++   int level = vrend_memory.handled_level;
++   uint64_t t = vrend_memory_now_ns();
 +
 +   if (events != vrend_memory.seen_events) {
-+      int level = atomic_load(&vrend_memory.level);
 +      vrend_memory.seen_events = events;
-+      if (level != vrend_memory.handled_level) {
-+         virgl_info("macOS memory pressure: %s (guest GPU memory in use: %llu MB)%s\n",
-+                    vrend_pressure_names[level],
-+                    (unsigned long long)(vrend_state.resource_bytes >> 20),
-+                    level > vrend_memory.handled_level ? "; freeing what the GL still holds" : "");
-+         if (level > vrend_memory.handled_level)
-+            vrend_memory_trim(true);
-+         vrend_memory.handled_level = level;
-+         vrend_memory.dirty = true;
-+      }
++      level = atomic_load(&vrend_memory.level);
++   } else if (t - vrend_memory.checked_ns >= VREND_MEMORY_CHECK_NS) {
++      /* macOS tells only some processes about a warning, one at a time (seen on a Mac
++       * mini at warn: no event for minutes), so look for ourselves once a second */
++      vrend_memory.checked_ns = t;
++      level = vrend_memory_pressure_now();
++   }
++   if (level != vrend_memory.handled_level) {
++      virgl_info("macOS memory pressure: %s (guest GPU memory in use: %llu MB)%s\n",
++                 vrend_pressure_names[level],
++                 (unsigned long long)(vrend_state.resource_bytes >> 20),
++                 level > vrend_memory.handled_level ? "; freeing what the GL still holds" : "");
++      if (level > vrend_memory.handled_level)
++         vrend_memory_trim(true);
++      vrend_memory.handled_level = level;
++      vrend_memory.dirty = true;
 +   }
 +   if (vrend_memory.dirty)
 +      vrend_memory_status_write(false);
@@ -375,7 +388,7 @@ memory soak in docs/routes/app.md.
  }
  
  static bool vrend_resource_charge(struct vrend_resource *gr,
-@@ -10347,8 +10650,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
+@@ -10347,8 +10661,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
                      (unsigned long long)n);
        return false;
     }
@@ -387,7 +400,7 @@ memory soak in docs/routes/app.md.
     if (vrend_state.resource_bytes >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
        vrend_state.resource_peak_logged = vrend_state.resource_bytes / VREND_RESOURCE_PEAK_STEP *
                                           VREND_RESOURCE_PEAK_STEP;
-@@ -10363,6 +10669,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
+@@ -10363,6 +10680,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
  {
     vrend_state.resource_bytes -= MIN2(gr->budget_bytes, vrend_state.resource_bytes);
     gr->budget_bytes = 0;
