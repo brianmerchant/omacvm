@@ -63,7 +63,9 @@ final class Runner {
             // starts meanwhile waits too).
             "-audiodev", "sdl,id=snd0,timer-period=1000,out.buffer-count=8\(Runner.micAllowed ? "" : ",in.voices=0")",
             "-device", "intel-hda,id=hda0,romfile=",
-            "-device", "hda-micro,bus=hda0.0,audiodev=snd0",
+            // The codec paces the guest's sound (no catch-up after a stalled
+            // main loop); audioClassic keeps QEMU's own timing.
+            "-device", "hda-micro,bus=hda0.0,audiodev=snd0\(Settings.audioClassic ? ",pace=off" : "")",
             "-serial", "none",
             "-monitor", "none",
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
@@ -201,6 +203,11 @@ final class Runner {
         if let d = Runner.placement() { env["OMACVM_TEST_MAIN_DISPLAY"] = String(d) }
         if Settings.hdrActive {
             env["OMACVM_GL_HDR"] = "1"
+        }
+        // QEMU puts its main loop (sound card timers, virgl) at user-interactive
+        // QoS and logs which one it got; audioClassic keeps the default.
+        if Settings.audioClassic {
+            env["OMACVM_MAIN_LOOP_QOS"] = "default"
         }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"

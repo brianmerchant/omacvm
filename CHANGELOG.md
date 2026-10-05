@@ -212,6 +212,22 @@ in more words.
   only while a VM is on the fast network and only in its own pf rules
   (nothing else in the Mac's firewall changes), and takes it away when the
   VPN goes. `omacvm check` shows it (docs/routes/app.md).
+- OmacVM.app: the sound holds while the VM and the Mac are busy. QEMU's
+  main loop, which moves the sound and runs the VM's GPU, now runs at
+  user-interactive QoS instead of competing with the VM's CPUs, and the
+  sound card no longer takes the time it missed (a new shader stops that
+  thread for 50-80 ms) from the VM all at once. In 10-minute tests on a
+  MacBook Pro with the VM's GPU busy and 8 busy threads on the Mac, breaks
+  in a test tone went from 12 to 2; with every core busy as well, from a
+  median of 365 to 50. The sound's delay is the same. `omacvm check` shows
+  it ("sound timing"); `defaults write org.omacvm.app audioClassic -bool
+  true` goes back.
+- OmacVM.app: a Mac audio device that does not answer no longer hangs the
+  VM. Up to 2.9.1 QEMU waited for it without a limit at the start (no
+  window, the VM never ran) and whenever the VM started a sound. Now it opens
+  the device on a thread of its own; after 3 s the VM runs without sound,
+  `omacvm check` says so ("sound") with the fix, and the sound comes back
+  once the device answers again.
 
 ## 2.9.1
 

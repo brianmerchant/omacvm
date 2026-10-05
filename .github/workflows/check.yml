@@ -181,6 +181,9 @@ jobs:
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh
 
+      - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
+        run: src/tests/audio-timing.sh
+
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.
   guest:
