@@ -48,6 +48,9 @@ class Controller:
         self.updates: dict | None = c.get("updates") if isinstance(c.get("updates"), dict) else None
         self.jobs: dict[str, S.Job] = {}
         self.job_lines: dict[str, list[str]] = {}
+        # Graphics memory (OmacVM.app): a number of the moment, never cached.
+        self.gpu_memory: dict | None = None
+        self.gpu_memory_misses = 0
 
     # ---- the Mac ----
     @property
@@ -84,6 +87,27 @@ class Controller:
                 self.local.save_cache(mac_status=st)
         except BridgeError as e:
             self.mac_error = e
+
+    def gpu_memory_supported(self) -> bool | None:
+        """The Mac answers gpu-memory (None: its hello is not in yet)."""
+        return None if self.hello is None else "gpu-memory" in self.hello.requests
+
+    def wants_gpu_memory(self) -> bool:
+        return self.local.vm_type == "app" and self.linked and self.gpu_memory_supported() is True
+
+    def refresh_gpu_memory(self) -> None:
+        """One look at this VM's graphics memory (OmacVM.app only). A missed
+        answer keeps the last numbers; three in a row drop them (the row then
+        says it is asking)."""
+        if not self.wants_gpu_memory():
+            return
+        try:
+            self.gpu_memory = self.bridge.gpu_memory()
+            self.gpu_memory_misses = 0
+        except BridgeError:
+            self.gpu_memory_misses += 1
+            if self.gpu_memory_misses >= 3:
+                self.gpu_memory = None
 
     def refresh_updates(self, check: bool = False) -> dict | None:
         try:
@@ -167,7 +191,9 @@ class Controller:
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
                             offer=self.offer(), mac_features=mac_features, show_updates=with_updates)
         g = S.graphics_row(self.mac_status, self.local.vm_type, list(self.jobs.values()), checks)
-        return rows + [g] if g is not None else rows
+        m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
+                             offline=self.mac_error is not None)
+        return rows + [r for r in (g, m) if r is not None]
 
     def graphics(self) -> str:
         """This VM's Graphics setting as the Mac last said it ("" unknown)."""

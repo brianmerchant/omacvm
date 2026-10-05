@@ -333,6 +333,7 @@ are strict JSON up to 4 KB, unknown keys refused.
 |---|---|
 | `GET /omacvm/hello` | `{"proto", "proto_min", "omacvm", "requests", "features", "macos", "chip"}` |
 | `GET /omacvm/status` | the Mac's view of this VM: per feature on/available/reason, the Mac-side checks (`omacvm features --json` and `omacvm check --json --mac-only`, cached 30 s) |
+| `GET /omacvm/gpu-memory` | an OmacVM.app VM's graphics memory on the Mac, from `logs/gpu-memory` in its folder (QEMU writes it; the folder from `omacvm vms --json`): `{"measured", "in_use_mb", "peak_mb", "budget_mb", "pressure": "normal"\|"warn"\|"critical"\|"unknown", "refused", "lost"}`, numbers only (no app names, no paths); `measured` false before QEMU's first numbers; 409 `not-app` for other VMs. The control centre asks at most every 2 s while it is open; 200 answers are not logged, and it never starts a new `omacvm vms` run for a VM the list already has |
 | `GET /omacvm/updates` | the last update check: `checks_enabled`, `checked_at`, `ok`, `offline`, `error`, the verified manifest |
 | `POST /omacvm/updates/check` | fetch and verify the manifest now (once a minute) |
 | `POST /omacvm/settings/update-checks` `{"enabled": bool}` | the one switch for update checks and notices |

@@ -58,7 +58,9 @@ itself. Details below.
 - OmacVM.app: the app shows the VM's graphics memory beside its VM memory
   (graphics memory comes from the Mac on top): before a start in the app,
   while the VM runs in its app menu ("Graphics memory: 1.6 GB (peak
-  2.6 GB)"), and in `omacvm check` (now and peak). When macOS warns that memory is short, the VM drops its
+  2.6 GB)"), in `omacvm check` (now and peak) and in the control centre in
+  the VM (a "Graphics memory" row, every 2 s while it is open, ! while macOS
+  is short of memory or after refusals). When macOS warns that memory is short, the VM drops its
   file cache so the Mac gets that memory back.
 - OmacVM.app: if the VM's desktop loses its GPU context anyway, the app says
   so and offers to restart the desktop session, instead of a black VM.

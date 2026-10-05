@@ -708,7 +708,10 @@ run: peak 2.6 GB, from the Mac on top"; while the VM runs, its app menu (the
 one beside the Apple menu) has "VM memory: 8 GB" and "Graphics memory:
 1.6 GB (peak 2.6 GB)", read when you open the menu (a click explains them).
 `omacvm check` has a "graphics memory" row: now, the peak of this run, and
-macOS's memory pressure.
+macOS's memory pressure. So does the control centre in the VM (`omacvm`):
+"Graphics memory: 1.6 GB (peak 2.6 GB)", looked at every 2 s while it is
+open (nothing while it is closed), with a warning (!) while macOS is short of
+memory or after refused allocations.
 
 **No fixed limit.** QEMU asks macOS how much memory it can give
 (`virgl-darwin-memory-pressure.patch`):

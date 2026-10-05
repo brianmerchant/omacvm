@@ -238,3 +238,64 @@ def test_graphics_row_failing_check():
 
 def test_next_graphics_cycles():
     assert [S.next_graphics(x) for x in ("auto", "opengl", "vulkan", "")] == ["opengl", "vulkan", "auto", "auto"]
+
+
+# ---- OmacVM.app's graphics memory row ----
+GM = {"measured": True, "in_use_mb": 1126, "peak_mb": 1638, "budget_mb": 49152, "pressure": "normal",
+      "refused": 0, "lost": 0}
+
+
+def test_gpu_memory_row_only_on_app_vms():
+    assert S.gpu_memory_row(GM, "parallels") is None
+    assert S.gpu_memory_row(GM, "utm") is None
+
+
+def test_gpu_memory_row_numbers():
+    r = S.gpu_memory_row(GM, "app")
+    assert r.feature.title == "Graphics memory" and r.status is S.Status.WORKS
+    assert r.note == "1.1 GB (peak 1.6 GB)"
+    assert f"{r.feature.title}: {r.note}" == "Graphics memory: 1.1 GB (peak 1.6 GB)"
+    assert S.gpu_memory_row(dict(GM, in_use_mb=512, peak_mb=900), "app").note == "512 MB (peak 900 MB)"
+    # A peak below now (an odd file) shows now as the peak.
+    assert S.gpu_memory_row(dict(GM, in_use_mb=2048, peak_mb=10), "app").note == "2.0 GB (peak 2.0 GB)"
+
+
+def test_gpu_memory_row_explains_vm_vs_graphics_memory():
+    r = S.gpu_memory_row(GM, "app")
+    assert "VM memory is the Mac memory you gave the VM: its RAM" in r.feature.summary
+    assert "Graphics memory comes on top" in r.feature.summary
+
+
+@pytest.mark.parametrize("pressure", ["warn", "critical"])
+def test_gpu_memory_row_warns_under_pressure(pressure):
+    r = S.gpu_memory_row(dict(GM, pressure=pressure), "app")
+    assert r.status is S.Status.NEEDS_PERSON
+    assert r.note.startswith("1.1 GB (peak 1.6 GB); macOS is short of memory")
+
+
+def test_gpu_memory_row_warns_after_refusals():
+    r = S.gpu_memory_row(dict(GM, refused=3), "app")
+    assert r.status is S.Status.NEEDS_PERSON and "3 refused this run" in r.note
+    both = S.gpu_memory_row(dict(GM, refused=1, pressure="critical"), "app")
+    assert "short of memory" in both.note and "1 refused" in both.note
+
+
+def test_gpu_memory_row_unknowns():
+    assert S.gpu_memory_row(None, "app").status is S.Status.UNKNOWN
+    assert S.gpu_memory_row(None, "app").note == "asking the Mac"
+    assert S.gpu_memory_row(None, "app", offline=True).note == "needs the Mac"
+    assert "older than 3.0.0" in S.gpu_memory_row(None, "app", supported=False).note
+    r = S.gpu_memory_row({"measured": False}, "app")
+    assert r.status is S.Status.UNKNOWN and "not measured yet" in r.note
+
+
+def test_gpu_memory_row_ignores_junk():
+    r = S.gpu_memory_row({"measured": True, "in_use_mb": "9999", "peak_mb": -5, "refused": True,
+                          "pressure": "panic"}, "app")
+    assert r.status is S.Status.WORKS and r.note == "0 MB (peak 0 MB)"
+
+
+def test_gpu_memory_row_carries_the_macs_check():
+    c = S.Check("mac", "ok", "graphics memory", "1.1 GB now (peak 1.6 GB)", False, "")
+    other = S.Check("mac", "ok", "microphone", "", False, "")
+    assert S.gpu_memory_row(GM, "app", checks=[c, other]).checks == (c,)

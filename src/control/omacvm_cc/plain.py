@@ -33,6 +33,7 @@ def status(as_json: bool, fallback: bool = False) -> int:
     if not as_json and sys.stderr.isatty():
         print("asking the Mac and checking the VM ...", file=sys.stderr)
     c.refresh_mac()
+    c.refresh_gpu_memory()
     c.refresh_vm_checks()
     if c.linked:
         c.refresh_updates()

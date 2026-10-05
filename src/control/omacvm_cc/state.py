@@ -329,3 +329,52 @@ def next_graphics(current: str) -> str:
     """Space on the Graphics row: Automatic -> OpenGL -> Vulkan -> Automatic."""
     i = GRAPHICS_CHOICES.index(current) if current in GRAPHICS_CHOICES else -1
     return GRAPHICS_CHOICES[(i + 1) % len(GRAPHICS_CHOICES)]
+
+
+# ---- OmacVM.app: the VM's graphics memory on the Mac (GET /omacvm/gpu-memory) ----
+# The same words as the VM's app menu (omacvm-cocoa-graphics-memory.patch).
+GPU_MEMORY_EXPLAINER = (
+    "VM memory is the Mac memory you gave the VM: its RAM. Graphics memory comes on top: what the VM's "
+    "GPU work (its desktop and apps) uses of the Mac's memory, as it needs it.")
+GPU_MEMORY_FEATURE = Feature(
+    name="gpu-memory", default="on", sides=("mac",), tags=(), needs=None, title="Graphics memory",
+    summary=GPU_MEMORY_EXPLAINER)
+
+
+def gb(mb: int) -> str:
+    """As the app menu: "512 MB", "1.6 GB"."""
+    return f"{mb} MB" if mb < 1024 else f"{mb / 1024:.1f} GB"
+
+
+def _count(v) -> int:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+
+def gpu_memory_row(answer: dict | None, vm_type: str, supported: bool | None = True,
+                   checks: list[Check] | None = None, offline: bool = False) -> Row | None:
+    """The Graphics memory row of an OmacVM.app VM: now and the peak of this
+    run, a warning while macOS is short of memory or after refusals. None
+    on the other routes. supported: the Mac's hello lists gpu-memory (None:
+    not asked yet); offline: the Mac does not answer or refused this VM."""
+    if vm_type != "app":
+        return None
+    mine = tuple(c for c in (checks or []) if c.name == "graphics memory")
+    if supported is False:
+        return Row(GPU_MEMORY_FEATURE, True, Status.UNKNOWN, "the Mac's OmacVM does not say (older than 3.0.0?)", checks=mine)
+    if not isinstance(answer, dict):
+        return Row(GPU_MEMORY_FEATURE, True, Status.UNKNOWN, "needs the Mac" if offline else "asking the Mac", checks=mine)
+    if answer.get("measured") is not True:
+        return Row(GPU_MEMORY_FEATURE, True, Status.UNKNOWN, "not measured yet (the VM's app is older, or it just started)",
+                   checks=mine)
+    now = _count(answer.get("in_use_mb"))
+    peak = max(_count(answer.get("peak_mb")), now)
+    note = f"{gb(now)} (peak {gb(peak)})"
+    warn = []
+    if answer.get("pressure") in ("warn", "critical"):
+        warn.append("macOS is short of memory: close apps on the Mac or in the VM")
+    refused = _count(answer.get("refused"))
+    if refused:
+        warn.append(f"{refused} refused this run: an app that draws nothing needs a restart")
+    if warn:
+        return Row(GPU_MEMORY_FEATURE, True, Status.NEEDS_PERSON, "; ".join([note] + warn), checks=mine)
+    return Row(GPU_MEMORY_FEATURE, True, Status.WORKS, note, checks=mine)
