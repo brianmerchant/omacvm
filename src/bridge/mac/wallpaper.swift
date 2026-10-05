@@ -20,6 +20,11 @@ func setWallpaper(_ data: Data, theme: String) throws -> String {
   for f in (try? fm.contentsOfDirectory(atPath: wallpaperDir)) ?? [] where f.hasPrefix("background-") && "\(wallpaperDir)/\(f)" != file {
     try? fm.removeItem(atPath: "\(wallpaperDir)/\(f)")
   }
+  // The test identity's Bridge (control.swift) never changes the Mac's own
+  // wallpaper: test VMs post theirs on every apply and theme change.
+  if testIdentity {
+    return "wallpaper \(theme.isEmpty ? "" : theme + " ")(\(data.count / 1024) KB), kept: the test identity leaves the Mac's wallpaper as it is"
+  }
   var failures: [String] = []
   DispatchQueue.main.sync {
     let opts: [NSWorkspace.DesktopImageOptionKey: Any] = [
