@@ -2,18 +2,23 @@
 # The final round in one benchmark VM, from the Mac, over SSH.
 #   vm.sh TARGET --vm NAME USER@HOST[:PORT] --prepare                 before the round (full update, tools)
 #   vm.sh TARGET --vm NAME USER@HOST[:PORT] [--runs 3] [--only LIST] OUT.jsonl
+#   vm.sh TARGET --vm NAME USER@HOST[:PORT] --record                  keep the versions now (after a planned change)
+#   vm.sh TARGET --vm NAME USER@HOST[:PORT] --desktop [PICTURE]       the quiet desktop (round.sh, before tests and idle)
 #   vm.sh TARGET --vm NAME USER@HOST[:PORT] --cleanup [--packages]    after the round
-# TARGET: app, utm, fusion or parallels. NAME: the benchmark VM ("Bench ..."),
-# never the user's own; it must be the one VM that runs on that hypervisor.
+# TARGET: app, app-rc2 (a second OmacVM.app build, OMACVM_APP names it), utm,
+# fusion or parallels. NAME: the benchmark VM ("Bench ..."), never the user's
+# own; it must be the one VM that runs on that hypervisor. --desktop: Chrome
+# closed, notifications dismissed, and PICTURE (the Mac's wallpaper) as the
+# background unless the VM already shows the same image (by hash).
 # LIST: throughput,vkpeak,geekbench,vkmark,glmark2,browser (all by default).
 # The VM runs alone, in full screen on the built-in display (see README.md):
 # the round refuses a guest narrower than 3000 px or a Chrome page other than
 # 1728x1080 at 2x, and a VM that changed since --prepare (Mesa stays fixed).
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/common.sh"
-usage() { sed -n '2,11p' "$0" >&2; exit 2; }
+usage() { sed -n '2,17p' "$0" >&2; exit 2; }
 TARGET=${1:-}; shift 2>/dev/null
-NAME="" DEST="" OUT="" MODE=round PKG="" RUNS=3 ONLY=throughput,vkpeak,geekbench,vkmark,glmark2,browser
+NAME="" DEST="" OUT="" PICTURE="" MODE=round PKG="" RUNS=3 ONLY=throughput,vkpeak,geekbench,vkmark,glmark2,browser
 while [ $# -gt 0 ]; do
   case $1 in
     --vm) NAME=$2; shift 2 ;;
@@ -21,6 +26,8 @@ while [ $# -gt 0 ]; do
     --only) ONLY=$2; shift 2 ;;
     --prepare) MODE=prepare; shift ;;
     --cleanup) MODE=cleanup; shift ;;
+    --record) MODE=record; shift ;;
+    --desktop) MODE=desktop; shift; case ${1:-} in /*) PICTURE=$1; shift ;; esac ;;
     --packages) PKG=--packages; shift ;;
     --*) die "unknown option $1" ;;
     *) if [ -z "$DEST" ]; then DEST=$1; else OUT=$1; fi; shift ;;
@@ -33,7 +40,7 @@ want() { case ,$ONLY, in *,$1,*) return 0 ;; esac; return 1; }
 # KEEP_VM: the target's own processes (by bundle path), not "other VMs".
 plist_version() { defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo unknown; }
 case $TARGET in
-  app) KEEP_VM='OmacVM[^/]*\.app/'
+  app|app-rc2) KEEP_VM='OmacVM[^/]*\.app/'
        APP=${OMACVM_APP:-$HOME/Applications/OmacVM.app}; [ -d "$APP" ] || APP=/Applications/OmacVM.app
        HV="OmacVM.app $(plist_version "$APP")" ;;
   utm) KEEP_VM='UTM\.app/|com\.apple\.Virtualization'; HV="UTM $(plist_version /Applications/UTM.app)" ;;
@@ -47,11 +54,11 @@ PORT=22
 case $DEST in *:*) PORT=${DEST##*:}; DEST=${DEST%:*} ;; esac
 # Never the user's VMs: a benchmark VM by name, and it is what runs.
 bench_vm_ok "$NAME" || exit 1
-vm_running "$TARGET" "$NAME" "$PORT" || die "start \"$NAME\" (and only it) first"
+vm_running "${TARGET%-rc2}" "$NAME" "$PORT" || die "start \"$NAME\" (and only it) first"
 K=(-i "$HOME/.ssh/omacvm" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30
    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 G=/opt/omacvm-final-round
-in_vm() { ssh "${K[@]}" "$DEST" "GLMARK2_VERSION=$GLMARK2_VERSION bash $G/tests/bench/final-round/guest.sh $*"; }
+in_vm() { ssh "${K[@]}" "$DEST" "GLMARK2_VERSION=$GLMARK2_VERSION GLMARK2_DURATION=${GLMARK2_DURATION:-} bash $G/tests/bench/final-round/guest.sh $*"; }
 ssh "${K[@]}" "$DEST" true </dev/null || die "no SSH to $DEST"
 copy_tools() {   # the scripts only; $G/state (what prepare found) stays
   COPYFILE_DISABLE=1 tar -C "$REPO" --no-xattrs -cf - src/bench tests/bench |
@@ -68,6 +75,25 @@ case $MODE in
     exit 0 ;;
   cleanup)
     in_vm cleanup $PKG </dev/null || die "cleanup failed in the VM"
+    exit 0 ;;
+  record)
+    copy_tools
+    in_vm record </dev/null || die "record failed in the VM"
+    exit 0 ;;
+  desktop)
+    copy_tools
+    sum=""
+    if [ -n "$PICTURE" ]; then
+      [ -f "$PICTURE" ] || die "no picture $PICTURE"
+      sum=$(shasum -a 256 "$PICTURE" | cut -d' ' -f1)
+      case $(in_vm desktop "$sum" </dev/null) in
+        *'"wallpaper_same_as_mac": true'*) ;;
+        *) say "$NAME: the Mac's wallpaper as the background"
+           scp -q -P "$PORT" -i "$HOME/.ssh/omacvm" "${K[@]:4}" "$PICTURE" "$DEST:/tmp/${PICTURE##*/}" || die "copying the wallpaper failed"
+           in_vm wallpaper "/tmp/${PICTURE##*/}" </dev/null || die "setting the wallpaper failed" ;;
+      esac
+    fi
+    in_vm desktop "$sum" </dev/null
     exit 0 ;;
 esac
 

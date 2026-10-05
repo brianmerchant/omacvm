@@ -2,9 +2,12 @@
 """Final-round results -> medians, a Markdown table and the chart's JSON.
 
   summarize.py results/*.jsonl [--json chart.json] [--include-preliminary]
-               [--geekbench-scores scores.json | --fetch-geekbench]
+               [--geekbench-scores scores.json | --fetch-geekbench] [--label TARGET=TEXT ...]
 
-Reads the lines mac.sh, vm.sh and idle-power.sh wrote. Prints each test's
+Reads the lines mac.sh, vm.sh and idle-power.sh wrote. Targets: mac, app,
+app-rc2 (a second OmacVM.app build, e.g. a 3.0.0 RC with Vulkan), utm, fusion,
+parallels; the app's rows are named after the build ("OmacVM 2.9.1"), or by
+--label. Prints each test's
 median per target and its share of the Mac. --json writes the input for
 src/bench/chart.py --panel gpu.
 
@@ -29,8 +32,9 @@ Geekbench prints only a link: the score comes from --geekbench-scores
 """
 import argparse, collections, importlib.util, json, os, re, statistics, sys
 
-TARGETS = ["mac", "app", "utm", "fusion", "parallels"]
-NAMES = {"mac": "macOS", "app": "OmacVM.app", "utm": "UTM", "fusion": "VMware Fusion", "parallels": "Parallels"}
+TARGETS = ["mac", "app", "app-rc2", "utm", "fusion", "parallels"]
+NAMES = {"mac": "macOS", "app": "OmacVM.app", "app-rc2": "OmacVM.app RC", "utm": "UTM", "fusion": "VMware Fusion",
+         "parallels": "Parallels"}
 KEYS = [  # key, label, higher is better
     ("gpu-throughput", "GPU throughput, ray march (Gunits/s)", True),
     ("gpu-alu", "GPU ALU (GFLOPS, page)", True),
@@ -125,6 +129,8 @@ def main():
     ap.add_argument("--include-preliminary", action="store_true")
     ap.add_argument("--geekbench-scores")
     ap.add_argument("--fetch-geekbench", action="store_true")
+    ap.add_argument("--label", action="append", default=[], metavar="TARGET=TEXT",
+                    help='name a target in the table and chart, e.g. app-rc2="OmacVM 3.0.0 RC2 · Vulkan"')
     a = ap.parse_args()
 
     lines = [json.loads(l) for f in a.files for l in open(f) if l.startswith("{")]
@@ -264,6 +270,20 @@ def main():
         if len(seen) > 1:
             warnings.append(f"{k} versions differ: " + "; ".join(f"{NAMES[tg]} {', '.join(sorted(vs))}" for tg, vs in sorted(per.items())))
 
+    # The app's rows name the build: "OmacVM 2.9.1", "OmacVM 3.0.0 RC2 · Vulkan".
+    labels = {}
+    for line in lines:
+        hv = str((line.get("result") or {}).get("hypervisor") or "")
+        m = re.match(r"OmacVM\.app (\S+)", hv)
+        if line["target"] in ("app", "app-rc2") and m and m.group(1) != "unknown":
+            labels[line["target"]] = "OmacVM " + m.group(1).replace("-rc", " RC").replace("-RC", " RC") + \
+                (" · Vulkan" if line["target"] == "app-rc2" else "")
+    for x in a.label:
+        tg, _, lb = x.partition("=")
+        if tg in TARGETS and lb:
+            labels[tg] = lb
+    for tg, lb in labels.items():
+        NAMES[tg] = lb
     targets = [tg for tg in TARGETS if tg in med or tg in missing]
     mac = med.get("mac", {})
     print("| | " + " | ".join(NAMES[tg] for tg in targets) + " |")
@@ -296,7 +316,7 @@ def main():
     if prelim:
         print("\nPRELIMINARY: lines from a busy or not agreed Mac are included (--include-preliminary).")
     if a.json:
-        json.dump({"baseline": "mac", "preliminary": prelim, "medians": med, "missing": missing,
+        json.dump({"baseline": "mac", "preliminary": prelim, "labels": labels, "medians": med, "missing": missing,
                    "runs": {tg: dict(ks) for tg, ks in runs.items()}, "methods": methods,
                    "validation": validation, "excluded": excluded, "warnings": warnings},
                   open(a.json, "w"), indent=1)
