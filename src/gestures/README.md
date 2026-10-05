@@ -24,7 +24,7 @@ trackpad. Then:
   keyboard). With the gestures feature off, the VM's daemon is off too (no link to the Mac's
   Gestures at all), and so is this.
 
-**⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification) and
+**⌃⌥ Esc** releases the trackpad to macOS (Omarchy shows a notification) and
 moves the display under the pointer one Space toward the one it showed
 before the VM, with macOS's own "Move left/right a space" shortcut as the
 user set it (`com.apple.symbolichotkeys` 79 and 81; ⌃← and ⌃→ by default),
@@ -84,5 +84,5 @@ app does.
 
 Verified on macOS 15.7.4, Parallels 27.0.2, MacBook Pro M4 Max: 4-finger and
 3-finger swipes switch workspaces, pinch zooms in Chrome, macOS Spaces swipes
-blocked while captured, ⌃⌥⌘ Esc releases and re-arms; the scroll momentum's glide distance
+blocked while captured, the escape combo (then ⌃⌥⌘ Esc) releases and re-arms; the scroll momentum's glide distance
 within 5-10 % of macOS's, with the same decay.

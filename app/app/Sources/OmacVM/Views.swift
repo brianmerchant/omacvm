@@ -317,11 +317,27 @@ struct ReadyView: View {
         }
     }
 
+    /// VM memory and graphics memory side by side: the VM's RAM is fixed,
+    /// its graphics come from the Mac on top, as needed (GPUMemory).
+    private var graphicsMemory: some View {
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let vm = "VM memory: \(state.config.memoryMB / 1024) GB"
+            let gpu = GPUMemory.read(for: state.config).map {
+                "graphics memory last run: peak \(GPUMemory.gb($0.peakMB)), from the Mac on top"
+            } ?? "graphics memory: from the Mac on top, as the VM needs it"
+            Text("\(vm); \(gpu)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(GPUMemory.explanation)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(state.config.name).font(.title2.bold())
             Text("\(state.config.cpus) CPUs, \(state.config.memoryMB / 1024) GB memory, \(state.config.diskGB) GB disk, user \(state.config.user)")
                 .foregroundStyle(.secondary)
+            graphicsMemory
             Picker("Resources", selection: tier) {
                 ForEach(0..<4) { t in
                     let v = Mac.tier(t)
@@ -338,10 +354,10 @@ struct ReadyView: View {
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
             Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
                 .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
-            Picker("Escape combo (⌃⌥⌘ Esc)", selection: $escape) {
+            Picker("Escape combo (⌃⌥ Esc)", selection: $escape) {
                 ForEach(EscapeSetting.Choice.allCases, id: \.self) { Text($0.title).tag($0) }
             }
-            .help("In a full-screen VM, Control-Option-Command-Esc swipes back to macOS with macOS's own animation, and again to the VM. The keyboard follows the pointer's monitor.")
+            .help("In a full-screen VM, Control-Option-Esc moves the monitor under the pointer (or all monitors) to the Space beside the VM's with macOS's own animation; the VM stays full screen. Pressed in macOS, it goes back into the VM. The keyboard follows the pointer's monitor.")
             .onChange(of: escape) { _, v in EscapeSetting.set(v) }
             if state.hasNotch {
                 Toggle("Use the notch for the menu bar", isOn: $notch)

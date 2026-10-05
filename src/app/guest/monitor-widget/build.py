@@ -6,7 +6,8 @@
 Copies Omarchy's own display widget (/usr/share/omarchy/shell/plugins/panels/
 monitor) into OUT_DIR, so it follows the installed Omarchy, and adds a "MAC
 DISPLAYS" section with "Use external displays" (omacvm-displays external
-toggle). OUT_DIR gets this folder's manifest.json and placement.sh and a
+toggle), and on a display 4K wide or more a line under the scale presets: 2x
+is the sharp one there. OUT_DIR gets this folder's manifest.json and placement.sh and a
 .source-sha256 stamp of the panel it was built from. Exit 1 when Omarchy's
 panel has changed so much that the switch no longer fits: then the stock
 widget stays.
@@ -24,6 +25,12 @@ PROPS = """
   // OmacVM.app: in full screen, Omarchy on every Mac display (omacvm-displays).
   property bool macDisplays: false
   property bool macExternal: true
+  // OmacVM.app: the focused display's width, for the scale hint below.
+  readonly property int macFocusedWidth: {
+    for (var i = 0; i < displays.length; i++)
+      if (displays[i] && displays[i].focused) return displays[i].width
+    return 0
+  }
 """
 
 FUNCS = """
@@ -155,6 +162,24 @@ SECTION = """          // ---------- OmacVM.app: Mac displays ----------
 
 """
 
+# Under the scale presets on a 4K or larger display: whole scales are the sharp
+# and light ones there (docs/troubleshooting.md, finding 24).
+SCALE_HINT = """          // ---------- OmacVM.app: which scale suits a 4K or 5K display ----------
+          Text {
+            visible: root.macFocusedWidth >= 3840
+            width: parent.width
+            leftPadding: Style.space(6)
+            rightPadding: Style.space(6)
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            text: "2x is the sharpest here. In-between scales look softer in some apps and use more GPU memory."
+            color: Qt.darker(root.bar.foreground, 1.4)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+"""
+
 # (anchor, replacement): every anchor must be found exactly once.
 EDITS = [
     ("  property int enabledDisplayCount: 0\n",
@@ -178,6 +203,8 @@ EDITS = [
      "    if (!macStateProc.running) macStateProc.running = true\n"),
     ("  BarIconButton {\n    id: button\n",
      FUNCS + "  BarIconButton {\n    id: button\n"),
+    ("          // ---------- Monitors ----------\n",
+     SCALE_HINT + "          // ---------- Monitors ----------\n"),
     ("          Item {\n            width: parent.width\n            height: Style.space(4)\n          }\n",
      SECTION + "          Item {\n            width: parent.width\n            height: Style.space(4)\n          }\n"),
 ]

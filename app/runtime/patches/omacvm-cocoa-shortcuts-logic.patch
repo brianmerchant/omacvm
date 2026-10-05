@@ -5,7 +5,8 @@ What: a header with no AppKit in it: when macOS's global shortcuts are off
 (the VM has the keyboard, and nothing says otherwise), which Linux key
 Apple's own top-row key codes become (Mission Control, Spotlight, Dictation,
 Do Not Disturb, Launchpad, Dashboard: the F-key they sit on), and the escape
-combo. Used by omacvm-cocoa-system-shortcuts.patch (which explains the why).
+combo. Used by omacvm-cocoa-system-shortcuts.patch (which explains the why)
+and omacvm-cocoa-escape-combo-tap.patch.
 
 Why its own file: so the logic is tested against macOS's whole shortcut list
 without QEMU or a display (app/runtime/Tests/keys/test-shortcuts.sh applies
@@ -19,7 +20,7 @@ new file mode 100644
 index 0000000..5f66de0
 --- /dev/null
 +++ b/ui/omacvm-shortcuts.h
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,83 @@
 +/*
 + * OmacVM: macOS's own shortcuts while the VM has the keyboard.
 + *
@@ -86,15 +87,20 @@ index 0000000..5f66de0
 +}
 +
 +/*
-+ * The escape combo, Control+Option+Command+Escape (Esc is key code 53).
-+ * OmacVM Gestures takes it before us; only when it is not running does the
-+ * VM see it, and in full screen it then hands the keyboard back to macOS
-+ * (the app hides), so nobody is ever stuck in the VM.
++ * The escape combo, Control+Option+Escape (Esc is key code 53), and through
++ * 3.0.x the old Control+Option+Command+Escape (removed in a later version).
++ * Exactly these modifiers: with Shift too it is an ordinary key. OmacVM
++ * Gestures takes it (our event tap lets it through to Gestures' tap); only
++ * when Gestures is not running does our window see it, and in full screen
++ * it then hands the keyboard back to macOS (the app hides), so nobody is
++ * ever stuck in the VM.
 + */
 +static inline bool omacvm_is_escape_combo(int mac_keycode, bool control,
-+                                          bool option, bool command)
++                                          bool option, bool command,
++                                          bool shift)
 +{
-+    return mac_keycode == 53 && control && option && command;
++    (void)command;   /* with or without: the old combo had it */
++    return mac_keycode == 53 && control && option && !shift;
 +}
 +
 +#endif

@@ -1,6 +1,6 @@
 import Foundation
 
-/// "Escape combo" (Ctrl+Option+Cmd+Esc in a full-screen VM): swipe only the
+/// "Escape combo" (Ctrl+Option+Esc in a full-screen VM): move only the
 /// monitor under the pointer between the VM and macOS (the default), or all
 /// monitors that show the VM. OmacVM Gestures does the swipe and reads this
 /// from its own settings domain, so `defaults write org.omacvm.gestures
@@ -19,8 +19,8 @@ enum EscapeSetting {
         case pointer, all
         var title: String {
             switch self {
-            case .pointer: "Swipe the monitor under the pointer"
-            case .all: "Swipe all monitors"
+            case .pointer: "This monitor"
+            case .all: "All monitors"
             }
         }
     }
