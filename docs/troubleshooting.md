@@ -119,6 +119,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 | 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
 | 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
 | 23 | app | [Chrome hangs in Basemark Web 3.0, the screen flickers](#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers) |
+| 24 | app | [The sound crackles while the VM or the Mac is busy](#24-app-the-sound-crackles-while-the-vm-or-the-mac-is-busy) |
 
 Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 [notes/findings.md](notes/findings.md).
@@ -455,3 +456,48 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   VMs running on the Mac) and Aquarium still runs (19-21 fps).
 - **Where:** `app/runtime/patches/`, `app/runtime/build-qemu-gpu-runtime.sh`,
   `app/runtime/Tests/virgl/`, `app/scripts/gpu-check.sh`.
+
+## 24. app: the sound crackles while the VM or the Mac is busy
+
+- **Symptom:** music in the VM (Spotify, a browser) crackles or drops out
+  for a moment while the VM works hard and you move around in it: opening
+  apps, scrolling, a compile. Seen on a Mac mini M4 (10 cores) with the VM
+  at 8 CPUs.
+- **Cause:** QEMU moves the sound in its main loop (the HDA's DMA timer and
+  the 1 ms audio timer), the same thread that runs the VM's GPU (virgl).
+  Up to 2.9.0 that thread ran at the default QoS, on equal terms with the
+  VM's CPUs and the Mac's own work; with the cores busy it ran 10-50 ms late
+  thousands of times in 10 minutes and up to 200 ms late now and then. New
+  shaders (an app's first frames) stop it for 50-80 ms by themselves. QEMU's
+  own buffer kept the Mac playing, but afterwards the sound card took the
+  whole missed time from the VM at once, so the VM's PipeWire ran out (an
+  xrun).
+- **Fix:** from 3.0.0 QEMU's main loop runs at user-interactive QoS
+  (`app/runtime/patches/qemu-darwin-main-loop-qos.patch`) and the sound card
+  no longer catches up after a stall (`qemu-hda-no-catch-up.patch`: the VM's
+  sound clock pauses instead). Measured on a MacBook Pro M4 Max, VM with 8
+  CPUs, the VM's CPUs and GPU busy plus 8 busy threads on the Mac, a 30 Hz
+  tone through PipeWire's PulseAudio part, 10 minutes each: breaks in the
+  tone 337 (2.9.0) → 120 and 216 (QoS) → 19 and 37 (both); the main loop
+  10-49 ms late 3,554 → 9 times; the VM's sink under-ran 7 → 0 times. The
+  sound's delay stays the same (round trip in the VM about 282 ms).
+  `omacvm check` shows both ("sound timing");
+  `defaults write org.omacvm.app audioClassic -bool true` goes back to
+  2.9.0's timing.
+- **For 2.9.0:** a bigger safety buffer in the VM. As root in the VM
+  (USER = your user):
+
+  ```
+  mkdir -p /etc/wireplumber/wireplumber.conf.d
+  printf '%s\n' 'monitor.alsa.rules = [ { matches = [ { node.name = "~alsa_output.*" } ] actions = { update-props = { api.alsa.headroom = 8192 } } } ]' \
+    > /etc/wireplumber/wireplumber.conf.d/90-omacvm-audio-headroom.conf
+  systemctl --user -M USER@ restart wireplumber
+  ```
+
+  Same test on 2.9.0: 337 → 15 breaks in 10 minutes, xruns 234 → 1. It adds
+  128 ms to the sound's delay (round trip in the VM 275 → 400 ms). Remove the
+  file and restart WirePlumber to undo; 3.0.0 does not need it.
+- **Where:** `app/runtime/patches/qemu-darwin-main-loop-qos.patch`,
+  `app/runtime/patches/qemu-hda-no-catch-up.patch`,
+  `app/app/Sources/OmacVM/Runner.swift` (`audioClassic`), `src/cmd/check.sh`,
+  the measurement tools in `app/runtime/Tests/audio/`, ADR 0034.

@@ -3,6 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- OmacVM.app: the sound holds while the VM and the Mac are busy. QEMU's
+  main loop, which moves the sound and runs the VM's GPU, now runs at
+  user-interactive QoS instead of competing with the VM's CPUs, and the
+  sound card no longer takes the time it missed (a new shader stops that
+  thread for 50-80 ms) from the VM all at once. With every core busy, breaks
+  in a test tone went from 337 to 19-37 in 10 minutes; the sound's delay is
+  the same. `omacvm check` shows it ("sound timing");
+  `defaults write org.omacvm.app audioClassic -bool true` goes back.
+
 ## 2.9.1
 
 A hotfix for 2.9.0: brightness keys that work with the VM in front, a
