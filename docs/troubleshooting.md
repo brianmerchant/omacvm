@@ -474,10 +474,16 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   reached`, then `context ... (Hyprland) is lost`. It was not a loop and not
   a leak: switching between 1.6 and 2 sixteen times leaves the same memory
   in use each time.
-- **Fix:** the budget is three quarters of the Mac's memory
-  (`app/runtime/patches/virgl-resource-memory-budget.patch`): only a
-  runaway VM gets there. QEMU's log notes each new peak in 512 MB steps and
-  `omacvm check` shows it ("GPU memory"). The display sync also sends a
+- **Fix:** no fixed limit any more. The VM's graphics memory grows as
+  long as macOS has memory to give; new big buffers are refused only when
+  macOS says its memory is critical, or would be nearly used up while it
+  warns (`app/runtime/patches/virgl-darwin-memory-pressure.patch`). The one
+  fixed guard, three quarters of the Mac's memory, only stops a runaway VM.
+  If the desktop still loses its GPU context, the app says so and offers to
+  restart the desktop session instead of leaving the VM black.
+  `omacvm check` shows the graphics memory now and its peak ("graphics
+  memory"); the app shows it beside the VM memory
+  ([what the two are](routes/app.md#graphics-memory-and-vm-memory)). The display sync also sends a
   mode only when Hyprland shows another, one call at a time, and stops
   following an output that keeps changing (6 times in 10 s between two
   states, or 12 times at all) for a minute; the VM's `omacvm check` says so
@@ -485,6 +491,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   says 2x is the sharp scale. What in-between scales cost:
   [routes/app.md](routes/app.md#display-scale-on-4k-5k-and-larger-displays).
 - **Where:** `app/runtime/patches/virgl-resource-memory-budget.patch`,
+  `app/runtime/patches/virgl-darwin-memory-pressure.patch`,
+  `app/app/Sources/OmacVM/GPUMemory.swift`,
   `src/app/guest/omacvm-display-sync` (tests:
   `src/app/guest/tests/test_display_sync.py`),
   `src/app/guest/monitor-widget/build.py`, `src/cmd/check.sh`,

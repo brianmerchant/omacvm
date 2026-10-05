@@ -447,13 +447,11 @@ and Hyprland scales the desktop. What a scale costs:
   config reload sets it again) and for a moment old and new buffers both
   count (the last column). Switching between 1.6 and 2 sixteen times
   left the same memory in use each time: nothing leaks.
-- The VM's GPU memory has a budget so a runaway VM cannot fill the Mac's
-  memory: three quarters of the Mac's memory (`OMACVM_GPU_MEMORY_MB` in
-  QEMU's environment sets another). Up to 2.9.1 it was a quarter, which a 5K
+- The VM's graphics memory has no fixed limit: it grows as long as macOS
+  has memory to give ([Graphics memory and VM memory](#graphics-memory-and-vm-memory)).
+  Up to 2.9.1 it had a budget of a quarter of the Mac's memory, which a 5K
   desktop at 1.6 with apps open could reach on a 16 GB Mac
   ([troubleshooting, finding 24](../troubleshooting.md#24-app-a-scale-like-16-on-a-5k-display-turns-the-vm-black-and-flickering)).
-  `omacvm check` shows the highest use so far ("GPU memory"). The VM's own
-  memory comes on top: on an 8 GB Mac, 8K with apps open fills it.
 - The display sync (`omacvm-display-sync`) sends Hyprland a mode only when
   it shows another, one call at a time, and stops following an output that
   keeps changing (6 times in 10 s between two states, or 12 times at all)
@@ -465,3 +463,72 @@ Omarchy's scales, nothing sent twice, the loop guard),
 `tests/graphics/fractional-scale.sh` (a running VM: every scale, mode kept,
 no loop, no refused memory or lost GPU context in QEMU's log; `--frames`
 adds frame times of a full-screen page).
+
+## Graphics memory and VM memory
+
+A Mac with Apple silicon has one pool of memory for everything: macOS, your
+apps, the GPU. A VM takes two kinds from it:
+
+- **VM memory** is the VM's RAM, the number you pick for the VM ("Resources"
+  in the app, `omacvm resources`). Linux sees exactly that much. The Mac
+  gives it as the VM touches it, and the VM gives back what Linux frees
+  (QEMU's balloon device with free page reporting).
+- **Graphics memory** is extra, on top: the textures and buffers the VM's
+  desktop and apps draw with, kept by the Mac's GPU driver for the VM. It
+  grows and shrinks with what is on screen: Omarchy alone at 5K about
+  1.2 GB, with a browser about 2 GB, 3 GB at 8K, and for a moment more
+  while the display scale changes (the table above).
+
+The app shows both: "VM memory: 8 GB; graphics memory last run: peak 2.6 GB,
+from the Mac on top". `omacvm check` has a "graphics memory" row: now, the
+peak of this run, and macOS's memory pressure.
+
+**No fixed limit.** QEMU asks macOS how much memory it can give
+(`virgl-darwin-memory-pressure.patch`):
+
+- While macOS's memory pressure is normal (green in Activity Monitor),
+  every allocation goes through.
+- When macOS warns (yellow), QEMU lets the Mac's GPU driver free what it
+  still holds for deleted textures, and the app asks the VM to drop its file
+  cache (at most every 10 minutes), which Linux then gives back to the Mac.
+  A new big buffer (16 MB or more) that would leave macOS less than a
+  sixteenth of its memory free is refused.
+- When macOS is critical (red), new big buffers are refused. Before a
+  refusal QEMU frees what it can and looks again three times (100 ms).
+  Screens, cursors and small buffers are never refused for this, so the
+  desktop keeps drawing as long as it can.
+
+Only a runaway VM meets the one fixed guard: all graphics memory together
+at most three quarters of the Mac's memory (`OMACVM_GPU_MEMORY_MB` in
+QEMU's environment sets another, 0 turns it off; for tests).
+
+**When a buffer is refused**, the app that wanted it loses its GPU context
+(the VM's graphics driver cannot hand back an "out of memory" for it). A
+browser starts its GPU process again. Hyprland cannot: the VM's Mesa does
+not report a lost context, and Hyprland 0.56, when told, stops ("Cannot
+continue until proper GPU reset handling is implemented"). The app then
+shows "The VM's desktop stopped drawing" with a button that restarts the
+desktop session (SDDM logs you in again; apps open in the VM close),
+instead of leaving a black window. `logs/qemu.log` says which app lost its
+context and why.
+
+**On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
+open on a 4K or 5K display the Mac is near its limit. macOS then compresses
+and swaps first, and only refuses new graphics when it says memory is
+critical. A smaller window or scale 2 needs the least.
+
+**Other VM apps** (what we checked; their own documents may say more):
+
+- **UTM** runs the same QEMU and virglrenderer: graphics memory comes from
+  the Mac on top of the VM's memory, with no limit at all.
+- **VMware Fusion** has a graphics memory setting of its own
+  (`svga.graphicsMemoryKB` in the `.vmx`, 8 GB at most; OmacVM's Fusion route
+  sets it), taken from the VM's memory.
+- **Parallels Desktop** has a video memory setting (OmacVM's Parallels route
+  sets 0, automatic) and draws with the Mac's GPU in its own way; how much
+  memory that takes on the Mac it does not say.
+
+Tests: `app/runtime/Tests/virgl/test-resource-budget.c` (build time: the
+budget, refusals at critical and warn, the status file, a lost context),
+`tests/graphics/fractional-scale.sh` (a running VM).
+

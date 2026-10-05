@@ -11,9 +11,17 @@ in more words.
   the VM black and flickering. The VM's GPU memory on the Mac had a budget of
   a quarter of the Mac's memory (4 GB on a 16 GB Mac mini), and a 5K desktop
   with apps open, whose buffers are all made again on a scale change, reached
-  it: Hyprland's next buffer was refused and its GPU context lost. The budget
-  is now three quarters of the Mac's memory, only there to stop a runaway VM;
-  6K and 8K displays fit too. `omacvm check` shows the VM's peak GPU memory.
+  it: Hyprland's next buffer was refused and its GPU context lost. Graphics
+  memory now has no fixed limit: it grows while macOS has memory to give,
+  and new big buffers are refused only when macOS runs short (its memory
+  pressure). 6K and 8K displays fit too. A runaway VM still stops at three
+  quarters of the Mac's memory.
+- OmacVM.app: the app shows the VM's graphics memory beside its VM memory
+  (graphics memory comes from the Mac on top), and so does `omacvm check`
+  (now and peak). When macOS warns that memory is short, the VM drops its
+  file cache so the Mac gets that memory back.
+- OmacVM.app: if the VM's desktop loses its GPU context anyway, the app says
+  so and offers to restart the desktop session, instead of a black VM.
 - OmacVM.app: the VM's display sync sends a mode only when Hyprland shows
   another (each resend was a modeset: a flash, every buffer made again), one
   call at a time, and stops following an output that keeps changing (a loop)

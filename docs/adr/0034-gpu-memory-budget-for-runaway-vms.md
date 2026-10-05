@@ -1,7 +1,8 @@
 # 0034: The GPU memory budget stops a runaway VM, never a desktop
 
-Status: accepted. Built on `fractional-scale`
-(`app/runtime/patches/virgl-resource-memory-budget.patch`).
+Status: accepted, amended (dynamic, see the end). Built on `fractional-scale`
+(`app/runtime/patches/virgl-resource-memory-budget.patch`,
+`app/runtime/patches/virgl-darwin-memory-pressure.patch`).
 
 ## Context
 
@@ -44,3 +45,30 @@ shows the peak and says when the budget was reached.
   (reset status for a robust compositor) is separate work.
 - The peaks in the log show what VMs really need; if they ever come near,
   this record is replaced.
+
+## Amendment: dynamic, from macOS's memory pressure (same branch)
+
+Any fixed number is wrong somewhere: three quarters lets an 8 GB Mac with a
+4 GB VM take 10 GB, and "a VM with a lot going on will hit any hard limit
+eventually" (the user). So below the runaway guard nothing is fixed: QEMU
+follows macOS's memory pressure (dispatch source, and
+`kern.memorystatus_vm_pressure_level` when a big resource is made). Normal:
+everything goes through. Warn: Apple's GL frees what it holds for deleted
+resources, the app asks the VM to drop its file cache, and a new resource of
+16 MB or more is refused only if it would leave macOS less than a sixteenth
+of its memory (at least 512 MB) free, inactive or purgeable. Critical: new
+big resources are refused, after a glFinish and three more looks over
+100 ms. Screens, cursors and small resources are never refused for pressure.
+
+Rejected: sizing a budget from the displays and the VM's memory (option 4
+plus the VM's RAM): the VM's RAM is mostly not resident (free page
+reporting), and 8K at a scale change needs 6.2 GB for a moment, which such a
+budget on a 16 GB Mac would refuse.
+
+Consequence: a refusal still costs the app its GPU context, and Hyprland
+cannot recover from that (it aborts on a reported reset; stock guest Mesa
+does not report one). The app shows a message with a desktop restart
+instead of a black window. Guest Mesa reporting resets (gpu-robust's
+`mesa-virgl-reset-status.patch`, PR #60) would let browsers recover by
+themselves; Hyprland would then stop (whether start-hyprland starts it again
+is not tested).
