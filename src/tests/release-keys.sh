@@ -35,6 +35,36 @@ doc() {
   sign_doc "$1" "${4:-}"
 }
 
+# ---- the real release key signs only inside a release run ----
+# A stand-in `security` records whether the Keychain was asked at all.
+mkdir -p "$T/fakebin"
+printf '#!/bin/bash\ntouch "%s/keychain-read"\nexit 1\n' "$T" > "$T/fakebin/security"; chmod +x "$T/fakebin/security"
+G=$T/relrepo
+mkdir -p "$G/src/release"
+cp "$R/src/release/release-key.sh" "$R/src/release/keys.py" "$R/src/release/sign.swift" "$G/src/release/"
+echo 9.9.9 > "$G/src/VERSION"; echo '{}' > "$T/rel.json"
+git -C "$G" init -q && git -C "$G" add -A && git -C "$G" -c user.name=t -c user.email=t@t commit -qm v
+relsign() {   # [ENV...]: "asked" if the Keychain was read, else "refused" (the sign must fail either way here)
+  rm -f "$T/keychain-read"
+  env -u OMACVM_RELEASE_KEY_FILE -u OMACVM_RELEASE_RUN PATH="$T/fakebin:$PATH" "$@" "$G/src/release/release-key.sh" sign "$T/rel.json" >/dev/null 2>&1
+  [[ -e $T/keychain-read ]] && echo asked || echo refused
+}
+expect "release key: no release run, Keychain not read" refused "$(relsign)"
+expect "release key: release run of another version, not read" refused "$(relsign OMACVM_RELEASE_RUN=9.9.8)"
+expect "release key: release run, clean tree at that version: read" asked "$(relsign OMACVM_RELEASE_RUN=9.9.9)"
+echo x >> "$G/src/release/keys.py"
+expect "release key: changed tracked file, not read" refused "$(relsign OMACVM_RELEASE_RUN=9.9.9)"
+git -C "$G" checkout -q -- src/release/keys.py
+git -C "$G" -c user.name=t -c user.email=t@t commit -q --allow-empty -m two && git -C "$G" tag v9.9.9 HEAD~1
+expect "release key: tag v9.9.9 on another commit, not read" refused "$(relsign OMACVM_RELEASE_RUN=9.9.9)"
+git -C "$G" tag -f v9.9.9 HEAD >/dev/null
+expect "release key: at the tag, read" asked "$(relsign OMACVM_RELEASE_RUN=9.9.9)"
+rm -f "$T/keychain-read" "$T/m.json"
+env -u OMACVM_RELEASE_KEY_FILE -u OMACVM_RELEASE_RUN PATH="$T/fakebin:$PATH" python3 "$R/src/release/manifest.py" build \
+  --version 9.9.9 --commit abc --teams 722686Y34B --out "$T/m.json" >/dev/null 2>&1
+expect "manifest.py build --out outside a release run: refused, nothing written, Keychain not read" "2 no no" \
+  "$? $([[ -e $T/m.json ]] && echo yes || echo no) $([[ -e $T/keychain-read ]] && echo yes || echo no)"
+
 # ---- either key, nothing else ----
 D=$T/doc.json
 doc "$D" control-manifest

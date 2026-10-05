@@ -168,7 +168,7 @@ class Bridge:
                 while sent < len(line):
                     left = end - time.monotonic()
                     if left <= 0 or not select.select([], [fd], [], left)[1]:
-                        raise BridgeError("offline", "OmacVM.app does not read this VM's control port (update OmacVM.app)")
+                        raise BridgeError("offline", "OmacVM.app does not read this VM's control port")
                     sent += os.write(fd, line[sent:])
                 buf = b""
                 while True:

@@ -520,6 +520,15 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(ll2.admit("late", now: t0 + 70) == 0 && ll2.count <= 2, "a minute later the old keys go (\(ll2.count))")
     }
 
+    // ---- the feed fetch: a missing signature is "not signed", not offline ----
+    let some = Data("x".utf8)
+    expect(feedFetch(manifest: some, manifestError: nil, sig: some, sigError: nil) == .got, "manifest + sig: got")
+    expect(feedFetch(manifest: some, manifestError: nil, sig: nil, sigError: "HTTP 404") == .unsigned, "no .sig (404): not signed")
+    expect(feedFetch(manifest: some, manifestError: nil, sig: nil, sigError: "HTTP 403") == .unsigned, "no .sig (403): not signed")
+    expect(feedFetch(manifest: some, manifestError: nil, sig: nil, sigError: "The request timed out.") == .offline("The request timed out."), ".sig timed out: offline")
+    expect(feedFetch(manifest: some, manifestError: nil, sig: nil, sigError: "HTTP 503") == .offline("HTTP 503"), ".sig 503: offline")
+    expect(feedFetch(manifest: nil, manifestError: "HTTP 404", sig: nil, sigError: "HTTP 404") == .offline("HTTP 404"), "no manifest: offline")
+
     print("control policy: \(passed) passed, \(failures) failed")
     exit(failures == 0 ? 0 : 1)
   }

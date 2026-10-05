@@ -21,6 +21,13 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 
 def report_cli(args: list) -> int:
+    if args[:1] in (["-h"], ["--help"], ["help"]):
+        print("omacvm report [--print | --save FILE]\n"
+              "  report a problem: what goes into the GitHub issue, without personal data;\n"
+              "  shown first, the browser opens only when you say yes (you submit it there)\n"
+              "  --print       print it and stop\n"
+              "  --save FILE   write it to FILE")
+        return 0
     from omacvm_cc import collect, report
 
     mac = "--mac" in args
