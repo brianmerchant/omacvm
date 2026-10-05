@@ -569,15 +569,24 @@ final class Control {
   private func verifiedManifest() -> Manifest? {
     guard let raw = (lastResult()["raw"] as? String).flatMap({ Data(base64Encoded: $0) }),
           let sig = (lastResult()["sig"] as? String).flatMap({ Data(base64Encoded: $0) }),
-          let key = releaseKey(), manifestSigned(raw, sig: sig, key: key),
+          let keys = releaseKeys(), manifestSigned(raw, sig: sig, keys: keys),
           case .success(let m) = parseManifest(raw) else { return nil }
     return m
   }
 
-  private func releaseKey() -> String? {
-    if let k = ProcessInfo.processInfo.environment["OMACVM_FEED_KEY"], !k.isEmpty { return k }
+  /// The main and the spare release key of the installed checkout (either
+  /// one signs), or OMACVM_FEED_KEY (test keys, space-separated); plus the
+  /// spares signed documents named. nil: no key at all.
+  private func releaseKeys() -> ReleaseKeys? {
+    let store = URL(fileURLWithPath: omacvmSupport + "/release-keys")
+    if let k = ProcessInfo.processInfo.environment["OMACVM_FEED_KEY"], !k.isEmpty {
+      return ReleaseKeys(shipped: k.split(separator: " ").map(String.init), store: store)
+    }
     guard case .success(let cli) = controlCLI() else { return nil }
-    return try? String(contentsOfFile: cliRoot(cli) + "/src/lib/release-key.pub", encoding: .utf8)
+    let shipped = ["release-key.pub", "release-key-spare.pub"].compactMap {
+      try? String(contentsOfFile: cliRoot(cli) + "/src/lib/" + $0, encoding: .utf8)
+    }.filter { ReleaseKeys.key($0) != nil }
+    return shipped.isEmpty ? nil : ReleaseKeys(shipped: shipped, store: store)
   }
 
   private func fetch(_ url: URL) -> (Data?, String?) {
@@ -607,7 +616,7 @@ final class Control {
       try? FileManager.default.createDirectory(atPath: omacvmSupport, withIntermediateDirectories: true)
       try? jsonData(out).write(to: URL(fileURLWithPath: updatesPath), options: .atomic)
     }
-    guard let key = releaseKey() else {
+    guard let keys = releaseKeys() else {
       out["error"] = "this OmacVM has no release key yet: updates come with omacvm update on the Mac"
       return out
     }
@@ -620,11 +629,12 @@ final class Control {
       out["tried_at"] = isoFormat.string(from: Date())
       return out
     }
-    guard manifestSigned(data, sig: sig, key: key) else { out["error"] = "the update's signature does not match: not used"; return out }
+    guard manifestSigned(data, sig: sig, keys: keys) else { out["error"] = "the update's signature does not match: not used"; return out }
     switch parseManifest(data) {
     case .failure(let e): out["error"] = e.message
     case .success(let m):
       out["ok"] = true
+      if keys.remember(data, signature: sig) { log("control: the release names a new spare release key") }
       out["raw"] = data.base64EncodedString(); out["sig"] = sig.base64EncodedString()
       log("control: update check: \(m.version) (\(m.parts.count) parts)")
     }

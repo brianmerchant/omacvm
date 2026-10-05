@@ -22,13 +22,26 @@ public struct BundleInfo: Equatable, Sendable {
 /// Code signatures, with Security.framework (as `codesign --verify --deep
 /// --strict -R=REQUIREMENT`).
 public enum CodeCheck {
-    /// OmacVM's releases are signed with the Developer ID of this team.
-    public static let team = "722686Y34B"
+    /// The Developer ID teams a signed document allows: 1 to 4 distinct
+    /// Apple team IDs (10 capitals or digits). Missing, empty or anything
+    /// else: nil, and the document is refused (never "any team").
+    public static func teams(_ v: Any?) -> [String]? {
+        guard let a = v as? [Any], (1...4).contains(a.count) else { return nil }
+        var out: [String] = []
+        for t in a {
+            guard let s = t as? String, s.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil,
+                  !out.contains(s) else { return nil }
+            out.append(s)
+        }
+        return out
+    }
 
-    /// Developer ID Application, issued by Apple, of TEAM.
-    public static func developerID(team: String = team) -> String {
-        "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
-            + "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"\(team)\""
+    /// Developer ID Application, issued by Apple, of one of TEAMS (checked
+    /// by teams() first: they go into the requirement's text).
+    public static func developerID(teams: [String]) -> String {
+        let ou = teams.map { "certificate leaf[subject.OU] = \"\($0)\"" }.joined(separator: " or ")
+        return "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and "
+            + "certificate leaf[field.1.2.840.113635.100.6.1.13] exists and (\(ou))"
     }
 
     /// nil when the code at URL is intact (nested code too) and meets the
@@ -50,7 +63,7 @@ public enum CodeCheck {
         guard status == errSecSuccess else {
             let why = err.map { CFErrorCopyDescription($0.takeRetainedValue()) as String } ?? "OSStatus \(status)"
             return status == errSecCSReqFailed
-                ? "\(url.lastPathComponent) is not signed with OmacVM's Developer ID (team \(team))"
+                ? "\(url.lastPathComponent) is not signed with a Developer ID the update feed allows"
                 : "\(url.lastPathComponent): \(why)"
         }
         return nil

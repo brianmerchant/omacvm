@@ -455,6 +455,20 @@ func forwardGate(release: String, mac: String, vm: String) -> PolicyError? {
 struct Manifest: Equatable {
   let version: String, commit: String, date: String, notesURL: String, proto: Int, protoMin: Int
   let parts: [String: [String: String]]   // name -> digest, release, note
+  /// The Developer ID teams of the release (required, as in OmacVM.app's feed).
+  let teams: [String]
+}
+
+/// The Developer ID teams a signed document allows: 1 to 4 distinct Apple
+/// team IDs. Missing, empty or anything else: nil, and the document is refused.
+func devidTeams(_ v: Any?) -> [String]? {
+  guard let a = v as? [Any], (1...4).contains(a.count) else { return nil }
+  var out: [String] = []
+  for t in a {
+    guard let s = t as? String, s.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil, !out.contains(s) else { return nil }
+    out.append(s)
+  }
+  return out
 }
 
 func parseManifest(_ data: Data) -> Result<Manifest, PolicyError> {
@@ -480,19 +494,92 @@ func parseManifest(_ data: Data) -> Result<Manifest, PolicyError> {
     if let n = p["note"] as? String { entry["note"] = String(n.prefix(120)).filter { !$0.isNewline } }
     parts[name] = entry
   }
+  guard let teams = devidTeams(o["devid_teams"]) else { return bad("no Developer ID teams") }
+  if let k = o["next_spare_key"] { guard let s = k as? String, ReleaseKeys.key(s) != nil else { return bad("next_spare_key") } }
   return .success(Manifest(version: v, commit: c, date: date, notesURL: notes,
-                           proto: o["proto"] as? Int ?? 1, protoMin: o["proto_min"] as? Int ?? 1, parts: parts))
+                           proto: o["proto"] as? Int ?? 1, protoMin: o["proto_min"] as? Int ?? 1, parts: parts, teams: teams))
 }
 
-/// The manifest's Ed25519 signature (base64 in the .sig file) under the
-/// release key (base64 of the raw 32-byte public key). Checked before any
-/// field of the manifest is read.
-func manifestSigned(_ data: Data, sig: Data, key: String) -> Bool {
-  guard let k = Data(base64Encoded: key.trimmingCharacters(in: .whitespacesAndNewlines)),
-        let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: k),
-        let s = Data(base64Encoded: String(decoding: sig, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)),
-        s.count == 64 else { return false }
-  return pub.isValidSignature(s, for: data)
+/// The manifest's Ed25519 signature (base64 in the .sig file) under a
+/// trusted release key. Checked before any field of the manifest is read.
+func manifestSigned(_ data: Data, sig: Data, keys: ReleaseKeys) -> Bool {
+  ReleaseKeys.signed(data, sig, by: keys.trusted())
+}
+
+/// OmacVM's release keys (docs/release-keys.md), as OmacVM.app reads them
+/// (app/app/Sources/OmacVMUpdate/ReleaseKeys.swift, the same rules and the
+/// same folder): the main and the spare public key from the checkout's
+/// src/lib, either one valid, plus a spare a signed document named
+/// ("next_spare_key"). Such a document is kept with its signature in
+/// ~/Library/Application Support/omacvm/release-keys, never as a bare key,
+/// so a file written there by another process adds nothing.
+struct ReleaseKeys {
+  let shipped: [String]
+  let store: URL?
+  static let kinds: Set<String> = ["app-feed", "control-manifest", "prebuilt-manifest"]
+  static let maxKept = 8
+
+  static func key(_ b64: String) -> Curve25519.Signing.PublicKey? {
+    guard let d = Data(base64Encoded: b64.trimmingCharacters(in: .whitespacesAndNewlines)), d.count == 32 else { return nil }
+    return try? Curve25519.Signing.PublicKey(rawRepresentation: d)
+  }
+
+  static func signed(_ data: Data, _ sig: Data, by keys: [Curve25519.Signing.PublicKey]) -> Bool {
+    guard let s = Data(base64Encoded: String(decoding: sig, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)),
+          s.count == 64 else { return false }
+    return keys.contains { $0.isValidSignature(s, for: data) }
+  }
+
+  static func namedKey(_ data: Data) -> Curve25519.Signing.PublicKey? {
+    guard data.count <= 256 << 10, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+          let kind = o["kind"] as? String, kinds.contains(kind), let k = o["next_spare_key"] as? String else { return nil }
+    return key(k)
+  }
+
+  /// The shipped keys plus those named by kept documents a trusted key signed.
+  func trusted() -> [Curve25519.Signing.PublicKey] {
+    var keys = shipped.compactMap(Self.key)
+    var left = kept()
+    var grew = true
+    while grew && !left.isEmpty {
+      grew = false
+      for (i, doc) in left.enumerated().reversed() where Self.signed(doc.0, doc.1, by: keys) {
+        left.remove(at: i)
+        if let k = Self.namedKey(doc.0), !keys.contains(where: { $0.rawRepresentation == k.rawRepresentation }) {
+          keys.append(k)
+          grew = true
+        }
+      }
+    }
+    return keys
+  }
+
+  /// Keeps a verified document that names a key not trusted yet.
+  @discardableResult
+  func remember(_ data: Data, signature: Data) -> Bool {
+    guard let store, let k = Self.namedKey(data) else { return false }
+    let keys = trusted()
+    guard Self.signed(data, signature, by: keys), !keys.contains(where: { $0.rawRepresentation == k.rawRepresentation }),
+          kept().count < Self.maxKept else { return false }
+    let name = SHA256.hash(data: k.rawRepresentation).prefix(8).map { String(format: "%02x", $0) }.joined()
+    do {
+      try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+      try signature.write(to: store.appendingPathComponent("\(name).json.sig"), options: .atomic)
+      try data.write(to: store.appendingPathComponent("\(name).json"), options: .atomic)
+    } catch { return false }
+    return true
+  }
+
+  func kept() -> [(Data, Data)] {
+    guard let store, let names = try? FileManager.default.contentsOfDirectory(atPath: store.path) else { return [] }
+    return names.filter { $0.range(of: "^[0-9a-f]{16}\\.json$", options: .regularExpression) != nil }.sorted()
+      .prefix(Self.maxKept).compactMap { n in
+        let f = store.appendingPathComponent(n)
+        guard let d = try? Data(contentsOf: f), d.count <= 256 << 10,
+              let s = try? Data(contentsOf: f.appendingPathExtension("sig")), s.count <= 1024 else { return nil }
+        return (d, s)
+      }
+  }
 }
 
 // ---- the VM list (`omacvm vms --json`): no request waits for it ----

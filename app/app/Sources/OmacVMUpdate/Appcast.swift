@@ -10,10 +10,14 @@ import Foundation
 ///      "url": "https://github.com/gillesgoetsch/omacvm/releases/download/v2.9.1/OmacVM-2.9.1.zip",
 ///      "length": 123456789, "sha256": "<64 hex>", "minimum_macos": "15.0",
 ///      "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1",
-///      "date": "2026-10-20T12:00:00Z"}
+///      "date": "2026-10-20T12:00:00Z", "devid_teams": ["722686Y34B"]}
 ///
-/// "kind" is required: the same release key signs the control centre's
+/// "kind" is required: the same release keys sign the control centre's
 /// manifest ("kind": "control-manifest"), and neither may pass for the other.
+/// "devid_teams" (required, 1 to 4) are the Apple Developer ID teams the new
+/// app may be signed by: a change of team is announced by a feed signed
+/// with our own key that names both. "next_spare_key" (optional) names a
+/// new spare release key (ReleaseKeys).
 public struct Appcast: Equatable, Sendable {
     public var version: Version
     public var url: URL
@@ -21,6 +25,8 @@ public struct Appcast: Equatable, Sendable {
     public var sha256: String
     public var minimumMacOS: Version?
     public var notesURL: URL?
+    public var teams: [String]
+    public var nextSpareKey: String?
 
     public static let kind = "app-feed"
     public static let maxFeedBytes = 64 * 1024
@@ -33,22 +39,19 @@ public struct Appcast: Equatable, Sendable {
         public var description: String {
             switch self {
             case .tooLarge: "the update feed is too large"
-            case .badSignature: "the update feed's signature does not match OmacVM's release key"
+            case .badSignature: "the update feed's signature does not match OmacVM's release keys"
             case .noKey: "no release key"
             case .malformed(let what): "the update feed is malformed (\(what))"
             }
         }
     }
 
-    /// Checks the signature first, then reads the fields.
-    public static func verified(feed: Data, signature: Data, publicKey: String) -> Result<Appcast, Problem> {
+    /// Checks the signature first (any trusted release key), then reads the fields.
+    public static func verified(feed: Data, signature: Data, keys: ReleaseKeys) -> Result<Appcast, Problem> {
         guard feed.count <= maxFeedBytes, signature.count <= maxSignatureBytes else { return .failure(.tooLarge) }
-        guard let keyData = Data(base64Encoded: publicKey.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyData) else { return .failure(.noKey) }
-        let sigText = String(decoding: signature, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let sig = Data(base64Encoded: sigText), key.isValidSignature(sig, for: feed) else {
-            return .failure(.badSignature)
-        }
+        let trusted = keys.trusted()
+        guard !trusted.isEmpty else { return .failure(.noKey) }
+        guard ReleaseKeys.signed(feed, signature, by: trusted) else { return .failure(.badSignature) }
         return parse(feed)
     }
 
@@ -80,8 +83,14 @@ public struct Appcast: Equatable, Sendable {
             guard let s = n as? String, let u = URL(string: s), u.scheme == "https" else { return .failure(.malformed("notes_url")) }
             notes = u
         }
+        guard let teams = CodeCheck.teams(o["devid_teams"]) else { return .failure(.malformed("devid_teams")) }
+        var spare: String?
+        if let k = o["next_spare_key"] {
+            guard let s = k as? String, ReleaseKeys.key(s) != nil else { return .failure(.malformed("next_spare_key")) }
+            spare = s
+        }
         return .success(Appcast(version: version, url: url, length: length, sha256: sha,
-                                minimumMacOS: minimum, notesURL: notes))
+                                minimumMacOS: minimum, notesURL: notes, teams: teams, nextSpareKey: spare))
     }
 
     /// https anywhere; http only to 127.0.0.1 or localhost (a test feed).

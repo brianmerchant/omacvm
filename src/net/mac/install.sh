@@ -18,9 +18,10 @@
 # LaunchServices, Developer ID for published apps): no Xcode needed. Apps from
 # before that: built here from this source (needs Xcode's Command Line Tools).
 # Accepted callers: processes of the Mac users who installed it (each user who
-# runs this is added) that are QEMU signed with OmacVM's Developer ID (team
-# 722686Y34B), or, for an app signed ad hoc (built from source), exactly that
-# app's QEMU (its cdhash: install again after rebuilding the app).
+# runs this is added) that are QEMU signed with the Developer ID team of the
+# app's own QEMU (the app the person installs it for; a later app of another
+# team asks again), or, for an app signed ad hoc (built from source), exactly
+# that app's QEMU (its cdhash: install again after rebuilding the app).
 # OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
 # terminal (OmacVM.app's Fast Network button runs this script that way).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask
@@ -33,8 +34,11 @@ PLIST=/Library/LaunchDaemons/$LABEL.plist
 SOCK=/var/run/$LABEL.sock
 LOG=/var/log/$LABEL.log
 STATE=/var/run/$LABEL.state   # the daemon's vmnet back-off (omacvm-netd.c)
-TEAM='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
-DEVID='anchor apple generic and identifier "org.omacvm.app.qemu" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
+# Developer ID Application of TEAM, issued by Apple, with the identifier ID
+# (the same text as before teams came from the app: installed daemons stay "ok").
+devid() {   # TEAM ID
+  printf 'anchor apple generic and identifier "%s" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "%s"' "$2" "$1"
+}
 
 MODE=install APP=""
 while (( $# )); do
@@ -49,12 +53,19 @@ done
 
 source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app
 
-# The code requirement for APP's QEMU: the team for a Developer ID build, else
+# The Developer ID team APP's QEMU is signed with, if it is a Developer ID build.
+qemu_team() {
+  local q=$1/Contents/Resources/runtime/bin/OmacVM t
+  t=$(codesign -dv "$q" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+  [[ $t =~ ^[A-Z0-9]{10}$ ]] && codesign --verify -R="$(devid "$t" org.omacvm.app.qemu)" "$q" 2>/dev/null && echo "$t"
+}
+
+# The code requirement for APP's QEMU: its team for a Developer ID build, else
 # that exact build.
 requirement() {
-  local q=$1/Contents/Resources/runtime/bin/OmacVM h
+  local q=$1/Contents/Resources/runtime/bin/OmacVM h t
   [[ -x $q ]] || { echo "no QEMU in $1" >&2; return 1; }
-  if codesign --verify -R="$DEVID" "$q" 2>/dev/null; then echo "$DEVID"; return 0; fi
+  if t=$(qemu_team "$1"); then devid "$t" org.omacvm.app.qemu; echo; return 0; fi
   codesign --verify "$q" 2>/dev/null || { echo "$q has no valid signature" >&2; return 1; }
   h=$(codesign -dvvv "$q" 2>&1 | sed -n 's/^CDHash=//p' | head -1)
   [[ $h =~ ^[0-9a-f]{40}$ ]] || { echo "no cdhash for $q" >&2; return 1; }
@@ -211,19 +222,19 @@ case $(status) in
     echo "==> fast network: vmnet is tried again"
     exit 0 ;;
 esac
-# What the daemon must satisfy: for a Developer ID app, OmacVM's team and the
-# daemon's identifier; else (ad hoc: an app built from source, or built here)
-# exactly the file checked here, by its cdhash. Any file can be signed ad hoc,
-# so "a valid signature" alone would let a swapped file through.
+# What the daemon must satisfy: for a Developer ID app, the team of its QEMU
+# and the daemon's identifier; else (ad hoc: an app built from source, or
+# built here) exactly the file checked here, by its cdhash. Any file can be
+# signed ad hoc, so "a valid signature" alone would let a swapped file through.
 DREQ=""
-[[ $REQ == "$DEVID" ]] && DREQ="$TEAM and identifier \"$LABEL\""
+QTEAM=$(qemu_team "$APP") && DREQ=$(devid "$QTEAM" "$LABEL")
 if h=$(bundled "$APP"); then
   # The app's daemon, checked on a copy first (a clear message), and again
   # as root on the installed file before launchd may run it.
   cp "$h" "$T/omacvm-netd"
   codesign --verify --strict "$T/omacvm-netd" 2>/dev/null || { echo "$h has no valid signature" >&2; exit 1; }
   if [[ -n $DREQ ]] && ! codesign --verify -R="$DREQ" "$T/omacvm-netd" 2>/dev/null; then
-    echo "$h is not signed with OmacVM's Developer ID" >&2; exit 1
+    echo "$h is not signed with the Developer ID of team $QTEAM, as the app's QEMU is" >&2; exit 1
   fi
 else
   { xcode-select -p >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; } || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }

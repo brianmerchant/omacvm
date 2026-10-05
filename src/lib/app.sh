@@ -236,10 +236,15 @@ app_prebuilt_lookup() {
 }
 
 app_zip_url() { echo "$APP_DOWNLOADS/v$1/OmacVM-$1.zip"; }   # VERSION
-# The release app is signed with OmacVM's Developer ID (team 722686Y34B). The
-# .sha256 comes from the same release, so it only shows the download is
-# whole; this shows who made it.
-APP_DEVID='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
+APP_KEYS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../release/keys.py
+# Who made the download: the release's update feed (OmacVM-appcast.json),
+# signed with OmacVM's release key (main or spare, src/release/keys.py),
+# gives the zip's SHA-256 and the Developer ID teams it may be signed by.
+app_devid() {   # TEAM...: Developer ID Application of one of the teams, issued by Apple
+  local t ou=""
+  for t in "$@"; do ou+="${ou:+ or }certificate leaf[subject.OU] = \"$t\""; done
+  echo "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and ($ou)"
+}
 
 app_version_lt() {   # A B: A is older than B (2.10.0 is newer than 2.9.1)
   awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, ".")
@@ -247,8 +252,8 @@ app_version_lt() {   # A B: A is older than B (2.10.0 is newer than 2.9.1)
     exit 1 }'
 }
 
-app_published() {   # VERSION: its checksum file is there (small; the zip is not fetched)
-  curl -fsSL --max-time 30 -o /dev/null "$(app_zip_url "$1").sha256" 2>/dev/null
+app_published() {   # VERSION: its signed update feed is there (small; the zip is not fetched)
+  curl -fsSL --max-time 30 -o /dev/null "$APP_DOWNLOADS/v$1/OmacVM-appcast.json.sig" 2>/dev/null
 }
 
 app_install_dir() { echo "$HOME/Applications"; }   # where a new OmacVM.app goes, as the app installs itself
@@ -260,26 +265,44 @@ app_install_cmd() {   # VERSION
 
 # curl sets no quarantine attribute (a browser does), so Gatekeeper does not
 # stop the app, notarized or not: the Developer ID check does that part.
-app_install() {   # VERSION [APP]
-  local v=$1 dest=${2:-} url tmp want got new name
+# app_download VERSION DIR: the release's OmacVM.app into DIR/x/OmacVM.app,
+# checked: the signed feed first (nothing of the release is used before it
+# checks out), then the zip against its SHA-256 and size, then the app: our
+# bundle id and the feed's version, intact, and signed with a Developer ID of
+# a team the feed names.
+app_download() {
+  local v=$1 tmp=$2 url want len got new feed teams_line teams=()
   url=$(app_zip_url "$v")
-  tmp=$(mktemp -d)
-  curl -fsL --max-time 30 -o "$tmp/sum" "$url.sha256" ||
-    { rm -rf "$tmp"; echo "no OmacVM.app $v to download ($url)" >&2; return 1; }
+  if ! curl -fsL --max-time 30 -o "$tmp/feed.json" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json" ||
+     ! curl -fsL --max-time 30 -o "$tmp/feed.json.sig" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json.sig"; then
+    echo "no signed update feed for OmacVM.app $v ($APP_DOWNLOADS/v$v/OmacVM-appcast.json): not installed" >&2; return 1
+  fi
+  feed=$(python3 "$APP_KEYS" app-feed "$tmp/feed.json" "$v") ||
+    { echo "the update feed of OmacVM.app $v does not check out: not installed" >&2; return 1; }
+  read -r want len teams_line <<<"$feed"
+  read -r -a teams <<<"$teams_line"
+  [[ $want =~ ^[0-9a-f]{64}$ && $len =~ ^[0-9]{1,10}$ && ${#teams[@]} -ge 1 ]] ||
+    { echo "the update feed of OmacVM.app $v names no Developer ID team: not installed" >&2; return 1; }
   printf 'Downloading OmacVM.app %s\n' "$v" >&2
-  curl -fL --progress-bar -o "$tmp/OmacVM.zip" "$url" ||
-    { rm -rf "$tmp"; echo "the download failed ($url)" >&2; return 1; }
-  want=$(awk '{ print $1; exit }' "$tmp/sum")
+  curl -fL --progress-bar -o "$tmp/OmacVM.zip" "$url" || { echo "the download failed ($url)" >&2; return 1; }
   got=$(shasum -a 256 "$tmp/OmacVM.zip" | awk '{ print $1 }')
-  [[ $want =~ ^[0-9a-f]{64}$ && $got == "$want" ]] ||
-    { rm -rf "$tmp"; echo "the download does not match its checksum: not installed" >&2; return 1; }
+  [[ $got == "$want" && $(stat -f %z "$tmp/OmacVM.zip") == "$len" ]] ||
+    { echo "the download does not match the signed feed's checksum: not installed" >&2; return 1; }
   new=$tmp/x/OmacVM.app
   if ! ditto -x -k "$tmp/OmacVM.zip" "$tmp/x" || [[ ! -d $new ]] || [[ $(defaults read "$new/Contents/Info" CFBundleIdentifier 2>/dev/null) != org.omacvm.app ]] ||
+     [[ $(defaults read "$new/Contents/Info" CFBundleShortVersionString 2>/dev/null) != "$v" ]] ||
      ! codesign --verify --deep --strict "$new" 2>/dev/null; then
-    rm -rf "$tmp"; echo "the download holds no intact OmacVM.app: not installed" >&2; return 1
+    echo "the download holds no intact OmacVM.app $v: not installed" >&2; return 1
   fi
-  codesign --verify -R="$APP_DEVID" "$new" 2>/dev/null ||
-    { rm -rf "$tmp"; echo "the download is not signed with OmacVM's Developer ID (team 722686Y34B): not installed" >&2; return 1; }
+  codesign --verify -R="$(app_devid "${teams[@]}")" "$new" 2>/dev/null ||
+    { echo "the download is not signed with a Developer ID the signed feed names (${teams[*]}): not installed" >&2; return 1; }
+}
+
+app_install() {   # VERSION [APP]
+  local v=$1 dest=${2:-} tmp new name
+  tmp=$(mktemp -d)
+  app_download "$v" "$tmp" || { rm -rf "$tmp"; return 1; }
+  new=$tmp/x/OmacVM.app
   if [[ -n $dest ]]; then
     # Installed under its own name (the app offers that): keep it, signed
     # again ad hoc as the app does when it installs itself.

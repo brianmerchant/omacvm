@@ -44,8 +44,8 @@ With `OMACVM_SIGN_ID` the app, its QEMU and QEMU's libraries are signed with
 that Developer ID, the hardened runtime and a timestamp; QEMU gets
 `runtime/qemu-hvf.entitlements` (Hypervisor, microphone), the app
 `app/OmacVM.entitlements` (microphone). Without it the build is signed ad hoc,
-and `package-release.sh` refuses it: a release needs the Developer ID of team
-722686Y34B.
+and `package-release.sh` refuses it: a release needs a Developer ID (its team
+goes into the signed update feed, see [docs/release-keys.md](../docs/release-keys.md)).
 It also refuses a history that holds `runtime/.build-runtime.log` (local home
 paths, filtered out of the history): rebase a branch made before that onto
 the filtered history first.
@@ -58,9 +58,10 @@ dist/OmacVM-<version>.zip --keychain-profile <profile> --wait`, then
 
 The version is OmacVM's (`../src/VERSION`). Upload both files to the GitHub
 release `v<version>`: `omacvm build --vm-type app` and `omacvm update`
-download them from there. With a release key (`../src/lib/release-key.pub`),
-`package-release.sh` also writes the update feed `OmacVM-appcast.json` and
-its `.sig` (`scripts/appcast.sh`); upload them too. Publish as a pre-release
+download them from there. `package-release.sh` also writes the update feed
+`OmacVM-appcast.json` and its `.sig` (`scripts/appcast.sh`, signed with the
+release key from the Keychain: [docs/release-keys.md](../docs/release-keys.md));
+upload them too. Publish as a pre-release
 first and try its zip; installed apps see it once the release is marked
 latest. (Release builds ignore `OMACVM_APPCAST_URL`; the update itself is
 tested with `scripts/dev/self-update-test.sh`.)
@@ -70,9 +71,9 @@ tested with `scripts/dev/self-update-test.sh`.)
 The app updates itself ([ADR 0033](../docs/adr/0033-app-self-update.md)):
 
 - Once a week it looks at the latest release's update feed (signed with
-  OmacVM's release key). A newer version is downloaded and checked: size and
-  SHA-256 from the feed, then the app and its QEMU signed with OmacVM's
-  Developer ID (team 722686Y34B). The window then offers it: What's New,
+  OmacVM's main or spare release key). A newer version is downloaded and
+  checked: size and SHA-256 from the feed, then the app and its QEMU signed
+  with a Developer ID of a team the feed names. The window then offers it: What's New,
   Skip This Version, Update and Relaunch. *OmacVM › Check for Updates…* asks
   right away.
 - Nothing is replaced while a VM runs from the app: the update waits until

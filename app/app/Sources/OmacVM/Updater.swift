@@ -7,8 +7,10 @@ import OmacVMUpdate
 /// control centre) it fetches OmacVM-appcast.json and its Ed25519 signature
 /// from the latest GitHub release. A newer version is downloaded, checked
 /// (size and SHA-256 from the signed feed, then the unpacked app: same bundle
-/// id, same version as the feed, Developer ID of team 722686Y34B for the app
-/// and its QEMU) and kept ready. The window then offers it; nothing is
+/// id, same version as the feed, a Developer ID of a team the feed names
+/// ("devid_teams") for the app and its QEMU) and kept ready. The feed is
+/// valid when signed by either release key (ReleaseKeys: the main one, the
+/// spare, or a spare a signed feed named since). The window then offers it; nothing is
 /// replaced while a VM runs from this app or one is being built.
 ///
 /// Installing hands over to update-swap.sh (copied out of the bundle first):
@@ -24,8 +26,8 @@ import OmacVMUpdate
 /// update.log, the state files below). An app on another volume keeps
 /// previous/ and incoming/ next to itself (.omacvm-updates/), so the swap
 /// stays renames on one volume. Tests: OMACVM_APPCAST_URL,
-/// OMACVM_APPCAST_KEY (a test key), OMACVM_SETTINGS_DIR; only test builds
-/// (another bundle id) read them (TestHooks).
+/// OMACVM_APPCAST_KEY (test keys, space-separated), OMACVM_SETTINGS_DIR;
+/// only test builds (another bundle id) read them (TestHooks).
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
@@ -34,6 +36,8 @@ final class Updater: ObservableObject {
         let version: String
         let app: URL
         let notes: URL?
+        /// From the signed feed kept next to it.
+        let teams: [String]
     }
 
     @Published private(set) var staged: Staged?
@@ -78,18 +82,26 @@ final class Updater: ObservableObject {
         return hook ?? URL(string: Self.defaultFeed)!
     }
 
-    /// The release key's public half: src/lib/release-key.pub in the app
-    /// (inside the signed bundle), or OMACVM_APPCAST_KEY in a test build.
-    var publicKey: String? {
-        if let k = TestHooks.value("OMACVM_APPCAST_KEY", bundleID: bundleID) { return k }
-        let url = Paths.resources.appendingPathComponent(Mac.omacvmSrc + "/lib/release-key.pub")
-        let k = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return k?.isEmpty == false ? k : nil
+    /// The release keys' public halves: src/lib/release-key.pub and
+    /// release-key-spare.pub in the app (inside the signed bundle), or
+    /// OMACVM_APPCAST_KEY in a test build. Plus the spares signed feeds named,
+    /// kept next to the shared settings.
+    var keys: ReleaseKeys {
+        let shipped: [String]
+        if let k = TestHooks.value("OMACVM_APPCAST_KEY", bundleID: bundleID) {
+            shipped = k.split(separator: " ").map(String.init)
+        } else {
+            shipped = ["release-key.pub", "release-key-spare.pub"].compactMap { name in
+                let url = Paths.resources.appendingPathComponent(Mac.omacvmSrc + "/lib/" + name)
+                return (try? String(contentsOf: url, encoding: .utf8)).flatMap { ReleaseKeys.key($0) != nil ? $0 : nil }
+            }
+        }
+        return ReleaseKeys(shipped: shipped, store: settings.releaseKeysFolder)
     }
 
     /// nil when this copy can update itself, else why not.
     var unavailableReason: String? {
-        if publicKey == nil { return "This build has no release key yet: updates start with a release that has one." }
+        if keys.shipped.isEmpty { return "This build has no release key yet: updates start with a release that has one." }
         if Version(currentVersion) == nil { return "This build (\(currentVersion)) is not a release version." }
         if ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] != nil { return "Updates are off when run from the source tree." }
         if bundle.path.contains("/AppTranslocation/") {
@@ -198,7 +210,7 @@ final class Updater: ObservableObject {
         trimLog()
         noteCopy()
         readSwapResult()
-        if publicKey != nil, notice == nil { tellWriteProblemOnce() }
+        if !keys.shipped.isEmpty, notice == nil { tellWriteProblemOnce() }
         Task {
             await loadStaged()
             resumePending(pending)
@@ -237,7 +249,8 @@ final class Updater: ObservableObject {
     /// checked. Automatic checks stay off metered and Low Data networks.
     func check(manual: Bool) async -> Outcome {
         if let why = unavailableReason { return .failed(why) }
-        guard !checking, let key = publicKey, let current = Version(currentVersion) else { return .failed("A check is running.") }
+        guard !checking, let current = Version(currentVersion) else { return .failed("A check is running.") }
+        let keys = keys
         checking = true
         defer { checking = false }
         let config = URLSessionConfiguration.ephemeral
@@ -248,7 +261,7 @@ final class Updater: ObservableObject {
         let session = URLSession(configuration: config)
         defer { session.finishTasksAndInvalidate() }
 
-        let feed: Appcast
+        let feed: Appcast, feedData: Data, feedSig: Data
         do {
             let (raw, code) = try await fetch(feedURL, cap: Appcast.maxFeedBytes, session: session)
             // The server answered: the week starts again even without a feed
@@ -257,13 +270,16 @@ final class Updater: ObservableObject {
             guard code == 200 else { return failed("no update feed (HTTP \(code)) at \(feedURL.absoluteString)") }
             let (sig, scode) = try await fetch(feedURL.appendingPathExtension("sig"), cap: Appcast.maxSignatureBytes, session: session)
             guard scode == 200 else { return failed("the update feed has no signature (HTTP \(scode))") }
-            switch Appcast.verified(feed: raw, signature: sig, publicKey: key) {
-            case .success(let f): feed = f
+            switch Appcast.verified(feed: raw, signature: sig, keys: keys) {
+            case .success(let f): feed = f; feedData = raw; feedSig = sig
             case .failure(let p): return failed(p.description)
             }
         } catch {
             return failed("no connection to the update feed (\(error.localizedDescription))")
         }
+
+        // A new spare named by the feed: trusted from now on.
+        if let k = keys.remember(feedData, signature: feedSig) { log("the update feed names a new spare release key: \(k)") }
 
         let os = Version(ProcessInfo.processInfo.operatingSystemVersion)
         // Asked for by hand: a skipped version is offered again.
@@ -283,7 +299,7 @@ final class Updater: ObservableObject {
         if let s = staged, s.version == feed.version.description { return .ready(s.version) }
         log("downloading \(feed.version) from \(feed.url.absoluteString)")
         do {
-            let s = try await stage(feed, session: session)
+            let s = try await stage(feed, data: feedData, signature: feedSig, session: session)
             staged = s
             log("ready: \(s.version) at \(s.app.path)")
             return .ready(s.version)
@@ -312,8 +328,9 @@ final class Updater: ObservableObject {
     private var stagedRoot: URL { home.appendingPathComponent("staged") }
 
     /// Downloads to staged/VERSION, checks size and digest, unpacks, checks
-    /// the app. Anything that fails leaves nothing behind.
-    private func stage(_ feed: Appcast, session: URLSession) async throws -> Staged {
+    /// the app. Anything that fails leaves nothing behind. The signed feed is
+    /// kept there too: a later launch checks it again for the teams.
+    private func stage(_ feed: Appcast, data: Data, signature: Data, session: URLSession) async throws -> Staged {
         let fm = FileManager.default
         try? fm.removeItem(at: stagedRoot)
         let dir = stagedRoot.appendingPathComponent(feed.version.description)
@@ -334,11 +351,13 @@ final class Updater: ObservableObject {
                 }
                 try? FileManager.default.removeItem(at: zip)
                 guard let app = Files.singleApp(in: x) else { throw HelperError.io("the download holds no single app") }
-                try Updater.verifyApp(app, id: id, version: feed.version)
+                try Updater.verifyApp(app, id: id, version: feed.version, teams: feed.teams)
                 return app
             }.value
+            try data.write(to: dir.appendingPathComponent("feed.json"))
+            try signature.write(to: dir.appendingPathComponent("feed.json.sig"))
             if let n = feed.notesURL { try? Data(n.absoluteString.utf8).write(to: dir.appendingPathComponent("notes")) }
-            return Staged(version: feed.version.description, app: app, notes: feed.notesURL)
+            return Staged(version: feed.version.description, app: app, notes: feed.notesURL, teams: feed.teams)
         } catch {
             try? fm.removeItem(at: dir)
             throw error
@@ -346,15 +365,16 @@ final class Updater: ObservableObject {
     }
 
     /// The checks before an app may replace this one: our bundle id, the
-    /// version the signed feed named, OmacVM's Developer ID on the app and
-    /// on its QEMU (the part with the Hypervisor entitlement).
-    nonisolated static func verifyApp(_ app: URL, id: String, version: Version) throws {
+    /// version the signed feed named, a Developer ID of a team it named on
+    /// the app and on its QEMU (the part with the Hypervisor entitlement).
+    nonisolated static func verifyApp(_ app: URL, id: String, version: Version, teams: [String]) throws {
         guard let info = BundleInfo.read(app) else { throw HelperError.io("the new app has no Info.plist") }
         guard info.identifier == id else { throw HelperError.io("the new app is \(info.identifier), not \(id)") }
         guard Version(info.version) == version else {
             throw HelperError.io("the new app says \(info.version), the feed \(version)")
         }
-        let req = CodeCheck.developerID()
+        guard CodeCheck.teams(teams) != nil else { throw HelperError.io("the update feed names no Developer ID team") }
+        let req = CodeCheck.developerID(teams: teams)
         if let p = CodeCheck.problem(app, requirement: req) { throw HelperError.io(p) }
         let qemu = app.appendingPathComponent("Contents/Resources/runtime/bin/OmacVM")
         if let p = CodeCheck.problem(qemu, requirement: req) { throw HelperError.io(p) }
@@ -364,17 +384,24 @@ final class Updater: ObservableObject {
     private func loadStaged() async {
         guard let current = Version(currentVersion),
               let dirs = try? FileManager.default.contentsOfDirectory(at: stagedRoot, includingPropertiesForKeys: nil) else { return }
-        let id = bundleID, skip = skipped.flatMap(Version.init)
+        let id = bundleID, skip = skipped.flatMap(Version.init), keys = keys
         for dir in dirs {
+            // The feed it came with, checked again: the teams come from it.
+            let feed = (try? Data(contentsOf: dir.appendingPathComponent("feed.json"))).flatMap { d in
+                (try? Data(contentsOf: dir.appendingPathComponent("feed.json.sig"))).flatMap { s in
+                    try? Appcast.verified(feed: d, signature: s, keys: keys).get()
+                }
+            }
             guard let v = Version(dir.lastPathComponent), current < v, skip.map({ $0 < v }) ?? true,
+                  let feed, feed.version == v,
                   let app = Files.singleApp(in: dir.appendingPathComponent("x")),
-                  (try? await Task.detached { try Updater.verifyApp(app, id: id, version: v) }.value) != nil else {
+                  (try? await Task.detached { try Updater.verifyApp(app, id: id, version: v, teams: feed.teams) }.value) != nil else {
                 try? FileManager.default.removeItem(at: dir)
                 continue
             }
             let notes = (try? String(contentsOf: dir.appendingPathComponent("notes"), encoding: .utf8))
                 .flatMap(URL.init(string:)).flatMap { $0.scheme == "https" ? $0 : nil }
-            staged = Staged(version: v.description, app: app, notes: notes)
+            staged = Staged(version: v.description, app: app, notes: notes, teams: feed.teams)
         }
     }
 
@@ -473,7 +500,7 @@ final class Updater: ObservableObject {
             return
         }
         do {
-            try Updater.verifyApp(incoming, id: bundleID, version: v)
+            try Updater.verifyApp(incoming, id: bundleID, version: v, teams: s.teams)
         } catch {
             try? fm.removeItem(at: incoming.deletingLastPathComponent())
             try? fm.removeItem(at: stagedRoot)

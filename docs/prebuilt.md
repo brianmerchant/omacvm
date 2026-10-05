@@ -87,7 +87,12 @@ adds one while the VM is off, after the seed is gone.
 ## Downloading one by hand
 
 Each release has, per app, `omacvm-prebuilt-VERSION-ROUTE.tar.zst.part-aa`,
-`-ab`, …, a manifest (`.json`), SHA-256 sums (`.sha256`) and the package list.
+`-ab`, …, a manifest (`.json`) with its signature (`.json.sig`), SHA-256 sums
+(`.sha256`) and the package list. `omacvm build --prebuilt` and the app only
+use an image whose manifest is signed with OmacVM's release key (from 3.0.0;
+[release-keys.md](release-keys.md)) and take each part's SHA-256 from it. By
+hand, check the signature with `python3 src/release/keys.py verify
+prebuilt-manifest omacvm-prebuilt-VERSION-ROUTE.json`.
 
 ```bash
 shasum -a 256 -c omacvm-prebuilt-2.6.0-utm.sha256

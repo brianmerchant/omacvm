@@ -9,7 +9,8 @@
 #   generalize  in the VM: remove the user, keys, logs and caches, install the
 #               first-boot service, check for personal data, zero the free space
 #   package     compact the disk, copy the bundle without logs or Mac paths,
-#               tar + zstd -19, split into 1.9 GB parts, manifest + SHA-256 sums
+#               tar + zstd -19, split into 1.9 GB parts, manifest (signed with
+#               the release key: src/release/release-key.sh) + SHA-256 sums
 #   repack      the packed image again with this checkout's configuration edits
 #   upload      to the GitHub release $OMACVM_PREBUILT_TAG (default
 #               prebuilt-VERSION), created as a pre-release if missing
@@ -192,16 +193,25 @@ compress_stage() {
   fi
   omarchy=$(cat "$OUT/omarchy-version" 2>/dev/null || echo unknown)
   local base=omacvm-prebuilt-$VERSION-$ROUTE
-  rm -f "$OUT/$base".tar.zst.* "$OUT/$base.json"
+  rm -f "$OUT/$base".tar.zst.* "$OUT/$base.json" "$OUT/$base.json.sig"
   log "compressing (zstd -19, a while)"
   local t0; t0=$(date +%s)
   COPYFILE_DISABLE=1 tar --no-xattrs -C "$WORK" -cf - "$(basename "$stage")" |
     zstd -19 --long=27 -T8 -q -c | split -b 1900m -a 2 - "$OUT/$base.tar.zst.part-"
   log "compressed in $(( ($(date +%s) - t0) / 60 )) minutes"
+  # Signed with OmacVM's release key (the main one from the Keychain, or
+  # OMACVM_RELEASE_KEY_FILE) and read back as omacvm build and the app read
+  # it; "devid_teams": the Developer ID team of the release app
+  # (app/dist/OmacVM.app) or of OMACVM_SIGN_ID (src/release/release-key.sh).
+  local teams app=()
+  [[ -d $R/app/dist/OmacVM.app ]] && app=("$R/app/dist/OmacVM.app")
+  teams=$("$R/src/release/release-key.sh" teams ${app[@]+"${app[@]}"}) || die "no Developer ID team for the manifest"
   python3 "$R/src/prebuilt/manifest.py" write "$OUT/$base.json" --route "$ROUTE" --omacvm "$VERSION" \
     --omarchy "$omarchy" --bundle "$(basename "$stage")" --unpacked "$(du -sk "$stage" | cut -f1)" \
-    --disk-gb "$PREBUILT_DISK_GB" "$OUT/$base".tar.zst.part-*
-  (cd "$OUT" && shasum -a 256 "$base".tar.zst.part-* "$base.json" > "$base.sha256")
+    --disk-gb "$PREBUILT_DISK_GB" --teams "$teams" --next-spare-key "${OMACVM_NEXT_SPARE_KEY:-}" "$OUT/$base".tar.zst.part-*
+  "$R/src/release/release-key.sh" sign "$OUT/$base.json" || die "the manifest was not signed"
+  python3 "$R/src/prebuilt/manifest.py" get "$OUT/$base.json" route >/dev/null || die "the signed manifest does not read back"
+  (cd "$OUT" && shasum -a 256 "$base".tar.zst.part-* "$base.json" "$base.json.sig" > "$base.sha256")
   cp "$R/src/prebuilt/SOURCES.md" "$OUT/SOURCES.md"
   cp "$OUT/packages.txt" "$OUT/$base-packages.txt"
   rm -rf "$WORK"
@@ -235,7 +245,9 @@ stage_upload() {
       --notes "Prebuilt Omarchy VMs for OmacVM $VERSION. Use them with: omacvm build --prebuilt. What's inside: [SOURCES.md](https://github.com/$PREBUILT_REPO/releases/download/$TAG/SOURCES.md); how they are made: [docs/prebuilt.md](https://github.com/$PREBUILT_REPO/blob/main/docs/prebuilt.md)." >/dev/null
   fi
   log "uploading $base to $TAG"
-  gh release upload "$TAG" -R "$PREBUILT_REPO" --clobber "$OUT/$base".tar.zst.part-* "$OUT/$base.json" "$OUT/$base.sha256" "$OUT/$base-packages.txt" "$OUT/SOURCES.md"
+  [[ -f $OUT/$base.json.sig ]] || die "$base.json has no signature: package again"
+  gh release upload "$TAG" -R "$PREBUILT_REPO" --clobber "$OUT/$base".tar.zst.part-* "$OUT/$base.json" "$OUT/$base.json.sig" \
+    "$OUT/$base.sha256" "$OUT/$base-packages.txt" "$OUT/SOURCES.md"
 }
 
 stage_clean() {

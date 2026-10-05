@@ -4,6 +4,7 @@
 import CryptoKit
 import Foundation
 import OmacVMUpdate
+import Security
 
 // A copy of this tool inside a fake app bundle plays a VM's QEMU (a copied
 // system tool is killed: platform binaries only run from their place).
@@ -32,14 +33,19 @@ expect(UpdatePolicy.isDue(lastCheck: now.addingTimeInterval(-7 * day), now: now)
 expect(!UpdatePolicy.isDue(lastCheck: now.addingTimeInterval(3600), now: now), "an hour ahead (clock skew): not due")
 expect(UpdatePolicy.isDue(lastCheck: now.addingTimeInterval(2 * day), now: now), "2 days ahead (clock went back): due")
 
-// The feed: signature first, then strict fields
+// The feed: signature first (either release key), then strict fields.
+// Throwaway keys: "main" and "spare" play the two shipped ones.
 let key = Curve25519.Signing.PrivateKey()
-let pub = key.publicKey.rawRepresentation.base64EncodedString()
+let spareKey = Curve25519.Signing.PrivateKey()
+func b64(_ k: Curve25519.Signing.PrivateKey) -> String { k.publicKey.rawRepresentation.base64EncodedString() }
+let pub = b64(key)
+let shipped = ReleaseKeys(shipped: [pub, b64(spareKey)], store: nil)
 let sha = String(repeating: "ab", count: 32)
 func feed(_ fields: [String: Any]) -> Data {
     var o: [String: Any] = ["schema": 1, "kind": "app-feed", "version": "2.9.1", "url": "https://github.com/gillesgoetsch/omacvm/releases/download/v2.9.1/OmacVM-2.9.1.zip",
                             "length": 61_234_567, "sha256": sha, "minimum_macos": "15.0",
-                            "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1"]
+                            "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1",
+                            "devid_teams": ["722686Y34B"]]
     for (k, val) in fields { o[k] = val is NSNull ? nil : val }
     return try! JSONSerialization.data(withJSONObject: o, options: .sortedKeys)
 }
@@ -47,17 +53,25 @@ func sign(_ d: Data, with k: Curve25519.Signing.PrivateKey = key) -> Data {
     Data((try! k.signature(for: d)).base64EncodedString().utf8 + [0x0a])
 }
 let good = feed([:])
-if case .success(let a) = Appcast.verified(feed: good, signature: sign(good), publicKey: pub) {
-    expect(a.version == v("2.9.1") && a.length == 61_234_567 && a.sha256 == sha && a.minimumMacOS == v("15.0"), "a good feed reads")
-} else { expect(false, "a good feed reads") }
+if case .success(let a) = Appcast.verified(feed: good, signature: sign(good), keys: shipped) {
+    expect(a.version == v("2.9.1") && a.length == 61_234_567 && a.sha256 == sha && a.minimumMacOS == v("15.0")
+           && a.teams == ["722686Y34B"] && a.nextSpareKey == nil, "a good feed reads (signed with the main key)")
+} else { expect(false, "a good feed reads (signed with the main key)") }
+if case .success = Appcast.verified(feed: good, signature: sign(good, with: spareKey), keys: shipped) {
+    expect(true, "signed with the spare key: accepted")
+} else { expect(false, "signed with the spare key: accepted") }
 var tampered = good; tampered[tampered.count / 2] ^= 1
-expect(Appcast.verified(feed: tampered, signature: sign(good), publicKey: pub) == .failure(.badSignature), "one changed byte: refused")
-expect(Appcast.verified(feed: good, signature: sign(good, with: Curve25519.Signing.PrivateKey()), publicKey: pub) == .failure(.badSignature),
+expect(Appcast.verified(feed: tampered, signature: sign(good), keys: shipped) == .failure(.badSignature), "one changed byte: refused")
+expect(Appcast.verified(feed: good, signature: sign(good, with: Curve25519.Signing.PrivateKey()), keys: shipped) == .failure(.badSignature),
        "signed with another key: refused")
-expect(Appcast.verified(feed: good, signature: Data("garbage".utf8), publicKey: pub) == .failure(.badSignature), "garbage signature: refused")
-expect(Appcast.verified(feed: good, signature: sign(good), publicKey: "") == .failure(.noKey), "no key: refused")
+expect(Appcast.verified(feed: good, signature: sign(good, with: spareKey), keys: ReleaseKeys(shipped: [pub], store: nil)) == .failure(.badSignature),
+       "the spare's signature where only the main key ships: refused")
+expect(Appcast.verified(feed: good, signature: Data("garbage".utf8), keys: shipped) == .failure(.badSignature), "garbage signature: refused")
+expect(Appcast.verified(feed: good, signature: sign(good), keys: ReleaseKeys(shipped: [], store: nil)) == .failure(.noKey), "no key: refused")
+expect(Appcast.verified(feed: good, signature: sign(good), keys: ReleaseKeys(shipped: ["", "bm90IGEga2V5"], store: nil)) == .failure(.noKey),
+       "only broken keys: refused")
 let big = Data(repeating: 0x20, count: Appcast.maxFeedBytes + 1)
-expect(Appcast.verified(feed: big, signature: sign(big), publicKey: pub) == .failure(.tooLarge), "oversized feed: refused")
+expect(Appcast.verified(feed: big, signature: sign(big), keys: shipped) == .failure(.tooLarge), "oversized feed: refused")
 let bad: [(String, [String: Any])] = [
     ("schema 2", ["schema": 2]), ("no kind", ["kind": NSNull()]), ("the control centre's manifest", ["kind": "control-manifest"]),
     ("kind as a number", ["kind": 1]), ("version with a suffix", ["version": "2.9.1-rc1"]),
@@ -66,19 +80,30 @@ let bad: [(String, [String: Any])] = [
     ("short digest", ["sha256": "abc"]), ("http to another host", ["url": "http://example.com/OmacVM.zip"]),
     ("file URL", ["url": "file:///tmp/OmacVM.zip"]), ("notes over http", ["notes_url": "http://example.com"]),
     ("no url", ["url": NSNull()]), ("minimum_macos as a number", ["minimum_macos": 15]),
+    ("no devid_teams", ["devid_teams": NSNull()]), ("empty devid_teams", ["devid_teams": [String]()]),
+    ("devid_teams as a string", ["devid_teams": "722686Y34B"]), ("lower-case team", ["devid_teams": ["722686y34b"]]),
+    ("short team", ["devid_teams": ["722686Y34"]]), ("team with a quote", ["devid_teams": ["722686Y3\"B"]]),
+    ("team twice", ["devid_teams": ["722686Y34B", "722686Y34B"]]), ("five teams", ["devid_teams": ["AAAAAAAAA1", "AAAAAAAAA2", "AAAAAAAAA3", "AAAAAAAAA4", "AAAAAAAAA5"]]),
+    ("team as a number", ["devid_teams": [1234567890]]), ("next_spare_key not a key", ["next_spare_key": "bm90IGEga2V5"]),
+    ("next_spare_key as a number", ["next_spare_key": 1]),
 ]
 for (what, change) in bad {
     let f = feed(change)
-    if case .failure(.malformed) = Appcast.verified(feed: f, signature: sign(f), publicKey: pub) {
+    if case .failure(.malformed) = Appcast.verified(feed: f, signature: sign(f), keys: shipped) {
         expect(true, "\(what): refused")
     } else { expect(false, "\(what): refused") }
 }
 let local = feed(["url": "http://127.0.0.1:8765/OmacVM.zip"])
-if case .success = Appcast.verified(feed: local, signature: sign(local), publicKey: pub) { expect(true, "http to 127.0.0.1 (a test feed): allowed") }
+if case .success = Appcast.verified(feed: local, signature: sign(local), keys: shipped) { expect(true, "http to 127.0.0.1 (a test feed): allowed") }
 else { expect(false, "http to 127.0.0.1 (a test feed): allowed") }
 
+let twoTeams = feed(["devid_teams": ["722686Y34B", "ABCDE12345"]])
+if case .success(let a) = Appcast.verified(feed: twoTeams, signature: sign(twoTeams), keys: shipped) {
+    expect(a.teams == ["722686Y34B", "ABCDE12345"], "two teams (a change of Developer ID): both read")
+} else { expect(false, "two teams (a change of Developer ID): both read") }
+
 // What to offer
-if case .success(let a) = Appcast.verified(feed: good, signature: sign(good), publicKey: pub) {
+if case .success(let a) = Appcast.verified(feed: good, signature: sign(good), keys: shipped) {
     let os = v("15.7.4")
     expect(UpdatePolicy.offer(a, current: v("2.9.1"), skipped: nil, os: os) == .upToDate, "same version: nothing")
     expect(UpdatePolicy.offer(a, current: v("3.0.0"), skipped: nil, os: os) == .upToDate, "older feed (replayed): nothing")
@@ -129,13 +154,82 @@ try! FileManager.default.createDirectory(at: linked, withIntermediateDirectories
 try! FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("OmacVM.app"), withDestinationURL: unpacked)
 expect(Files.singleApp(in: linked) == nil, "an app that is a link: refused")
 
-// Code signatures: Apple's own tools are valid but not OmacVM's team
+// Code signatures: Apple's own tools are valid but not of a team the feed names
+let req = CodeCheck.developerID(teams: ["722686Y34B", "ABCDE12345"])
+var parsed: SecRequirement?
+expect(SecRequirementCreateWithString(req as CFString, [], &parsed) == errSecSuccess, "requirement for two teams compiles")
+expect(req.contains(#"(certificate leaf[subject.OU] = "722686Y34B" or certificate leaf[subject.OU] = "ABCDE12345")"#),
+       "requirement: either team")
 expect(CodeCheck.problem(URL(fileURLWithPath: "/bin/ls"), requirement: nil) == nil, "/bin/ls has a valid signature")
-expect(CodeCheck.problem(URL(fileURLWithPath: "/bin/ls"), requirement: CodeCheck.developerID())?.contains("Developer ID") == true,
-       "/bin/ls is not OmacVM's Developer ID")
+expect(CodeCheck.problem(URL(fileURLWithPath: "/bin/ls"), requirement: req)?.contains("Developer ID") == true,
+       "/bin/ls is not signed by a team the feed names")
+// Apple's own tools are signed by Apple, not a Developer ID: no team list lets them pass.
+expect(CodeCheck.problem(URL(fileURLWithPath: "/bin/ls"), requirement: CodeCheck.developerID(teams: ["0000000000"])) != nil,
+       "another team: refused")
 let unsigned = tmp.appendingPathComponent("unsigned")
 try! Data("#!/bin/sh\n".utf8).write(to: unsigned)
-expect(CodeCheck.problem(unsigned, requirement: CodeCheck.developerID()) != nil, "an unsigned file: refused")
+expect(CodeCheck.problem(unsigned, requirement: req) != nil, "an unsigned file: refused")
+
+// A Developer ID signed app (OMACVM_TEST_DEVID_APP, e.g. a test build made
+// with OMACVM_SIGN_ID): its own team passes, another team does not.
+if let path = ProcessInfo.processInfo.environment["OMACVM_TEST_DEVID_APP"], !path.isEmpty {
+    let app = URL(fileURLWithPath: path)
+    var code: SecStaticCode?
+    var info: CFDictionary?
+    SecStaticCodeCreateWithPath(app as CFURL, [], &code)
+    if let code { SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) }
+    let team = (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String ?? ""
+    expect(CodeCheck.teams([team]) != nil, "test app has a team (\(team))")
+    expect(CodeCheck.problem(app, requirement: CodeCheck.developerID(teams: [team])) == nil, "its own team: accepted")
+    expect(CodeCheck.problem(app, requirement: CodeCheck.developerID(teams: ["0000000000", team])) == nil, "its team second in the list: accepted")
+    expect(CodeCheck.problem(app, requirement: CodeCheck.developerID(teams: ["0000000000"]))?.contains("Developer ID") == true,
+           "another team only: refused")
+} else {
+    print("skip a Developer ID signed app (set OMACVM_TEST_DEVID_APP)")
+}
+
+// Release keys: a feed may name a new spare, kept as the signed feed itself
+let store = tmp.appendingPathComponent("support/release-keys")
+let rotating = ReleaseKeys(shipped: [pub, b64(spareKey)], store: store)
+let nextKey = Curve25519.Signing.PrivateKey()
+let announce = feed(["next_spare_key": b64(nextKey), "version": "2.9.2"])
+if case .success(let a) = Appcast.verified(feed: announce, signature: sign(announce, with: spareKey), keys: rotating) {
+    expect(a.nextSpareKey == b64(nextKey), "a feed naming a new spare reads")
+} else { expect(false, "a feed naming a new spare reads") }
+let byNext = feed(["version": "2.9.3"])
+expect(Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), keys: rotating) == .failure(.badSignature),
+       "the new spare before it was named: refused")
+expect(rotating.remember(announce, signature: sign(announce, with: Curve25519.Signing.PrivateKey())) == nil,
+       "a naming feed signed by a stranger: not kept")
+expect(rotating.remember(feed([:]), signature: sign(feed([:]))) == nil, "a feed naming nothing: nothing kept")
+expect(rotating.remember(announce, signature: sign(announce, with: spareKey)) == b64(nextKey), "the named spare is kept")
+expect(rotating.remember(announce, signature: sign(announce, with: spareKey)) == nil, "named again: already trusted")
+if case .success = Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), keys: rotating) {
+    expect(true, "signed with the named spare: accepted from then on")
+} else { expect(false, "signed with the named spare: accepted from then on") }
+let keptFiles = (try? FileManager.default.contentsOfDirectory(atPath: store.path)) ?? []
+expect(keptFiles.count == 2 && keptFiles.contains { $0.hasSuffix(".json.sig") }, "kept as the feed and its signature (\(keptFiles))")
+// The named spare names the next one: a chain.
+let thirdKey = Curve25519.Signing.PrivateKey()
+let announce2 = feed(["next_spare_key": b64(thirdKey), "version": "2.9.4"])
+expect(rotating.remember(announce2, signature: sign(announce2, with: nextKey)) == b64(thirdKey), "the named spare names another")
+expect(rotating.trusted().count == 4, "trusted: main, spare and the two named")
+// A copy that ships other keys does not trust what the old ones named.
+expect(ReleaseKeys(shipped: [b64(Curve25519.Signing.PrivateKey())], store: store).trusted().count == 1,
+       "shipped keys changed: the kept documents no longer count")
+// A kept document changed on disk (a key put in by another process): ignored.
+for name in keptFiles where name.hasSuffix(".json") {
+    var d = try! Data(contentsOf: store.appendingPathComponent(name))
+    d[d.count / 2] ^= 1
+    try! d.write(to: store.appendingPathComponent(name))
+}
+expect(rotating.trusted().count == 2, "a changed kept document: its key (and the chain after it) not trusted")
+expect(Appcast.verified(feed: byNext, signature: sign(byNext, with: nextKey), keys: rotating) == .failure(.badSignature),
+       "after the change: the named spare refused again")
+// A bare key file dropped in the folder means nothing.
+try! Data(b64(nextKey).utf8).write(to: store.appendingPathComponent("0123456789abcdef.json"))
+try! Data("x".utf8).write(to: store.appendingPathComponent("0123456789abcdef.json.sig"))
+expect(rotating.trusted().count == 2, "a bare key file in the folder: not trusted")
 
 // Who may replace the bundle: its folder and the bundle itself writable
 let folder = tmp.appendingPathComponent("Applications")

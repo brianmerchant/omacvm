@@ -5,15 +5,20 @@
       {"version", "parts": {part: {"digest", "release"}}} for this copy of
       src/ (omacvm apply writes it to the VM's /etc/omacvm/installed.json)
   manifest.py build --version V --commit C [--previous FILE] [--date D] [--notes FILE] [--src DIR]
+                    [--teams "T..." | --app APP] [--out FILE]
       the release manifest ("kind": "control-manifest"); a part keeps the release of the previous manifest
       while its digest is the same, so nobody bumps versions by hand. --notes:
-      "part<TAB>note" lines (one line per changed part)
+      "part<TAB>note" lines (one line per changed part). "devid_teams": --teams, else the
+      Developer ID team of --app (default app/dist/OmacVM.app, the release build) or of
+      OMACVM_SIGN_ID, plus OMACVM_EXTRA_TEAMS (release-key.sh teams). OMACVM_NEXT_SPARE_KEY:
+      "next_spare_key". --out: writes FILE and signs it (FILE.sig, release-key.sh sign:
+      the main key from the Keychain), then reads it back as the Bridge would
   manifest.py parts [--src DIR]
       every file with its part (to check parts.tsv)
 
 A digest is sha256 over the part's files, sorted: "path<TAB>sha256 of the
 file" lines. build/ and __pycache__/ are left out (apply does not copy them).
-Sign the result with sign.swift. Runs with macOS's python3 3.9.
+Runs with macOS's python3 3.9.
 """
 from __future__ import annotations
 
@@ -24,6 +29,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -95,6 +101,9 @@ def main() -> int:
     ap.add_argument("--previous")
     ap.add_argument("--date", default=datetime.date.today().isoformat())
     ap.add_argument("--notes")
+    ap.add_argument("--teams")
+    ap.add_argument("--app")
+    ap.add_argument("--out")
     a = ap.parse_args()
     if a.cmd == "parts":
         for name, fs in assign(a.src, load_parts(os.path.join(HERE, "parts.tsv"))).items():
@@ -129,13 +138,48 @@ def main() -> int:
         if not same and k in notes:
             p["note"] = notes[k]
         parts[k] = p
-    # "kind": one release key signs this and OmacVM.app's feed ("app-feed");
-    # the Bridge takes only a "control-manifest".
+    sys.path.insert(0, HERE)
+    import keys
+    tool = os.path.join(HERE, "release-key.sh")
+    if a.teams is not None:
+        teams = a.teams.split()
+    else:
+        app = a.app or os.path.join(os.path.dirname(os.path.dirname(HERE)), "app", "dist", "OmacVM.app")
+        r = subprocess.run([tool, "teams"] + ([app] if a.app or os.path.isdir(app) else []), stdout=subprocess.PIPE, text=True)
+        if r.returncode:
+            ap.error("no Developer ID team (--teams, --app or OMACVM_SIGN_ID)")
+        teams = json.loads(r.stdout)
+    try:
+        keys.teams(teams)
+    except keys.Refused as e:
+        ap.error(str(e))
+    # "kind": the same release keys sign this, OmacVM.app's feed ("app-feed")
+    # and the prebuilt manifests; the Bridge takes only a "control-manifest".
     m = {"schema": 1, "kind": "control-manifest", "version": a.version, "commit": a.commit, "date": a.date, "channel": "stable",
          "notes_url": f"https://github.com/gillesgoetsch/omacvm/releases/tag/v{a.version}",
-         "proto": 1, "proto_min": 1, "parts": parts}
-    json.dump(m, sys.stdout, indent=1, sort_keys=True)
-    print()
+         "proto": 1, "proto_min": 1, "parts": parts, "devid_teams": teams}
+    spare = os.environ.get("OMACVM_NEXT_SPARE_KEY")
+    if spare:
+        if not keys.key(spare):
+            ap.error("OMACVM_NEXT_SPARE_KEY is not a public key")
+        m["next_spare_key"] = spare
+    if not a.out:
+        json.dump(m, sys.stdout, indent=1, sort_keys=True)
+        print()
+        return 0
+    with open(a.out, "w", encoding="utf-8") as f:
+        json.dump(m, f, indent=1, sort_keys=True)
+        f.write("\n")
+    if subprocess.run([tool, "sign", a.out]).returncode:
+        return 1
+    try:
+        keys.load(a.out, "control-manifest")
+    except keys.Refused as e:
+        os.remove(a.out)
+        os.remove(a.out + ".sig")
+        sys.exit("manifest.py: %s does not read back: %s" % (a.out, e))
+    print(a.out)
+    print(a.out + ".sig")
     return 0
 
 
