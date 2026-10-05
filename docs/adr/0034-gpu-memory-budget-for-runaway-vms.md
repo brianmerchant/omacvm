@@ -14,7 +14,7 @@ GPU context. When that app is Hyprland, the VM goes black until it restarts.
 On a 16 GB Mac mini with a 5K display, picking scale 1.6 did exactly that:
 4 GB was reached. Measured (QEMU's log, Omarchy with Chromium): 1.6 GB at
 5K, 2.0 GB at 6K, 3.1 GB at 8K, and while a scale changes every
-screen-sized buffer is made again, so the highest use is 2.6, 3.4 and 5.3 GB.
+screen-sized buffer is made again, so the highest use is 2.6, 3.4 and 6.2 GB.
 More apps, more memory. The user wants every display to work, 6K and 8K
 too, "no artificial limits".
 

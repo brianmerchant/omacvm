@@ -364,7 +364,7 @@ Rules:
 - Classic resources count against a budget (all levels, layers and
   samples; `virgl-resource-memory-budget.patch`): three quarters of the
   Mac's memory, so only a runaway VM reaches it (ADR 0034). A desktop takes
-  1.1 GB at 4K to 3.1 GB at 8K, up to 5.3 GB for a moment while the scale
+  1.1 GB at 4K to 3.1 GB at 8K, up to 6.2 GB for a moment while the scale
   changes (every screen-sized buffer is made again). QEMU's log notes each
   new peak in 512 MB steps.
 

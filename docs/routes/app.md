@@ -429,12 +429,18 @@ and Hyprland scales the desktop. What a scale costs:
   | 4K (3840×2160) | 1.1 GB | 1.1 GB | 1.1 GB | 1.2 GB | 1.6 GB |
   | 5K (5120×2880) | 1.6 GB | 1.8 GB | 1.9 GB | 1.7 GB | 2.6 GB |
   | 6K (6016×3384) | 2.0 GB | 2.2 GB | 2.1 GB (1.33) | 2.5 GB | 3.4 GB |
-  | 8K (7680×4320) | 3.1 GB | 3.3 GB | 3.2 GB | 4.1 GB | 5.3 GB |
+  | 8K (7680×4320) | 3.1 GB | 3.3 GB | 3.2 GB | 4.1 GB | 6.2 GB |
 
   Omarchy alone at 5K: 1.2 GB at 2x, 1.3 GB at 1.6. Scales that would not
   give whole pixels are rounded the way Omarchy does: on 5K 1.5 becomes 1.6
   and 1.75 becomes 2; on 4K and 8K 1.75 becomes 1.875.
 
+- **Frame times** (Chromium showing a full-screen page that redraws every
+  frame, `tests/graphics/fractional-scale.sh --frames`, 60 Hz virtual
+  display, M4 Max, benchmark lock held): at 5K every scale kept 60 fps
+  (median 16.7 ms, no late frames). At 8K: 56 fps at 2x, 49 at 1.6 and
+  1.25, 39 at 1x. A Mac with a smaller GPU has less room; 2x is the
+  lightest.
 - **A scale change** makes every screen-sized buffer again, Hyprland's and
   every app's (20 to 50 of them, 32 to 127 MB each from 4K to 8K): Hyprland
   sets the mode 2 or 3 times (Omarchy's scale command sets it, then its
