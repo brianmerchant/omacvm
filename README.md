@@ -146,7 +146,7 @@ control centre).
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
 omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.
 
-Put the VM in full screen for the gestures. **⌃⌥⌘ Esc** moves the monitor
+Put the VM in full screen for the gestures. **⌃⌥ Esc** moves the monitor
 under the pointer one Space over to macOS, with macOS's own animation; the VM
 stays full screen in its Space. Press it there again to go back into the VM
 ([more](docs/features.md#full-screen-and-the-escape-keys)).
@@ -172,7 +172,7 @@ then opens a pre-filled GitHub issue.
 
 - **The Mac's menu bar stays over the full-screen VM**: System Settings › Menu
   Bar › Automatically hide and show the menu bar: **In Full Screen Only**.
-- **Gestures do nothing**: the VM must be full screen and in front; if ⌃⌥⌘ Esc
+- **Gestures do nothing**: the VM must be full screen and in front; if ⌃⌥ Esc
   left you in the VM without the trackpad, press it again. `omacvm check`
   says when the helpers miss a permission.
 - **"answers with another SSH host key"** after a rebuild:
