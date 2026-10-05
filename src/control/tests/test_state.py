@@ -210,6 +210,17 @@ def test_graphics_row_says_next_start():
     assert S.graphics_row(st, "app").note == "OpenGL: OpenGL from the next start"
 
 
+def test_graphics_row_vulkan_waiting_for_driver():
+    st = {"graphics": {"graphics": "vulkan", "next_start": "opengl", "waiting_for_driver": True,
+                       "summary": "Vulkan (driver not built yet: runs on OpenGL until the next apply)",
+                       "this_start": "vulkan -> opengl (driver not built yet: runs on OpenGL until the next apply)"}}
+    r = S.graphics_row(st, "app")
+    assert r.note == "Vulkan (driver not built yet: runs on OpenGL until the next apply)"
+    # A Mac whose omacvm has no summary yet still says why.
+    del st["graphics"]["summary"]
+    assert "driver not built yet" in S.graphics_row(st, "app").note
+
+
 def test_graphics_row_unknown_and_busy():
     assert S.graphics_row({}, "app").status is S.Status.UNKNOWN
     assert S.graphics_row({"graphics": {"graphics": "metal"}}, "app").status is S.Status.UNKNOWN

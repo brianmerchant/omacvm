@@ -441,10 +441,8 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
     : > "$d/venus-ready"
   else
     rm -f "$d/venus-ready"
-    if [[ $GRAPHICS == vulkan && $(graphics_choice "$d") == auto ]] && ! graphics_forced "$d"; then
-      info "Graphics: the VM's Vulkan driver did not build (see above): Automatic gives it OpenGL until it is there"
-    elif [[ $GRAPHICS == vulkan ]]; then
-      info "Graphics: the VM's Vulkan driver did not build (see above): Vulkan apps fail until it is there (the VM tries again at each start)"
+    if [[ $GRAPHICS == vulkan ]] && ! graphics_forced "$d"; then
+      info "Graphics: the VM's Vulkan driver did not build (see above): the VM runs on OpenGL until an apply builds it"
     fi
   fi
   # Its VA-API shim keeps AV1 to Chromium-based browsers (FFmpeg's AV1 cannot

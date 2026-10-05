@@ -75,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // From `--update-now` of a second launcher: this one stays open.
             Task { @MainActor in await Updater.shared.runScripted(quitWhenDone: false) }
         }
+        // Before any VM start reads the Graphics setting.
+        Settings.migrateVenusSwitch()
         state.startVM = { [weak self] in self?.startVM() }
         state.storage.appBusy = { [weak self] in
             guard let self else { return false }
