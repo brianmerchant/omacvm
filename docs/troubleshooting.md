@@ -26,12 +26,13 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Accessibility and Input Monitoring permissions of *OmacVM Gestures*
   (`omacvm check` names a missing one; the helpers' logs say
   "permissions: ... MISSING").
-- **⌃⌥⌘ Esc does not swipe**: the swipe needs a Space beside the VM's on that
-  monitor (System Settings › Desktop & Dock › Mission Control: "Displays have
-  separate Spaces" decides whether each monitor has its own). Without one,
-  the app you were in before comes to the front instead; that needs "When
-  switching to an application, switch to a Space with open windows" (on by
-  default). The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
+- **⌃⌥⌘ Esc does not move to another Space**: the move needs a Space beside
+  the VM's on that monitor (System Settings › Desktop & Dock › Mission
+  Control: "Displays have separate Spaces" decides whether each monitor has
+  its own) and macOS's "Move left/right a space" shortcuts (System Settings ›
+  Keyboard › Keyboard Shortcuts › Mission Control). Without them, OmacVM
+  tries a Dock swipe, then opens Mission Control so you pick a Space (below).
+  The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
   "escape combo: ...") says which way it took.
 - **A macOS shortcut still does its macOS thing in the VM** (a screenshot,
   Mission Control): that is the default; sending them all to the VM is

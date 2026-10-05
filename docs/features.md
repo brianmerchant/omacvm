@@ -86,7 +86,6 @@ and macOS shows its Space.
 In an OmacVM.app window, ⌃⌥⌘ Esc gives the keyboard back to macOS (the app
 you were in before, else Finder); press it again in macOS to get the window
 back with the keyboard.
-The combo brings it back.
 
 Media keys while a VM is in front (OmacVM.app full screen or in a window;
 Parallels, UTM and Fusion full screen): volume and mute change the Mac's
@@ -97,7 +96,7 @@ Play/pause, next and previous go to the VM's players (OmacVM.app). Brightness
 keys change the display the VM is on (below).
 
 <p align="center">
-  <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
+  <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock and moves the monitor one Space over to macOS with macOS's own animation; the VM stays full screen in its Space and the trackpad and keys belong to macOS. Pressed again, the monitor moves back into the VM, captured again. A setting chooses the monitor under the pointer or all monitors. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
 </p>
 
 ## External display brightness
