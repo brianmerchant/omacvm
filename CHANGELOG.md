@@ -5,6 +5,12 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+- OmacVM.app: the VM no longer freezes when the Mac cannot send one of its
+  UDP packets at once (seen on a Mac mini during a big file copy; network
+  filters and VPN apps can hold sends back). The packet is dropped, as a
+  busy network would, and `qemu.log` says so at most once a minute. If
+  QEMU's main loop stops for more than 2 seconds for any reason, `qemu.log`
+  says where (`OMACVM_STALL_WATCHDOG=0` turns this off).
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.
