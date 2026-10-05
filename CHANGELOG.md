@@ -3,36 +3,109 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.0 (unreleased)
+## 2.9.1
 
-- External display brightness (feature `external-brightness`, on): with the
-  VM in front on an external display, the Mac's brightness keys set that
-  display over DDC/CI, in macOS's 16 steps (Option: 64), with Omarchy's
-  popup. A Studio Display, Pro Display XDR or LG UltraFine goes through
-  macOS's own control. Omarchy's brightness keys, `omarchy brightness display` and its
-  monitor panel in the VM do the same through OmacVM Bridge. OmacVM.app also
-  in a window; Parallels, UTM and VMware Fusion in full screen. The built-in
-  display works as before, and so does a display without DDC/CI (`omacvm
-  check` names it and why).
+A hotfix for 2.9.0: brightness keys that work with the VM in front, a
+way out of the VM that always works, no VM freeze under network load, and
+WebGL Aquarium back to 2.8.0's speed.
 
-## 2.9.0 (unreleased)
+### Fixed
 
-- OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
-  of 1.5 ms, so light 3D work runs two to three and a half times as fast
-  (glmark2's short set 2,800-3,700 instead of 1,000-1,500 in the same build;
-  2,856 against 2.8.0's 1,124; benchmark lock held). A new frame goes to the window as soon as Omarchy
-  finishes it, drawn off the main thread as an IOSurface, not on QEMU's
-  30 ms timer.
-- WebGL-heavy pages are where they were on a quiet Mac (Aquarium 21-23 fps,
-  as before): there Apple's OpenGL is the limit. While other VMs use the Mac
-  they ran about 10% slower than with the old path (20-21 fps against
-  23-24); with the Mac's CPU busy otherwise, about 15% faster (12.0 against
-  10.4 fps). Against 2.8.0 with one other VM running: Aquarium 19.0 against
-  19.9 fps, Basemark Web 3.0 2,669 against 2,482.
+- OmacVM.app: the VM no longer freezes when the Mac cannot send one of its
+  UDP packets at once (seen on a Mac mini during a big file copy; network
+  filters and VPN apps can hold sends back). QEMU's user network waited in
+  that send with the whole VM stopped; now the packet is dropped, as a busy
+  network would, and `qemu.log` says so at most once a minute with where it
+  was going. `info usernet` counts the drops.
+- If QEMU's main loop stops for more than 2 seconds for any reason,
+  `qemu.log` now says where it is and when it is back
+  (`OMACVM_STALL_WATCHDOG=0` turns this off).
+- Brightness keys with an OmacVM.app VM in front (full screen or in a
+  window): on macOS 27 they reach no app, so OmacVM Bridge now reads them
+  from the keyboard (Input Monitoring; macOS still gets every key) and sets
+  the display the VM is on. This works with a Bluetooth Magic Keyboard too.
+  Quick presses step every time and a held key repeats at macOS's key repeat
+  speed. With no VM in front, macOS handles them as always. The volume keys
+  are taken at the keyboard level as well.
+- ⌃⌥⌘ Esc always gets you out of the full-screen VM. After the swipe,
+  OmacVM Gestures checks that the VM is no longer in front; if it still is
+  (on a Mac mini the swipe did nothing and Finder had no window), the VM's
+  window leaves full screen and is hidden, and ⌃⌥⌘ Esc in macOS brings it
+  back. On a Mac with only the desktop and the VM's Space, a swipe that
+  bounces is tried the other way once. "Swipe all monitors" swipes each
+  display.
+- ⌃⌥⌘ Esc in an OmacVM.app window gives the keyboard back to the app you
+  were in before (else Finder); pressed again in macOS, the window comes
+  back with the keyboard.
+- The helpers' key taps take the front place again in more cases after
+  OmacVM.app restarts: also for a VM in a window, and for the Bridge's media
+  keys when macOS names no program for QEMU (builds on brianmerchant's fix,
+  #39).
+- WebGL Aquarium is back to 2.8.0's speed with 2.9.0's GPU gains kept: the
+  thread that waits for GPU fences no longer tests them back to back while
+  QEMU's render thread runs guest commands (it took Apple's OpenGL lock from
+  it). Bench lock, this part alone: Aquarium 20.15-20.6 fps against 2.9.0's
+  19.0 and 2.8.0's 20.2 (ADR 0026). `OMACVM_VIRGL_FENCE_BUSY=0` goes back.
+- Mouse wheels scroll one to one again, with nothing after the wheel stops
+  (a smooth-scrolling mouse such as a Logitech MX could jump on). Scroll
+  momentum now only ever takes a trackpad's scrolling (built-in, or a Magic
+  Trackpad, also one connected later), so it is on by default for new VMs.
+- Omarchy's bar shows Wi-Fi as connected while the Mac is, also before
+  Location Services is allowed for OmacVM Bridge (or when it is not): the
+  link decides then and the network's name stays hidden. No more flipping
+  on and off.
+
+### Also
+
+- OmacVM.app's `apply-vm.sh` takes `--reset-host-key` for a reinstalled VM.
+- OmacVM Bridge logs a brightness key an external display did not take
+  once, and asks for QEMU's control socket again on the next key.
+- Experimental, off by default: every macOS shortcut to the VM while it has
+  the keyboard (`defaults write org.omacvm.app macShortcuts -bool false` and
+  a VM restart). On a Mac mini macOS's shortcuts were not always handed
+  back, so macOS keeps them unless you turn this on.
+- Docs: OmacVM.app needs macOS 15 or newer.
+
+## 2.9.0
+
+A faster GPU path for OmacVM.app with frames on the display's refresh (120
+Hz on a MacBook Pro), fewer black WebGL canvases, video encoding on the
+Mac's media engine, ⌃⌥⌘ Esc straight back to macOS, media and brightness
+keys for the VM and external displays, signed Mac helpers, and an opt-in
+fast network. Numbers against 2.8.0 are from the release candidate, with
+the benchmark lock held.
+
+### GPU and display (OmacVM.app)
+
+- A faster GPU path. GPU fences come back in about 0.2 ms instead of 1.5
+  ms, so light 3D work runs two to three and a half times as fast:
+  glmark2's short set 2,856 against 2.8.0's 1,124. A new frame goes to the
+  window as soon as Omarchy finishes it, drawn off the main thread as an
+  IOSurface, not on QEMU's 30 ms timer.
+- WebGL-heavy pages stay about where they were; there Apple's OpenGL is the
+  limit. Against 2.8.0 with one other VM running: Aquarium 19.0 against 19.9
+  fps (4.5% slower: the new threads that wait for the GPU and show frames
+  take Apple's OpenGL lock from the render thread; a fix is in testing),
+  Basemark Web 3.0 2,669 against 2,482.
 - The thread that waits for the GPU no longer keeps a core busy, also during
   a long GPU job (about 2,100 wakeups a second instead of 19,900). If it
   cannot start, the VM falls back to the old 1 ms polling and says so in
   `qemu.log` and `omacvm check`, instead of hanging the guest's GPU.
+- Frames on the display's refresh: one new frame per refresh (testufo 117-120
+  new frames a second on a 120 Hz display; 2.8.0 about 90). On a ProMotion
+  MacBook the refresh rate follows what the guest draws (a 24 fps video asks
+  for 24 Hz), as native apps do; displays with one rate keep it.
+  `OMACVM_GL_REFRESH=fixed` keeps the full rate. The windows on other
+  displays still draw the old way.
+- Colours: frames are tagged sRGB, so the guest's colours are no longer
+  stretched to the MacBook's P3 range (red was too saturated).
+- WebGL and OpenGL apps: shaders and limits that Apple's OpenGL refuses no
+  longer stop the app's whole GL context (the canvas or window went black for
+  good). dEQP GLES3 (every 50th case) 812 to 855 of 869; the whole GLES3
+  list in one process 22,445 to 43,125 cases; the WebGL conformance pages in
+  one Chrome 430 to 776 (WebGL 1) and 97 to 959 (WebGL 2), because one
+  refused shader no longer breaks every page after it. 107 transform
+  feedback cases that failed in 2.7.1 pass.
 - The guest can no longer make QEMU allocate up to 3 GiB of window surfaces,
   or new ones on every frame: they are at most the size of the largest Mac
   display and made again at most twice a second.
@@ -43,33 +116,34 @@ in more words.
 - Vulkan in the VM, hidden and experimental (Venus on MoltenVK):
   `defaults write org.omacvm.app venus -bool true`. Needs Mesa 26.2.4 or newer
   in the VM (`app/scripts/dev/guest-mesa-venus.sh` builds it while Arch Linux
-  ARM has 26.2.3). vkmark about 5,200; the same build with the old polled
-  fences gives about 730 (no release had Venus). Venus memory is mapped into
-  the VM only in whole 16 KiB pages that belong to it.
-- The app carries the licence texts of MoltenVK and the Vulkan loader
-  (Apache-2.0, with cereal and cJSON).
-- OmacVM.app shows the guest's frames on the display's refresh: one new
-  frame per refresh (testufo 117-120 new frames a second on a 120 Hz
-  display; 2.8.0 about 90, the first 2.9.0 candidate about 108). On a ProMotion MacBook the
-  refresh rate follows what the guest draws (a 24 fps video asks for 24 Hz),
-  as native apps do; displays with one rate keep it.
-  `OMACVM_GL_REFRESH=fixed` keeps the full rate.
-- Colours: frames are tagged sRGB, so the guest's colours are no longer
-  stretched to the MacBook's P3 range.
+  ARM has 26.2.3). vkmark about 4,500 to 5,200; the same build with the old
+  polled fences gives about 730 (no release had Venus). Venus memory is mapped
+  into the VM only in whole 16 KiB pages that belong to it. `omacvm check`
+  names the Vulkan driver a VM uses.
+- KosmicKrisp, opt-in at build time: a runtime built with
+  `OMACVM_RUNTIME_KOSMICKRISP=1` (needs Xcode 26 and Homebrew's llvm,
+  spirv-llvm-translator and spirv-tools) also carries Mesa's Vulkan
+  driver on Metal. On macOS 26 and newer Venus then runs on it (Vulkan 1.4,
+  more features than MoltenVK); when it cannot start, Venus falls back to
+  MoltenVK, says why in `qemu.log`, and `omacvm check` shows a warning. The
+  released app is built without it.
 - HDR, hidden and experimental: `defaults write org.omacvm.app hdr -bool
   true`, then in the VM `sudo omacvm-virtio-gpu-build` (a 10-bit virtio-gpu
   module, rebuilt for new kernels) and a restart. Only on displays that can
-  show HDR; the main window's output only.
-- WebGL and OpenGL apps: shaders and limits that Apple's OpenGL refuses no
-  longer stop the app's whole GL context (the canvas or window went black for
-  good). dEQP GLES3 (every 50th case) 812 to 855 of 869; the whole GLES3
-  list in one process 22,445 to 43,125 cases; the WebGL conformance pages in
-  one Chrome 430 to 776 (WebGL 1) and 97 to 959 (WebGL 2), because one
-  refused shader no longer breaks every page after it.
-- Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
-  Firefox's 16). Past that, a video decodes on the CPU instead of playing
-  black (the VM's VA-API driver knows the Mac's limit). The copy of each
-  decoded picture can no longer be dropped by the app's own graphics state.
+  show HDR; the main window's output only. mpv and Chrome do not send HDR yet.
+- In full screen the pointer no longer races near the screen corners and the
+  Dock's edge (since 2.8.0 it got faster there with every move, up to about
+  20 times). It now moves as macOS moves it everywhere, and reaches
+  Omarchy's own corners. The Mac's cursor still stays off the corners and
+  the Dock's edge. New setting "Keep the Dock and hot corners away in full
+  screen" (on by default); off gives macOS's own full screen.
+- "Use the notch for the menu bar" is on by default (Omarchy's bar beside the
+  notch in full screen). It shows only on a Mac whose built-in display has a
+  notch, checked again when displays change; if you switched it off before,
+  it stays off.
+
+### Video (OmacVM.app)
+
 - Video encoding on the Mac's media engine: apps in the VM that encode H.264
   or HEVC through VA-API use it instead of the VM's CPU (FFmpeg's
   `h264_vaapi`/`hevc_vaapi`, OBS Studio's VAAPI encoders). Google Chrome's
@@ -77,20 +151,14 @@ in more words.
   FFmpeg 1080p uses 6 to 8 times less Mac CPU than x264/x265. 8 encoders at
   once per VM, 12 at most. `OMACVM_VIDEO_NO_ENCODE=1` in QEMU's environment
   turns it off.
-- OmacVM.app: the VM no longer freezes when the Mac cannot send one of its
-  UDP packets at once (seen on a Mac mini during a big file copy; network
-  filters and VPN apps can hold sends back). The packet is dropped, as a
-  busy network would, and `qemu.log` says so at most once a minute. If
-  QEMU's main loop stops for more than 2 seconds for any reason, `qemu.log`
-  says where (`OMACVM_STALL_WATCHDOG=0` turns this off).
-- Fast network for OmacVM.app, experimental and off by default:
-  `omacvm enable fast-network --vm NAME` puts the VM on macOS's own VM
-  network (vmnet, as Parallels and UTM) through a small system service,
-  `omacvm-netd`, that asks for your password once. On a Mac mini, VM to Mac
-  7.2 instead of 3.0 Gbit/s with less CPU; Mac to VM is lower than the user
-  network (9.5 against 12.2 Gbit/s). Without the service the VM keeps QEMU's
-  user network. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
-  changes, several VMs at once, Omanotch over it.
+- Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
+  Firefox's 16). Past that, a video decodes on the CPU instead of playing
+  black (the VM's VA-API driver knows the Mac's limit). The copy of each
+  decoded picture can no longer be dropped by the app's own graphics state.
+  Existing VMs get the new driver with `omacvm update`.
+
+### Keys, brightness and the Mac's helpers
+
 - ⌃⌥⌘ Esc in the full-screen VM now takes you straight back to macOS: the
   monitor under the pointer swipes to the Space beside the VM's, with
   macOS's own animation, and the keyboard follows the pointer's monitor (no
@@ -108,58 +176,8 @@ in more words.
   volume with Omarchy's popup instead of macOS's greyed-out panel.
   Play/pause, next and previous go to the VM's players, not macOS's Now
   Playing. The keys reach the VM through QEMU's control socket; if that is
-  busy, the key goes to macOS.
-- Brightness keys on a Mac mini with one Apple-style display (LG UltraFine,
-  Studio Display) set that display with the VM in front, full screen or in a
-  window. A key the Bridge cannot use goes to macOS, and the Bridge's log
-  says once why.
-- OmacVM.app, experimental and off by default: every key combination goes
-  to the VM while it has the keyboard (full screen, or its window in front):
-  macOS's own shortcuts are switched off meanwhile, so screenshots (⌘⇧3/4/5 and the ⌃ variants),
-  Mission Control, App Exposé, Show Desktop (F11, ⌘F11), Launchpad,
-  ⌃-arrows, Spotlight (⌘Space), input sources (⌃Space), ⌘Tab, ⌘\`, ⌘Q/H/M/W
-  and F-keys with any modifier reach Omarchy. The top-row keys macOS knows by
-  their own code (Mission Control, Spotlight, Dictation, Do Not Disturb)
-  arrive as F3-F6. Only ⌃⌥⌘ Esc stays macOS's, and the media keys keep
-  their rules (volume and brightness: the Mac's, else the VM's; play, next,
-  previous: the VM's). Checked against macOS's whole list (405 shortcuts,
-  each typed into a real QEMU). macOS turns its shortcuts back on by itself
-  when the VM's app quits or crashes, and OmacVM turns them on if the VM's
-  window stops answering. On a Mac mini the switch was not always handed
-  back (macOS's brightness keys then stopped working in macOS), so by
-  default macOS keeps its shortcuts, as before. To try it:
-  `defaults write org.omacvm.app macShortcuts -bool false` and a VM restart.
-- ⌃⌥⌘ Esc always gets you out of the full-screen VM: after the swipe (or
-  the app switch) OmacVM Gestures checks that the VM is no longer in front
-  and its Space no longer shows. If it still is (on a Mac mini the swipe did
-  nothing and Finder came to the front without a window), the VM's window
-  leaves full screen and its app is hidden. ⌃⌥⌘ Esc in macOS then brings it
-  back in full screen.
-- ⌃⌥⌘ Esc in an OmacVM.app window gives the keyboard back to macOS (the app
-  you were in before, else Finder); pressed again in macOS, the window comes
-  back with the keyboard.
-- Brightness keys with an OmacVM.app VM in front work on macOS 27 too: there
-  they reach no app at all, so OmacVM Bridge reads them from the keyboard
-  (Input Monitoring; macOS still gets every key) and sets the display the VM
-  is on, also from a Bluetooth Magic Keyboard. Quick presses step every
-  time and a held key repeats at macOS's key repeat speed. With no VM in
-  front macOS handles them as always. The volume keys
-  are taken at the keyboard level now (on macOS 27 they did not reach the
-  Bridge before).
-- Scroll momentum only ever takes a trackpad's scrolling (the built-in one,
-  a Magic Trackpad, also one connected later), decided per scroll: wheel
-  mice, smooth-scrolling mice (Logitech MX and co.) and a Magic Mouse scroll
-  one to one through the VM app again, with nothing added after the wheel
-  stops (before, a smooth-scrolling mouse could jump on after it stopped).
-  So it is now on by default: on a Mac with only mice it does nothing.
-- ⌃⌥⌘ Esc on a Mac with only the desktop and the VM's Space (a Mac mini):
-  a swipe that bounces at the edge is tried the other way once, and the way
-  that works is kept, so the swipe works from the first press. "Swipe all
-  monitors" swipes each display (the pointer visits it and comes back).
-- OmacVM Bridge: Wi-Fi shows connected while the Mac is, also before
-  Location Services is allowed for the Bridge (or when it is not): the
-  interface's link decides then, the network's name stays hidden.
-- OmacVM.app's `apply-vm.sh` takes `--reset-host-key` for a reinstalled VM.
+  busy, the key goes to macOS. The Bridge takes them at the HID level: on
+  macOS 27 the volume keys never reach a session tap.
 - OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
   OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
   these copies (nothing is compiled on the Mac), and macOS keeps their
@@ -167,12 +185,22 @@ in more words.
   once more after the first signed install. A source checkout without the
   app, or of another version, builds them as before. Both helpers log which
   permission is missing, and `omacvm check` shows it.
-- OmacVM.app opens the VM's window on the display you are using (under the
-  pointer, else the one with the active menu bar) and gives it the keyboard.
 - After OmacVM.app was restarted, ⌃⌥⌘ Esc and the media keys could stop
   working until the Mac's helpers were restarted: the new VM's own key tap
   sat ahead of theirs. They now take the front place again whenever an
   OmacVM VM comes to the front (Gestures fix by brianmerchant, #39).
+- External display brightness (feature `external-brightness`, on): with the
+  VM in front on an external display, the Mac's brightness keys set that
+  display, in macOS's 16 steps (Option: 64), with Omarchy's popup. A display
+  macOS dims itself (Studio Display, Pro Display XDR, LG UltraFine) goes
+  through macOS's own control, also on a Mac mini where it is the only
+  display; other monitors over DDC/CI. Omarchy's
+  brightness keys, `omarchy brightness display` and its monitor panel in the
+  VM do the same through OmacVM Bridge. OmacVM.app also in a window;
+  Parallels, UTM and VMware Fusion in full screen. The built-in display works
+  as before, and so does a display without DDC/CI (`omacvm check` names it
+  and why). A key the Bridge cannot use goes to macOS, and the Bridge's log
+  says once why.
 - OmacVM Bridge: Wi-Fi no longer flips between connected and disconnected
   in Omarchy's bar on a Mac on Ethernet with Wi-Fi also on (Mac mini).
 - Trackpad gestures off now means the VM's Gestures service is off on every
@@ -180,10 +208,8 @@ in more words.
   the Cmd shortcuts and connected to the Mac's Gestures anyway; Cmd as Super
   there now comes with the gestures feature. `omacvm apply` stops the service
   in VMs that have gestures off.
-- Prebuilt VMs: the image's manifest is checked before use. A bad value in a
-  manifest (for example a disk size with a command in it) could run that
-  command on the Mac; now such a manifest is refused and the VM is built here
-  instead.
+
+### OmacVM.app and its VMs
 
 - OmacVM.app keeps its VMs in `~/OmacVM`, one folder per VM, and installs
   itself in `~/Applications`. VMs in the old place
@@ -193,18 +219,29 @@ in more words.
   the same way as the app. Spotlight still lists the file names in
   `~/OmacVM` (it never reads inside a VM disk); to hide them, add the folder
   under System Settings › Spotlight › Search Privacy.
+- The install dialog starts on the name and folder of the copy you installed
+  before, so a new download replaces it instead of adding a second app, and
+  says when Install replaces a copy. Run Without Installing now counts for
+  that copy only. Install refuses to replace a copy that is running.
+- OmacVM.app opens the VM's window on the display you are using (under the
+  pointer, else the one with the active menu bar) and gives it the keyboard.
+- Fast network, experimental and off by default:
+  `omacvm enable fast-network --vm NAME` puts the VM on macOS's own VM
+  network (vmnet, as Parallels and UTM) through a small system service,
+  `omacvm-netd`, that asks for your password once. On a Mac mini, VM to Mac
+  7.2 instead of 3.0 Gbit/s with less CPU; Mac to VM is lower than the user
+  network (9.5 against 12.2 Gbit/s). Without the service the VM keeps QEMU's
+  user network. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
+  changes, several VMs at once, Omanotch over it.
+- The app carries the licence texts of MoltenVK and the Vulkan loader
+  (Apache-2.0, with cereal and cJSON), and of KosmicKrisp in builds that
+  have it.
 
-- OmacVM.app in full screen: the pointer no longer races near the screen
-  corners and the Dock's edge (since 2.8.0 it got faster there with every
-  move, up to about 20 times). It now moves as macOS moves it everywhere,
-  and reaches Omarchy's own corners. The Mac's cursor still stays off the
-  corners and the Dock's edge. New setting "Keep the Dock and hot corners
-  away in full screen" (on by default); off gives macOS's own full screen.
+### Prebuilt VMs
 
-- OmacVM.app: "Use the notch for the menu bar" is on by default (Omarchy's
-  bar beside the notch in full screen). It shows only on a Mac whose
-  built-in display has a notch, checked again when displays change; if you
-  switched it off before, it stays off.
+- The image's manifest is checked before use. A bad value in a manifest (for
+  example a disk size with a command in it) could run that command on the
+  Mac; now such a manifest is refused and the VM is built here instead.
 
 ## 2.8.0
 

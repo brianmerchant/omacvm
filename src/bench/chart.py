@@ -4,8 +4,11 @@
   chart.py docs/benchmarks/chart.json docs/images/benchmarks.svg "MacBook Pro M4 Max · macOS 15.7 · Chrome 154"
 
 The JSON is report.py's ("medians", "missing"), plus optional "unreleased":
-{route: [test, ...]} for numbers from a build that is not out yet. Those bars
-are striped and tagged. Tests without a Mac value are left out.
+{route: [test, ...]} for numbers from a build that is not out yet, or
+{route: {test: tag}} to name it (say "2.9.0 RC"). Those bars are striped and
+tagged ("not released" without a name). An optional "note" (a string, or a
+list for several lines) replaces the line under the chart. Tests without a Mac
+value are left out.
 """
 import json, sys
 from xml.sax.saxutils import escape
@@ -45,7 +48,12 @@ def main():
     data = json.load(open(sys.argv[1]))
     out, subtitle = sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else ""
     med, missing = data["medians"], data.get("missing", {})
-    unrel = {(r, t) for r, ts in data.get("unreleased", {}).items() for t in ts}
+    unrel = {}  # (route, test) -> tag on the bar
+    for r, ts in data.get("unreleased", {}).items():
+        for t in ts:
+            unrel[(r, t)] = ts[t] if isinstance(ts, dict) else "not released"
+    note = data.get("note", NOTE)
+    notes = [note] if isinstance(note, str) else note
     mac = med.get("mac", {})
     routes = [r for r in ROUTES if r[0] in med]
     tests = [t for t in TESTS if mac.get(t[0]) and any(t[0] in med[r[0]] or t[0] in missing.get(r[0], {}) for r in routes)]
@@ -53,7 +61,7 @@ def main():
     W, left, full = 1000, 230, 620          # full = width of 100 % (the Mac)
     pitch, bar, gap, top = 15, 11, 16, 104
     group = len(routes) * pitch
-    H = top + len(tests) * (group + gap) + 30
+    H = top + len(tests) * (group + gap) + 14 + 16 * len(notes)
 
     def share(name, key):
         v = med.get(name, {}).get(key)
@@ -67,7 +75,8 @@ def main():
             if p is None:
                 parts.append(f"{rl} {missing.get(name, {}).get(key, 'not available')}")
             else:
-                parts.append(f"{rl} {round(p)} percent" + (" (not released yet)" if (name, key) in unrel else ""))
+                tag = unrel.get((name, key))
+                parts.append(f"{rl} {round(p)} percent" + (f" ({'not released yet' if tag == 'not released' else tag})" if tag else ""))
         desc.append(f"{label} ({bench}): " + ", ".join(parts))
 
     s = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-labelledby="t d">',
@@ -114,10 +123,13 @@ def main():
                 s.append(f'<rect x="{left + w + 1:.1f}" y="{by}" width="52" height="{pitch}" fill="{BG}"/>')
             s.append(text(f"{tx:.1f}", by + 11, f"{round(p)} %", 12, INK, MONO, "600" if name == routes[0][0] else None, halo=True))
             if (name, key) in unrel:
-                s.append(f'<rect x="{tx + 42:.1f}" y="{by + 1}" width="86" height="13" rx="6.5" fill="none" stroke="{col}" stroke-opacity="0.7"/>')
-                s.append(text(f"{tx + 85:.1f}", by + 11, "not released", 10, col, anchor="middle"))
+                tag = unrel[(name, key)]
+                tw = textw(tag, 10) + 28
+                s.append(f'<rect x="{tx + 42:.1f}" y="{by + 1}" width="{tw:.0f}" height="13" rx="6.5" fill="none" stroke="{col}" stroke-opacity="0.7"/>')
+                s.append(text(f"{tx + 42 + tw / 2:.1f}", by + 11, tag, 10, col, anchor="middle"))
         y += group + gap
-    s.append(text(W / 2, H - 14, NOTE, 12, MUTED, anchor="middle"))
+    for i, line in enumerate(notes):
+        s.append(text(W / 2, H - 14 - 16 * (len(notes) - 1 - i), line, 12, MUTED, anchor="middle"))
     s.append('</svg>')
     open(out, "w").write("\n".join(s) + "\n")
 

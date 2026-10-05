@@ -159,7 +159,7 @@ A build is done when all of this holds:
 
 | Requirement | Value |
 |---|---|
-| Host | Apple Silicon, macOS 14+ (verified 15.7.4, MacBook Pro M4 Max) |
+| Host | Apple Silicon, macOS 14+ (OmacVM.app: macOS 15+; verified 15.7.4, MacBook Pro M4 Max) |
 | Parallels route | Parallels Desktop 19+ (verified 27.0.2, Pro trial). Per-VM limits from `prlsrvctl info --license` (`cpu_total`, `max_memory`): Standard 4 CPUs / 8 GB, Pro/Business/trial 32 CPUs (18 tested on Apple Silicon) / 128 GB; build.sh never writes more than the licence allows (Parallels would reject the config). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
 | UTM route | UTM 5 (verified 5.0.6, QEMU 10.0.12); required: on UTM 4.7 GL clients map but never paint (black windows) unless rendering is forced to software (ggalancs/omarchy-arm-utm#7). OmacVM never sets `LIBGL_ALWAYS_SOFTWARE`; VirGL (virtio-gpu-gl), Vulkan off. VM creation through UTM's AppleScript dictionary (`/Applications/UTM.app/Contents/Resources/UTM.sdef`), `utmctl` for start/stop/status/ip-address |
 | VMware Fusion route (new) | VMware Fusion 13+ (verified 26.0.1). Needs Hyprland with the vmwgfx fix (`src/fusion/guest/`); see `docs/routes/vmware-fusion.md` (and the build log `docs/experiments/vmware-fusion.md`). `vmcli VM Create`, `vmware-vdiskmanager`, `vmrun start/list` from `VMware Fusion.app/Contents/Library`; the rest is the `.vmx` (`src/vm/fusion.sh`). VMs in `~/Virtual Machines.localized` or `$OMACVM_FUSION_DIR` |
@@ -281,7 +281,7 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   list by `app/runtime/Tests/keys/test-shortcuts.sh` and in a real QEMU by
   `src/tests/vm-shortcuts.sh`). The switch belongs to QEMU's window-server
   connection (macOS restores it when QEMU dies); a watchdog thread turns it
-  on after 2 s without the main thread. Off by default since RC11 (not
+  on after 2 s without the main thread. Off by default since 2.9.1 (not
   always handed back on the Mac mini): `macShortcuts` (org.omacvm.app,
   default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
   turns the switch on. Gestures' tap still takes ⌃⌥⌘ Esc first; the Bridge

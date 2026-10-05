@@ -63,6 +63,7 @@ src/tests/prebuilt-manifest.sh
 src/tests/gestures-off.sh
 src/tests/app-paths.sh
 src/tests/app-notch.sh
+src/tests/bench-docs.sh
 ```
 
 The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`
