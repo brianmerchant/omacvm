@@ -39,8 +39,11 @@ if [[ -n $SET && $SET != "$(graphics_choice "$d")" ]]; then
     die "could not write $d/graphics"
   CHANGED=true
   NOTE="from the VM's next start"
-  # A running VM that gets Vulkan builds its Venus driver now.
-  if [[ $(graphics_wants "$d") == vulkan ]] && ip=$(app_ip "$VM"); then
+fi
+# A running VM that gets Vulkan builds its Venus driver now (also when the
+# setting stays: the control centre's repair).
+if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d/venus-ready ]]; }; then
+  if ip=$(app_ip "$VM"); then
     vm_pin "$VM" app
     if (( ! JSON )); then log "the VM's Vulkan driver (the first time a few minutes)"; fi
     if gssh "$ip" "sed -i '/^OMACVM_GRAPHICS=/d' /etc/omacvm/env && echo OMACVM_GRAPHICS=vulkan >> /etc/omacvm/env &&
@@ -48,7 +51,7 @@ if [[ -n $SET && $SET != "$(graphics_choice "$d")" ]]; then
       : > "$d/venus-ready"
     else
       rm -f "$d/venus-ready"
-      NOTE="from the VM's next start; its Vulkan driver did not build (the VM tries again at each start)"
+      NOTE="${NOTE:+$NOTE; }its Vulkan driver did not build (the VM tries again at each start)"
     fi
   fi
 fi

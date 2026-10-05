@@ -21,6 +21,8 @@ graphics_macos_major() { echo "${OMACVM_TEST_MACOS_MAJOR:-$(sw_vers -productVers
 # The OmacVM.app whose runtime has KosmicKrisp (Metal 4, macOS 26+).
 graphics_kosmickrisp() {
   [[ -n ${OMACVM_TEST_KOSMICKRISP:-} ]] && { [[ $OMACVM_TEST_KOSMICKRISP == 1 ]]; return; }
+  # apply-vm.sh: the app that runs it (and its VM).
+  [[ -n ${OMACVM_APP_RUNTIME:-} ]] && { [[ -e $OMACVM_APP_RUNTIME/lib/libvulkan_kosmickrisp.dylib ]]; return; }
   local a
   a=$(app_bundle 2>/dev/null) || return 1
   [[ -e $a/Contents/Resources/runtime/lib/libvulkan_kosmickrisp.dylib ]]

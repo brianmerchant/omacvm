@@ -33,6 +33,11 @@ if [[ -d $HERE/../../Helpers ]]; then
   OMACVM_HELPERS=$(cd "$HERE/../../Helpers" && pwd)
   export OMACVM_HELPERS
 fi
+# This app's runtime: whether it has KosmicKrisp decides Graphics' Automatic
+# (src/lib/graphics.sh).
+for rt in "$HERE/../runtime/.build/qemu-gpu-runtime" "$HERE/../runtime"; do   # a dev tree, the app
+  [[ -d $rt/lib ]] && { OMACVM_APP_RUNTIME=$(cd "$rt" && pwd); export OMACVM_APP_RUNTIME; break; }
+done
 args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
 for f in ${FEATURES:-}; do args+=(--feature "$f"); done
 # A changed SSH host key: say how to forget it the app's way.
