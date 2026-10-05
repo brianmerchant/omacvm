@@ -12,6 +12,8 @@
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
 #  * HDR's 10-bit virtio-gpu module builder (not built until the user asks)
+#  * Vulkan (Venus) with the app's Vulkan switch on: a Venus driver for the
+#    Mac's 16 KiB pages while Arch Linux ARM's is too old (venus/)
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
@@ -72,6 +74,9 @@ else
 fi
 rm -rf "$T"
 install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-video.js
+# Vulkan (Venus), when the app's Vulkan switch is on: a Venus driver that sizes
+# GPU memory to the Mac's 16 KiB pages (venus/vulkan-virtio.sh says why).
+venus/vulkan-virtio.sh || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then

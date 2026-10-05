@@ -1,0 +1,81 @@
+#!/bin/bash
+# vulkan-virtio.sh (as root, in an OmacVM.app VM): Vulkan through Venus on a
+# stock Omarchy. When the app's Vulkan switch is on, the Mac sizes GPU memory
+# in its 16 KiB pages (virtio-gpu blob alignment). Arch Linux ARM's Mesa 26.2.3
+# Venus driver does not, the guest kernel refuses its first blob and every
+# Vulkan app fails with "vkCreateInstance failed with ERROR_OUT_OF_HOST_MEMORY".
+# Mesa 26.2.4 does. Until Arch Linux ARM ships it, this builds the distro's
+# vulkan-virtio package from Mesa 26.2.4 (PKGBUILD here, Venus only, a few
+# minutes) and installs it with pacman; the distro's 26.2.4 or newer replaces
+# it on the next pacman -Syu. OpenGL stays on the distro's Mesa.
+#   vulkan-virtio.sh            install it if this VM needs it (silent when Vulkan is off)
+#   vulkan-virtio.sh --status   one line: STATE DETAIL, STATE one of
+#                               ok | needed | no-venus | no-pages (nothing to do)
+# Tests: OMACVM_VENUS_PROBE replaces the probe's output ("venus=1 blob_alignment=16384").
+set -euo pipefail
+cd "$(dirname "$0")"
+FIXED=1:26.2.4                       # the first Venus driver that honours blob alignment
+LOG=/var/log/omacvm-vulkan-virtio.log
+
+status() {
+  local p venus align have
+  p=${OMACVM_VENUS_PROBE:-$(python3 ./venus-probe.py 2>/dev/null || echo "venus=0 blob_alignment=0")}
+  venus=$(sed -n 's/.*venus=\([0-9]*\).*/\1/p' <<<"$p"); align=$(sed -n 's/.*blob_alignment=\([0-9]*\).*/\1/p' <<<"$p")
+  have=$(pacman -Q vulkan-virtio 2>/dev/null | awk '{ print $2 }' || true)
+  if [[ ${venus:-0} != 1 ]]; then
+    echo "no-venus Vulkan is off in OmacVM.app for this VM${have:+ (vulkan-virtio $have)}"
+  elif (( ${align:-0} <= 4096 )); then
+    echo "no-pages the GPU needs no page alignment here${have:+ (vulkan-virtio $have)}"
+  elif [[ -n $have ]] && (( $(vercmp "$have" "$FIXED") >= 0 )); then
+    echo "ok vulkan-virtio $have sizes GPU memory to ${align}-byte pages"
+  else
+    echo "needed vulkan-virtio ${have:-not installed} cannot size GPU memory to ${align}-byte pages (needs ${FIXED#*:})"
+  fi
+}
+
+if [[ ${1:-} == --status ]]; then status; exit 0; fi
+[[ -z ${1:-} ]] || { echo "usage: vulkan-virtio.sh [--status]" >&2; exit 2; }
+s=$(status)
+case ${s%% *} in
+  needed) ;;
+  ok) echo "Vulkan (Venus): ${s#* }"; exit 0 ;;
+  *) exit 0 ;;
+esac
+(( EUID == 0 )) || { echo "vulkan-virtio.sh: run as root" >&2; exit 1; }
+
+echo "Vulkan (Venus): building Mesa's vulkan-virtio ${FIXED#*:} (a few minutes, log $LOG)"
+# Build tools this VM lacks are added for the build and removed after.
+deps=(base-devel)
+while IFS= read -r d; do deps+=("$d"); done < <(bash -c 'source ./PKGBUILD; printf "%s\n" "${depends[@]}" "${makedepends[@]}"')
+missing=$(pacman -T "${deps[@]}" || true)
+B=$(mktemp -d /var/tmp/omacvm-vulkan-virtio.XXXXXX)
+cleanup() {
+  rm -rf "$B"
+  if [[ -n $missing ]]; then
+    # shellcheck disable=SC2086 # one package per word
+    pacman -Rns --noconfirm $missing >>"$LOG" 2>&1 || echo "Vulkan (Venus): build tools left installed (pacman -Rns did not take them all)"
+  fi
+}
+trap cleanup EXIT
+fail() { echo "Vulkan (Venus): $1 (OpenGL is unaffected; details in $LOG)" >&2; exit 1; }
+: > "$LOG"
+if [[ -n $missing ]]; then
+  # shellcheck disable=SC2086 # one package per word
+  pacman -S --needed --noconfirm --asdeps $missing >>"$LOG" 2>&1 || fail "pacman could not install the build tools"
+fi
+install -m644 PKGBUILD "$B/"
+chown -R nobody: "$B"
+# makepkg refuses root: build as nobody (it downloads and checks the sha256 itself).
+( cd "$B" && runuser -u nobody -- env HOME="$B" PKGDEST="$B" BUILDDIR="$B/build" SRCDEST="$B" LOGDEST="$B" PACKAGER="OmacVM <omacvm@users.noreply.github.com>" \
+    makepkg --nodeps --noconfirm --noprogressbar ) >>"$LOG" 2>&1 || fail "the build failed"
+pkg=""
+# name-epoch:pkgver-pkgrel-arch
+for f in "$B"/vulkan-virtio-"$FIXED"-*-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=$f; done
+[[ -n $pkg ]] || fail "the build made no package"
+# Keep how the distro's package was installed (a dependency of Omarchy's, or by hand).
+reason=--asexplicit
+pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
+pacman -U --noconfirm "$reason" "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
+s=$(status)
+[[ ${s%% *} == ok ]] || fail "installed, but: ${s#* }"
+echo "Vulkan (Venus): ${s#* } (restart Vulkan apps)"

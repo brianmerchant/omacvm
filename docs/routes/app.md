@@ -95,6 +95,14 @@ VM runs, and goes back by itself when a new version does not start
   how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).
   For development `defaults write org.omacvm.app venus -bool true` gives
   every VM the Venus device without the guest side.
+  With the Venus device on, a VM without OmacVM's Mesa still gets Vulkan:
+  while Arch Linux ARM has Mesa 26.2.3 (its Venus driver does not size GPU
+  memory to the Mac's 16 KiB pages, so every Vulkan app fails with
+  `ERROR_OUT_OF_HOST_MEMORY`), apply builds Mesa 26.2.4's Venus driver as
+  Arch's own `vulkan-virtio` package
+  ([`src/app/guest/venus`](../../src/app/guest/venus)) and installs it with
+  pacman; Arch's 26.2.4 replaces it on an update. `omacvm check` shows a
+  "Vulkan (Venus)" row.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

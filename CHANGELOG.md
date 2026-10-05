@@ -129,6 +129,11 @@ in more words.
   both browsers, ffmpeg OpenCL) passed in the app with no failure, and
   the host's GPU memory went back down when the browsers closed.
   `omacvm disable vulkan` removes it.
+- Vulkan in the VM (the hidden `venus` switch) works on a stock Omarchy:
+  `omacvm apply` builds Mesa 26.2.4's Venus driver as Arch's `vulkan-virtio`
+  package while Arch Linux ARM has 26.2.3, whose driver does not size GPU
+  memory to the Mac's 16 KiB pages (every Vulkan app failed with
+  `ERROR_OUT_OF_HOST_MEMORY`). `omacvm check` has a "Vulkan (Venus)" row.
 
 ## 2.9.1
 

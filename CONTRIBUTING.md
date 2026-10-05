@@ -65,6 +65,8 @@ src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
 src/net/mac/test.sh
 src/gestures/mac/test.sh
 src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
+src/tests/venus-driver.sh
+src/tests/vulkan-feature.sh && src/tests/venus-build-tools.sh
 src/tests/app-paths.sh
 app/runtime/Tests/display/test-pointer-guard.sh
 app/runtime/Tests/display/test-pointer-start.sh
