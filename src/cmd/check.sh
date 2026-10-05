@@ -242,7 +242,10 @@ if [[ $BRIDGE == on ]]; then
     esac
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
-  [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  if [[ $(jq -r '.capture_keys == false' "$OMA_BRIDGE_SUPPORT/config.json" 2>/dev/null) == true ]]; then
+    skip "media keys" "off: macOS keeps them (capture_keys false in config.json)"
+  elif [[ $m == *installed* ]]; then ok "media keys" "event tap installed"
+  else bad "media keys" "${m:-no event tap yet}"; fi
   # The Bridge says which permissions it has (at start and on each change).
   pm=$(last_line "$BRIDGE_LOG" 'omacvm-bridge: permissions: ')
   case $pm in
