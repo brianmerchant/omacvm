@@ -49,6 +49,15 @@ Option 3, macOS only:
   the end of a submit (only when someone waits), at most 1 ms, then tests.
   After a busy wait the wait starts over (spin and short naps first), so an
   idle render thread reports fences as fast as before.
+- The wake-up is a handshake (seq_cst on both sides): the sync thread raises
+  a flag only while it waits on the semaphore, and whoever takes the flag
+  back decides. If the render thread took it, it signals once and the sync
+  thread takes that signal, also after a timeout. So no wake-up is left on
+  the semaphore to end a later wait at once. 2.9.1 left one when a submit
+  ended just after a 1 ms timeout or during the 50 us grace wait (harmless
+  in the VM, one extra test; its build test failed under load). The build
+  test forces each of these races at a fixed point and checks counts, not
+  the clock.
 - `OMACVM_VIRGL_FENCE_BUSY=0` goes back to 2.9.0's behaviour; the sync
   thread logs which way it waits.
 - Not shipped: the present queue's backoff (`qemu-cocoa-gl-present-wait-backoff.patch`
