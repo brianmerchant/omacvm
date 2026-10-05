@@ -46,6 +46,9 @@ jobs:
         working-directory: app/app
         run: swift build
 
+      - name: Install dialog defaults (previous copy, Run Without Installing)
+        run: src/tests/install-defaults.sh
+
       - name: Mac helpers build (Gestures, Bridge)
         run: |
           src/gestures/mac/build.sh
@@ -53,6 +56,11 @@ jobs:
 
       - name: Omanotch offline tests
         run: src/omanotch/mac/test.sh
+
+      - name: External display brightness offline tests (Bridge and VM side)
+        run: |
+          src/bridge/mac/test.sh
+          src/tests/external-brightness.sh
 
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
@@ -66,6 +74,18 @@ jobs:
       - name: Gestures offline test (which VM gets them)
         run: src/gestures/mac/test.sh
 
+      - name: Bridge offline tests (media-key tap, where each media key goes, Wi-Fi state)
+        run: src/bridge/mac/test-models.sh
+
+      - name: Bridge brightness keys read from the keyboard (made-up keyboards)
+        run: src/bridge/mac/test-hid.sh
+
+      - name: OmacVM.app's signed Mac helpers are used only for the same sources
+        run: src/tests/prebuilt-helpers.sh
+
+      - name: Escape combo setting and where a VM window opens
+        run: src/tests/app-escape-window.sh
+
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
 
@@ -74,3 +94,15 @@ jobs:
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
+
+      - name: Full-screen pointer guard (motion maths)
+        run: app/runtime/Tests/display/test-pointer-guard.sh
+
+      - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
+        run: app/runtime/Tests/keys/test-shortcuts.sh
+
+      - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
+        run: src/tests/app-notch.sh
+
+      - name: Benchmark chart and the pages that quote it agree
+        run: src/tests/bench-docs.sh

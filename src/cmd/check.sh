@@ -201,6 +201,14 @@ if [[ $BRIDGE == on ]]; then
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  # The Bridge says which permissions it has (at start and on each change).
+  pm=$(last_line "$L/omacvm-bridge.log" 'omacvm-bridge: permissions: ')
+  case $pm in
+    "") ;;   # a Bridge from before it said so
+    *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
+    *"Input Monitoring MISSING"*) warn "Bridge permissions" "Input Monitoring is off for OmacVM Bridge: the brightness keys do nothing with a VM in front (System Settings > Privacy & Security > Input Monitoring)" ;;
+    *) ok "Bridge permissions" "${pm#permissions: }" ;;
+  esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
   c=~/Library/Application\ Support/omacvm-bridge/config.json
   if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
@@ -208,6 +216,25 @@ if [[ $BRIDGE == on ]]; then
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
   else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
+  # External displays: which ones the brightness keys set while the VM is on
+  # them (DDC/CI, an Apple display's own control), and why not.
+  # Asked only while the feature is on: the Bridge then reads each display over DDC/CI.
+  if [[ $(feat external_brightness on) != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
+  else
+    ex=""; declare -F bget >/dev/null && ex=$(bget /display/external)
+    if ! jq -e .displays <<<"$ex" >/dev/null 2>&1; then bad "external brightness" "the Bridge does not answer /display/external (omacvm update)"
+    elif [[ $(jq -r .enabled <<<"$ex") != true ]]; then skip "external brightness" "off on this Mac (external_brightness in $c)"
+    elif [[ $(jq '.displays | length' <<<"$ex") == 0 ]]; then skip "external brightness" "no external display connected"
+    else
+      while IFS=$'\t' read -r name method reason; do
+        case $method in
+          ddc) ok "brightness: $name" "DDC/CI: the brightness keys set it while the VM is in front on it" ;;
+          apple) ok "brightness: $name" "its own control: the brightness keys set it while the VM is in front on it" ;;
+          *) skip "brightness: $name" "not settable, $reason: the brightness keys stay as before there" ;;
+        esac
+      done < <(jq -r '.displays[] | [.name, .method, (.reason // "")] | @tsv' <<<"$ex")
+    fi
+  fi
 else skip "Bridge" "off (chosen at setup)"; fi
 # The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
 if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
@@ -268,6 +295,17 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
   esac
 fi
+# macOS's own shortcuts while an app VM has the keyboard (this run): to the
+# VM (switched off meanwhile), kept by the user's choice, or a fallback.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  if grep -q 'macOS shortcuts stay with macOS' "$miclog"; then
+    skip "macOS shortcuts" "stay with macOS (the default; experimental, all to the VM: defaults write org.omacvm.app macShortcuts -bool false)"
+  elif grep -q "macOS's switch for them was not found\|macOS shortcuts .*FAILED" "$miclog"; then
+    warn "macOS shortcuts" "some stay with macOS: macOS refused to switch them off (logs/qemu.log)"
+  elif grep -q 'macOS shortcuts off' "$miclog"; then
+    ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥⌘ Esc is macOS's)"
+  fi
+fi
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
@@ -298,14 +336,23 @@ if [[ $GESTURES == on ]]; then
       # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
       g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
       [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
-      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
+      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "on (trackpad only): a trackpad's scrolling goes to this VM in full screen, mice scroll one to one"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
     # The helper listens only once it has its permissions, so a later
     # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
-    p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
-    [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
-      || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
+    # Gestures says which of its two permissions it has (at start and on each
+    # change); one from before that: its older lines.
+    p=$(last_line "$L/omacvm-gestures.log" 'omacvm-gestures: permissions: ')
+    if [[ $p == *MISSING* ]]; then
+      miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
+      bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security" human
+    elif [[ -n $p ]]; then ok "keyboard/trackpad access" "Accessibility + Input Monitoring"
+    else
+      p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
+      [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
+        || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
+    fi
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
 else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
 # The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app
@@ -370,10 +417,11 @@ if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
 fi
 if [[ $TYPE == app ]]; then
-  # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
-  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
-  if [[ $n == 1 ]]; then skip "notch strip (app)" "the app's full screen covers it (no Space of its own)"
-  elif [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
+  # (Omanotch then leaves the strip alone).
+  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 1)
+  if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  elif [[ $n == 1 ]]; then skip "notch strip (app)" "on: Omarchy's bar beside the notch (full screen has no Space of its own)"
   else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0

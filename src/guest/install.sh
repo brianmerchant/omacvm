@@ -6,7 +6,8 @@
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, fast-network, vulkan) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
+# fast-network, vulkan) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -259,6 +260,18 @@ elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
     rm -f "$tmp" "$NL"
   fi
   rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
+fi
+# External display brightness: Omarchy's own DDC/CI path (ddcutil) goes through
+# the Bridge to the external Mac display an output is on. Only our ddcutil is
+# ever removed; Omarchy's cached "no DDC here" (60 s) goes with each change.
+DDC=/usr/local/bin/ddcutil
+if [[ ${F[external-brightness]} == on ]]; then
+  log "external display brightness"
+  cmp -s "$R/bridge/guest/omacvm-ddcutil" "$DDC" || install -m755 "$R/bridge/guest/omacvm-ddcutil" "$DDC"
+  rm -rf "/run/user/$(id -u "$U")/omarchy-brightness-display-ddc"
+elif grep -qs '^# omacvm-ddcutil' "$DDC"; then
+  log "external display brightness: off"
+  rm -f "$DDC" && rm -rf "/run/user/$(id -u "$U")/omarchy-brightness-display-ddc"
 fi
 # The Mac's camera: Parallels passes it itself; elsewhere /dev/video42.
 if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)"; fi

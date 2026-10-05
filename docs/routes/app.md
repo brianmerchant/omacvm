@@ -10,13 +10,19 @@ OmacVM's version.
 
 ## Get it
 
+OmacVM.app needs macOS 15 or newer on an Apple Silicon Mac (the other
+routes run on macOS 14).
+
 - `omacvm build --vm-type app`: when the app is missing, OmacVM offers to
   download it (below) and goes on with the build.
 - Or download `OmacVM-<version>.zip` from the
   [releases](https://github.com/gillesgoetsch/omacvm/releases) (signed with
   a Developer ID), unzip it and open it: it offers to install itself in
   Applications, keeping that signature (under another name it is signed
-  again ad hoc). Downloaded with a
+  again ad hoc). A newer download starts on the name and folder of the copy
+  you installed before, so Install replaces it in place. Run Without
+  Installing counts for that copy only: the next download asks again. Updates
+  (`omacvm update`) never ask. Downloaded with a
   browser, macOS blocks it the first time: click Open Anyway in System
   Settings › Privacy & Security.
 
@@ -88,8 +94,8 @@ OmacVM's version.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
-- Full screen in its own Space, below the notch, like Parallels; Omanotch puts
-  Omarchy's bar into the strip beside the notch, as on the other routes.
+- Full screen, like Parallels; on a MacBook with a notch Omarchy's bar goes
+  beside the notch ("Use the notch for the menu bar", below).
 - Every Mac display in full screen: with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
@@ -107,9 +113,12 @@ OmacVM's version.
   OmacVM Gestures, as on UTM: the app needs no Accessibility of its own.
   With the gestures feature off the VM does not talk to Gestures, so these
   shortcuts stay with macOS.
-- Optional notch-strip mode (a switch in the app): the window covers the
-  strip itself and Omarchy's bar moves there, but that full screen has no
-  Space of its own (macOS 15 keeps full-screen Spaces below the notch).
+- On a MacBook with a notch, "Use the notch for the menu bar" (on by
+  default): full screen covers the strip beside the notch too and Omarchy's
+  bar goes there, but that full screen has no Space of its own (macOS 15
+  keeps full-screen Spaces below the notch). Switched off, full screen is in
+  its own Space below the notch. The switch shows only while the Mac's
+  built-in display has a notch; elsewhere it is off.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
@@ -380,11 +389,18 @@ window per guest screen:
   signals Quickshell's screens do not have); Omanotch's patched bar and
   wallpaper remap themselves when their output moves.
 - In full screen the Dock and the menu bar stay hidden on every display, and
-  the Mac's cursor stays 3 points off the screen corners while the VM has
-  the pointer (`omacvm-cocoa-fullscreen-edges.patch`; `immersive=off` turns
-  both off). That is meant to keep hot corners from firing, but it is not
-  confirmed: with simulated mouse motion the bottom-left corner still fired,
-  and a check with a real mouse is open.
+  while the VM has the pointer the Mac's cursor never gets onto a screen
+  corner or the Dock's edge: within 200 points of them it is detached and
+  stays put, and the guest's pointer moves on by the mouse's own motion
+  (VMs that show the Mac's cursor instead of the guest's, `show-cursor=on`:
+  the cursor follows the guest's pointer, still kept off the corners and
+  the Dock's edge) (`omacvm-cocoa-fullscreen-edges.patch`, maths in
+  `omacvm-cocoa-pointer-guard.patch`, unit test
+  `app/runtime/Tests/display/test-pointer-guard.sh`). The pointer moves the
+  same there as anywhere else. The app's setting "Keep the Dock and hot
+  corners away in full screen" (QEMU's `immersive`) turns both off. Whether
+  hot corners stay quiet with a real mouse is still to be confirmed (with
+  simulated motion the bottom-left corner fired in an earlier test).
 
 Testing without a monitor: `app/scripts/dev/virtual-display.m` makes a
 virtual Mac display (killing it is unplugging it). With

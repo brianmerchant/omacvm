@@ -146,6 +146,18 @@ fi
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
 if (( MAC )) && needs_bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
+# External display brightness: a switch in the Bridge's config, which it takes
+# within seconds. One Bridge serves every VM: the last apply sets it.
+if (( MAC )) && needs_bridge; then
+  c="$(dirname "$T")/config.json"
+  want=$(on external-brightness && echo true || echo false)
+  if [[ -f $c ]]; then
+    [[ $(plutil -extract external_brightness raw -o - "$c" 2>/dev/null) == "$want" ]] ||
+      plutil -replace external_brightness -bool "$want" "$c"
+  elif [[ $want == false ]]; then
+    mkdir -p "$(dirname "$c")" && echo '{"external_brightness": false}' > "$c"   # the Bridge adds the rest
+  fi
+fi
 # The gestures daemon says it too (OmacVM.app's VMs show it on 127.0.0.1 even
 # without the Bridge).
 if (( TOKEN )) && on gestures; then bridge_token_ensure; fi

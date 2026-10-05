@@ -41,7 +41,7 @@ KK_STAMP=
 if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-0} == 1 ]]; then
   KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
 fi
-INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h
+INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h Tests/display/* Tests/keys/* Tests/net/*
   echo "firmware=${OMACVM_FIRMWARE:-omacvm}"
   echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}${KK_STAMP:+ $KK_STAMP}"; } | shasum -a 256 | cut -d' ' -f1)
 # A runtime built with OMACVM_RUNTIME_TEST_HOOKS=1 (test hooks) is never shipped.
@@ -121,6 +121,21 @@ xcrun clang -O2 -Wall -Wextra -Werror -mmacosx-version-min=14.0 \
   -DNETD_VERSION="\"$(shasum -a 256 "$NETD_SRC" | cut -c1-16)\"" -o "$NETD" "$NETD_SRC" \
   -framework vmnet -framework Security -framework CoreFoundation -lbsm
 
+# OmacVM's Mac helpers (Bridge, Gestures), built here from the src/ inside the
+# app and signed with it: omacvm apply/update and the app's own apply install
+# these copies (src/lib/helpers.sh), so the user's Mac compiles nothing and,
+# with the Developer ID, macOS keeps their Accessibility and Input Monitoring
+# grants across updates. Built in a copy: nothing lands in the app's src/.
+log "Mac helpers (Bridge, Gestures)"
+HB=$(mktemp -d)
+cp -R "$C/Resources/omacvm/src" "$HB/src"
+"$HB/src/bridge/mac/build.sh" >/dev/null 2>&1 || { echo "the Bridge did not build" >&2; rm -rf "$HB"; exit 1; }
+"$HB/src/gestures/mac/build.sh" >/dev/null 2>&1 || { echo "Gestures did not build" >&2; rm -rf "$HB"; exit 1; }
+mkdir -p "$C/Helpers"
+ditto "$HB/src/bridge/mac/build/OmacVMBridge.app" "$C/Helpers/OmacVMBridge.app"
+ditto "$HB/src/gestures/mac/build/OmacVMGestures.app" "$C/Helpers/OmacVMGestures.app"
+rm -rf "$HB"
+
 # The app carries the version of the OmacVM it is part of.
 VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
@@ -159,6 +174,8 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   codesign "${SIGN[@]}" --identifier org.omacvm.app.qemu \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign "${SIGN[@]}" --identifier org.omacvm.netd "$NETD"
+  codesign "${SIGN[@]}" --identifier org.omacvm.bridge --entitlements "$ROOT/app/OmacVMBridge.entitlements" "$C/Helpers/OmacVMBridge.app"
+  codesign "${SIGN[@]}" --identifier org.omacvm.gestures "$C/Helpers/OmacVMGestures.app"
   codesign "${SIGN[@]}" --identifier org.omacvm.app \
     --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
@@ -171,6 +188,7 @@ else
   codesign --force --sign - --identifier org.omacvm.app.qemu -r='designated => identifier "org.omacvm.app.qemu"' \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign --force --sign - --identifier org.omacvm.netd "$NETD"
+  # The helpers keep the signature their build gave them (src/lib/sign.sh: the same rule).
   codesign --force --sign - --identifier org.omacvm.app -r='designated => identifier "org.omacvm.app"' "$APP"
 fi
 codesign --verify --deep --strict "$APP"

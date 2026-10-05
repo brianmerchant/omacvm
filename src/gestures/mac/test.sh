@@ -9,9 +9,25 @@
 #    within seconds, on keepalive, and the Mac drops its old connection.
 # 3. The default gateway: the card with a link, lowest metric, the same in
 #    Gestures, the Bridge client and the guest check.
+# 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
+#    own tap sits ahead of ours) comes to the front, and when macOS invalidated
+#    it; a failed re-creation keeps the old tap and is logged once (test-tap.c).
+# 5. Ctrl+Option+Cmd+Esc: in the VM the display under the pointer swipes out
+#    (or every display with "all"), in macOS back in; a swipe that does not
+#    land falls back to the app switch, then to hiding the VM's app; the
+#    keyboard follows the pointer's display (test-escape.c, a made-up world
+#    of displays and Spaces: nothing swiped or activated).
+# 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
+#    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
+#    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
+#    and trackpad frames through the real callbacks).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-T=$(mktemp -d); trap 'kill ${PIDS:-} 2>/dev/null || true; rm -rf "$T"' EXIT
+T=$(mktemp -d)
+# A process and what it started (the guest runs python3 in a subshell).
+killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done; }
+trap 'killtree ${PIDS:-}; rm -rf "$T"' EXIT
+trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
   -framework CoreFoundation -framework AppKit
@@ -158,10 +174,30 @@ t0=$(date +%s)
 echo 10.0.2.2 > "$T/gw"   # the app moved the VM: its default gateway changed
 wait "$MAC" || true
 took=$(( $(date +%s) - t0 ))
-kill "$GUEST" 2>/dev/null; wait "$GUEST" 2>/dev/null || true
+killtree "$GUEST"; wait "$GUEST" 2>/dev/null || true
 expect "$T/guest3" "guest: connect 10.0.2.2"
 expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
 expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one was dropped
 reject "$T/out2" "live App VM 192.168.77.2"
+# 4. The event tap after a VM app (re)starts.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit
+"$T/test-tap" > "$T/tap" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/tap"
+n=$(grep -c "cannot create the event tap again" "$T/tap" || true)
+if [[ $n == 1 ]]; then echo "ok   a failed re-creation is logged once (two tries)"; else echo "FAIL logged $n times" >&2; fail=1; fi
+# 5. The escape combo's way out and back.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-escape" "$HERE/test-escape.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit
+"$T/test-escape" > "$T/escape" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/escape"
+# 6. Which scrolling scroll momentum takes.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit
+"$T/test-scroll" > "$T/scroll" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/scroll"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }

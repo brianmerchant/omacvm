@@ -523,6 +523,9 @@ verify_file_sha "IPv4 UDP reply translation patch" "$udp_patch" "$udp_patch_sha2
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$udp_patch"
 # OmacVM: the guest reaches the Mac's 127.0.0.1 only on the ports it may use.
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$native_dir/patches/omacvm-libslirp-host-ports.patch"
+# Non-blocking UDP/ICMP sockets: a send the Mac cannot take at once is dropped
+# instead of freezing the VM (Tests/net/test-slirp-udp-stall.sh).
+patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$native_dir/patches/libslirp-nonblocking-datagram-sockets.patch"
 tar -xzf "$qemu_archive" -C "$source_parent"
 tar -xzf "$virgl_archive" -C "$source_parent"
 tar -xzf "$virgl_tap_archive" -C "$source_parent"
@@ -606,6 +609,8 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+# OmacVM: a main loop stall > 2 s is logged with its place.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
 # full screen beside the notch; the window keeps its size; full screen at the
 # window's real size; modifiers only from input events; the recording device
@@ -627,7 +632,10 @@ patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-display-event-race.patch"
 # OmacVM: big buffers in fragmented guest memory attach (virtio-gpu).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-mapping-entries.patch"
-# OmacVM: no Dock, menu bar or hot corner from inside full screen (all displays).
+# OmacVM: no Dock, menu bar or hot corner from inside full screen (all displays);
+# the pointer guard's maths in its own header, unit tested here.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-guard.patch"
+"$native_dir/Tests/display/test-pointer-guard.sh"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-edges.patch"
 # Test hook: real full screen on some displays only (OMACVM_TEST_ONLY_DISPLAYS).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-test-only-displays.patch"
@@ -674,6 +682,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subreg
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-vsync.patch"
 # Colour-space tagged frames; 10-bit scanouts in half float; HDR (PQ) with EDR.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-color.patch"
+# macOS's own shortcuts go to the VM while it has the keyboard (and its logic's test).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shortcuts-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-system-shortcuts.patch"
+"$native_dir/Tests/keys/test-shortcuts.sh"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -905,6 +917,8 @@ verify_file_sha "Framebuffer without attachments patch" "$virgl_framebuffer_no_a
 patch -d "$virgl_source" -p1 -f -i "$virgl_framebuffer_no_attachments_patch"
 verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_caps_sampler_limit_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
+# OmacVM GPU: the sync thread does not test fences while the render thread runs commands.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
 # OmacVM Venus: MoltenVK cannot compile zero-initialized workgroup memory.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
 virgl_build="$virgl_source/build"
@@ -1080,6 +1094,12 @@ log "Relocating, capability-gating, signing, and publishing the runtime"
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
   ${kosmickrisp_args[@]+"${kosmickrisp_args[@]}"} \
   --archive-dir "$archive_dir"
+
+# A stalled UDP send on the Mac must not freeze the VM, and the stall
+# watchdog must name the place (an idle QEMU without guest, a few seconds).
+"$native_dir/Tests/net/test-slirp-udp-stall.sh" \
+  "$native_dir/.build/qemu-gpu-runtime/bin/qemu-system-aarch64" || \
+  die "the slirp UDP stall test failed"
 
 # The firmware must show the logo and name the disk's boot entry as QEMU's
 # does, with the QEMU it ships with (Tests/firmware/test-firmware.py).

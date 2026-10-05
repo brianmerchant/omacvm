@@ -5,7 +5,7 @@
 #   omacvm enable FEATURE... [--vm NAME] [--yes]
 #   omacvm disable FEATURE... [--vm NAME] [--yes]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery idle-lock autologin thp-kernel. A feature that needs another one brings it
+# mac-clock camera battery external-brightness idle-lock autologin thp-kernel. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM. A stopped VM is started.
@@ -96,6 +96,8 @@ label() {   # INDEX -> one line for the list
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
   feature_has_tag "$i" slow && tag=" $dim(slow to build)$off"
   available "$i" || tag=" $dim($REASON)$off"
+  # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
+  [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"
   printf '%s%s' "${FTITLE[$i]}" "$tag"
 }
 

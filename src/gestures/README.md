@@ -24,14 +24,28 @@ trackpad. Then:
   keyboard). With the gestures feature off, the VM's daemon is off too (no link to the Mac's
   Gestures at all), and so is this.
 
-**⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification); it
-re-arms when you come back to the full-screen VM, or press the combo again.
+**⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification) and
+swipes the display under the pointer to the Space beside the VM's (a Dock
+swipe, as three or four fingers make it; `EscapeSwipe` = `all` in the
+`org.omacvm.gestures` settings: every display that shows the VM). The
+keyboard follows the pointer's display. Pressed there again in macOS, it
+swipes back. A swipe that cannot be made or does not land falls back to the
+app switch (the app from before, its Space). Every way out is checked: the
+VM still in front, or its full screen still showing, takes its window out of
+full screen and hides the VM's app, so the keyboard never stays in the VM;
+the combo in macOS then brings it back in full screen. In an OmacVM.app
+window the combo gives the keyboard to the app from before (else Finder) and
+brings the window back. It re-arms when you come back to the full-screen VM,
+or press the combo again.
 If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
 ## macOS-native scroll momentum
 
-Turned on per VM (`omacvm enable scroll-momentum`; `OMACVM_FEATURE_scroll_momentum=on` in the VM's
-`/etc/omacvm/env`). While two fingers touch the trackpad, every frame
+On per VM by default (`omacvm disable scroll-momentum` turns it off; `OMACVM_FEATURE_scroll_momentum` in the VM's
+`/etc/omacvm/env`). It takes only a trackpad's scrolling (built-in or Magic Trackpad, every one connected, also
+later; `mac/scroll-model.h`, per scroll event: phases from a scroll that a trackpad's fingers make, and its
+momentum). Wheel mice, smooth-scrolling mice and a Magic Mouse pass to the VM app one to one
+(`mac/test-scroll.c`). While two fingers touch the trackpad, every frame
 goes to the guest, together with macOS's own scroll events for them (`A`, its
 acceleration); macOS's scroll events no longer reach the VM app. After the
 lift, macOS's momentum follows (`W`) and the guest continues the same virtual
@@ -41,7 +55,7 @@ tuning log in `docs/experiments/trackpad-scrolling.md`.
 
 | Part | Where |
 |---|---|
-| Mac helper | `mac/omacvm-gestures.c` (+ `mac/scroll_ns.m`): the built-in trackpad, else an external Magic Trackpad (MultitouchSupport also lists Magic Mice: told apart by a surface at least 100 mm wide); without either keys-only, checking every 10 s → `~/Applications/OmacVMGestures.app` (`org.omacvm.gestures`), LaunchAgent `org.omacvm.gestures`, log `~/Library/Logs/omacvm-gestures.log`. Listens on `10.211.55.2:47830`, `192.168.64.1:47830`, port 47830 of the `.1` of VMware Fusion's NAT network, `127.0.0.1:47830` and `192.168.77.1:47830` (OmacVM.app, its fast network: those clients count as the app's). Needs Accessibility + Input Monitoring. Options: `--keys-only` (no trackpad for any VM), `-v`, `--record` (`~/Library/Logs/omacvm-input.tsv`, Glide analysis) |
+| Mac helper | `mac/omacvm-gestures.c` (+ `mac/scroll_ns.m`, `mac/scroll-model.h`): the built-in trackpad and every Magic Trackpad (MultitouchSupport also lists Magic Mice: told apart by a surface at least 100 mm wide), the one touching now sends its frames; looked for again every 10 s (one connected later or again); without any keys-only → `~/Applications/OmacVMGestures.app` (`org.omacvm.gestures`), LaunchAgent `org.omacvm.gestures`, log `~/Library/Logs/omacvm-gestures.log`. Listens on `10.211.55.2:47830`, `192.168.64.1:47830`, port 47830 of the `.1` of VMware Fusion's NAT network, `127.0.0.1:47830` and `192.168.77.1:47830` (OmacVM.app, its fast network: those clients count as the app's). Needs Accessibility + Input Monitoring. Options: `--keys-only` (no trackpad for any VM), `-v`, `--record` (`~/Library/Logs/omacvm-input.tsv`, Glide analysis) |
 | Guest daemon | `guest/omacvm-gestures` → `/usr/local/bin/omacvm-gestures` (python-evdev, root), `guest/omacvm-gestures.service` (systemd, reads `/etc/omacvm/env`). Creates "Apple Inc. Magic Trackpad (OmacVM)" (Apple vendor id) and, on UTM, "OmacVM keyboard (Mac shortcuts)"; connects to the Mac. Glide settings: `OMACVM_GLIDE_*` (defaults = the tuned values) |
 | Its Hyprland settings ("Glide" in the code) | `guest/glide.sh <user> on\|off` → `~/.config/hypr/omacvm_glide.lua` (required from `hyprland.lua`), `--disable-smooth-scrolling` for Chromium/Chrome |
 | Hyprland | `~/.config/hypr/input.lua`: `hl.gesture({ fingers = 3/4, direction = "horizontal", action = "workspace" })` |

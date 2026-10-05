@@ -108,6 +108,11 @@ final class Location: NSObject, CLLocationManagerDelegate {
 final class WiFi: NSObject, CWEventDelegate {
   let client = CWWiFiClient.shared()
   var onEvent: ((String) -> Void)?
+  private let lock = NSLock()
+  private var linkEvent: Date?        // CoreWLAN's last link, SSID, BSSID or power event
+  private var steady = WiFiSteady()   // state() only (the hub's queue)
+  private var heldLogged = Date.distantPast
+  private let store = SCDynamicStoreCreate(nil, "omacvm-bridge" as CFString, nil, nil)
 
   func start() { client.delegate = self; subscribe() }
 
@@ -120,10 +125,10 @@ final class WiFi: NSObject, CWEventDelegate {
     }
   }
 
-  func powerStateDidChangeForWiFiInterface(withName name: String) { onEvent?("power") }
-  func ssidDidChangeForWiFiInterface(withName name: String) { onEvent?("ssid") }
-  func bssidDidChangeForWiFiInterface(withName name: String) { onEvent?("bssid") }
-  func linkDidChangeForWiFiInterface(withName name: String) { onEvent?("link") }
+  func powerStateDidChangeForWiFiInterface(withName name: String) { linkChanged(); onEvent?("power") }
+  func ssidDidChangeForWiFiInterface(withName name: String) { linkChanged(); onEvent?("ssid") }
+  func bssidDidChangeForWiFiInterface(withName name: String) { linkChanged(); onEvent?("bssid") }
+  func linkDidChangeForWiFiInterface(withName name: String) { linkChanged(); onEvent?("link") }
   func modeDidChangeForWiFiInterface(withName name: String) { onEvent?("mode") }
   func countryCodeDidChangeForWiFiInterface(withName name: String) { onEvent?("country") }
   func scanCacheUpdatedForWiFiInterface(withName name: String) { onEvent?("scan-cache") }
@@ -139,27 +144,63 @@ final class WiFi: NSObject, CWEventDelegate {
   // network adapters: an "en" interface that is not the Wi-Fi one), like a
   // Mac mini on a cable. VPN tunnels (utun) do not count.
   func wiredPrimary(wifiName: String?) -> Bool {
-    guard let store = SCDynamicStoreCreate(nil, "omacvm-bridge" as CFString, nil, nil),
-          let g = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
+    guard let store, let g = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
           let primary = g["PrimaryInterface"] as? String else { return false }
     return primary.hasPrefix("en") && primary != wifiName
   }
 
+  private func linkChanged() { lock.lock(); linkEvent = Date(); lock.unlock() }
+
+  /// Whether the system has a link on this interface (associated, for
+  /// Wi-Fi). configd keeps it from the kernel's link events, so a radio scan
+  /// does not change it. nil: not known.
+  func linkActive(_ name: String?) -> Bool? {
+    guard let name, let store,
+          let d = SCDynamicStoreCopyValue(store, "State:/Network/Interface/\(name)/Link" as CFString) as? [String: Any]
+    else { return nil }
+    return d["Active"] as? Bool
+  }
+
+  /// The Wi-Fi interface: CoreWLAN's default one; with several (a second
+  /// Wi-Fi adapter), the one with a link. CoreWLAN lists Wi-Fi only (a Mac
+  /// mini's Ethernet en0 is never one of them; its Wi-Fi is en1).
+  private func pick() -> CWInterface? {
+    let all = client.interfaces() ?? []
+    guard all.count > 1 else { return client.interface() ?? all.first }
+    return all.first { linkActive($0.interfaceName) == true } ?? client.interface()
+  }
+
+  /// The state to report: one read, kept steady (WiFiSteady). The hub's queue.
   func state(locationOK: Bool) -> [String: Any] {
+    let (raw, problem, name) = read(locationOK: locationOK)
+    lock.lock(); let event = linkEvent; lock.unlock()
+    let (s, held) = steady.take(raw, link: linkActive(name), event: event, now: Date())
+    if held, let problem, Date().timeIntervalSince(heldLogged) >= 600 {
+      heldLogged = Date()
+      log("wifi: a read said not connected (\(problem)) without a Wi-Fi event\(linkActive(name) == true ? " while \(name!) has a link" : ""): kept the last state (this line at most every 10 min)")
+    }
+    return s
+  }
+
+  /// One read of CoreWLAN, what made it "not connected", and the interface.
+  private func read(locationOK: Bool) -> ([String: Any], String?, String?) {
     let detail = ["ssid", "bssid", "rssi", "noise", "snr", "quality", "channel", "security", "secure",
                   "tx_rate_mbps", "phy_mode", "can_share"]
     var s: [String: Any] = ["location_authorized": locationOK]
     for k in detail { s[k] = NSNull() }
-    guard let i = client.interface() else {
+    guard let i = pick() else {
       s["interface"] = NSNull(); s["power"] = false; s["connected"] = false; s["country_code"] = NSNull()
       s["wired"] = wiredPrimary(wifiName: nil)
-      return s
+      return (s, "no Wi-Fi interface", nil)
     }
     s["wired"] = wiredPrimary(wifiName: i.interfaceName)
     let power = i.powerOn()
     let channel = power ? i.wlanChannel() : nil
     let rssi = i.rssiValue()
-    let connected = channel != nil && rssi < 0
+    let link = linkActive(i.interfaceName)
+    let connected = WiFiRead.connected(power: power, channel: channel != nil, rssi: rssi, locationOK: locationOK, link: link)
+    let problem = connected ? nil : !power ? "power off" : !locationOK && link == false ? "no link (without Location Services)"
+      : channel == nil ? "no channel, rssi \(rssi)" : "rssi \(rssi)"
     s["interface"] = nn(i.interfaceName)
     s["power"] = power
     s["connected"] = connected
@@ -167,14 +208,17 @@ final class WiFi: NSObject, CWEventDelegate {
     if connected {
       let noise = i.noiseMeasurement(), sec = i.security()
       s["ssid"] = nn(i.ssid()); s["bssid"] = nn(i.bssid())
-      s["rssi"] = rssi; s["noise"] = noise; s["snr"] = rssi - noise; s["quality"] = quality(rssi)
-      s["channel"] = channelInfo(channel)
+      // Without Location Services a read may have no signal: shown as unknown.
+      if rssi < 0 {
+        s["rssi"] = rssi; s["noise"] = noise; s["snr"] = rssi - noise; s["quality"] = quality(rssi)
+        s["channel"] = channelInfo(channel)
+      }
       s["security"] = securityName(sec); s["secure"] = sec != .none
       s["can_share"] = shareableSecurity.contains(securityName(sec))   // QR sharing via /wifi/password
       s["tx_rate_mbps"] = i.transmitRate()
       s["phy_mode"] = nn(phyNames[i.activePHYMode().rawValue])
     }
-    return s
+    return (s, problem, i.interfaceName)
   }
 
   // Saved networks: readable without admin rights or Location Services.

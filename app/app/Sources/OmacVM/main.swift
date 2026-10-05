@@ -134,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.showWindow()
             }
         }
+        let wasActive = NSApp.isActive
         do {
             try r.start()
             runner = r
@@ -141,9 +142,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window?.orderOut(nil)
             // QEMU's window carries the app's name and icon in the Dock.
             NSApp.setActivationPolicy(.accessory)
+            if let pid = r.process?.processIdentifier { handFocus(to: pid, wasActive: wasActive) }
         } catch {
             state.message = "Could not start the VM: \(error.localizedDescription)"
             showWindow()
+        }
+    }
+
+    /// The keyboard goes with the VM's window, wherever it opened: once QEMU
+    /// shows it, this launcher (in front when Start was clicked) hands its
+    /// activation over (macOS lets only the app in front do that).
+    private func handFocus(to pid: pid_t, wasActive: Bool) {
+        Task { @MainActor in
+            for _ in 0..<75 {   // QEMU's window comes within a few seconds
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return }
+                guard Runner.hasWindow(pid) else { continue }
+                if app.isActive { return }
+                if wasActive { NSApp.yieldActivation(to: app) }
+                app.activate(from: .current, options: [])
+                return
+            }
         }
     }
 
