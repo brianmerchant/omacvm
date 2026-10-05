@@ -183,7 +183,11 @@ def gpu_panel(*args):
     placeholder = data.get("placeholder", False)
     banner = ("PLACEHOLDER DATA: made-up numbers to show the layout. Not measured." if placeholder else
               "PRELIMINARY: not from the agreed quiet Mac, not the final round." if data.get("preliminary") else None)
-    routes = [r for r in ROUTES if r[0] in med or r[0] in missing]
+    # A second app build (summarize.py's "app-rc2", e.g. a 3.0.0 RC with Vulkan) sits under the app, only in
+    # the rows it has a number or a reason for. "labels" names the builds ("OmacVM 2.9.1").
+    labels = data.get("labels", {})
+    routes = [(n, labels.get(n, rl), c) for n, rl, c in ROUTES[:1] + [("app-rc2", "OmacVM.app (second build)", "#eb6f92")] + ROUTES[1:]
+              if n in med or n in missing]
     tests = []
     for key, label, bench, headline, base in GPU_TESTS:
         if key == "aquarium" and not aquarium:
@@ -193,12 +197,16 @@ def gpu_panel(*args):
         if not base and not any(med.get(n, {}).get(key) for n, _, _ in routes):
             continue
         m = data.get("methods", {}).get(key, {}).get("method")
+        if key == "glmark2" and data.get("glmark2_scene_seconds") not in (None, 10):   # shorter scenes than glmark2's own
+            bench += f" · {data['glmark2_scene_seconds']:g} s scenes"
         tests.append((key, label, bench + (f" · {METHOD[m]}" if m in METHOD else ""), headline, base))
+
+    def row_routes(key):
+        return [r for r in routes if r[0] != "app-rc2" or key in med.get("app-rc2", {}) or key in missing.get("app-rc2", {})]
 
     W, left, full = 1000, 250, 560
     pitch, bar, gap, top = 22, 14, 26, 112
-    group = len(routes) * pitch
-    H = top + len(tests) * (group + gap) + (58 if banner else 34)
+    H = top + sum(len(row_routes(t[0])) * pitch + gap for t in tests) + (58 if banner else 34)
 
     def share(name, key, base):
         v = med.get(name, {}).get(key)
@@ -206,7 +214,7 @@ def gpu_panel(*args):
             return None
         if base:
             return 100 * v / mac[base]
-        best = max(med.get(n, {}).get(key) or 0 for n, _, _ in routes)
+        best = max(med.get(n, {}).get(key) or 0 for n, _, _ in row_routes(key))
         return 100 * v / best
 
     def why(name, key):
@@ -215,7 +223,7 @@ def gpu_panel(*args):
     desc = []
     for key, label, bench, _, base in tests:
         parts = []
-        for n, rl, _ in routes:
+        for n, rl, _ in row_routes(key):
             v = med.get(n, {}).get(key)
             parts.append(f"{rl} {why(n, key)}" if v is None else f"{rl} {round(share(n, key, base))} percent" if base
                          else f"{rl} score {v:g}")
@@ -242,9 +250,11 @@ def gpu_panel(*args):
         s.append(text(f"{x + 18:.0f}", 80, rl, 13, weight="600" if rl == routes[0][1] else None))
         x += w
 
-    bottom = top + len(tests) * (group + gap) - gap
+    bottom = top + sum(len(row_routes(t[0])) * pitch + gap for t in tests) - gap
     y = top
     for key, label, bench, headline, base in tests:
+        rr = row_routes(key)
+        group = len(rr) * pitch
         if headline:   # the headline row sits on a faint band
             s.append(f'<rect x="24" y="{y - 8}" width="{W - 48}" height="{group + 16}" rx="8" fill="{INK}" fill-opacity="0.04"/>')
         if base:   # macOS = 100 %, only where macOS has the test
@@ -254,7 +264,7 @@ def gpu_panel(*args):
         s.append(text(40, ly, label, 16 if headline else 15, weight="600"))
         for j, ln in enumerate(lines):
             s.append(text(40, ly + 18 + 15 * j, ln, 12, MUTED))
-        for i, (name, rl, col) in enumerate(routes):
+        for i, (name, rl, col) in enumerate(rr):
             by = y + i * pitch + (pitch - bar) / 2
             p = share(name, key, base)
             if p is None:   # an empty bar to 100 %, hatched, with the reason
@@ -269,7 +279,11 @@ def gpu_panel(*args):
             first = name == routes[0][0]
             num = f"{round(p)} %" if base else f"{med[name][key]:g}"
             s.append(text(f"{tx:.1f}", by + 11.5, num, 13, INK, MONO, "600" if first else None, halo=True))
-            s.append(text(f"{tx + 10 + textw(num, 13):.1f}", by + 11.5, rl, 11, SOFT, halo=True))
+            lx = tx + 10 + textw(num, 13)
+            if lx + textw(rl, 11) > W - 12 and w > textw(rl, 11) + 16:   # no room right of a long bar: inside its end
+                s.append(text(f"{left + w - 8:.1f}", by + 11, rl, 11, BG, weight="600", anchor="end"))
+            else:
+                s.append(text(f"{lx:.1f}", by + 11.5, rl, 11, SOFT, halo=True))
         y += group + gap
     if banner:
         s.append(f'<rect x="24" y="{H - 44}" width="{W - 48}" height="28" rx="6" fill="#eb6f92" fill-opacity="0.15" stroke="#eb6f92"/>')

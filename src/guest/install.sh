@@ -179,6 +179,20 @@ if system; then
 else
   log "repair: $(tr , ' ' <<<"${ONLY:1:-1}")"
 fi
+# Network cards without a link: their routes are skipped at once. OmacVM.app
+# moves a running VM between its two cards (fast network <-> QEMU's user
+# network) by their links; the kernel kept sending on the card whose link
+# went down until NetworkManager dropped its route, about 6 s without
+# internet at each move (seen on the Mac mini). App VMs only.
+if [[ $TYPE == app ]]; then
+  printf '%s\n' "# OmacVM.app: skip the routes of a network card without a link (src/guest/install.sh)" \
+    "net.ipv4.conf.all.ignore_routes_with_linkdown = 1" "net.ipv6.conf.all.ignore_routes_with_linkdown = 1" \
+    > /etc/sysctl.d/90-omacvm-net.conf
+  sysctl -q -p /etc/sysctl.d/90-omacvm-net.conf >/dev/null 2>&1 || true
+elif [[ -e /etc/sysctl.d/90-omacvm-net.conf ]]; then
+  rm -f /etc/sysctl.d/90-omacvm-net.conf
+  sysctl -q -w net.ipv4.conf.all.ignore_routes_with_linkdown=0 net.ipv6.conf.all.ignore_routes_with_linkdown=0 >/dev/null 2>&1 || true
+fi
 # A VM switched off during pacman keeps pacman's lock, and every pacman below
 # would fail. Wait for one that runs (omarchy update); a lock without pacman goes.
 for ((i = 0; i < 120; i++)); do

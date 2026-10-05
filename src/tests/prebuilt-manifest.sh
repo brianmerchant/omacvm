@@ -206,6 +206,18 @@ expect "free space: too little: refused" 1 "$rc"
 expect "free space: too little: says so" yes "$([[ $out == "not enough free space"* ]] && echo yes || echo "$out")"
 expect "free space: enough" 0 "$( (PB_SIZE=1000 PB_UNPACKED_KB=1000; prebuilt_space_ok "$T") >/dev/null 2>&1; echo $?)"
 
+# make-image.sh's manifest carries OMACVM_REVOKED_KEYS like the app's feed (docs/release-keys.md).
+S=$(cat "$T/stranger-key.pub")
+head -c 10 /dev/zero > "$T/part-aa"
+mw() { python3 "$R/src/prebuilt/manifest.py" write "$T/w.json" --route parallels --omacvm "$VERSION" --omarchy 4 --bundle Omarchy.pvm \
+  --unpacked 1 --disk-gb 64 --teams '["722686Y34B"]' --next-spare-key "" "$@" "$T/part-aa" >/dev/null 2>&1; }
+mw --revoked-keys "$S $S"
+expect "manifest.py write: revoked_keys, once per key" "[\"$S\"]" "$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("revoked_keys")))' "$T/w.json")"
+mw --revoked-keys ""
+expect "manifest.py write: no revoked_keys when empty" None "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("revoked_keys"))' "$T/w.json")"
+expect "manifest.py write: not a key refused" 1 "$(mw --revoked-keys bm90; echo $?)"
+expect "make-image.sh passes OMACVM_REVOKED_KEYS" 1 "$(grep -c -- '--revoked-keys "${OMACVM_REVOKED_KEYS:-}"' "$R/src/prebuilt/make-image.sh")"
+
 # No manifest value inside (( )) or $(( )) in the scripts that use them, except
 # behind 10# (then a value with letters is an error, never an expression).
 expect "no PB_ value in bash arithmetic" "" "$(grep -nE '\(\([^)]*\bPB_[A-Z_]+' "$R"/src/prebuilt/*.sh "$R"/src/cmd/build.sh "$R"/app/scripts/*.sh 2>/dev/null |

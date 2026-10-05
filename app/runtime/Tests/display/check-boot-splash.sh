@@ -27,3 +27,19 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$tmp" \
   "$here/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore -framework OpenGL \
   -o "$tmp/test-boot-splash-fade"
 "$tmp/test-boot-splash-fade"
+# Through the launcher QEMU's window has the display agent's port open, and
+# the firmware then opens it too (EDK2's VirtioSerialDxe answers the host's
+# open): an open port is no desktop. With the channel only the agent's hello
+# counts; the hello sets it, a reset clears it.
+p="$runtime/patches/omacvm-cocoa-boot-splash.patch"
+awk '/^\+static bool omacvm_splash_agent_up\(void\)$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" \
+  > "$tmp/agent-up.inc"
+grep -q 'getenv("OMACVM_DISPLAY_SOCKET")' "$tmp/agent-up.inc" &&
+  grep -q 'return qatomic_read(&omacvm_display_hello);' "$tmp/agent-up.inc" ||
+  { echo "FAIL: the display agent counts by its open port, not its hello" >&2; exit 1; }
+awk '/^\+static void omacvm_splash_reset\(void \*opaque\)$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" |
+  grep -q 'qatomic_set(&omacvm_display_hello, false);' ||
+  { echo "FAIL: a guest reset does not forget the agent's hello" >&2; exit 1; }
+grep -A3 '^ *if (d\[@"hello"\]) {$' "$p" | grep -q '^+ *qatomic_set(&omacvm_display_hello, true);' ||
+  { echo "FAIL: the agent's hello does not reach the boot logo" >&2; exit 1; }
+echo "check-boot-splash: the display agent counts by its hello when the window talks to it"

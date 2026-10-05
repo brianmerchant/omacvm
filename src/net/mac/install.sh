@@ -11,15 +11,25 @@
 #                                        down (installed, not loaded) | missing
 #                                        (also: only for other Mac users) |
 #                                        stopped (vmnet failed too often: it no
-#                                        longer tries until a restart or install)
+#                                        longer tries until a restart or install);
+#                                        then "vpn-nat: IF..." while it does the
+#                                        NAT for networks macOS's sharing does not
+#                                        cover (a VPN connected later)
 #   src/net/mac/install.sh --remove      not for this Mac user any more; off this
 #                                        Mac when no other user has it (sudo)
 #   src/net/mac/install.sh --trust [--app APP]
 #                                        what an install would trust (no root):
-#                                        "team TEAM" or "exact build", and why
+#                                        "team TEAM" or "exact build", and why;
+#                                        then where the daemon would come from:
+#                                        "daemon: app", "daemon: source" or
+#                                        "daemon: refused"
 # The daemon comes built and signed inside OmacVM.app (Contents/Library/
-# LaunchServices, Developer ID for published apps): no Xcode needed. Apps from
-# before that: built here from this source (needs Xcode's Command Line Tools).
+# LaunchServices, Developer ID for published apps): no Xcode needed. It is
+# used only when OmacVM's release key vouches for the app's team (below) or
+# this script is the app's own copy. Else (another app, nobody vouches for
+# it), and for apps without one: built here from this source (needs Xcode's
+# Command Line Tools); without them the install is refused: an app nobody
+# vouches for never gets its own file run as root.
 # Accepted callers: processes of the Mac users who installed it (each user who
 # runs this is added) that are QEMU signed with the Developer ID team of the
 # app's own QEMU (the app the person installs it for; a later app of another
@@ -41,6 +51,16 @@ PLIST=/Library/LaunchDaemons/$LABEL.plist
 SOCK=/var/run/$LABEL.sock
 LOG=/var/log/$LABEL.log
 STATE=/var/run/$LABEL.state   # the daemon's vmnet back-off (omacvm-netd.c)
+NAT=/var/run/$LABEL.nat       # its VPN NAT: "boot pf-reference interface..." (omacvm-netd.c)
+# After launchctl bootout (as root): the daemon takes its VPN NAT out of pf when
+# launchd stops it; if it could not (killed), its own anchor is emptied and its
+# pf reference given back here. Nothing else in pf is touched.
+NAT_CLEAN='if [ -f '"$NAT"' ]; then
+    /sbin/pfctl -a com.apple/org.omacvm.netd -f /dev/null >/dev/null 2>&1 || true
+    read -r _ t _ < '"$NAT"' || true
+    case $t in ""|0|*[!0-9]*) ;; *) /sbin/pfctl -X "$t" >/dev/null 2>&1 || true ;; esac
+    rm -f '"$NAT"'
+  fi'
 # Developer ID Application of TEAM, issued by Apple, with the identifier ID
 # (the same text as before teams came from the app: installed daemons stay "ok").
 devid() {   # TEAM ID
@@ -54,7 +74,7 @@ while (( $# )); do
     --status) MODE=status; shift ;;
     --remove) MODE=remove; shift ;;
     --trust) MODE=trust; shift ;;
-    -h|--help) sed -n '2,22s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "net/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -127,9 +147,10 @@ status() {
     # Installed for the team of the app's QEMU (vouched for then), or for exactly this QEMU.
     have=$(installed_req) && [[ -n $have ]] || { echo old; return 0; }
     [[ $have == "$(team_req "$APP" 2>/dev/null)" || $have == "$(hash_req "$APP" 2>/dev/null)" ]] || { echo old; return 0; }
-    # The app's own daemon (its code); apps without one: this source's.
-    if h=$(bundled "$APP"); then [[ -n $(cdhash "$h") && $(cdhash "$h") == "$(cdhash "$BIN")" ]] || { echo old; return 0; }
-    elif [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
+    # The app's own daemon (its code), or one built from this source (an app
+    # nobody vouches for, or one without a daemon).
+    if ! { h=$(bundled "$APP") && [[ -n $(cdhash "$h") && $(cdhash "$h") == "$(cdhash "$BIN")" ]]; } &&
+       [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
   elif [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
   launchctl print "system/$LABEL" >/dev/null 2>&1 && [[ -S $SOCK ]] || { echo down; return 0; }
   if stopped; then echo stopped; return 0; fi
@@ -220,6 +241,16 @@ EOF
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 ME=$(id -u)
 
+# Its VPN NAT, this boot's only: "vpn-nat: IF..." (the networks it translates
+# the fast network's addresses on itself, as macOS's sharing does not), or nothing.
+nat_status() {
+  local boot b t ifs
+  boot=$(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ sec = \([0-9]*\),.*/\1/p')
+  [[ -r $NAT ]] && read -r b t ifs < "$NAT" || return 0
+  [[ $b == "$boot" && -n $ifs && $ifs =~ ^[a-z0-9\ ]+$ ]] && echo "vpn-nat: $ifs"
+  return 0
+}
+
 # What the QEMU (REQ) and the daemon (DREQ) must satisfy: for a Developer ID
 # app whose team OmacVM's release key vouches for, that team (and each one's
 # identifier); else exactly the files checked here, by their cdhash (an app
@@ -241,12 +272,24 @@ decide() {
   QTEAM=""
 }
 
+# Where the daemon comes from (after decide): "app" (the one inside APP) when
+# the release key vouches for APP's team or this is APP's own copy (the app
+# vouches for itself); else "source" (built here from this source) when
+# Xcode's Command Line Tools are there; else "refused".
+have_clang() { xcode-select -p >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; }
+daemon_from() {
+  if bundled "$APP" >/dev/null && { [[ -n $QTEAM ]] || own_copy "$APP"; }; then echo app
+  elif have_clang; then echo source
+  else echo refused; fi
+}
+
 case $MODE in
-  status) status; exit 0 ;;
+  status) status; nat_status; exit 0 ;;
   trust)
     [[ -n $APP ]] || APP=$(app_bundle) || { echo "no OmacVM.app installed (in /Applications or ~/Applications)" >&2; exit 1; }
     decide
     if [[ -n $QTEAM ]]; then echo "team $QTEAM"; else echo "exact build"; fi
+    echo "daemon: $(daemon_from)"
     exit 0 ;;
   remove)
     [[ -e $BIN || -e $PLIST ]] || exit 0
@@ -259,12 +302,15 @@ case $MODE in
       make_plist "$T/$LABEL.plist" "$req" $others
       as_root 'set -e
         launchctl bootout system/'"$LABEL"' 2>/dev/null || true
+        '"$NAT_CLEAN"'
         install -o root -g wheel -m 644 "$1" '"$PLIST"'
         launchctl bootstrap system '"$PLIST" _ "$T/$LABEL.plist"
       echo "==> fast network: off for this Mac user (other users of this Mac still have it)"
       exit 0
     fi
-    as_root 'launchctl bootout system/'"$LABEL"' 2>/dev/null || true; rm -f '"$PLIST $BIN $SOCK $LOG $STATE"
+    as_root 'launchctl bootout system/'"$LABEL"' 2>/dev/null || true
+      '"$NAT_CLEAN"'
+      rm -f '"$PLIST $BIN $SOCK $LOG $STATE"
     echo "==> fast network removed"
     exit 0 ;;
 esac
@@ -280,7 +326,13 @@ case $(status) in
     exit 0 ;;
 esac
 decide
-if h=$(bundled "$APP"); then
+FROM=$(daemon_from)
+if [[ $FROM == refused ]] && bundled "$APP" >/dev/null; then
+  echo "the fast network service inside $(basename "$APP") is not run as root: OmacVM's release key does not vouch for this app (no signed update feed lists its team) and this is not the app's own copy of install.sh. Use the app's Fast Network button, or install Xcode's Command Line Tools (xcode-select --install) to build the service from this source" >&2
+  exit 3
+fi
+if [[ $FROM == app ]]; then
+  h=$(bundled "$APP")
   # The app's daemon, checked on a copy first (a clear message), and again
   # as root on the installed file before launchd may run it.
   cp "$h" "$T/omacvm-netd"
@@ -289,7 +341,7 @@ if h=$(bundled "$APP"); then
     echo "$h is not signed with the Developer ID of team $QTEAM, as the app's QEMU is" >&2; exit 1
   fi
 else
-  { xcode-select -p >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; } || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }
+  [[ $FROM == source ]] || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }
   xcrun clang -O2 -Wall -mmacosx-version-min=14.0 -DNETD_VERSION="\"$VERSION\"" -o "$T/omacvm-netd" "$HERE/omacvm-netd.c" \
     -framework vmnet -framework Security -framework CoreFoundation -lbsm
 fi
@@ -307,6 +359,7 @@ make_plist "$T/$LABEL.plist" "$REQ" "$ME" $(installed_users | grep -vx "$ME" || 
 as_root 'set -e
   install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools
   launchctl bootout system/'"$LABEL"' 2>/dev/null || true
+  '"$NAT_CLEAN"'
   install -o root -g wheel -m 755 "$1" '"$BIN"'
   if ! /usr/bin/codesign --verify --strict ${3:+-R="$3"} '"$BIN"' 2>/dev/null; then
     rm -f '"$BIN"'; echo "the installed omacvm-netd failed its signature check: removed" >&2; exit 1

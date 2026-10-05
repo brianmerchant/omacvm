@@ -5,6 +5,17 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+In short: OmacVM.app updates itself, the control centre in Omarchy, a
+prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
+26 and newer), Chromium video on the Mac's media engine, VMs on any drive,
+a boot splash, less power when idle. From 2.9.x: `omacvm update` once; after
+that the app updates itself. Details below.
+
+Pending (each line is decided at release: the lane landed, or it moves to
+3.0.1; this list goes before the release):
+- (pending #91) Any Omarchy scale on 5K and larger: graphics memory without
+  a fixed limit.
+
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy
@@ -15,6 +26,8 @@ in more words.
   started first. OmacVM.app's *Escape combo* setting is now *This monitor*
   or *All monitors*. Parallels, UTM and Fusion: `omacvm update` brings the
   new Gestures (until then the old combo keeps working).
+- `base-install.sh` keeps pacstrap's whole output in its log, so a failed
+  package install shows its real cause.
 - OmacVM.app: the pointer moves in Omarchy right after the VM starts, and
   after a reboot in the VM, without a click into the window first, in a
   window and in full screen, on any display. Coming back to the VM's window
@@ -30,7 +43,9 @@ in more words.
   Prebuilt images are only used with a signed manifest. A signed feed can
   revoke a spare key that leaked. The fast network's service trusts a
   Developer ID team only when the release's signed feed lists it (or the
-  app installs it for itself); otherwise it trusts only that exact build.
+  app installs it for itself); otherwise it trusts only that exact build,
+  and builds the service from source instead of running the app's own copy
+  as root.
   Maintainers: [docs/release-keys.md](docs/release-keys.md).
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
@@ -60,10 +75,10 @@ in more words.
 - OmacVM.app can make its VM from a prebuilt image, like the other apps:
   "Download a prebuilt VM" in the app's setup, or
   `omacvm build --vm-type app --prebuilt`. The parts are checked against
-  the release's SHA-256 sums; the first boot (without a window) sets up your
+  the image's signed manifest; the first boot (without a window) sets up your
   user, password, keyboard and timezone from a seed that is deleted after.
-  The images come with a release after 2.9.0; until then the app builds its
-  VM as before. See [docs/prebuilt.md](docs/prebuilt.md).
+  The first image comes with 3.0.0 (release `prebuilt-3.0.0`). See
+  [docs/prebuilt.md](docs/prebuilt.md).
 - OmacVM.app: the setup shows the VMs folder and its free space. Storage in
   the app's window changes it (an external drive too) and moves the VMs: a
   rename on the same drive, else copied, read back, compared and only then
@@ -84,10 +99,6 @@ in more words.
   VMs in `~/OmacVM` (or in the folder picked in the app). VMs still in the
   old hidden folder or another folder are hidden from it, not deleted; 3.0
   finds them again.
-- Fast network (OmacVM.app, experimental): a button in the app turns it on
-  and off (Fast network › Turn On…, one password dialog), and Omanotch
-  works over it. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
-  changes.
 - Omarchy's Chromium decodes H.264 and VP9 on the Mac's media engine in
   OmacVM.app VMs, YouTube included, with no flags to set: feature
   `chromium-video`, on by default for app VMs (`omacvm disable
@@ -106,15 +117,15 @@ in more words.
   `omacvm report` on the Mac) collects the check, versions and logs without
   names, addresses, keys or Wi-Fi names, shows you the text, and opens a
   GitHub issue with it. Requests go to the Mac through OmacVM Bridge, signed
-  with a key each VM gets from `omacvm apply`. Updates through it are not
-  live yet (no release key); `omacvm update` on the Mac stays the way to
-  update. Feature `control-centre`, on by default; an older VM is asked once
-  at its next apply.
+  with a key each VM gets from `omacvm apply`. It shows when a release has
+  updates for your features (from the release's signed manifest) and
+  installs them when you ask (as `omacvm update` does). Feature `control-centre`, on by
+  default; an older VM is asked once at its next apply.
 - OmacVM.app can update itself (weekly check, waits until the VM is shut
   down, goes back to the old version if the new one does not start; "Go
-  Back" in the app menu). Not live yet: the update feed needs a release
-  key, and until a release has one the app checks nothing and says so under
-  Check for Updates.
+  Back" in the app menu). The feed is signed with OmacVM's release key;
+  3.0.0 is the first release with one. From 2.9.x, update once with
+  `omacvm update` (or the zip); 2.9.x apps do not check by themselves.
 - Prebuilt VMs for Parallels, UTM and VMware Fusion: only the VM bundle comes
   out of the image, and its settings and disks are checked before use (no
   paths outside the bundle, no shared folders, no extra QEMU arguments,
@@ -200,6 +211,44 @@ in more words.
   ffmpeg OpenCL) passed in the app with no failure, and the host's GPU
   memory went back down when the browsers closed. `omacvm disable vulkan`
   removes it.
+- Fast network (OmacVM.app, experimental): a button in the app turns it on
+  and off (Fast network › Turn On…, one password dialog), and Omanotch's
+  link works over it (the strip itself not checked on a notch Mac yet).
+  Two VMs at once work (each from an app copy with its own bundle id: the
+  app runs one VM at a time).
+- Fast network: moving a running VM between the fast network and QEMU's
+  user network no longer leaves it without internet for seconds. Back to
+  the fast network had a gap of 7-8 s, now none (the user network stays
+  until the fast one has worked for 12 s); to the user network 6.6 s
+  instead of 14.5 s (app VMs skip a card's routes the moment its link goes
+  down). Measured on a Mac mini with two VMs.
+- Fast network field tests on the Mac mini: a real sleep and wake (SSH and
+  Omanotch back within 2-5 s, no reconnect), Wi-Fi/Ethernet changes (no
+  gap), two VMs at once.
+- Fast network: a VPN connected while the VM runs works for the VM. macOS
+  translates the VM's addresses only on the networks that were up when its
+  sharing service started, so a VPN's server got the VM's own addresses
+  and dropped them (a full tunnel: no internet in the VM). The fast
+  network's service now does that translation itself for such networks,
+  only while a VM is on the fast network and only in its own pf rules
+  (nothing else in the Mac's firewall changes), and takes it away when the
+  VPN goes. `omacvm check` shows it (docs/routes/app.md).
+- OmacVM.app: the sound holds while the VM and the Mac are busy. QEMU's
+  main loop, which moves the sound and runs the VM's GPU, now runs at
+  user-interactive QoS instead of competing with the VM's CPUs, and the
+  sound card no longer takes the time it missed (a new shader stops that
+  thread for 50-80 ms) from the VM all at once. In 10-minute tests on a
+  MacBook Pro with the VM's GPU busy and 8 busy threads on the Mac, breaks
+  in a test tone went from 12 to 2; with every core busy as well, from a
+  median of 365 to 50. The sound's delay is the same. `omacvm check` shows
+  it ("sound timing"); `defaults write org.omacvm.app audioClassic -bool
+  true` goes back.
+- OmacVM.app: a Mac audio device that does not answer no longer hangs the
+  VM. Up to 2.9.1 QEMU waited for it without a limit at the start (no
+  window, the VM never ran) and whenever the VM started a sound. Now it opens
+  the device on a thread of its own; after 3 s the VM runs without sound,
+  `omacvm check` says so ("sound") with the fix, and the sound comes back
+  once the device answers again.
 
 ## 2.9.1
 

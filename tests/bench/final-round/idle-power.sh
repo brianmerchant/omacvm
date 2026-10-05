@@ -1,7 +1,7 @@
 #!/bin/bash
 # Idle power of the whole Mac, for the final round.
 #   idle-power.sh TARGET [--seconds 600] [--settle 60] [--ssh USER@HOST[:PORT]] [--desktop TEXT] OUT.jsonl
-# TARGET: mac, app, utm, fusion or parallels (the label; the VM must already
+# TARGET: mac, app, app-rc2, utm, fusion or parallels (the label; the VM must already
 # run alone in full screen with its desktop idle, see README.md). --ssh: the
 # VM, checked once before the settle (no Chrome left, load low). The VM
 # process's CPU time is read at the start and the end of the window (no
@@ -32,9 +32,9 @@ done
 OUT=${1:-}
 [ -n "$TARGET" ] && [ -n "$OUT" ] || { sed -n '2,4p' "$0" >&2; exit 2; }
 case $TARGET in
-  mac) KEEP_VM=NONE ;; app) KEEP_VM='OmacVM[^/]*\.app/' ;; utm) KEEP_VM='UTM\.app/|com\.apple\.Virtualization' ;;
+  mac) KEEP_VM=NONE ;; app|app-rc2) KEEP_VM='OmacVM[^/]*\.app/' ;; utm) KEEP_VM='UTM\.app/|com\.apple\.Virtualization' ;;
   fusion) KEEP_VM='VMware Fusion\.app/' ;; parallels) KEEP_VM='Parallels Desktop\.app/|/prl_' ;;
-  *) die "target is mac, app, utm, fusion or parallels" ;;
+  *) die "target is mac, app, app-rc2, utm, fusion or parallels" ;;
 esac
 export KEEP_VM
 [ "$(battery ExternalConnected)" = Yes ] || die "the charger is not connected: SystemPowerIn reads 0 on battery"

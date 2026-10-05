@@ -725,7 +725,11 @@ step "Arch Linux ARM onto the VM's disk ($IP)"
   read -r l v <<<"$KB"; printf 'OMA_XKB_LAYOUT=%q\nOMA_XKB_VARIANT=%q\n' "$l" "${v:-}"
 } | gssh "$IP" "umask 077; cat > /root/omacvm.env"
 gssh "$IP" "cat > /root/omacvm.pub" < "$KEY.pub"
-gssh "$IP" "bash -s" < "$R/src/vm/base-install.sh" 2>&1 | ui_follow "Arch Linux ARM onto the disk"
+if ! gssh "$IP" "bash -s" < "$R/src/vm/base-install.sh" 2>&1 | ui_follow "Arch Linux ARM onto the disk"; then
+  # pacstrap's full output is only in the live system: keep it in the build log.
+  { echo "---- /root/pacstrap.log ----"; gssh "$IP" "cat /root/pacstrap.log" < /dev/null; } >> "$BUILD_LOG" 2>&1 || true
+  die "the Arch Linux ARM install failed"
+fi
 gssh "$IP" "systemctl poweroff" 2>/dev/null || true
 
 step "Booting from the new disk"

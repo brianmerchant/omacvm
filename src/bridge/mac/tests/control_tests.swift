@@ -342,6 +342,20 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     }
     expect(rotating.remember(naming, signature: sign(naming, spare)) && manifestSigned(body, sig: byNext, keys: rotating),
            "12 junk documents first: a real one is still kept and trusted")
+    // More junk than the old 256-file cap on both sides of the real names, and a pipe named like one.
+    try? FileManager.default.removeItem(at: store)
+    try! FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+    let junkDoc = with(#""next_spare_key": "\#(b64(Curve25519.Signing.PrivateKey()))""#), junkSig = sign(body, other)
+    for i in 0..<300 {
+      for n in [String(format: "%016x", i), String(format: "ffffffff%08x", i)] {
+        try! junkDoc.write(to: store.appendingPathComponent("\(n).json"))
+        try! junkSig.write(to: store.appendingPathComponent("\(n).json.sig"))
+      }
+    }
+    expect(mkfifo(store.appendingPathComponent("00000000000b0000.json").path, 0o600) == 0
+           && mkfifo(store.appendingPathComponent("00000000000b0000.json.sig").path, 0o600) == 0, "a pipe named like a document")
+    expect(rotating.remember(naming, signature: sign(naming, spare)) && manifestSigned(body, sig: byNext, keys: rotating),
+           "600 junk documents and a pipe around it: a real one is still kept and trusted")
     let schema2 = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 2"#).utf8)
     if case .failure(let e) = parseManifest(schema2) { expect(e.code == "bad-manifest", "schema 2") } else { expect(false, "schema 2") }
     // One key signs both feeds: the app's feed, or no kind, is no manifest.

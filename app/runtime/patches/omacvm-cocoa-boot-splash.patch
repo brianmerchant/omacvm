@@ -8,7 +8,10 @@ the glow goes by 3.56 s. Then the logo holds until Omarchy's desktop (or its
 login or lock screen) is there, over the firmware's progress bar, GRUB's
 text and Linux's console, and fades into it. The desktop is there when
 Omarchy's display agent (omacvm-displays, a user service that starts with
-the desktop) opens its port org.omacvm.display, or when the guest's picture
+the desktop) says hello on its port org.omacvm.display (QEMU's window talks
+to it when the launcher sets OMACVM_DISPLAY_SOCKET; without that channel the
+port's opening counts: with it, the firmware opens the port too, EDK2's
+VirtioSerialDxe answers the host's open 0.2 s into the boot), or when the guest's picture
 is lit almost everywhere (a wallpaper, not text on black; 32 x 18 pixels
 looked at 4 times a second, read back from the scanout's texture). If the
 desktop comes before the animation ends, the animation still plays to its
@@ -83,7 +86,8 @@ logo again to the desktop), the display agent's port opened by hand (gives
 way at once), the time limit at 2 s (the animation still ends first), the
 still logo; the layer's green and navy are the GL logo's and the firmware's
 values on the screen (168,205,118 and 26,27,38), the logo's box the GL
-logo's to the pixel.
+logo's to the pixel. Through the launcher (RC2 pre-stage verify) the
+logo gave way 0.2 s in, on the firmware's port open: fixed by the hello.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
@@ -98,7 +102,7 @@ logo's to the pixel.
  
  static bool cocoa_gl_is_compatible_dcl(DisplayGLCtx *dgc,
                                         DisplayChangeListener *dcl);
-@@ -238,6 +242,8 @@ - (id)init
+@@ -238,6 +242,8 @@ static DisplayGLCtx dgc = {
      self = [super init];
      if (self) {
          [self setAsynchronous:NO];
@@ -107,7 +111,7 @@ logo's to the pixel.
      }
      return self;
  }
-@@ -1266,6 +1272,9 @@ - (void) updateUIInfoLocked
+@@ -1266,6 +1272,9 @@ static bool omacvm_notch_mode(void)
      info.yoff = 0;
      NSSize backingFrameSize = [self convertSizeToBacking:frameSize];
      CGFloat backingScale = [[self window] backingScaleFactor];
@@ -117,7 +121,7 @@ logo's to the pixel.
      /* Keep the corresponding Hyprland logical dimensions integral. */
      uint32_t cleanScaleDivisor = backingScale > 1.75 ? 2 :
                                   backingScale > 1.25 ? 3 : 1;
-@@ -3353,6 +3362,733 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
+@@ -3353,6 +3362,747 @@ static void cocoa_gl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
      CGLDestroyContext(ctx);
  }
  
@@ -129,7 +133,9 @@ logo's to the pixel.
 + * After a reboot the logo comes back, still, the same way. The desktop is
 + * there when
 + * - Omarchy's display agent (omacvm-displays, a user service that starts
-+ *   with the desktop) opens its port, org.omacvm.display, or
++ *   with the desktop) says hello on its port, org.omacvm.display (QEMU's
++ *   window talks to it when the launcher gives OMACVM_DISPLAY_SOCKET; else
++ *   the port's opening counts), or
 + * - the guest's picture is lit almost everywhere (omacvm_splash_desktop:
 + *   a wallpaper, not text on black), looked at 4 times a second.
 + * The logo gives way earlier, and says why in qemu.log, when the VM stops on
@@ -162,6 +168,8 @@ logo's to the pixel.
 +static GLuint omacvm_splash_tex;        /* the logo; gl_view_ctx's group */
 +static bool omacvm_guest_drew;          /* a picture of the guest's since the last reset */
 +static bool omacvm_desktop_up;          /* its desktop since the last reset */
++/* The display agent said hello since the last reset (main thread sets, BQL clears; atomic). */
++static bool omacvm_display_hello;
 +static bool omacvm_splash_hint_up;
 +static QEMUTimer *omacvm_splash_timer;
 +static NSTextField *omacvm_splash_hint; /* main thread */
@@ -460,8 +468,17 @@ logo's to the pixel.
 +
 +static bool omacvm_splash_agent_up(void)
 +{
++    const char *chan = getenv("OMACVM_DISPLAY_SOCKET");
 +    bool up = false;
 +
++    /*
++     * With the window's channel open on the Mac side, the port's opening
++     * proves nothing: the firmware (EDK2's VirtioSerialDxe) opens every port
++     * the host has open, 0.2 s into the boot. Then only the agent's hello counts.
++     */
++    if (chan && *chan) {
++        return qatomic_read(&omacvm_display_hello);
++    }
 +    object_child_foreach_recursive(object_get_root(), omacvm_splash_agent_port, &up);
 +    return up;
 +}
@@ -524,6 +541,7 @@ logo's to the pixel.
 +static void omacvm_splash_reset(void *opaque)
 +{
 +    omacvm_guest_drew = false;
++    qatomic_set(&omacvm_display_hello, false);
 +    omacvm_desktop_up = false;
 +    if (omacvm_overlay_ok) {
 +        omacvm_hold_start();
@@ -851,7 +869,7 @@ logo's to the pixel.
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -3361,6 +4097,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
+@@ -3361,6 +4111,7 @@ static void cocoa_gl_update(DisplayChangeListener *dcl,
          gl_dirty = true;
      });
      cocoa_refresh_activity();
@@ -859,7 +877,7 @@ logo's to the pixel.
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -3374,6 +4111,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -3374,6 +4125,7 @@ static void cocoa_gl_switch(DisplayChangeListener *dcl,
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -867,7 +885,7 @@ logo's to the pixel.
  }
  
  static void cocoa_gl_render(void)
-@@ -3451,6 +4189,8 @@ static void cocoa_gl_render(void)
+@@ -3451,6 +4203,8 @@ static void cocoa_gl_render(void)
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -876,7 +894,7 @@ logo's to the pixel.
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3689,6 +4429,11 @@ static bool cocoa_gl_present_init(void)
+@@ -3689,6 +4443,11 @@ static bool cocoa_gl_present_init(void)
      return true;
  }
  
@@ -888,7 +906,7 @@ logo's to the pixel.
  static void cocoa_gl_present_free(void)
  {
      for (int i = 0; i < present_nsurf; i++) {
-@@ -3823,6 +4568,7 @@ static bool cocoa_gl_present(void)
+@@ -3823,6 +4582,7 @@ static bool cocoa_gl_present(void)
      bool flip;
      uint32_t w, h;
      GLint filter = qatomic_read(&zoom_interpolation) ? GL_LINEAR : GL_NEAREST;
@@ -896,7 +914,7 @@ logo's to the pixel.
  
      if (gl_scanout_borrow) {
          DisplayGLTexture texture = gl_scanout_borrow(gl_scanout_id);
-@@ -3834,6 +4580,13 @@ static bool cocoa_gl_present(void)
+@@ -3834,6 +4594,13 @@ static bool cocoa_gl_present(void)
          h = texture.height;
          /* The surface's first row is the top of the window. */
          flip = !texture.y_0_top;
@@ -910,7 +928,7 @@ logo's to the pixel.
      } else if (surface && surface->texture) {
          src = surface->texture;
          w = surface_width(surface);
-@@ -3852,14 +4605,16 @@ static bool cocoa_gl_present(void)
+@@ -3852,14 +4619,16 @@ static bool cocoa_gl_present(void)
  
      /* A 10-bit scanout keeps its depth: half-float surfaces. */
      GLint ifmt = 0;
@@ -931,7 +949,7 @@ logo's to the pixel.
          info_report("cocoa: scanout format 0x%x, %s surfaces%s", ifmt,
                      deep ? "half-float" : "8-bit",
                      deep && cocoa_gl_present_hdr_wanted() ? ", HDR (PQ)" : "");
-@@ -3911,13 +4666,18 @@ static bool cocoa_gl_present(void)
+@@ -3911,13 +4680,18 @@ static bool cocoa_gl_present(void)
      glClear(GL_COLOR_BUFFER_BIT);
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
      glActiveTexture(GL_TEXTURE0);
@@ -957,7 +975,7 @@ logo's to the pixel.
      glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
      glBindTexture(GL_TEXTURE_2D, 0);
      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-@@ -4531,6 +5291,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
+@@ -4531,6 +5305,7 @@ static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)
      gl_scanout_borrow = NULL;
      gl_dirty = true;
      cocoa_refresh_activity();
@@ -965,7 +983,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout disable");
  }
-@@ -4543,8 +5304,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
+@@ -4543,8 +5318,13 @@ static void cocoa_gl_scanout_texture(DisplayChangeListener *dcl,
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
@@ -979,7 +997,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -4555,6 +5321,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -4555,6 +5335,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
                                     uint32_t w, uint32_t h)
  {
      gl_dirty = true;
@@ -987,7 +1005,7 @@ logo's to the pixel.
  
      /*
       * Show the guest's frame now, not on the next 30 ms refresh tick:
-@@ -5299,6 +6066,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
+@@ -5299,6 +6080,8 @@ static void omacvm_head_render(OmacVMHead *hd, NSSize size)
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -996,7 +1014,16 @@ logo's to the pixel.
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -6332,6 +7101,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -5968,6 +6751,8 @@ static void omacvm_chan_line(NSData *data)
+         NSDictionary *d = obj;
+         bool update = false;
+         if (d[@"hello"]) {
++            /* Omarchy's desktop is up: the boot logo may give way. */
++            qatomic_set(&omacvm_display_hello, true);
+             if (!omacvm_ptr.drawing) {
+                 info_report("cocoa: the guest draws its own pointer now");
+             }
+@@ -6332,6 +7117,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          }
          info_report("cocoa: GL frames shown %s",
                      present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");

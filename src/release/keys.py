@@ -35,6 +35,7 @@ import json
 import os
 import plistlib
 import re
+import stat
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,7 +43,7 @@ SRC = os.path.dirname(HERE)
 KINDS = ("app-feed", "control-manifest", "prebuilt-manifest")
 MAX_DOC = 256 * 1024
 MAX_KEPT = 8        # documents used from the folder
-MAX_SCAN = 256      # files looked at there
+MAX_HELD = 16       # documents held while reading it
 MAX_REVOKED = 8
 TEAM = re.compile(r"[A-Z0-9]{10}")
 
@@ -236,31 +237,86 @@ def _resolve(keys: list, docs: list):
     return trusted, revoked, used
 
 
-def _kept() -> list:
-    """The documents in the folder that could matter (at most MAX_SCAN files
-    looked at; junk is skipped and counts toward nothing)."""
-    d = store()
+def _read_small(path: str, limit: int):
+    """A regular file's bytes (not a link, pipe or device), None when it is
+    larger than limit."""
     try:
-        names = sorted(n for n in os.listdir(d) if re.fullmatch(r"[0-9a-f]{16}\.json", n))[:MAX_SCAN]
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
     except OSError:
-        return []
-    out = []
-    for n in names:
-        try:
-            with open(os.path.join(d, n), "rb") as f:
-                data = f.read(MAX_DOC + 1)
-            with open(os.path.join(d, n + ".sig"), "rb") as f:
-                sig = f.read(1025)
-        except OSError:
-            continue
-        doc = _doc(data, sig)
-        if doc:
-            out.append(doc)
-    return out
+        return None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
+            return None
+        data = f.read(limit + 1)
+    return data if len(data) <= limit else None
+
+
+NAME = re.compile(r"[0-9a-f]{16}\.json")
+
+
+def _each_doc(d: str):
+    """(name, document) for each document in folder d, unverified, one at a
+    time. Other names, files that are not regular or too large, and junk are
+    skipped unread or as soon as a check fails."""
+    try:
+        it = os.scandir(d)
+    except OSError:
+        return
+    with it:
+        for e in it:
+            if not NAME.fullmatch(e.name):
+                continue
+            sig = _read_small(os.path.join(d, e.name + ".sig"), 1024)
+            if sig is None or _sig(sig) is None:
+                continue
+            data = _read_small(os.path.join(d, e.name), MAX_DOC)
+            # Kept files are named by their content (remember): copies and
+            # junk under another name go before any signature check.
+            if data is None or hashlib.sha256(data + sig).hexdigest()[:16] != e.name[:16]:
+                continue
+            doc = _doc(data, sig)
+            if doc:
+                yield e.name, doc
+
+
+def _kept(keys: list) -> list:
+    """The documents in the folder that could matter, as ReleaseKeys.kept in
+    the app: every file looked at, cheap checks first (name, regular file,
+    sizes, signature format, the name is the content's hash, JSON); a document is held
+    only once a key signed it and it adds a key or a revocation (at most
+    MAX_HELD); the folder is read again for each round of new keys. Junk,
+    however many files, neither pushes real documents out nor fills memory."""
+    d, base = store(), list(dict.fromkeys(keys))
+    held, known, revoked, by = {}, set(base), set(), {}
+    fresh, first = list(base), True
+    while fresh and len(held) < MAX_HELD:
+        added = []
+        for name, doc in _each_doc(d):
+            if name in held:
+                continue
+            data, sig, named, revokes = doc
+            if first and revokes:
+                signer = next((k for k in base if signed(data, sig, [k])), None)
+                new = set(revokes) - set(base) - by.get(signer, set()) if signer else set()
+                if new:
+                    by.setdefault(signer, set()).update(new)
+                    revoked |= new
+                    held[name] = doc
+            if named and named not in known and named not in revoked and signed(data, sig, fresh):
+                known.add(named)
+                added.append(named)
+                held[name] = doc
+            if len(held) >= MAX_HELD:
+                break
+        first = False
+        fresh = [k for k in added if k not in revoked]
+    return [held[n] for n in sorted(held)]
 
 
 def trusted(hooks: bool = True) -> list:
-    return _resolve(shipped(hooks), _kept())[0]
+    keys = shipped(hooks)
+    return _resolve(keys, _kept(keys))[0]
 
 
 def remember(data: bytes, sig: bytes) -> bool:
@@ -269,7 +325,8 @@ def remember(data: bytes, sig: bytes) -> bool:
     doc = _doc(data, sig)
     if not doc:
         return False
-    keys, kept = shipped(), _kept()
+    keys = shipped()
+    kept = _kept(keys)
     before, after = _resolve(keys, kept), _resolve(keys, kept + [doc])
     if len(kept) not in after[2] or (set(after[0]) <= set(before[0]) and after[1] <= before[1] and not doc[3]):
         return False

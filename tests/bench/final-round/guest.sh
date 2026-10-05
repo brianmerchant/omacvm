@@ -2,10 +2,15 @@
 # The VM side of the final round. vm.sh copies src/bench and tests/bench to
 # /opt/omacvm-final-round and runs this as root over SSH:
 #   guest.sh prepare                   BEFORE the round: full system update, the tools, vkpeak and Geekbench
+#   guest.sh record                    keep the versions as they are now (after a planned change: a second
+#                                      app build's Vulkan driver), no update
 #   guest.sh check MIN_WIDTH           the VM is as prepared (Mesa and the rest unchanged), wide enough
 #   guest.sh info                      facts about the VM (one JSON line)
 #   guest.sh viewport                  Chrome's page size in full screen (one JSON line)
 #   guest.sh throughput|vkpeak|geekbench|vkmark|glmark2|browser RUNS
+#   guest.sh desktop [SHA256]          the idle desktop: notifications dismissed, Chrome closed, the wallpaper's
+#                                      hash checked against the Mac's (one JSON line)
+#   guest.sh wallpaper FILE            FILE (the Mac's own wallpaper, copied in) as Omarchy's background
 #   guest.sh cleanup [--packages]      AFTER the round: remove our files (and the packages prepare added)
 # Only in benchmark VMs (vm.sh checks the name). The tests run as the desktop
 # user (uid 1000) in its Hyprland session. Each prints JSON lines on stdout;
@@ -21,10 +26,13 @@ CACHE=/home/$U/.cache/omacvm-bench
 PKGS="glmark2 vkmark vulkan-tools clinfo opencl-mesa mesa-utils git cmake base-devel"
 CPU_DEV='llvmpipe|lavapipe|swiftshader|softpipe'
 as_user() {
-  local sig
+  local sig senv=()
   sig=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+  # OmacVM's own session settings (environment.d), which sudo does not read: e.g. MESA_VK_WSI_DEBUG=sw
+  # in app VMs with Vulkan, without which a Vulkan app on Wayland ends Hyprland's GPU context.
+  while IFS= read -r l; do senv+=("$l"); done < <(cat /etc/environment.d/90-omacvm*.conf 2>/dev/null | grep -E '^[A-Z_][A-Z0-9_]*=')
   sudo -u "$U" env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE="$sig" \
-    HOME="/home/$U" OMACVM_BENCH_SRC="$B/src/bench" "$@"
+    HOME="/home/$U" OMACVM_BENCH_SRC="$B/src/bench" ${senv[@]+"${senv[@]}"} "$@"
 }
 chrome_version() {
   local c
@@ -39,6 +47,9 @@ versions() {
     "$(pkgver mesa)" "$(cat /opt/omacvm-mesa/omacvm-mesa-version 2>/dev/null)" "$(pkgver glmark2)" "$(pkgver vkmark)" \
     "$(pkgver vulkan-virtio)" "$(chrome_version)" "$(uname -r)"
 }
+# Omarchy's shell (notifications, background) over its IPC, as the desktop user.
+oshell() { as_user env OMARCHY_PATH=/usr/share/omarchy PATH="/home/$U/.local/share/omarchy/bin:/usr/local/bin:/usr/bin" "$@"; }
+background() { readlink -f "/home/$U/.local/state/omarchy/current/background" 2>/dev/null; }
 widths() { as_user hyprctl monitors -j 2>/dev/null | python3 -c 'import json,sys; print(" ".join(str(m["width"]) for m in json.load(sys.stdin)))' 2>/dev/null; }
 
 case $CMD in
@@ -64,6 +75,10 @@ prepare)
     echo "the kernel was updated: reboot the VM, then run prepare again" >&2; exit 3
   fi
   echo "prepared: $(tr '\n' ' ' < "$S/prepared")" >&2 ;;
+record)
+  [[ -f $S/prepared ]] || { echo "not prepared: run vm.sh ... --prepare first" >&2; exit 1; }
+  versions > "$S/prepared"; date -u +%FT%TZ > "$S/prepared-at"
+  echo "recorded: $(tr '\n' ' ' < "$S/prepared")" >&2 ;;
 check)
   min=${2:-3000}; problems=()
   if [[ ! -f $S/prepared ]]; then problems+=("not prepared: run vm.sh ... --prepare before the round")
@@ -124,9 +139,11 @@ vkmark)
   types=$(vulkaninfo --summary 2>/dev/null | sed -n 's/.*deviceType *= *//p' | sort -u | tr '\n' ' ')
   [[ -n $types ]] || { echo "{\"not_available\":\"no Vulkan device\",\"vkmark\":\"$v\"}"; exit 0; }
   [[ $types == "PHYSICAL_DEVICE_TYPE_CPU " ]] && { echo "{\"not_available\":\"CPU Vulkan only, no GPU\",\"vkmark\":\"$v\"}"; exit 0; }
-  dev=()   # the first device that is not a CPU one, where vkmark can be told
+  dev=()   # the first device that is not a CPU one, by vkmark's own list (vulkaninfo's UUIDs differ from vkmark's)
   if vkmark --help 2>&1 | grep -q -- --use-device; then
-    uuid=$(vulkaninfo --summary 2>/dev/null | awk '/deviceType *=/ { t = $NF } /deviceUUID *=/ && t != "PHYSICAL_DEVICE_TYPE_CPU" && u == "" { u = $NF } END { print u }')
+    uuid=$(as_user vkmark --list-devices 2>/dev/null | awk -v cpu="$CPU_DEV" '
+      /Device Name:/ { sub(/.*Device Name: */, ""); n = $0 }
+      /Device UUID:/ && u == "" && tolower(n) !~ cpu { u = $NF } END { print u }')
     [[ -n $uuid ]] && dev=(--use-device "$uuid")
   fi
   for ((i = 1; i <= RUNS; i++)); do
@@ -139,15 +156,30 @@ vkmark)
 glmark2)
   v=$(pkgver glmark2)
   [[ $v == "$GLMARK2_VERSION"* ]] || { echo "{\"error\":\"glmark2 ${v:-missing}, the round uses ${GLMARK2_VERSION:-?}\"}"; exit 0; }
+  # GLMARK2_DURATION: seconds per scene for all the default scenes (glmark2's own default: 10).
+  opt=(); d=${GLMARK2_DURATION:-}; [[ -n $d ]] && opt=(-b ":duration=$d")
   for ((i = 1; i <= RUNS; i++)); do
-    s=$(as_user glmark2-es2-wayland --fullscreen 2>&1 | sed -n 's/.*glmark2 Score: *\([0-9]*\).*/\1/p')
-    echo "{\"run\":$i,\"value\":${s:-null},\"glmark2\":\"$v\"}"
+    s=$(as_user glmark2-es2-wayland --fullscreen "${opt[@]}" 2>&1 | sed -n 's/.*glmark2 Score: *\([0-9]*\).*/\1/p')
+    echo "{\"run\":$i,\"value\":${s:-null},\"glmark2\":\"$v\",\"scene_seconds\":${d:-10}}"
   done ;;
 browser)   # Basemark Web 3.0 and WebGL Aquarium 30k, bench.sh's way (full-screen Chrome)
   out=$(mktemp)
   chmod 666 "$out"
   as_user bash "$B/src/bench/bench.sh" --runs "$RUNS" --only aquarium,basemark "$out" >/dev/null 2>&1
   cat "$out"; rm -f "$out" ;;
+desktop)   # before the GPU tests and the idle window: the same quiet desktop in every VM
+  pkill -f /opt/google/chrome/chrome 2>/dev/null; sleep 1
+  oshell omarchy-shell -q notifications dismissAll
+  bg=$(background); sum=$( [[ -n $bg ]] && sha256sum "$bg" | cut -d' ' -f1)
+  python3 -c 'import json,sys; s, want, bg = sys.argv[1:]
+print(json.dumps({"wallpaper": bg or None, "wallpaper_sha256": s or None,
+                  "wallpaper_same_as_mac": (s == want) if want else None, "notifications": "dismissed",
+                  "chrome_closed": True}))' "$sum" "${2:-}" "$bg" ;;
+wallpaper)   # FILE: the Mac's wallpaper, kept in ~/.local/share/omacvm-bench (cleanup leaves it: it is the background)
+  f=/home/$U/.local/share/omacvm-bench/${2##*/}
+  install -d -o "$U" -g "$U" "${f%/*}" && install -m644 -o "$U" -g "$U" "$2" "$f" || exit 1
+  oshell omarchy-theme-bg-set "$f" >/dev/null 2>&1
+  [[ $(background) == "$f" ]] || { echo "the background is $(background), not $f" >&2; exit 1; } ;;
 cleanup)
   pk=$(cat "$S/installed-packages" 2>/dev/null | tr '\n' ' ')
   rm -rf "$CACHE" "$B"

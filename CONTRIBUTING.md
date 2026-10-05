@@ -60,7 +60,7 @@ src/bridge/mac/test.sh && src/tests/external-brightness.sh
 src/tests/install-defaults.sh
 src/tests/vm-names.sh
 src/tests/mac-install.sh
-src/tests/release-keys.sh
+src/tests/release-keys.sh && src/tests/release-script.sh
 src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
 src/net/mac/test.sh
 src/gestures/mac/test.sh
@@ -82,6 +82,7 @@ src/tests/app-idle.sh
 src/tests/app-battery.sh
 python3 src/app/guest/tests/test_omacvm_displays.py
 python3 src/app/guest/tests/test_idle_waits.py
+src/tests/audio-timing.sh
 ```
 
 `src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to

@@ -64,9 +64,15 @@ native_dir=$(cd "$(dirname "$0")" && pwd -P)
 # OMACVM_RUNTIME_KOSMICKRISP=1. Its build needs Homebrew LLVM and SPIR-V tools,
 # so check the build machine before the long QEMU build. Without it the
 # runtime has MoltenVK only.
+# OMACVM_KOSMICKRISP_FROM=DIR: one built on another Mac (import-kosmickrisp.sh).
 case ${OMACVM_RUNTIME_KOSMICKRISP:-0} in
   0) with_kosmickrisp=0 ;;
-  1) "$native_dir/build-kosmickrisp.sh" --check; with_kosmickrisp=1 ;;
+  1) if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+       "$native_dir/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM" --stamp >/dev/null
+     else
+       "$native_dir/build-kosmickrisp.sh" --check
+     fi
+     with_kosmickrisp=1 ;;
   *) echo 'qemu-source-build: OMACVM_RUNTIME_KOSMICKRISP must be 0 or 1' >&2; exit 64 ;;
 esac
 texture_patch="$native_dir/patches/qemu-texture-borrowing-11.1.patch"
@@ -603,6 +609,9 @@ verify_file_sha "Try Omarchy HDA full-ring recovery patch" \
   "$audio_recovery_patch" "$audio_recovery_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$audio_device_patch"
 patch -d "$source_dir" -p1 -f -i "$audio_recovery_patch"
+# OmacVM: no catch-up after a stalled main loop (the guest's sound clock pauses;
+# QEMU's ring covers the stall instead of the guest under-running).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hda-no-catch-up.patch"
 patch -d "$source_dir" -p1 -f -i "$shared_folder_patch"
 patch -d "$source_dir" -p1 -f -i "$strchrnul_patch"
 patch -d "$source_dir" -p1 -f -i "$memory_reclaim_patch"
@@ -626,6 +635,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input-only.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
+# OmacVM: the playback device opens and closes off the BQL too: a Mac audio
+# device that does not answer no longer hangs the VM, it runs without sound.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-thread.patch"
+# OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
+# busy guest on a busy Mac no longer delays it and the sound stays clean.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 # OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window
@@ -1140,7 +1155,11 @@ fi
 
 kosmickrisp_args=()
 if ((with_kosmickrisp)); then
-  "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+    "$native_dir/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM"
+  else
+    "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  fi
   kosmickrisp_args=(--source-kosmickrisp "$native_dir/.build/kosmickrisp/libvulkan_kosmickrisp.dylib")
 fi
 
