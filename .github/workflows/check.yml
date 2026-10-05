@@ -46,6 +46,10 @@ jobs:
         working-directory: app/app
         run: swift build
 
+      - name: OmacVM.app network switch tests (fast network <-> user network)
+        working-directory: app/app
+        run: swift run net-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
