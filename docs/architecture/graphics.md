@@ -248,6 +248,20 @@ back to back (the spin counts from the last sleep, not per fence). With the benc
 QEMU's CPU during glmark2 195% -> 165%, Aquarium 194% -> 176%, frame rates
 the same (ADR 0017).
 
+Fence tests and the render thread (`virgl-darwin-fence-wait-busy.patch`,
+ADR 0026): every `glClientWaitSync` takes Apple GL's share-group lock, which
+the render thread's GL calls take too, and a collision parks the render
+thread in the kernel. Where the render thread is the bottleneck (WebGL
+Aquarium) the sync thread's back-to-back tests after each new fence cost
+about 5 %. So while the render thread runs a guest command buffer,
+`vrend-sync` waits for the end of the submit (the render thread wakes it,
+at most 1 ms) instead of testing on a timer; an idle render thread gets the
+spin and naps above. `OMACVM_VIRGL_FENCE_BUSY=0` turns it off. Bench lock,
+2.8.0 / 2.9.0 / this part alone: Aquarium 20.2 / 19.0 / 20.15-20.6 fps
+(one session for the last); with the present queue's backoff too (not
+shipped, ADR 0026) 19.9 fps, glmark2 short set 1160 / 2986 / 3168, testufo
+unchanged.
+
 ### Where the time goes
 
 - Light frames (glmark2, the desktop): the fence round trip. Fixed above.

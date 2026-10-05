@@ -67,7 +67,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 - **A mouse scrolls on after the wheel stops, or jumps**: scroll momentum is
   for trackpads only and passes every mouse's scrolling one to one; this was
   a smooth-scrolling mouse (Logitech MX and co.) taken as a trackpad before
-  2.9.0. Update the Mac's helpers (`omacvm update`).
+  2.9.1. Update the Mac's helpers (`omacvm update`).
 - **Omarchy's bar shows Wi-Fi without its name**: OmacVM Bridge has no
   Location Services permission (macOS needs it for the network's name). The
   bar still shows connected from the Mac's link. Allow it in System

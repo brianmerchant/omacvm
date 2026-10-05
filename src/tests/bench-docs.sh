@@ -78,10 +78,12 @@ for page in ("README.md", "docs/compare.md", "docs/benchmarks/README.md"):
 
 # 5. The CHANGELOG's KosmicKrisp line names what the build script refuses without.
 kk = read("app/runtime/build-kosmickrisp.sh")
-# The newest section that has the line (an unreleased section above may not).
-sections = read("CHANGELOG.md").split("\n## ")[1:]
-top = next((s for s in sections if "\n- KosmicKrisp" in s), "")
-bullet = re.search(r"\n- KosmicKrisp.*?(?=\n- |\n### |\Z)", top, re.S)
+# The newest release section that has the line (an unreleased hotfix above it may not).
+bullet = None
+for section in read("CHANGELOG.md").split("\n## ")[1:]:
+    bullet = re.search(r"\n- KosmicKrisp.*?(?=\n- |\n### |\Z)", section, re.S)
+    if bullet:
+        break
 bullet = re.sub(r"\s+", " ", bullet.group(0)) if bullet else ""
 for need, in_script in (("Xcode 26", "(Xcode 26)"), ("llvm", "brew install llvm)"),
                         ("spirv-llvm-translator", "brew install spirv-llvm-translator"),
