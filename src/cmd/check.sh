@@ -307,14 +307,17 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   fi
 fi
 # Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
-# user-interactive QoS; the hidden audioClassic setting keeps the default.
+# user-interactive QoS, and the sound card paced (no catch-up after a stall);
+# the hidden audioClassic setting keeps QEMU's own timing for both.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   q=$(grep -o 'main loop QoS: .*' "$miclog" | tail -1)
-  case $q in
-    "") ;;   # a runtime before 3.0.0 says nothing
-    *user-interactive) ok "sound timing" "QEMU's main loop at user-interactive QoS" ;;
+  p=$(grep -o 'HDA sound pacing [a-z]*' "$miclog" | tail -1)
+  case "$q|$p" in
+    "|") ;;   # a runtime before 3.0.0 says nothing
     *refused*) warn "sound timing" "macOS refused user-interactive QoS: sound may crackle while the Mac is busy" ;;
-    *) ok "sound timing" "QEMU's main loop at the default QoS (audioClassic)" ;;
+    *user-interactive"|HDA sound pacing on") ok "sound timing" "QEMU's main loop at user-interactive QoS, sound card paced" ;;
+    *"|HDA sound pacing off") ok "sound timing" "QEMU's own sound timing (audioClassic)" ;;
+    *) ok "sound timing" "${q:-main loop QoS: unknown}, ${p:-pacing unknown}" ;;
   esac
 fi
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and

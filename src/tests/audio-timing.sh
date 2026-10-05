@@ -1,8 +1,8 @@
 #!/bin/bash
 # Offline checks for the sound-on-a-busy-Mac change (no VM, no QEMU build):
 #  - the tone glitch detector finds made-up gaps and skips (app/runtime/Tests/audio/glitches.py)
-#  - the launcher, QEMU's patch and omacvm check use the same switch and log lines
-#    (OMACVM_MAIN_LOOP_QOS=default; "main loop QoS: user-interactive|default|... refused")
+#  - the launcher, QEMU's patches and omacvm check use the same switches and log lines
+#    (OMACVM_MAIN_LOOP_QOS=default, hda-micro pace=off; "main loop QoS: ...", "HDA sound pacing on|off")
 # Exit 0 when every check passes.
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -21,23 +21,26 @@ check "runtime build applies the patch" grep -q "patches/qemu-darwin-main-loop-q
 check "patch reads OMACVM_MAIN_LOOP_QOS=default" grep -q 'getenv("OMACVM_MAIN_LOOP_QOS")' "$P"
 check "launcher sets OMACVM_MAIN_LOOP_QOS=default for audioClassic" \
   grep -q 'env\["OMACVM_MAIN_LOOP_QOS"\] = "default"' "$RUNNER"
-# Each line QEMU can log gets the verdict omacvm check means for it.
-verdict() {   # LOG_LINE -> what check.sh's case gives
-  local q=$1
-  case $q in
-    "") echo none ;;
-    *user-interactive) echo ok-ui ;;
-    *refused*) echo warn ;;
-    *) echo ok-default ;;
-  esac
-}
+HP=$R/app/runtime/patches/qemu-hda-no-catch-up.patch
+check "pacing patch is pinned in SHA256SUMS" grep -q " qemu-hda-no-catch-up.patch$" "$R/app/runtime/patches/SHA256SUMS"
+check "runtime build applies the pacing patch" grep -q "patches/qemu-hda-no-catch-up.patch" "$R/app/runtime/build-qemu-gpu-runtime.sh"
+check "pacing is a codec property, on by default" grep -qF 'DEFINE_PROP_BOOL("pace", HDAAudioState, pace, true)' "$HP"
+check "launcher turns pacing off for audioClassic" grep -qF 'audiodev=snd0\(Settings.audioClassic ? ",pace=off" : "")' "$RUNNER"
+check "pacing patch logs its state" grep -qF 'info_report("OmacVM: HDA sound pacing %s"' "$HP"
 for line in "main loop QoS: user-interactive" "main loop QoS: default" "main loop QoS: default (user-interactive refused)"; do
-  check "patch logs '$line'" grep -qF "OmacVM: $line" "$P"
+  check "QoS patch logs '$line'" grep -qF "OmacVM: $line" "$P"
 done
-check "check.sh: user-interactive is ok" test "$(verdict 'main loop QoS: user-interactive')" = ok-ui
-check "check.sh: refused is a warning" test "$(verdict 'main loop QoS: default (user-interactive refused)')" = warn
-check "check.sh: default (audioClassic) is ok" test "$(verdict 'main loop QoS: default')" = ok-default
-check "check.sh has the same cases" grep -qF '*user-interactive) ok "sound timing"' "$CHECK"
-check "check.sh warns on refused" grep -qF '*refused*) warn "sound timing"' "$CHECK"
+# check.sh's verdict for each pair of log lines QEMU can write (its own case, run here).
+verdict() {   # QOS_LINE PACING_LINE -> the status check.sh prints
+  local miclog TYPE=app out
+  miclog=$(mktemp); printf 'OmacVM: %s\nOmacVM: %s\n' "$1" "$2" | grep -v 'OmacVM: $' > "$miclog"
+  ok() { echo "ok:$2"; }; warn() { echo "warn:$2"; }
+  out=$(eval "$(sed -n '/^# Sound on a busy Mac/,/^fi$/p' "$CHECK")")
+  rm -f "$miclog"; echo "$out"
+}
+check "check.sh: QoS + pacing on is ok" grep -q "^ok:QEMU's main loop at user-interactive QoS, sound card paced" <<<"$(verdict 'main loop QoS: user-interactive' 'HDA sound pacing on')"
+check "check.sh: audioClassic is ok" grep -q "^ok:QEMU's own sound timing" <<<"$(verdict 'main loop QoS: default' 'HDA sound pacing off')"
+check "check.sh: refused QoS warns" grep -q "^warn:" <<<"$(verdict 'main loop QoS: default (user-interactive refused)' 'HDA sound pacing on')"
+check "check.sh: an old runtime prints nothing" test -z "$(verdict '' '')"
 echo "audio-timing: $((N - FAIL))/$N ok"
 exit $(( FAIL > 0 ))

@@ -599,6 +599,9 @@ verify_file_sha "Try Omarchy HDA full-ring recovery patch" \
   "$audio_recovery_patch" "$audio_recovery_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$audio_device_patch"
 patch -d "$source_dir" -p1 -f -i "$audio_recovery_patch"
+# OmacVM: no catch-up after a stalled main loop (the guest's sound clock pauses;
+# QEMU's ring covers the stall instead of the guest under-running).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hda-no-catch-up.patch"
 patch -d "$source_dir" -p1 -f -i "$shared_folder_patch"
 patch -d "$source_dir" -p1 -f -i "$strchrnul_patch"
 patch -d "$source_dir" -p1 -f -i "$memory_reclaim_patch"
