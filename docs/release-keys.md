@@ -77,7 +77,8 @@ would trust it for good. So a document can revoke it:
    ships, never with a named one) and list the leaked key:
    `OMACVM_REVOKED_KEYS="<leaked public key>" app/scripts/package-release.sh`
    (and `manifest.py build --out`, so copies that only run the Bridge get it
-   too). Add `OMACVM_NEXT_SPARE_KEY` in the same run to name the new spare.
+   too; `src/prebuilt/make-image.sh` reads it as well, for prebuilt images
+   made in the same round). Add `OMACVM_NEXT_SPARE_KEY` in the same run to name the new spare.
    The feed then has `"revoked_keys": ["<key>"]` (1 to 8 keys).
 3. Each copy that reads it keeps it (like a naming document) in
    `~/Library/Application Support/omacvm/release-keys`. From then on the
