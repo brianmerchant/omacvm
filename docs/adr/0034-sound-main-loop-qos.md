@@ -53,9 +53,11 @@ fix for 2.9.0 (troubleshooting finding 24).
 
 ## Consequences
 
-- Same load, 10 minutes: tone breaks 337 (2.9.0) → 120 and 216 (QoS) → 19
-  and 37 (QoS and pacing); the guest's sink no longer under-runs. Round trip
-  unchanged (about 282 ms).
+- 10-minute runs, breaks in the tone: with the VM's GPU and the Mac busy
+  12 → 2; with every core busy too, median 365 (2.9.0) → 120 (QoS) → 50
+  (QoS and pacing). The spread between runs is large (other work on the
+  Mac); the main loop's lateness (thousands of 10-49 ms delays → under 10)
+  is the steady signal. Round trip unchanged (about 282 ms).
 - After a stall QEMU's ring refills at 1/32 over real time (a 60 ms stall
   takes about 2 s); a second long stall inside that window can still empty
   it, which the Mac hears as a short gap.

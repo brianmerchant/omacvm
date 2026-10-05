@@ -9,10 +9,12 @@ in more words.
   main loop, which moves the sound and runs the VM's GPU, now runs at
   user-interactive QoS instead of competing with the VM's CPUs, and the
   sound card no longer takes the time it missed (a new shader stops that
-  thread for 50-80 ms) from the VM all at once. With every core busy, breaks
-  in a test tone went from 337 to 19-37 in 10 minutes; the sound's delay is
-  the same. `omacvm check` shows it ("sound timing");
-  `defaults write org.omacvm.app audioClassic -bool true` goes back.
+  thread for 50-80 ms) from the VM all at once. In 10-minute tests on a
+  MacBook Pro with the VM's GPU busy and 8 busy threads on the Mac, breaks
+  in a test tone went from 12 to 2; with every core busy as well, from a
+  median of 365 to 50. The sound's delay is the same. `omacvm check` shows
+  it ("sound timing"); `defaults write org.omacvm.app audioClassic -bool
+  true` goes back.
 
 ## 2.9.1
 

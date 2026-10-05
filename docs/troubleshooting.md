@@ -476,11 +476,15 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   (`app/runtime/patches/qemu-darwin-main-loop-qos.patch`) and the sound card
   no longer catches up after a stall (`qemu-hda-no-catch-up.patch`: the VM's
   sound clock pauses instead). Measured on a MacBook Pro M4 Max, VM with 8
-  CPUs, the VM's CPUs and GPU busy plus 8 busy threads on the Mac, a 30 Hz
-  tone through PipeWire's PulseAudio part, 10 minutes each: breaks in the
-  tone 337 (2.9.0) → 120 and 216 (QoS) → 19 and 37 (both); the main loop
-  10-49 ms late 3,554 → 9 times; the VM's sink under-ran 7 → 0 times. The
-  sound's delay stays the same (round trip in the VM about 282 ms).
+  CPUs, a 30 Hz tone in the VM, 10 minutes each, breaks in the tone:
+  - the VM's GPU busy (glmark2, a new scene every 10 s), 8 busy threads on
+    the Mac: 12 (2.9.0) → 2;
+  - the VM's CPUs busy too: median 365 (2.9.0, 4 runs) → 120 (QoS only,
+    5 runs) → 50 (both, 4 runs); the main loop 10-49 ms late 2,261-4,752
+    times per run → 1-9.
+
+  The rest are the VM's own apps starved of CPU at 100 % load. The sound's
+  delay stays the same (round trip in the VM about 282 ms).
   `omacvm check` shows both ("sound timing");
   `defaults write org.omacvm.app audioClassic -bool true` goes back to
   2.9.0's timing.

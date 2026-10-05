@@ -15,10 +15,12 @@ then the output timer took the whole S at once and the sync corrections
 pulled up to five times faster. The guest saw its DMA position jump by S:
 PipeWire's sink under-ran, or refilled in a burst and drained the app's
 stream. Each stall had to be buffered twice (in QEMU and in the guest).
-Measured (M4 Max, 8 busy vCPUs, glmark2 scene changes, 8 busy Mac threads,
-a tone through PipeWire's PulseAudio part, 10 min, main loop at
-user-interactive QoS): breaks 120-216 without, 19 with; xruns sink/app
-14-15 / 80-176 without, 0 / 8 with; no added latency.
+Measured (M4 Max, VM 8 vCPUs, glmark2 scene changes, 8 busy Mac threads, a
+tone through PipeWire, 10 min each, main loop at user-interactive QoS):
+breaks in the tone median 120 (5 runs) without, 50 (4 runs) with when the
+vCPUs are busy too; the guest's sink under-ran in 4 of 5 runs without and
+1 of 4 with; QEMU's full-ring recoveries 62-67 per run without, 0 with.
+Round trip unchanged (about 282 ms).
 
 Applies after qemu-hda-full-ring-recovery.patch.
 Upstream: not sent yet (QEMU's HDA pacing is shared by every host; worth

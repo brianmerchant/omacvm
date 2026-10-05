@@ -32,16 +32,20 @@ them (`out.buffer-count=8`, 93 ms).
 
 ## Results (MacBook Pro M4 Max, 8 vCPUs, 10 minutes each, bench lock held)
 
-8 busy vCPUs (`stress-ng`), glmark2's terrain scene (a new scene every 10
-s), 8 busy `yes` loops on the Mac, the tone through PipeWire's PulseAudio
-part. Breaks per 10 minutes in what SDL got:
+glmark2's terrain scene (a new scene every 10 s) and 8 busy `yes` loops on
+the Mac, with or without 8 busy vCPUs (`stress-ng`); the tone through
+PipeWire (`paplay`, or `pw-play --latency 1024`). Breaks per 10 minutes in
+what SDL got:
 
-| Runtime | Breaks | Guest xruns (sink / app) | Main loop 10-49 ms late |
+| Load | 2.9.0 | QoS | QoS and no HDA catch-up |
 |---|---|---|---|
-| 2.9.0 | 337 | 7 / 227 | 3,554 |
-| main loop at user-interactive QoS | 120, 216 | 14-15 / 80-176 | 9, 5 |
-| QoS and no HDA catch-up | 19, 37 | 0 / 8-21 | 2, 3 |
-| 2.9.0, guest ALSA headroom 8192 | 15 | 0 / 1 | 4,030 |
+| GPU + Mac | 12 | | 2 |
+| CPU + GPU + Mac | 726, 392, 337, 28 (median 365) | 64, 197, 120, 216, 52 (median 120) | 132, 19, 37, 62 (median 50) |
+| (sink xruns, same runs) | 414, 221, 7, 1 | 35, 99, 15, 14, 0 | 73, 0, 0, 0 |
+| (main loop 10-49 ms late) | 2,261-4,752 | 3-9 | 1-3 |
+
+2.9.0 with the guest's ALSA headroom at 8192 (troubleshooting finding 24):
+15 and 44 breaks.
 
 Round trip in the guest (`jack_iodelay`, loopback probe): about 282 ms for
 2.9.0, QoS, and QoS with pacing; 400 ms with headroom 8192. The spread from
