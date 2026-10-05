@@ -361,6 +361,12 @@ Rules:
   `qemu-hvf-virgl-blob-subregion.patch` maps a memory subregion instead.
 - Metal heaps are pointers in one process, which is why the Venus server
   runs in process (ADR 0012).
+- Classic resources count against a budget (all levels, layers and
+  samples; `virgl-resource-memory-budget.patch`): three quarters of the
+  Mac's memory, so only a runaway VM reaches it (ADR 0034). A desktop takes
+  1.1 GB at 4K to 3.1 GB at 8K, up to 5.3 GB for a moment while the scale
+  changes (every screen-sized buffer is made again). QEMU's log notes each
+  new peak in 512 MB steps.
 
 ## 6. Vulkan: Venus (built: `gpu-venus`)
 
@@ -527,7 +533,8 @@ What crosses and who checks it:
   arrays, 1e300, 101 flips).
 - **no host pointers** reach the guest; no guest-controlled allocation
   without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
-  IOSurfaces 3 per window, each at most the largest display).
+  IOSurfaces 3 per window, each at most the largest display, classic
+  resources three quarters of the Mac's memory).
 - **scanout size and format**: the present surfaces follow the guest's
   scanout, capped at the largest display. `pacing-hdr` keeps five of them
   with vsync (queue for the display's refresh; three with
