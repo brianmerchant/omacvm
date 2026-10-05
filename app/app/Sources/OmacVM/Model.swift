@@ -397,8 +397,9 @@ enum Settings {
     /// ever misbehaves on a Mac. Everything else of the GPU stays as it is.
     /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
     static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
-    /// Vulkan in the VM (Venus on KosmicKrisp on macOS 26+, MoltenVK before),
-    /// experimental: the guest needs Mesa 26.2.4 or newer.
+    /// Vulkan in every VM (Venus on MoltenVK; KosmicKrisp on macOS 26+ only in
+    /// a runtime built with OMACVM_RUNTIME_KOSMICKRISP=1), for development. Users switch it per VM: omacvm enable vulkan (the
+    /// VM's vulkan file, and OmacVM's Mesa in the VM).
     /// Hidden: defaults write org.omacvm.app venus -bool true
     static var venus: Bool { UserDefaults.standard.bool(forKey: "venus") }
     /// HDR: a 10-bit guest output is shown as BT.2100 PQ with the Mac's EDR,

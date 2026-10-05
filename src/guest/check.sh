@@ -321,6 +321,17 @@ app)
     skip "fast network" "not this start: QEMU's user network (omacvm check on the Mac says why)"
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
+  if [[ ${OMACVM_FEATURE_vulkan:-off} == on && ! -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
+    bad "Vulkan (Venus)" "on, but OmacVM's Mesa is not installed: omacvm apply (its log says why)"
+  elif [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
+    if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
+      skip "Vulkan (Venus)" "on from the VM's next start (shut it down in OmacVM.app, then start it again)" 1
+    else
+      check "Vulkan (Venus)" "OmacVM's Mesa venus" bash -c 'VK_LOADER_DRIVERS_DISABLE=virtio_icd.json vulkaninfo --summary 2>/dev/null | grep -q "driverName *= venus"'
+      check "OpenCL (rusticl on Zink)" "a zink device" bash -c 'RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink'
+      check "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)" test -x /usr/local/bin/omacvm-chromium-webgpu
+    fi
+  else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
   if [[ ! -e /dev/virtio-ports/org.omacvm.display ]]; then

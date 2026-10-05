@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 |---|---|
 | 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. |
 | 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
-| 🎮 **Real GPU performance**<br>A fast GPU path that keeps up with your display's refresh, up to 120 Hz. Vulkan, WebGPU and OpenCL *(coming)*. | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
+| 🎮 **Real GPU performance**<br>A fast GPU path that keeps up with your display's refresh, up to 120 Hz. Vulkan, WebGPU and OpenCL *(coming with 3.0.0, opt-in)*. | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
 | 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
 | 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
 | ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Prebuilt VM (5 min) | 🔜 ³ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes · ⁴ Vulkan since 2.9.0 as a hidden, experimental switch; WebGPU and OpenCL come later · ⁵ with the VM in full screen on that display · ⁶ in OmacVM.app's VMs it shows the VM's side; switching from it comes with the app's control port (until then `omacvm features` on the Mac)
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes · ⁴ Vulkan since 2.9.0 as a hidden, experimental switch; Vulkan, WebGPU and OpenCL as an opt-in feature in 3.0.0 · ⁵ with the VM in full screen on that display · ⁶ in OmacVM.app's VMs it shows the VM's side; switching from it comes with the app's control port (until then `omacvm features` on the Mac)
 
 <p align="center">
   <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 18 (2.9.0 release candidate, in a window with another VM running), 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">

@@ -412,6 +412,20 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
       info "fast network: off from the VM's next start"
     fi
   fi
+  # Vulkan (Venus) from the VM's next start: the app reads the vulkan file.
+  # Only with OmacVM's Mesa in the VM: without it the distro's venus (Mesa
+  # 26.2.3) gets the device, and every Vulkan app fails with
+  # ERROR_OUT_OF_HOST_MEMORY.
+  if on vulkan && ! gssh "$IP" "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" < /dev/null 2>/dev/null; then
+    info "Vulkan: not turned on, OmacVM's Mesa did not build in the VM (see above; the VM keeps OpenGL)"
+    rm -f "$d/vulkan"
+  elif on vulkan; then
+    [[ -e $d/vulkan ]] || { : > "$d/vulkan"; [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] ||
+      info "Vulkan, WebGPU and GPU compute: from the VM's next start (shut it down, then start it again)"; }
+  elif [[ -e $d/vulkan ]]; then
+    rm -f "$d/vulkan"
+    [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] || info "Vulkan: off from the VM's next start"
+  fi
   # Its VA-API shim keeps AV1 to Chromium-based browsers (FFmpeg's AV1 cannot
   # go to the Mac's decoder): the app may offer AV1 to this VM.
   gssh "$IP" "test -x /usr/local/lib/dri/omacvm_drv_video.so" < /dev/null 2>/dev/null &&

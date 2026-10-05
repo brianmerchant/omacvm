@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a browser benchmark in Chrome/Chromium and print its score.
 
-  browser-bench.py speedometer|motionmark|aquarium [--port 9222]
+  browser-bench.py speedometer|motionmark|aquarium|basemark|webgpu [--port 9222]
 
 The browser must already run with --remote-debugging-port (see bench.sh).
 Talks to it over the DevTools protocol; Python's standard library only.
@@ -45,6 +45,16 @@ TESTS = {
                 " return /benchmark-result/.test(location.pathname) && r ? r.textContent.trim() : '' })()",
         "detail": "location.href + ' ' + (document.body.innerText.replace(/\\s+/g, ' ').split('RESULT')[1] || '').slice(0, 700)",
         "timeout": 900,
+    },
+    # WebGPU compute: f32 matrix multiply 2048 x 2048 in GFLOPS (pages/webgpu-matmul.html, about
+    # 10 s). Pages without a hardware adapter report "error: no adapter".
+    "webgpu": {
+        "url": "pages/webgpu-matmul.html",
+        "start": "document.getElementById('result')",
+        "done": "(() => { const r = document.getElementById('result');"
+                " return r && r.dataset.done ? r.textContent : '' })()",
+        "detail": "document.getElementById('detail').textContent",
+        "timeout": 300,
     },
 }
 
@@ -134,7 +144,10 @@ def main():
 def run(dt, t):
     dt.call("Page.enable")
     dt.call("Page.bringToFront")
-    dt.call("Page.navigate", url=t["url"])
+    url = t["url"]
+    if not url.startswith("http"):   # a page that ships beside this script
+        url = "file://" + os.path.join(os.path.dirname(os.path.abspath(__file__)), url)
+    dt.call("Page.navigate", url=url)
     for _ in range(120):
         time.sleep(1)
         if dt.js("document.readyState") == "complete" and dt.js("typeof " + t["start"].split("(")[0].split(".")[0]) != "undefined":

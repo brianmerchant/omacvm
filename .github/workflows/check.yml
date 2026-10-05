@@ -118,6 +118,12 @@ jobs:
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
 
+      - name: The vulkan feature (VM folder file, guest Mesa step)
+        run: src/tests/vulkan-feature.sh
+
+      - name: The vulkan feature's Mesa build (build tools come and go)
+        run: src/tests/venus-build-tools.sh
+
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 

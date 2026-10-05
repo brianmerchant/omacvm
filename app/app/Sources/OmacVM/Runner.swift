@@ -27,6 +27,8 @@ final class Runner {
         // older VMs keep the Mac's pointer.
         let guestPointer = FileManager.default.fileExists(
             atPath: c.folder.appendingPathComponent("guest-pointer").path)
+        let vulkan = Settings.venus || FileManager.default.fileExists(
+            atPath: c.folder.appendingPathComponent("vulkan").path)
         var a: [String] = [
             "-name", q(c.name),
             "-machine", "virt,gic-version=3",
@@ -45,8 +47,9 @@ final class Runner {
         ] + networkArguments() + [
             // One output per Mac display in full screen (Virtual-1 is the window;
             // QEMU's window code opens the others): the built-in and four more.
-            // Venus (Vulkan) needs blobs and a host memory window for them.
-            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(Settings.venus ? ",blob=true,venus=true,hostmem=4G" : "")",
+            // Venus (Vulkan; omacvm enable vulkan writes the VM's vulkan file)
+            // needs blobs and a host memory window for them.
+            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(vulkan ? ",blob=true,venus=true,hostmem=4G" : "")",
             "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",

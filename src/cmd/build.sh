@@ -76,6 +76,7 @@ feature_flag() {   # NAME on|off
     thp-kernel) THP=$v ;;
     control-centre) CONTROL=$v ;;
     fast-network) [[ $2 == off ]] || usage "the fast network goes on after the build: omacvm enable fast-network --vm NAME" ;;
+    vulkan) [[ $2 == off ]] || usage "Vulkan goes on after the build: omacvm enable vulkan --vm NAME" ;;
     *) usage "unknown feature '$1' (omacvm features lists them)" ;;
   esac
   [[ $2 == on || $2 == off ]] || usage "--feature $1=$2: on or off"

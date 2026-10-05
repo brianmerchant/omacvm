@@ -77,13 +77,24 @@ VM runs, and goes back by itself when a new version does not start
   If the picture or the GPU misbehaves on a Mac: `defaults write
   org.omacvm.app gpuSafeMode -bool true` and restart the VM goes back to the
   2.8.0 fence and frame path; `omacvm check` shows which path a VM took.
-- Vulkan in the VM (Venus on MoltenVK), hidden and experimental:
-  `defaults write org.omacvm.app venus -bool true`, then restart the VM. The
-  VM's Mesa must round GPU memory to the Mac's 16 KiB pages (Mesa 26.2.4 or
-  newer; Arch Linux ARM has 26.2.3, so
-  [`app/scripts/dev/guest-mesa-venus.sh`](../../app/scripts/dev/guest-mesa-venus.sh)
-  builds the Venus driver into `/opt/mesa-venus`); otherwise Vulkan apps fail
-  to get memory. vkmark about 5,200. OpenGL stays on virgl.
+- Vulkan, WebGPU and GPU compute (experimental, off by default):
+  `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
+  The VM gets Vulkan (Venus on MoltenVK; on KosmicKrisp on macOS 26+ only
+  in an app built with `OMACVM_RUNTIME_KOSMICKRISP=1`, not the default), OpenCL
+  (rusticl), WebGPU in Firefox, and a "Chromium (WebGPU)" menu entry that
+  starts Chromium with WebGPU on the Mac's GPU (the normal Chromium keeps
+  its software WebGPU: its Vulkan mode costs WebGL about a fifth). The
+  first time the VM builds OmacVM's Mesa for it (pinned 26.2.4 with five
+  patches) into `/opt/omacvm-mesa`: about 3 minutes on an M4 Max and a
+  140 MB download (Mesa's source and Rust; Omarchy has LLVM and Clang
+  already). The build tools it adds (Rust, meson, ninja, bindgen) are
+  removed after the build. If the build fails, Vulkan stays off and apply
+  says so (log: `/var/log/omacvm-mesa-build.log` in the VM). OpenGL stays
+  on virgl. `omacvm disable vulkan`
+  removes it. Numbers: [benchmarks](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04),
+  how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).
+  For development `defaults write org.omacvm.app venus -bool true` gives
+  every VM the Venus device without the guest side.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

@@ -8,7 +8,7 @@
 #                    (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -133,6 +133,7 @@ esac
 [[ $TYPE == app ]] || F[fast-network]=off
 # Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
 [[ $TYPE == app ]] || F[chromium-video]=off
+[[ $TYPE == app ]] || F[vulkan]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 [[ $TYPE == fusion ]] && FUSION_DNS=1
@@ -268,6 +269,16 @@ if want chromium-video && [[ $TYPE == app ]]; then
     "$R/vdec/guest/install.sh" "$U" on || not_set_up chromium-video "Chromium video"
   else
     "$R/vdec/guest/install.sh" "$U" off || not_set_up chromium-video "Chromium video (off)"
+  fi
+fi
+# Vulkan (Venus): OmacVM's Mesa for it, built once in the VM. Its own step,
+# so the control centre can repair it alone.
+if want vulkan && [[ $TYPE == app ]]; then
+  if [[ ${F[vulkan]} == on ]]; then
+    log "Vulkan, WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
+    "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "Vulkan (GL is as it was)"
+  elif [[ -e /opt/omacvm-mesa ]]; then
+    log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
   fi
 fi
 if ! want battery; then
