@@ -124,6 +124,7 @@ int main(void)
     *    waits for the end: here the full FENCE_BUSY_NAP, the submit runs on. */
    reset_stats();
    end_at = "";
+   fprintf(stderr, "a stray wake-up planted on purpose (the warning below is expected):\n");
    semaphore_signal(fence_busy_sem);
    vrend_renderer_submit_begin();
    t0 = now_ns();
