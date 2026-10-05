@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -139,6 +140,8 @@ class SyncCase(unittest.TestCase):
         self.set_scale("2")
 
     def tearDown(self):
+        # the look the guard schedules for when a hold ends
+        subprocess.run(["pkill", "-f", str(SYNC)], capture_output=True)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def set_scale(self, scale: str):
@@ -242,6 +245,16 @@ class ModeAndScale(SyncCase):
 
 
 class Guard(SyncCase):
+    def run_sync(self):
+        # The guard counts changes within 10 s. A slow machine (CI, a busy
+        # VM) must not stretch the test past that: every change so far
+        # counts as just now.
+        h = self.state / "Virtual-1.history"
+        if h.exists():
+            now = time.time()
+            h.write_text("".join(f"{now} {line.split()[1]}\n" for line in h.read_text().splitlines()))
+        return super().run_sync()
+
     def test_ping_pong_is_held(self):
         # Something flips the output between two states (a loop): the 6th
         # change in 10 s is held, and nothing more is sent for a while.
@@ -259,6 +272,10 @@ class Guard(SyncCase):
         r = self.run_sync()
         self.assertEqual(len(self.evals()), 5)
         self.assertEqual(r.stderr.count("keeping"), 0)
+        # one look is scheduled for when the hold ends
+        looks = subprocess.run(["pgrep", "-f", f"sleep 61; exec .*{SYNC.name}"],
+                               capture_output=True, text=True).stdout.split()
+        self.assertEqual(len(looks), 1)
 
     def test_window_resize_is_followed(self):
         # A window being resized: a new size each time (about one a second

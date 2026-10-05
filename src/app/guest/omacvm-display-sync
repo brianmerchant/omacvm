@@ -355,19 +355,21 @@ PY
 # again; 2: held. The hold is the guard against a loop: an output that
 # changed 6 times in 10 s between only two states (ping-pong), or 12 times
 # in 10 s at all, keeps what it shows for 60 s and the reason is logged once
-# (journal, and the file "held" for omacvm check). A window being resized
+# (journal, and the file "held" for omacvm check); then it looks once more
+# (the window may have changed meanwhile). A window being resized
 # changes it about once a second (QEMU waits a second), to new sizes each
 # time: that is never held.
 follow_check() {
-  python3 - "$state_dir" "$@" <<'PY'
+  python3 - "$state_dir" "$0" "$@" <<'PY'
 import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 
-state, output, digest, mode, scale, position, hdr, shown = sys.argv[1:9]
+state, self_path, output, digest, mode, scale, position, hdr, shown = sys.argv[1:10]
 WINDOW, PINGPONG, STORM, HOLD = 10.0, 6, 12, 60.0
 d = pathlib.Path(state)
 d.mkdir(parents=True, exist_ok=True)
@@ -442,6 +444,10 @@ if len(events) >= STORM or (len(events) >= PINGPONG and distinct <= 2):
     history.unlink(missing_ok=True)
     with open(d / "held", "a") as held:
         held.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {reason}\n")
+    # One look when the hold ends, with what is current then.
+    subprocess.Popen(["sh", "-c", f'sleep {HOLD + 1:.0f}; exec "$0" --once', self_path],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
     raise SystemExit(2)
 history.write_text("".join(f"{t} {h}\n" for t, h in events))
 last_hdr.write_text(hdr)
