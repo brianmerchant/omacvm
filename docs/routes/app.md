@@ -103,7 +103,7 @@ VM runs, and goes back by itself when a new version does not start
   "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the
   VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
   desktop, never in the boot's critical chain. Automatic is OpenGL on every
-  Mac in 3.0.0 (CHANGELOG, known issue).
+  Mac in 3.0.0 (CHANGELOG).
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan

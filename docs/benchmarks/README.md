@@ -450,19 +450,35 @@ which MoltenVK lacks. With Vulkan on, OpenGL stays on virgl (Zink is slower
 and ES 2.0 only) and Chrome keeps ANGLE on GL, so on macOS 26 and newer
 Vulkan adds Vulkan apps on the better driver and changes nothing else.
 
-**Automatic = OpenGL on every Mac in 3.0.0.** A Vulkan window that does not
-take the CPU copy below still ends Hyprland's GPU context (black desktop);
-until the host refuses that import without ending the context, Vulkan is the
-user's choice. Turning Automatic to Vulkan on macOS 26 and newer is one
-constant (`Graphics.autoVulkan`, `GRAPHICS_AUTO_VULKAN`).
+**Automatic = OpenGL on every Mac in 3.0.0.** On macOS 26 and newer
+(KosmicKrisp) Vulkan windows still go through the slow CPU copy below, and
+the GPU path for them is not tested there yet, so Vulkan is the user's
+choice. Turning Automatic to Vulkan on macOS 26 and newer is one constant
+(`Graphics.autoVulkan`, `GRAPHICS_AUTO_VULKAN`).
 
-Vulkan windows present through a CPU copy (Mesa's software WSI,
-`MESA_VK_WSI_DEBUG=sw`, set for app VMs): a Venus image handed to Hyprland
-as a dma-buf cannot be imported by its OpenGL context on the Mac and ended
-that context (black desktop). The copy is slow for full-screen Vulkan:
-vkmark full screen 387 (M4 Max, 2592x1458) and 203 (Mac mini M4, 5K); with
-vkmark's headless output, no window, 4,700-5,200 on the M4 Max. Those are not
-the same size or scene set, so they give only a rough idea of the cost.
+Vulkan windows: a Venus image handed to Hyprland as a dma-buf cannot be
+imported by its OpenGL context on the Mac. Until 3.0.0 RC that import ended
+Hyprland's context (black desktop), so app VMs presented through a CPU copy
+(Mesa's software WSI, `MESA_VK_WSI_DEBUG=sw`). Now the Mac fills a GL texture
+from the image (virgl-set-type-without-egl.patch) and Vulkan apps keep Mesa's
+normal present path. vkmark (7 scenes x 5 s, mailbox, M4 Max, macOS 15,
+MoltenVK, bench lock, median of 3, test window hidden):
+
+| | normal WSI (now) | software WSI (before) |
+|---|---|---|
+| window 800x600 | 865 | 336 |
+| full screen 2592x1458 | 678 | 65 |
+
+These count the app's frames. The frames the screen shows are capped by the
+display's refresh; that was not measured here (the hidden test window paces
+Hyprland at ~12 Hz for both paths). With vkmark's headless output, no window:
+4,700-5,200.
+
+The GPU path is on only with MoltenVK (macOS 15): the app sends
+`omacvm.vkwindows=1` only there. With KosmicKrisp (macOS 26 and newer) and
+with an older app, Vulkan windows still go through the CPU copy (vkmark full
+screen with it on a Mac mini M4 at 5K, macOS 27: 203; another run, not the
+table's scene set).
 
 ## GPU compute with Venus (2026-10-04)
 

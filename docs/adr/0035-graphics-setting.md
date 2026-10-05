@@ -31,9 +31,10 @@ decides whether Vulkan apps get the Mac's GPU, not how the desktop draws.
   centre (one more Bridge request: `{"action": "graphics", "graphics":
   "opengl"|"vulkan"|"auto"}`, app VMs only, a fixed argv).
 - Automatic = OpenGL on every Mac in 3.0.0 (`Graphics.autoVulkan` /
-  `GRAPHICS_AUTO_VULKAN` = off): a Vulkan window that skips the guest's CPU
-  copy still ends Hyprland's GPU context (black desktop) until the host
-  refuses that import without ending the context. With it on: Vulkan on
+  `GRAPHICS_AUTO_VULKAN` = off): the black desktop from Vulkan windows is
+  fixed (the host no longer ends Hyprland's context on that import), but on
+  macOS 26 and newer (KosmicKrisp) Vulkan windows still go through the slow
+  CPU copy and the GPU path is not tested there yet. With it on: Vulkan on
   macOS 26 and newer when the app has KosmicKrisp, OpenGL otherwise. The
   numbers are in
   [benchmarks](../benchmarks/README.md#graphics-automatic-2026-10-05).
