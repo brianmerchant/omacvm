@@ -121,6 +121,9 @@ jobs:
       - name: Full-screen pointer guard (motion maths)
         run: app/runtime/Tests/display/test-pointer-guard.sh
 
+      - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
+        run: app/runtime/Tests/display/test-pointer-start.sh
+
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 

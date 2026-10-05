@@ -66,6 +66,7 @@ src/gestures/mac/test.sh
 src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
 src/tests/app-paths.sh
 app/runtime/Tests/display/test-pointer-guard.sh
+app/runtime/Tests/display/test-pointer-start.sh
 src/tests/app-notch.sh
 src/tests/keyboard-light.sh
 src/tests/features-off.sh
