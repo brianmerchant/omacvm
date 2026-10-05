@@ -366,7 +366,8 @@ Rules:
   Mac's memory, so only a runaway VM reaches it (ADR 0034). Below it,
   `virgl-darwin-memory-pressure.patch` follows macOS's memory pressure (a
   dispatch source; its handler only stores the level, the renderer thread
-  acts in `virgl_renderer_poll`): big new resources (16 MB+, not screens or
+  acts in `virgl_renderer_poll` and also reads the level once a second,
+  because macOS tells only some processes about a warning): big new resources (16 MB+, not screens or
   cursors) are refused only at "critical", or at "warn" when they are bigger
   than all macOS has left, after a glFinish and three more looks. It writes
   `logs/gpu-memory` for the app and `omacvm check`. A desktop takes
