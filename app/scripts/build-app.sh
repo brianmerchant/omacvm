@@ -183,6 +183,11 @@ ditto "$HB/src/gestures/mac/build/OmacVMGestures.app" "$C/Helpers/$GESTURES_APP"
 rm -rf "$HB"
 
 # The app carries the version of the OmacVM it is part of.
+# Bluetooth: macOS charges Bluetooth, the camera and the microphone of a
+# helper run from inside this bundle (Contents/Helpers) to the app, and kills
+# the helper if the app's Info.plist has no reason for it (OS_REASON_TCC).
+# The installed Bridge runs from ~/Applications and has its own; this keeps
+# a Bridge started in place alive (src/tests/prebuilt-helpers.sh checks).
 VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -202,7 +207,8 @@ cat > "$C/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
-  <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>$( (( TEST )) && printf '\n  <key>OmacVMGesturesDomain</key><string>%s</string>' "$GESTURES_ID")
+  <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>OmacVM Bridge shows this Mac's Bluetooth devices in your Linux VM's status bar, and connects, disconnects or forgets them when you ask there.</string>$( (( TEST )) && printf '\n  <key>OmacVMGesturesDomain</key><string>%s</string>' "$GESTURES_ID")
 </dict>
 </plist>
 EOF

@@ -317,11 +317,27 @@ struct ReadyView: View {
         }
     }
 
+    /// VM memory and graphics memory side by side: the VM's RAM is fixed,
+    /// its graphics come from the Mac on top, as needed (GPUMemory).
+    private var graphicsMemory: some View {
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let vm = "VM memory: \(state.config.memoryMB / 1024) GB"
+            let gpu = GPUMemory.read(for: state.config).map {
+                "graphics memory last run: peak \(GPUMemory.gb($0.peakMB)), from the Mac on top"
+            } ?? "graphics memory: from the Mac on top, as the VM needs it"
+            Text("\(vm); \(gpu)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(GPUMemory.explanation)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(state.config.name).font(.title2.bold())
             Text("\(state.config.cpus) CPUs, \(state.config.memoryMB / 1024) GB memory, \(state.config.diskGB) GB disk, user \(state.config.user)")
                 .foregroundStyle(.secondary)
+            graphicsMemory
             Picker("Resources", selection: tier) {
                 ForEach(0..<4) { t in
                     let v = Mac.tier(t)
@@ -382,8 +398,8 @@ struct ReadyView: View {
             try Graphics.write(g, folder: folder)
             let plan = Runner.graphicsPlan(state.config)
             graphicsNote = "Applies on the next start."
-            if plan.venus && !Graphics.driverReady(folder: folder) {
-                graphicsNote = "Applies on the next start. The first time, the VM builds its Vulkan driver at that start (a few minutes; Vulkan apps wait for it)."
+            if g == .vulkan && !plan.venus {
+                graphicsNote = "The VM has no Vulkan driver yet: it runs on OpenGL until `omacvm apply` (or `omacvm graphics` while the VM runs) builds it, a few minutes."
             }
         } catch {
             graphicsNote = "Could not save: \(error.localizedDescription)"
@@ -511,9 +527,9 @@ struct GraphicsPicker: View {
                 Text("OpenGL").tag(GraphicsChoice.opengl)
                 Text("Vulkan (experimental)").tag(GraphicsChoice.vulkan)
             }
-            .help("OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before). Automatic picks what is faster on this Mac.")
+            .help("OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before); Vulkan windows are copied through the CPU. Automatic: OpenGL on every Mac in this version.")
             if let p = plan {
-                Text("Next start: \(p.venus ? "OpenGL and Vulkan" : "OpenGL") (\(p.why)).")
+                Text(p.choice == .vulkan && !p.venus ? "Next start: \(p.summary)." : "Next start: \(p.summary) (\(p.why)).")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

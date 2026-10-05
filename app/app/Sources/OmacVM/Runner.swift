@@ -11,6 +11,7 @@ final class Runner {
     let config: VMConfig
     private(set) var process: Process?
     private let sleep = VMHostSleepCoordinator()
+    private var gpuMemory: GPUMemoryWatch?
     private var observers: [NSObjectProtocol] = []
     var onExit: ((Int32) -> Void)?
 
@@ -78,6 +79,13 @@ final class Runner {
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
             a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
         }
+        // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch):
+        // the guest then presents Vulkan on the GPU, not through a CPU copy (omacvm-vulkan-present).
+        if Graphics.vulkanWindowsOnGPU(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                                       kosmicKrisp: Runner.runtimeHasKosmicKrisp,
+                                       driver: ProcessInfo.processInfo.environment["OMACVM_VULKAN_DRIVER"]) {
+            a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
+        }
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
@@ -133,16 +141,20 @@ final class Runner {
     /// The graphics this start got (Graphics.swift).
     private(set) var graphics: GraphicsPlan?
 
+    /// The runtime has KosmicKrisp (release builds; Venus uses it on macOS 26+).
+    static var runtimeHasKosmicKrisp: Bool {
+        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
+        return FileManager.default.fileExists(atPath: lib.path)
+    }
+
     /// The VM's Graphics setting on this Mac now: the macOS version, whether
     /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
     static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
-        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
-        let forced = Settings.venus || FileManager.default.fileExists(
-            atPath: c.folder.appendingPathComponent("vulkan").path)
+        let forced = FileManager.default.fileExists(atPath: c.folder.appendingPathComponent("vulkan").path)
         return Graphics.plan(choice: Graphics.read(folder: c.folder),
                              macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-                             kosmicKrisp: FileManager.default.fileExists(atPath: lib.path),
+                             kosmicKrisp: runtimeHasKosmicKrisp,
                              driverReady: Graphics.driverReady(folder: c.folder), forced: forced,
                              macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024)
     }
@@ -198,6 +210,9 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // The VM's graphics memory on the Mac, for this app and omacvm check (GPUMemory).
+        env["OMACVM_GPU_MEMORY_STATUS"] = GPUMemory.file(for: c).path
+        try? FileManager.default.removeItem(at: GPUMemory.file(for: c))
         // The window opens on the display the user is using (WindowPlacement).
         // QEMU's hook for that (omacvm-cocoa-displays.patch) still has the name
         // its first user, the display tests, gave it; it is no test mode.
@@ -222,8 +237,12 @@ final class Runner {
         }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let log = try FileHandle(forWritingTo: logURL)
+        // Append mode: this app adds "OmacVM: ..." lines while QEMU writes
+        // (appendLog); without O_APPEND QEMU's next write lands at its own
+        // offset and overwrites them.
+        let fd = open(logURL.path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0o644)
+        guard fd >= 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: logURL.path]) }
+        let log = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         // Which network this start took, for omacvm check and the omacvm command
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
@@ -244,6 +263,7 @@ final class Runner {
             GuestAgent.release(socketPath: agentPath)
             Task { @MainActor in
                 self?.stopObserving()
+                self?.gpuMemory?.stop()
                 self?.clipboard?.stop()
                 self?.battery?.stop()
                 self?.control?.stop()
@@ -262,6 +282,9 @@ final class Runner {
         process = p
         if network.vmnet { watchFastNetwork() }
         observeSleep()
+        let watch = GPUMemoryWatch(config: c) { [weak self] line in self?.appendLog(line) }
+        watch.start()
+        gpuMemory = watch
         observeActivation()
         startClipboard()
         // A feature that is off: nothing of the Mac on its port.
@@ -327,6 +350,14 @@ final class Runner {
         }
         // Back to vmnet once its NIC is up again; until then the user network stays.
         return l.fast == true ? "vmnet" : nil
+    }
+
+    /// One "OmacVM: ..." line at the end of qemu.log.
+    private func appendLog(_ line: String) {
+        guard let h = FileHandle(forWritingAtPath: config.folder.appendingPathComponent("logs/qemu.log").path) else { return }
+        h.seekToEndOfFile()
+        h.write(Data("\(line)\n".utf8))
+        try? h.close()
     }
 
     /// logs/network (first line: vmnet, slirp or vmnet-down, then why) and a

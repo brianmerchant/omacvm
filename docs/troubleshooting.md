@@ -126,6 +126,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 | 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
 | 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
 | 23 | app | [Chrome hangs in Basemark Web 3.0, the screen flickers](#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers) |
+| 24 | app | [A scale like 1.6 on a 5K display turns the VM black and flickering](#24-app-a-scale-like-16-on-a-5k-display-turns-the-vm-black-and-flickering) |
 | 25 | app | [The sound crackles while the VM or the Mac is busy](#25-app-the-sound-crackles-while-the-vm-or-the-mac-is-busy) |
 | 26 | app | [The VM does not start (no window), or freezes when sound starts](#26-app-the-vm-does-not-start-no-window-or-freezes-when-sound-starts) |
 
@@ -464,6 +465,54 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   VMs running on the Mac) and Aquarium still runs (19-21 fps).
 - **Where:** `app/runtime/patches/`, `app/runtime/build-qemu-gpu-runtime.sh`,
   `app/runtime/Tests/virgl/`, `app/scripts/gpu-check.sh`.
+
+## 24. app: a scale like 1.6 on a 5K display turns the VM black and flickering
+
+- **Symptom:** in OmacVM.app 2.9.0 on a Mac mini (16 GB) with an LG
+  UltraFine 5K, picking 1.6 in Omarchy's scale menu made the screen freeze
+  and flicker, then the VM stayed black. Setting the scale back did not bring
+  the picture back; restarting the VM did, and 1.6 then worked.
+- **Cause:** the VM's GPU memory on the Mac has a budget, so a runaway VM
+  cannot fill the Mac's memory. 2.9.0 set it to a quarter of the Mac's
+  memory: 4 GB on 16 GB. A 5K desktop takes about 1.2 GB, with a browser
+  open 1.6 to 1.9 GB, and more with more apps. A scale change makes every
+  screen-sized buffer again (Hyprland's and every app's, 56 to 90 MB each at
+  5K), so for a moment old and new ones both count. The VM reached the
+  budget, the Mac refused Hyprland's next buffer, and Hyprland's GPU context
+  was lost: `logs/qemu.log` says `guest GPU memory budget of 4096 MB
+  reached`, then `context ... (Hyprland) is lost`. It was not a loop and not
+  a leak: switching between 1.6 and 2 sixteen times leaves the same memory
+  in use each time, and a 35-minute session with 149 scale changes and 50
+  browser windows came back to where it started. The refused 8192-wide
+  buffer was most likely Omarchy's bar (quickshell): for one frame after
+  a scale change it draws the new size at the old scale (8192×4608 from
+  1.6 to 1 at 5K). A desktop with more apps open than in our tests (each
+  browser window at 5K holds a few buffers of 30 to 90 MB) plus that
+  moment explains the 3993 MB in use.
+- **Fix:** no fixed limit any more. The VM's graphics memory grows as
+  long as macOS has memory to give; new big buffers are refused only when
+  macOS says its memory is critical, or would be nearly used up while it
+  warns (`app/runtime/patches/virgl-darwin-memory-pressure.patch`). The one
+  fixed guard, three quarters of the Mac's memory, only stops a runaway VM.
+  If the desktop still loses its GPU context, the app says so and offers to
+  restart the desktop session instead of leaving the VM black.
+  `omacvm check` shows the graphics memory now and its peak ("graphics
+  memory"); the app shows it beside the VM memory
+  ([what the two are](routes/app.md#graphics-memory-and-vm-memory)). The display sync also sends a
+  mode only when Hyprland shows another, one call at a time, and stops
+  following an output that keeps changing (6 times in 10 s between two
+  states, or 12 times at all) for a minute; the VM's `omacvm check` says so
+  ("display sync"). On a 4K or larger display, Omarchy's display panel
+  says 2x is the sharp scale. What in-between scales cost:
+  [routes/app.md](routes/app.md#display-scale-on-4k-5k-and-larger-displays).
+- **Where:** `app/runtime/patches/virgl-resource-memory-budget.patch`,
+  `app/runtime/patches/virgl-darwin-memory-pressure.patch`,
+  `app/app/Sources/OmacVM/GPUMemory.swift`,
+  `src/app/guest/omacvm-display-sync` (tests:
+  `src/app/guest/tests/test_display_sync.py`),
+  `src/app/guest/monitor-widget/build.py`, `src/cmd/check.sh`,
+  `src/guest/check.sh`, `tests/graphics/fractional-scale.sh` (every scale in
+  a running VM).
 
 ## 25. app: the sound crackles while the VM or the Mac is busy
 

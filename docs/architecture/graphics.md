@@ -362,6 +362,19 @@ Rules:
   `qemu-hvf-virgl-blob-subregion.patch` maps a memory subregion instead.
 - Metal heaps are pointers in one process, which is why the Venus server
   runs in process (ADR 0012).
+- Classic resources count against a budget (all levels, layers and
+  samples; `virgl-resource-memory-budget.patch`): three quarters of the
+  Mac's memory, so only a runaway VM reaches it (ADR 0034). Below it,
+  `virgl-darwin-memory-pressure.patch` follows macOS's memory pressure (a
+  dispatch source; its handler only stores the level, the renderer thread
+  acts in `virgl_renderer_poll` and also reads the level once a second,
+  because macOS tells only some processes about a warning): big new resources (16 MB+, not screens or
+  cursors) are refused only at "critical", or at "warn" when they are bigger
+  than all macOS has left, after a glFinish and three more looks. It writes
+  `logs/gpu-memory` for the app and `omacvm check`. A desktop takes
+  1.1 GB at 4K to 3.1 GB at 8K, up to 6.2 GB for a moment while the scale
+  changes (every screen-sized buffer is made again). QEMU's log notes each
+  new peak in 512 MB steps.
 
 ## 6. Vulkan: Venus (built: `gpu-venus`)
 
@@ -388,10 +401,21 @@ Patches (all in `app/runtime/patches`, one per concern):
   pages (it was 4 KiB-aligned), so every blob the guest maps is the
   allocation's own memory.
 - `qemu-hvf-virgl-blob-subregion.patch`, `qemu-virtio-gpu-blob-alignment.patch`.
+- `virgl-set-type-without-egl.patch`: Vulkan windows. Hyprland imports a
+  Venus image (a Metal heap) as a dma-buf (`PIPE_RESOURCE_SET_TYPE` in its
+  virgl context). macOS OpenGL cannot import it, and the old EINVAL ended
+  Hyprland's whole context (black desktop). Now the resource gets a plain GL
+  texture, filled from the heap when a draw samples it (Metal blit into a
+  shared buffer, then `glTexSubImage2D`, once per command buffer); memory
+  that cannot be read leaves it blank. The app says so at start (OEM string
+  `omacvm.vkwindows=1`, only with MoltenVK: KosmicKrisp's exported memory is
+  not tested yet); the guest then keeps Mesa's normal WSI, otherwise (older
+  app, KosmicKrisp) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
 
-Switch: `defaults write org.omacvm.app venus -bool true` adds
-`blob=true,venus=true,hostmem=4G` to the GPU device. Off by default: the
-guest needs Mesa with blob rounding.
+Switch: the VM's Graphics setting (ADR 0035; up to 2.9 the hidden `venus`
+default, moved into it at the first 3.0.0 launch) adds
+`blob=true,venus=true,hostmem=<plan>G` to the GPU device, once the VM has a
+Venus driver with blob rounding (`venus-ready`). Automatic is OpenGL in 3.0.0.
 
 Limits: MoltenVK has no `nullDescriptor`, no geometry shaders, no logicOp,
 no float64, no `VK_EXT_provoking_vertex`. So Zink as a GL driver and
@@ -530,7 +554,7 @@ falls back and logs once.
 | `OMACVM_GL_HDR=1` | off (the app sets it only with an EDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
 | `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
 | `omacvm enable vulkan` (feature, per VM) | off | the VM folder's `vulkan` file: Venus device options for that VM; OmacVM's Mesa in the VM | built (`gpu-next`) |
-| `defaults write org.omacvm.app venus -bool true` | false | Venus device options for every VM (development) | built (`gpu-venus`) |
+| Graphics setting (`graphics` file per VM) | auto (= OpenGL in 3.0.0) | Venus device options for that VM once `venus-ready`; replaces the hidden `venus` default (moved once, removed) | built (`vk300`, `vk-review-fixes`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
 | Guest: `src/app/guest/venus/install.sh` (`--force`, `--remove`) | with the feature `vulkan` | OmacVM's Mesa for Vulkan, OpenCL (rusticl), Firefox WebGPU | built (`webgpu-compute`, `gpu-next`) |
 | `OMACVM_VIDEO_DECODE=0` | on | no video caps offered; guest decodes in software | built (`video-decode`) |
@@ -597,7 +621,10 @@ What crosses and who checks it:
   arrays, 1e300, 101 flips).
 - **no host pointers** reach the guest; no guest-controlled allocation
   without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
-  IOSurfaces 3 per window, each at most the largest display).
+  IOSurfaces 3 per window, each at most the largest display, classic
+  resources three quarters of the Mac's memory and, below that, macOS's
+  memory pressure). The lost context's name in `logs/gpu-memory` is the
+  guest's: only letters, digits and `. _ -` are written.
 - **scanout size and format**: the present surfaces follow the guest's
   scanout, capped at the largest display. `pacing-hdr` keeps five of them
   with vsync (queue for the display's refresh; three with

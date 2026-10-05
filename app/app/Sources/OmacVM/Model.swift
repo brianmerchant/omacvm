@@ -401,11 +401,20 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
-    /// Vulkan (Venus) in every VM whatever its Graphics setting, for
-    /// development. Users choose per VM: Graphics (Graphics.swift) in the
-    /// setup, the VM window, `omacvm graphics` and the control centre.
-    /// Hidden: defaults write org.omacvm.app venus -bool true
-    static var venus: Bool { UserDefaults.standard.bool(forKey: "venus") }
+    /// The hidden Vulkan switch up to 2.9 (`venus`): moved once into each
+    /// VM's Graphics setting at the first 3.0.0 launch, then removed
+    /// (Graphics.migrateVenusSwitch).
+    @MainActor static func migrateVenusSwitch() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "venus") != nil else { return }
+        let on = d.bool(forKey: "venus")
+        let lines = on ? Graphics.migrateVenusSwitch(folders: VMConfig.all().map(\.folder)) : []
+        d.removeObject(forKey: "venus")
+        for l in ["the hidden venus switch was \(on ? "on" : "off"): moved into the VMs' Graphics setting and removed"] + lines {
+            Updater.shared.log("graphics: \(l)")
+            FileHandle.standardError.write(Data("graphics: \(l)\n".utf8))
+        }
+    }
     /// HDR: a 10-bit guest output is shown as BT.2100 PQ with the Mac's EDR,
     /// and the guest's display sync turns HDR on once its 10-bit virtio-gpu
     /// module runs (omacvm-virtio-gpu-build in the VM, then a restart).

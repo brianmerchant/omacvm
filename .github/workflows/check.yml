@@ -149,8 +149,17 @@ jobs:
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
+      - name: Display sync (scales at 4K and 5K, nothing sent twice, the loop guard)
+        run: |
+          # The VM side runs on Arch's bash 5; macOS's own is 3.2.
+          [ -x /opt/homebrew/bin/bash ] || brew install bash
+          python3 src/app/guest/tests/test_display_sync.py
+
       - name: Full-screen pointer guard (motion maths)
         run: app/runtime/Tests/display/test-pointer-guard.sh
+
+      - name: App menu memory lines (VM memory, graphics memory)
+        run: app/runtime/Tests/display/test-gpu-memory-menu.sh
 
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh

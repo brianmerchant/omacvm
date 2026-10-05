@@ -8,13 +8,9 @@ in more words.
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
 prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
 26 and newer), Chromium video on the Mac's media engine, VMs on any drive,
-a boot splash, less power when idle. From 2.9.x: `omacvm update` once; after
-that the app updates itself. Details below.
-
-Pending (each line is decided at release: the lane landed, or it moves to
-3.0.1; this list goes before the release):
-- (pending #91) Any Omarchy scale on 5K and larger: graphics memory without
-  a fixed limit.
+a boot splash, any Omarchy scale on 5K and larger displays, less power
+when idle. From 2.9.x: `omacvm update` once; after that the app updates
+itself. Details below.
 
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
@@ -50,6 +46,29 @@ Pending (each line is decided at release: the lane landed, or it moves to
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.
+- OmacVM.app: an in-between scale (1.6, say) on a 5K display no longer turns
+  the VM black and flickering. The VM's GPU memory on the Mac had a budget of
+  a quarter of the Mac's memory (4 GB on a 16 GB Mac mini), and a 5K desktop
+  with apps open, whose buffers are all made again on a scale change, reached
+  it: Hyprland's next buffer was refused and its GPU context lost. Graphics
+  memory now has no fixed limit: it grows while macOS has memory to give,
+  and new big buffers are refused only when macOS runs short (its memory
+  pressure). 6K and 8K displays fit too. A runaway VM still stops at three
+  quarters of the Mac's memory.
+- OmacVM.app: the app shows the VM's graphics memory beside its VM memory
+  (graphics memory comes from the Mac on top): before a start in the app,
+  while the VM runs in its app menu ("Graphics memory: 1.6 GB (peak
+  2.6 GB)"), and in `omacvm check` (now and peak). When macOS warns that memory is short, the VM drops its
+  file cache so the Mac gets that memory back.
+- OmacVM.app: if the VM's desktop loses its GPU context anyway, the app says
+  so and offers to restart the desktop session, instead of a black VM.
+- OmacVM.app: the VM's display sync sends a mode only when Hyprland shows
+  another (each resend was a modeset: a flash, every buffer made again), one
+  call at a time, and stops following an output that keeps changing (a loop)
+  for a minute, with a line in `omacvm check`.
+- OmacVM.app: on a 4K or larger display, Omarchy's display panel says 2x is
+  the sharp scale there. What in-between scales cost:
+  [docs/routes/app.md](docs/routes/app.md#display-scale-on-4k-5k-and-larger-displays).
 - OmacVM.app: an app whose texture or buffer goes past the VM's GPU memory
   budget loses its GPU context at once, and QEMU's log says why. With the
   VM's reset-aware Mesa (`src/app/guest/mesa`, not installed by default) a
@@ -143,14 +162,16 @@ Pending (each line is decided at release: the lane landed, or it moves to
 - OmacVM.app: when a VM's window opens, OMACVM turns into Omarchy's logo
   (about 3.5 s; just the logo with Reduce motion). The logo then stays until
   Omarchy's desktop (or its login or lock screen) is there, over the
-  firmware, GRUB and Linux's text, and fades into it; also after a restart.
+  firmware, GRUB and Linux's text, and fades into it once the wallpaper is
+  drawn (not into Hyprland's grey before it); also after a restart.
   It gives way at once if the VM stops on an error, and after 40 seconds
   without a desktop, so a prompt or an error in the VM shows. If Omarchy has
   shown nothing at all after 90 seconds, a line under the logo says so and
   where the logs are.
 - OmacVM.app: an output with nothing on it shows Omarchy's logo instead of
   QEMU's "Display output is not active.", and plain black once the desktop
-  was there: an idle Omarchy that turns its display off now shows black.
+  was there (also when it came after the 40 seconds): an idle Omarchy that
+  turns its display off now shows black.
 - Boot logo: the firmware's logo is as big as the app's start animation
   (810 x 190 at 1920 x 1080) and smaller on a small screen (a small window
   after a restart) instead of none.
@@ -167,15 +188,20 @@ Pending (each line is decided at release: the lane landed, or it moves to
   **Automatic** (the default), in the app's setup and VM window, with
   `omacvm graphics --vm NAME opengl|vulkan|auto`, and on the control
   centre's Graphics row. Vulkan gives the VM Vulkan on the Mac's GPU (Venus)
-  next to OpenGL; Automatic picks it where it is the faster path on this
-  Mac: on macOS 26 and newer with KosmicKrisp, where Vulkan apps get the
-  faster driver (vkmark +29 % over MoltenVK); on macOS 15 it stays OpenGL,
-  because MoltenVK cannot carry OpenGL or WebGL (ES 2.0 only; numbers in
-  docs/benchmarks). OpenGL stays on virgl either way. It applies at the
-  VM's next start, and `omacvm check` says what a start got. The hidden `venus` switch stays for development.
+  next to OpenGL; OpenGL and the browsers stay on virgl either way, so
+  Vulkan only adds Vulkan apps (on macOS 26 and newer on KosmicKrisp, which
+  ran vkmark off-screen 29 % faster than MoltenVK on a Mac mini M4).
+  Automatic is OpenGL on every Mac in 3.0.0; turning it to Vulkan on
+  macOS 26 and newer later is one line. It applies at the VM's next start,
+  and `omacvm check` says what a start got. The hidden `venus` switch of 2.9
+  is gone: if it was on, the app's first 3.0.0 launch sets Graphics to
+  Vulkan for each VM that had no choice of its own (OpenGL stays OpenGL)
+  and says so in its log.
   With Vulkan the VM also gets OpenCL on the Mac's GPU (Arch's rusticl on
-  Zink on Venus, no build) where the Mac's driver is KosmicKrisp: Geekbench 7
-  OpenCL 20,121 on a Mac mini M4 (the Mac itself: 35,240).
+  Zink on Venus, no build) where the Mac's driver is KosmicKrisp (macOS 26
+  and newer): Geekbench 7 OpenCL 20,121 on a Mac mini M4 (the Mac itself:
+  35,240). On macOS 15 (MoltenVK) Zink cannot run, so OpenCL there needs
+  `omacvm enable vulkan` (below).
 - KosmicKrisp is in the app (about 13 MB, its licences in the app's
   licences folder): on macOS 26 and newer Vulkan runs on it, on older macOS
   on MoltenVK. A Mac where KosmicKrisp cannot run falls back to MoltenVK
@@ -191,15 +217,27 @@ Pending (each line is decided at release: the lane landed, or it moves to
   whose Venus driver does not size GPU memory to the Mac's 16 KiB pages
   (every Vulkan app failed with `ERROR_OUT_OF_HOST_MEMORY`), `omacvm apply`
   builds Mesa 26.2.4's Venus driver as Arch's `vulkan-virtio` package when
-  the setting gives the VM Vulkan, and the VM builds it at its next start
-  when Vulkan was picked since. Automatic waits for it. `omacvm check` has
-  a "Vulkan (Venus)" row.
+  the setting gives the VM Vulkan. Until it is built, a VM set to Vulkan
+  starts with OpenGL only, and the app, `omacvm graphics` and the control
+  centre say "Vulkan (driver not built yet: runs on OpenGL until the next
+  apply)". In the VM a timer looks again 90 s after boot, after the desktop
+  is up, so a build never holds up the boot or the desktop. `omacvm check`
+  has a "Vulkan (Venus)" row.
 - Vulkan windows no longer take Omarchy's desktop down: a Vulkan app on
   Wayland (vkcube, vkmark) made Hyprland lose its GPU context for good (a
-  black desktop) when it took the app's frame as a dma-buf, which the Mac
-  cannot share with OpenGL. App VMs now present Vulkan frames through a
-  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which costs full-screen Vulkan frame
-  rates.
+  black desktop) when it took the app's frame as a dma-buf. macOS OpenGL
+  cannot import that memory (a Metal heap), and the failed import ended
+  the whole context. Now the Mac copies the Vulkan image into an OpenGL
+  texture each time Hyprland draws it, and an import that cannot work
+  leaves that window blank instead of ending the context.
+  On macOS 15 (MoltenVK) Vulkan apps now use Mesa's normal present path
+  (vkmark on an M4 Max, median of 3: 865 in a window and 678 full screen,
+  against 336 and 65 with the CPU copy).
+  On macOS 26 and newer (KosmicKrisp) Vulkan windows still go through the
+  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which is slower, mostly full screen
+  (vkmark full screen 203 on a Mac mini M4 at 5K). The faster path is not
+  tested on KosmicKrisp yet. A VM started by an older app also keeps the
+  CPU copy.
 - OmacVM.app: WebGPU and GPU compute, experimental and off by default:
   `omacvm enable vulkan --vm NAME`, then restart the VM. The VM gets OpenCL
   (darktable, ffmpeg's OpenCL filters, Geekbench GPU), WebGPU in Firefox,
