@@ -80,6 +80,7 @@ final class GPUMemoryWatch {
     private var timer: Timer?
     private var pressure: DispatchSourceMemoryPressure?
     private var lastTrim = Date.distantPast
+    private var trimming = false
     private var lostSeen = 0
     private var alert: NSAlert?
 
@@ -110,13 +111,27 @@ final class GPUMemoryWatch {
     }
 
     private func macOSShort(critical: Bool) {
-        guard Date().timeIntervalSince(lastTrim) > 600 else { return }
-        lastTrim = Date()
+        guard !trimming, Date().timeIntervalSince(lastTrim) > 600 else { return }
+        trimming = true
         let socket = config.agentSocket.path
         let level = critical ? "critical" : "warning"
         log("OmacVM: macOS memory pressure \(level): asking the VM to drop its file cache")
-        DispatchQueue.global(qos: .utility).async {
-            GuestAgent.run(socketPath: socket, "/bin/sh", ["-c", "sync; echo 1 > /proc/sys/vm/drop_caches"])
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let ok = GuestAgent.run(socketPath: socket, "/bin/sh", ["-c", "sync; echo 1 > /proc/sys/vm/drop_caches"])
+            Task { @MainActor in self?.trimmed(ok) }
+        }
+    }
+
+    /// Done once per 10 minutes when the VM did it; when its agent did not
+    /// answer (still starting, busy), tried again in 30 seconds.
+    private func trimmed(_ ok: Bool) {
+        trimming = false
+        if ok {
+            lastTrim = Date()
+            log("OmacVM: the VM dropped its file cache")
+        } else {
+            lastTrim = Date().addingTimeInterval(-600 + 30)
+            log("OmacVM: the VM's agent did not answer: trying again in 30 s")
         }
     }
 
@@ -155,7 +170,10 @@ final class GPUMemoryWatch {
         NSApp.activate()
         let answer = a.runModal()
         alert = nil
-        guard answer == .alertFirstButtonReturn else { return }
+        guard answer == .alertFirstButtonReturn else {
+            log("OmacVM: the desktop stays black for now (Later)")
+            return
+        }
         let socket = config.agentSocket.path
         log("OmacVM: restarting the VM's desktop session")
         DispatchQueue.global(qos: .userInitiated).async {

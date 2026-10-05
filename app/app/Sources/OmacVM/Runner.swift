@@ -184,8 +184,12 @@ final class Runner {
         }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let log = try FileHandle(forWritingTo: logURL)
+        // Append mode: this app adds "OmacVM: ..." lines while QEMU writes
+        // (appendLog); without O_APPEND QEMU's next write lands at its own
+        // offset and overwrites them.
+        let fd = open(logURL.path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0o644)
+        guard fd >= 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: logURL.path]) }
+        let log = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         // Which network this start took, for omacvm check and the omacvm command
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
