@@ -122,16 +122,16 @@ GL_GUILTY_CONTEXT_RESET (0x8253) on the refused texture.
  {
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
-@@ -383,6 +383,8 @@ struct global_renderer_state {
-    uint64_t resource_bytes;
+@@ -384,6 +384,8 @@ struct global_renderer_state {
     uint64_t resource_budget;
     uint64_t resource_refusals;
+    uint64_t resource_peak_logged;
 +   /* the last vrend_renderer_resource_create failed on the budget */
 +   bool resource_refused_last;
  
     uint32_t max_draw_buffers;
     uint32_t max_texture_buffer_size;
-@@ -9991,6 +9993,7 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
+@@ -9998,6 +10000,7 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
                      MAX2(args->depth, args->array_size), (unsigned long long)(size >> 10),
                      (unsigned long long)(vrend_state.resource_bytes >> 20),
                      (unsigned long long)n);
@@ -139,7 +139,7 @@ GL_GUILTY_CONTEXT_RESET (0x8253) on the refused texture.
        return false;
     }
     gr->budget_bytes = size;
-@@ -10004,6 +10007,31 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
+@@ -10018,6 +10021,31 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
     gr->budget_bytes = 0;
  }
  
@@ -171,7 +171,7 @@ GL_GUILTY_CONTEXT_RESET (0x8253) on the refused texture.
  static struct vrend_resource *
  vrend_resource_create(const struct vrend_renderer_resource_create_args *args)
  {
-@@ -10039,6 +10067,7 @@ vrend_renderer_resource_create(const struct vrend_renderer_resource_create_args
+@@ -10053,6 +10081,7 @@ vrend_renderer_resource_create(const struct vrend_renderer_resource_create_args
     struct vrend_resource *gr;
     int ret;
  

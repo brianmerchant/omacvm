@@ -2,7 +2,7 @@ virglrenderer: Venus memory counts against the guest GPU memory budget
 
 What: Venus (Vulkan) device memory and Venus shared-memory blobs are charged
 against the same budget as the GL resources (virgl-resource-memory-budget.patch,
-OMACVM_GPU_MEMORY_MB, default a quarter of the Mac's memory): one budget per VM.
+OMACVM_GPU_MEMORY_MB, default three quarters of the Mac's memory): one budget per VM.
 vkAllocateMemory past it fails with VK_ERROR_OUT_OF_DEVICE_MEMORY, a shm blob
 past it is not made; the QEMU log says so at the 1st, 2nd, 4th ... refusal.
 Each allocation is charged in whole pages.
@@ -474,7 +474,7 @@ Mesa bug in its error path, not fixed here).
 +++ b/src/virgl_gpu_budget.h
 @@ -0,0 +1,36 @@
 +/*
-+ * OmacVM: the guest GPU memory budget (OMACVM_GPU_MEMORY_MB, default a quarter of the
++ * OmacVM: the guest GPU memory budget (OMACVM_GPU_MEMORY_MB, default three quarters of the
 + * Mac's memory), shared by vrend resources and Venus device memory. Charges and refunds
 + * are atomic: Venus allocates on its ring threads. Defined in vrend/vrend_renderer.c.
 + */
@@ -628,7 +628,7 @@ Mesa bug in its error path, not fixed here).
     uint64_t resource_bytes;
     uint64_t resource_budget;
     uint64_t resource_refusals;
-@@ -9947,7 +9950,7 @@ vrend_resource_estimated_size(const struct vrend_renderer_resource_create_args *
+@@ -9953,7 +9956,7 @@ vrend_resource_estimated_size(const struct vrend_renderer_resource_create_args *
     return MAX2(total, VREND_RESOURCE_MIN_CHARGE);
  }
  
@@ -637,16 +637,17 @@ Mesa bug in its error path, not fixed here).
  {
     const char *env = getenv("OMACVM_GPU_MEMORY_MB");
     long pages = sysconf(_SC_PHYS_PAGES), page_size = sysconf(_SC_PAGESIZE);
-@@ -9965,8 +9968,6 @@ static void vrend_resource_budget_init(void)
+@@ -9971,9 +9974,6 @@ static void vrend_resource_budget_init(void)
        }
     }
     vrend_state.resource_budget = budget;
 -   vrend_state.resource_bytes = 0;
 -   vrend_state.resource_refusals = 0;
+-   vrend_state.resource_peak_logged = 0;
     if (budget)
        virgl_info("guest GPU memory budget: %llu MB (%s)\n",
                   (unsigned long long)(budget >> 20), from);
-@@ -9974,36 +9975,117 @@ static void vrend_resource_budget_init(void)
+@@ -9981,43 +9981,125 @@ static void vrend_resource_budget_init(void)
        virgl_info("guest GPU memory budget: none (%s)\n", from);
  }
  
@@ -765,6 +766,19 @@ Mesa bug in its error path, not fixed here).
     }
     gr->budget_bytes = size;
 -   vrend_state.resource_bytes += size;
+-   if (vrend_state.resource_bytes >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
+-      vrend_state.resource_peak_logged = vrend_state.resource_bytes / VREND_RESOURCE_PEAK_STEP *
+-                                         VREND_RESOURCE_PEAK_STEP;
++   /* the peak is read here, on the renderer thread, and includes Venus memory */
++   uint64_t in_use = virgl_gpu_budget_in_use();
++   if (in_use >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
++      vrend_state.resource_peak_logged = in_use / VREND_RESOURCE_PEAK_STEP * VREND_RESOURCE_PEAK_STEP;
+       virgl_info("guest GPU memory in use: %llu MB, a new peak (budget %llu MB)\n",
+-                 (unsigned long long)(vrend_state.resource_bytes >> 20),
+-                 (unsigned long long)(budget >> 20));
++                 (unsigned long long)(in_use >> 20),
++                 (unsigned long long)(vrend_state.resource_budget >> 20));
+    }
     return true;
  }
  
@@ -775,7 +789,7 @@ Mesa bug in its error path, not fixed here).
     gr->budget_bytes = 0;
  }
  
-@@ -10027,7 +10109,7 @@ void vrend_renderer_context_refused_resource(struct vrend_context *ctx, uint32_t
+@@ -10041,7 +10123,7 @@ void vrend_renderer_context_refused_resource(struct vrend_context *ctx, uint32_t
     virgl_error("context %d (%s) made resource %u past the guest GPU memory budget "
                 "(%llu MB of %llu MB in use): the context is lost\n", ctx->ctx_id,
                 ctx->debug_name, res_handle,

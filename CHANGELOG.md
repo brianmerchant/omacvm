@@ -8,13 +8,9 @@ in more words.
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
 prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
 26 and newer), Chromium video on the Mac's media engine, VMs on any drive,
-a boot splash, less power when idle. From 2.9.x: `omacvm update` once; after
-that the app updates itself. Details below.
-
-Pending (each line is decided at release: the lane landed, or it moves to
-3.0.1; this list goes before the release):
-- (pending #91) Any Omarchy scale on 5K and larger: graphics memory without
-  a fixed limit.
+a boot splash, any Omarchy scale on 5K and larger displays, less power
+when idle. From 2.9.x: `omacvm update` once; after that the app updates
+itself. Details below.
 
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
@@ -50,6 +46,29 @@ Pending (each line is decided at release: the lane landed, or it moves to
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.
+- OmacVM.app: an in-between scale (1.6, say) on a 5K display no longer turns
+  the VM black and flickering. The VM's GPU memory on the Mac had a budget of
+  a quarter of the Mac's memory (4 GB on a 16 GB Mac mini), and a 5K desktop
+  with apps open, whose buffers are all made again on a scale change, reached
+  it: Hyprland's next buffer was refused and its GPU context lost. Graphics
+  memory now has no fixed limit: it grows while macOS has memory to give,
+  and new big buffers are refused only when macOS runs short (its memory
+  pressure). 6K and 8K displays fit too. A runaway VM still stops at three
+  quarters of the Mac's memory.
+- OmacVM.app: the app shows the VM's graphics memory beside its VM memory
+  (graphics memory comes from the Mac on top): before a start in the app,
+  while the VM runs in its app menu ("Graphics memory: 1.6 GB (peak
+  2.6 GB)"), and in `omacvm check` (now and peak). When macOS warns that memory is short, the VM drops its
+  file cache so the Mac gets that memory back.
+- OmacVM.app: if the VM's desktop loses its GPU context anyway, the app says
+  so and offers to restart the desktop session, instead of a black VM.
+- OmacVM.app: the VM's display sync sends a mode only when Hyprland shows
+  another (each resend was a modeset: a flash, every buffer made again), one
+  call at a time, and stops following an output that keeps changing (a loop)
+  for a minute, with a line in `omacvm check`.
+- OmacVM.app: on a 4K or larger display, Omarchy's display panel says 2x is
+  the sharp scale there. What in-between scales cost:
+  [docs/routes/app.md](docs/routes/app.md#display-scale-on-4k-5k-and-larger-displays).
 - OmacVM.app: an app whose texture or buffer goes past the VM's GPU memory
   budget loses its GPU context at once, and QEMU's log says why. With the
   VM's reset-aware Mesa (`src/app/guest/mesa`, not installed by default) a
