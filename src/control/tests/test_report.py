@@ -798,3 +798,11 @@ def test_host_owner_keeps_a_name_that_ends_in_s():
     out, _ = R.redact("Thomas wrote; ssh thomas@omarchy; Thomas's iPhone", k)
     R.gate(out, k)
     assert out == "<user> wrote; ssh <user>@omarchy; <user>'s iPhone", out
+
+
+def test_json_web_tokens_go():
+    """The e2e check: a JWT got through whole (its middle part says {"sub":"juergen"})."""
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJqdWVyZ2VuIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    out, counts = R.redact(f"session {jwt} refreshed; OmacVM 2.9.2 stays", known())
+    assert out == "session <secret> refreshed; OmacVM 2.9.2 stays", out
+    assert counts["secret"] == 1

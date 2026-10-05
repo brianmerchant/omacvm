@@ -44,6 +44,25 @@ while (( $# )); do
   esac
   shift
 done
+# The test identity (OMACVM_TEST_IDENTITY=1, app/scripts/build-app.sh
+# --test-identity): its helpers are the ones inside "OmacVM Test.app", on their
+# own ports and folders, granted once. Nothing is built or installed and no
+# LaunchAgent is touched (those are the installed helpers): the helpers this
+# run wants are started when they are not running yet, and that is all.
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+  H=${OMACVM_HELPERS:-$HOME/Applications/OmacVM Test.app/Contents/Helpers}
+  test_helper() {   # NAME LOG: start "NAME.app" from H (output to ~/Library/Logs/LOG) unless it runs
+    local app="$H/$1.app"
+    [[ -d $app ]] || { echo "src/mac/install.sh: test identity: $app is missing" >&2; return 1; }
+    pgrep -af "$app/Contents/MacOS/" >/dev/null && return 0   # -a: the Bridge may be our parent
+    open -g -n --stdout ~/Library/Logs/"$2" --stderr ~/Library/Logs/"$2" "$app" && echo "==> test identity: started $1"
+  }
+  rc=0
+  (( BRIDGE )) && { test_helper "OmacVM Test Bridge" omacvm-test-bridge.log || rc=5; }
+  (( GESTURES != -1 )) && { test_helper "OmacVM Test Gestures" omacvm-test-gestures.log || rc=5; }
+  (( CLIP || NOTCH )) && echo "==> test identity: no test clipboard helper or Omanotch (left out)"
+  exit "$rc"
+fi
 STAMPS=~/Library/Application\ Support/omacvm/installed
 mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
 # Up to 2.7, Gestures kept its list of VMs without a token here; nothing reads it now.
