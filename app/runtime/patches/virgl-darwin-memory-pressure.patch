@@ -18,8 +18,9 @@ against a runaway guest) nothing is refused while macOS has memory to give.
   looks again three times over 100 ms. Small resources, screens and cursors are
   never refused for pressure.
 - OMACVM_GPU_MEMORY_STATUS names a status file (key=value lines: in_use_mb,
-  peak_mb, budget_mb, pressure, refused, lost, lost_last) that OmacVM.app and
-  omacvm check read. Written by rename, at most four times a second from the poll,
+  peak_mb, budget_mb, pressure, refused, lost, lost_last, lost_recent: the last
+  eight lost contexts, so a reader that looks every 2 s misses none) that
+  OmacVM.app and omacvm check read. Written by rename, at most four times a second from the poll,
   at once for a refusal or a lost GPU context. lost_last is the lost context's
   name, which the guest chose: only letters, digits and . _ - are kept.
 - OMACVM_GPU_MEMORY_PRESSURE=off|normal|warn|critical[:AVAILABLE_MB] fixes the
@@ -34,8 +35,8 @@ the renderer thread (QEMU's main loop), like the budget.
 Upstream: not sent (macOS only; upstream has no host memory limit).
 Tests: Tests/virgl/test-resource-budget.c (build time, Apple's software renderer):
 critical refuses a 64 MB texture after trying again (>= 90 ms) but not an 8 MB
-texture or a 5K screen; warn with 100 MB left fits 64 MB and refuses 128 MB; the status file's in use, peak, pressure, refusals and a lost context
-with a sanitised name. In a VM: tests/graphics/fractional-scale.sh and the
+texture or a 5K screen; warn with 100 MB left fits 64 MB and refuses 128 MB; the status file's in use, peak, pressure, refusals and two lost
+contexts (a sanitised name, the recent list). In a VM: tests/graphics/fractional-scale.sh and the
 memory soak in docs/routes/app.md.
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
@@ -83,7 +84,7 @@ memory soak in docs/routes/app.md.
     if (vrend_state.use_async_fence_cb) {
        flush_eventfd(vrend_state.eventfd);
        mtx_lock(&vrend_state.poll_mutex);
-@@ -10324,6 +10340,304 @@ static void vrend_resource_budget_init(void)
+@@ -10324,6 +10340,316 @@ static void vrend_resource_budget_init(void)
                   (unsigned long long)(budget >> 20), from);
     else
        virgl_info("guest GPU memory budget: none (%s)\n", from);
@@ -137,6 +138,7 @@ memory soak in docs/routes/app.md.
 +   uint64_t refusals;
 +   uint64_t lost;
 +   char lost_last[64];
++   char lost_recent[8][64];     /* the last eight, oldest first */
 +   char *status_path;
 +   bool dirty;
 +   uint64_t written_bytes, written_peak, written_ns;
@@ -253,7 +255,7 @@ memory soak in docs/routes/app.md.
 +
 +static void vrend_memory_status_write(bool now)
 +{
-+   char text[512], tmp[PATH_MAX];
++   char text[1280], recent[8 * 65] = "", tmp[PATH_MAX];
 +   uint64_t t = vrend_memory_now_ns();
 +   int fd, len;
 +
@@ -263,15 +265,22 @@ memory soak in docs/routes/app.md.
 +   }
 +   if (!now && t - vrend_memory.written_ns < VREND_MEMORY_STATUS_NS)
 +      return;
++   for (int i = 0; i < 8; i++) {
++      if (!vrend_memory.lost_recent[i][0])
++         continue;
++      if (recent[0])
++         strcat(recent, ",");
++      strcat(recent, vrend_memory.lost_recent[i]);
++   }
 +   len = snprintf(text, sizeof(text),
 +                  "in_use_mb=%llu\npeak_mb=%llu\nbudget_mb=%llu\npressure=%s\nrefused=%llu\n"
-+                  "lost=%llu\nlost_last=%s\n",
++                  "lost=%llu\nlost_last=%s\nlost_recent=%s\n",
 +                  (unsigned long long)(vrend_state.resource_bytes >> 20),
 +                  (unsigned long long)(vrend_memory.peak >> 20),
 +                  (unsigned long long)(vrend_state.resource_budget >> 20),
 +                  vrend_pressure_names[vrend_memory.handled_level],
 +                  (unsigned long long)(vrend_memory.refusals + vrend_state.resource_refusals),
-+                  (unsigned long long)vrend_memory.lost, vrend_memory.lost_last);
++                  (unsigned long long)vrend_memory.lost, vrend_memory.lost_last, recent);
 +   if (snprintf(tmp, sizeof(tmp), "%s.tmp", vrend_memory.status_path) >= (int)sizeof(tmp))
 +      return;
 +   fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
@@ -383,12 +392,16 @@ memory soak in docs/routes/app.md.
 +                                  (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' ? c : '_';
 +   }
 +   vrend_memory.lost_last[i] = 0;
++   if (!i)
++      snprintf(vrend_memory.lost_last, sizeof(vrend_memory.lost_last), "unnamed");
++   memmove(vrend_memory.lost_recent[0], vrend_memory.lost_recent[1], sizeof(vrend_memory.lost_recent[0]) * 7);
++   memcpy(vrend_memory.lost_recent[7], vrend_memory.lost_last, sizeof(vrend_memory.lost_last));
 +   vrend_memory.lost++;
 +   vrend_memory_status_write(true);
  }
  
  static bool vrend_resource_charge(struct vrend_resource *gr,
-@@ -10347,8 +10661,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
+@@ -10347,8 +10673,11 @@ static bool vrend_resource_charge(struct vrend_resource *gr,
                      (unsigned long long)n);
        return false;
     }
@@ -400,7 +413,7 @@ memory soak in docs/routes/app.md.
     if (vrend_state.resource_bytes >= vrend_state.resource_peak_logged + VREND_RESOURCE_PEAK_STEP) {
        vrend_state.resource_peak_logged = vrend_state.resource_bytes / VREND_RESOURCE_PEAK_STEP *
                                           VREND_RESOURCE_PEAK_STEP;
-@@ -10363,6 +10680,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
+@@ -10363,6 +10692,7 @@ static void vrend_resource_uncharge(struct vrend_resource *gr)
  {
     vrend_state.resource_bytes -= MIN2(gr->budget_bytes, vrend_state.resource_bytes);
     gr->budget_bytes = 0;

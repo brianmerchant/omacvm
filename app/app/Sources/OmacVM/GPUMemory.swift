@@ -14,6 +14,8 @@ struct GPUMemory: Equatable {
     var refused = 0
     var lost = 0
     var lostLast = ""
+    /// The last eight lost contexts, oldest first.
+    var lostRecent: [String] = []
 
     static func file(for config: VMConfig) -> URL {
         config.folder.appendingPathComponent("logs/gpu-memory")
@@ -39,6 +41,7 @@ struct GPUMemory: Equatable {
             case "refused": m.refused = n
             case "lost": m.lost = n
             case "lost_last": m.lostLast = kv[1]
+            case "lost_recent": m.lostRecent = kv[1].split(separator: ",").map(String.init)
             default: break
             }
         }
@@ -123,8 +126,10 @@ final class GPUMemoryWatch {
         // also looks for itself once a second and writes what it sees.
         if m.pressure != "normal" { macOSShort(critical: m.pressure == "critical") }
         if m.lost > lostSeen {
+            // Several can be lost between two looks (the desktop, then a browser).
+            let new = m.lostRecent.suffix(min(m.lost - lostSeen, m.lostRecent.count))
             lostSeen = m.lost
-            if GPUMemory.compositors.contains(m.lostLast) { desktopLost(m) }
+            if new.contains(where: GPUMemory.compositors.contains) { desktopLost(m) }
         }
     }
 
@@ -134,7 +139,7 @@ final class GPUMemoryWatch {
     /// leaving a black window.
     private func desktopLost(_ m: GPUMemory) {
         guard alert == nil else { return }
-        log("OmacVM: the VM's desktop (\(m.lostLast)) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
+        log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
         let a = NSAlert()
         a.messageText = "The VM's desktop stopped drawing"
         a.informativeText = (m.pressure == "normal" && m.refused == 0

@@ -377,6 +377,13 @@ static int run_status(void)
    check(status_value("lost", NULL, 0) == 1, "its loss is in the status file at once: lost=1");
    check(status_value("lost_last", text, sizeof text) == 0 && !strcmp(text, "Hypr_land_1"),
          "lost_last=Hypr_land_1");
+   /* a second loss right after: the app must still see that the first one was lost */
+   check(virgl_renderer_context_create(2, 8, "chromium") == 0, "a second context");
+   virgl_renderer_submit_cmd(cmd, 2, 4);
+   check(status_value("lost", NULL, 0) == 2 &&
+         status_value("lost_recent", text, sizeof text) == 0 && !strcmp(text, "Hypr_land_1,chromium"),
+         "lost=2, lost_recent=Hypr_land_1,chromium");
+   virgl_renderer_context_destroy(2);
    virgl_renderer_context_destroy(1);
    return 0;
 }
