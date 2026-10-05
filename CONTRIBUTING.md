@@ -65,6 +65,8 @@ src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
 src/net/mac/test.sh
 src/gestures/mac/test.sh
 src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
+src/tests/venus-driver.sh
+src/tests/vulkan-feature.sh && src/tests/venus-build-tools.sh && src/tests/graphics-setting.sh
 src/tests/app-paths.sh
 app/runtime/Tests/display/test-pointer-guard.sh
 app/runtime/Tests/display/test-pointer-start.sh
@@ -80,6 +82,7 @@ src/tests/app-idle.sh
 src/tests/app-battery.sh
 python3 src/app/guest/tests/test_omacvm_displays.py
 python3 src/app/guest/tests/test_idle_waits.py
+src/tests/audio-timing.sh
 ```
 
 `src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to

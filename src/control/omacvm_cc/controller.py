@@ -163,9 +163,16 @@ class Controller:
                 mac_checks = S.parse_mac_checks(self.mac_status["checks"])
         checks = None if self.vm_checks is None and mac_checks is None else (self.vm_checks or []) + (mac_checks or [])
         mac_features = set(self.hello.features) if self.hello and self.hello.features else None
-        return S.build_rows(self.local.features, self.local.on, vm_type=self.local.vm_type, avail=avail,
+        rows = S.build_rows(self.local.features, self.local.on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
                             offer=self.offer(), mac_features=mac_features, show_updates=with_updates)
+        g = S.graphics_row(self.mac_status, self.local.vm_type, list(self.jobs.values()), checks)
+        return rows + [g] if g is not None else rows
+
+    def graphics(self) -> str:
+        """This VM's Graphics setting as the Mac last said it ("" unknown)."""
+        g = (self.mac_status or {}).get("graphics")
+        return str(g.get("graphics") or "") if isinstance(g, dict) else ""
 
     # ---- jobs ----
     def _job(self, d: dict) -> S.Job:

@@ -1,0 +1,38 @@
+From: OmacVM
+Subject: [PATCH] zink: no push descriptors on MoltenVK
+
+What: zink turns KHR_push_descriptor off when the (layered) driver is
+MoltenVK, like it already does on AMD.
+
+Why: MoltenVK binds push descriptor sets as discrete Metal resources, never
+through argument buffers. zink declares its bo bindings as several typed
+arrays aliasing one binding (u32 and u64 views of the kernel inputs), and
+SPIRV-Cross can alias an array binding only inside an argument buffer. So
+every compute shader that reads the push set failed in MoltenVK with
+"Attempting to alias same binding with a descriptor array which is not
+implemented through argument buffers" (vkCreateComputePipelines ->
+VK_ERROR_INITIALIZATION_FAILED): no OpenCL kernel (rusticl) ran at all.
+Seen on Venus over MoltenVK 1.4.2 (OmacVM.app, macOS 15); zink directly on
+MoltenVK has the same problem.
+
+Upstream: upstreamable (Mesa zink), not sent.
+Test: src/app/guest/venus/cltest.c (saxpy + reduction, PASS) and clpeak;
+before the patch every kernel failed to build its pipeline.
+
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -3136,6 +3136,14 @@
+    }
+ 
+    switch (zink_driverid(screen)) {
++   case VK_DRIVER_ID_MOLTENVK:
++      /* MoltenVK binds push descriptor sets as discrete Metal resources, never
++       * through argument buffers, and SPIRV-Cross can only alias one binding
++       * with several types (zink's bo arrays) inside an argument buffer: every
++       * shader reading the push set would fail to compile.
++       */
++      screen->info.have_KHR_push_descriptor = false;
++      break;
+    case VK_DRIVER_ID_MESA_RADV:
+    case VK_DRIVER_ID_AMD_OPEN_SOURCE:
+    case VK_DRIVER_ID_AMD_PROPRIETARY:

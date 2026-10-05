@@ -11,7 +11,11 @@ let controlBodyMax = 4096
 let controlFeaturesMax = 16
 let jobsPerHour = 20
 
-enum ControlAction: String { case enable, disable, reinstall, update }
+enum ControlAction: String { case enable, disable, reinstall, update, graphics }
+
+/// OmacVM.app's Graphics setting (src/cmd/graphics.sh): the only values a
+/// graphics job takes.
+let graphicsChoices: Set<String> = ["opengl", "vulkan", "auto"]
 
 struct JobRequest: Equatable { let action: ControlAction; let features: [String] }
 
@@ -74,10 +78,17 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       }
       return .success(.setUpdateChecks(b))
     case ("POST", "jobs"):
-      guard let o = try strictObject(body, allowed: ["action", "features"]),
+      guard let o = try strictObject(body, allowed: ["action", "features", "graphics"]),
             let a = o["action"] as? String, let action = ControlAction(rawValue: a) else {
-        throw PolicyError(400, "bad-action", "action: enable, disable, reinstall or update")
+        throw PolicyError(400, "bad-action", "action: enable, disable, reinstall, update or graphics")
       }
+      if action == .graphics {
+        guard o["features"] == nil, let g = o["graphics"] as? String, graphicsChoices.contains(g) else {
+          throw PolicyError(400, "bad-body", "send {\"action\": \"graphics\", \"graphics\": \"opengl\"|\"vulkan\"|\"auto\"}")
+        }
+        return .success(.startJob(JobRequest(action: .graphics, features: [g])))
+      }
+      guard o["graphics"] == nil else { throw PolicyError(400, "bad-body", "graphics only with the graphics action") }
       if action == .update {
         guard o["features"] == nil else { throw PolicyError(400, "bad-body", "update takes no features") }
         return .success(.startJob(JobRequest(action: .update, features: [])))
@@ -334,6 +345,9 @@ func jobArgv(cli: String, _ r: JobRequest, vm: String, type: String, commit: Str
     return [cli, "apply"] + which + ["--transaction", "--yes"] + r.features.flatMap { ["--reinstall", $0] }
   case .update:
     return [cli, "update"] + which + ["--transaction", "--yes"] + (commit.map { ["--commit", $0] } ?? [])
+  case .graphics:
+    // The value is one of graphicsChoices (controlRoute); OmacVM.app VMs only.
+    return [cli, "graphics", r.features.first ?? "auto"] + which + ["--yes"]
   }
 }
 
@@ -432,7 +446,7 @@ func versionGate(_ r: JobRequest, mac: String, vm: String) -> PolicyError? {
   if versionLess(mac, vm) == true {
     return PolicyError(409, "mac-older", "this VM has OmacVM \(vm), the Mac \(mac): update the Mac first (omacvm update on the Mac)")
   }
-  if r.action == .disable || r.action == .reinstall { return nil }
+  if r.action == .disable || r.action == .reinstall || r.action == .graphics { return nil }
   return PolicyError(409, "update-first", "the Mac has OmacVM \(mac), this VM \(vm.isEmpty ? "none" : vm): update first")
 }
 

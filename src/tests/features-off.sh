@@ -33,6 +33,7 @@ idle-lock:nothing of it talks to the Mac
 autologin:nothing of it talks to the Mac
 thp-kernel:nothing of it talks to the Mac
 fast-network:apply takes the Mac's service off when no VM has it (src/net/mac/test.sh)
+vulkan:apply removes the VM's vulkan file (no Venus device from the next start) and venus/install.sh --remove; nothing of it talks to the Mac (src/tests/vulkan-feature.sh)
 "
 while IFS=$'\t' read -r name _; do
   [[ -z $name || $name == \#* ]] && continue

@@ -32,6 +32,7 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
+source "$R/src/lib/graphics.sh"
 features_load
 VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
 YES=0; NEWKEY=0; REINSTALL=()
@@ -295,6 +296,14 @@ guest_install() {
   gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs$GI_ARGS" < /dev/null
 }
 step vm "the VM side"
+# OmacVM.app: what the VM's Graphics setting gives it on this Mac; with
+# Vulkan the VM builds its Venus driver now (a copy of an older OmacVM,
+# when going back, does not know the option).
+GRAPHICS=""
+if [[ $TYPE == app ]] && (( NAMED )) && gd=$(app_dir "$VM" 2>/dev/null); then
+  GRAPHICS=$(graphics_wants "$gd")
+  GI_ARGS+=" --graphics $GRAPHICS"
+fi
 # A repair installs only those features' parts again (all of OmacVM when the
 # VM has another version: its other parts would not match the new copy).
 ONLY=""
@@ -410,6 +419,32 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
       fi
     elif [[ $(app_net "$d") == vmnet ]]; then
       info "fast network: off from the VM's next start"
+    fi
+  fi
+  # Vulkan (Venus) from the VM's next start: the app reads the vulkan file.
+  # Only with OmacVM's Mesa in the VM: without it the distro's venus (Mesa
+  # 26.2.3) gets the device, and every Vulkan app fails with
+  # ERROR_OUT_OF_HOST_MEMORY.
+  if on vulkan && ! gssh "$IP" "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" < /dev/null 2>/dev/null; then
+    info "Vulkan: not turned on, OmacVM's Mesa did not build in the VM (see above; the VM keeps OpenGL)"
+    rm -f "$d/vulkan"
+  elif on vulkan; then
+    [[ -e $d/vulkan ]] || { : > "$d/vulkan"; [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] ||
+      info "WebGPU and GPU compute (Vulkan): from the VM's next start (shut it down, then start it again)"; }
+  elif [[ -e $d/vulkan ]]; then
+    rm -f "$d/vulkan"
+    [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] || info "Vulkan: off from the VM's next start"
+  fi
+  # Graphics: Automatic gives Vulkan only to a VM whose Venus driver sizes
+  # GPU memory to the Mac's 16 KiB pages (the app reads venus-ready).
+  if gssh "$IP" "/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh --ready" < /dev/null 2>/dev/null; then
+    : > "$d/venus-ready"
+  else
+    rm -f "$d/venus-ready"
+    if [[ $GRAPHICS == vulkan && $(graphics_choice "$d") == auto ]] && ! graphics_forced "$d"; then
+      info "Graphics: the VM's Vulkan driver did not build (see above): Automatic gives it OpenGL until it is there"
+    elif [[ $GRAPHICS == vulkan ]]; then
+      info "Graphics: the VM's Vulkan driver did not build (see above): Vulkan apps fail until it is there (the VM tries again at each start)"
     fi
   fi
   # Its VA-API shim keeps AV1 to Chromium-based browsers (FFmpeg's AV1 cannot

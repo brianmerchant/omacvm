@@ -77,13 +77,49 @@ VM runs, and goes back by itself when a new version does not start
   If the picture or the GPU misbehaves on a Mac: `defaults write
   org.omacvm.app gpuSafeMode -bool true` and restart the VM goes back to the
   2.8.0 fence and frame path; `omacvm check` shows which path a VM took.
-- Vulkan in the VM (Venus on MoltenVK), hidden and experimental:
-  `defaults write org.omacvm.app venus -bool true`, then restart the VM. The
-  VM's Mesa must round GPU memory to the Mac's 16 KiB pages (Mesa 26.2.4 or
-  newer; Arch Linux ARM has 26.2.3, so
-  [`app/scripts/dev/guest-mesa-venus.sh`](../../app/scripts/dev/guest-mesa-venus.sh)
-  builds the Venus driver into `/opt/mesa-venus`); otherwise Vulkan apps fail
-  to get memory. vkmark about 5,200. OpenGL stays on virgl.
+- Graphics, per VM: **OpenGL**, **Vulkan** or **Automatic** (the default),
+  in the app's setup and VM window, with `omacvm graphics --vm NAME
+  opengl|vulkan|auto`, or on the control centre's Graphics row. OpenGL:
+  Omarchy, its apps and browsers draw with OpenGL on the Mac's GPU (virgl),
+  as up to 2.9. Vulkan: the same, plus Vulkan on the Mac's GPU (Venus) for
+  Vulkan apps: on KosmicKrisp on macOS 26 and newer (in the app since 3.0.0),
+  on MoltenVK before (fewer Vulkan features). OpenGL stays on virgl either
+  way. Automatic picks Vulkan where it is the faster path on this Mac
+  ([numbers](../benchmarks/README.md#graphics-automatic-2026-10-05)): macOS
+  26 and newer with KosmicKrisp, OpenGL on macOS 15. A change applies at the
+  VM's next start; `omacvm check` shows what the start got ("Graphics" row)
+  and which Vulkan driver the Mac used ("Vulkan (Venus)": KosmicKrisp, or
+  MoltenVK when KosmicKrisp cannot run on that Mac, logged).
+  The VM needs a Venus driver that sizes GPU memory to the Mac's 16 KiB
+  pages (Mesa 26.2.4 or newer; with Arch Linux ARM's 26.2.3 every Vulkan app
+  fails with `ERROR_OUT_OF_HOST_MEMORY`). While Arch Linux ARM has 26.2.3,
+  apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
+  package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
+  minutes the first time) when the setting gives the VM Vulkan, and the VM
+  builds it at its next start when Vulkan was picked in the app since
+  (`omacvm-venus-driver.service`). Arch's 26.2.4 replaces it on an update.
+  Automatic waits for that driver: until it is there it gives OpenGL.
+  Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
+  plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
+  to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
+  allocates counts against the VM's GPU memory budget.
+  For development `defaults write org.omacvm.app venus -bool true` gives
+  every VM Vulkan whatever its setting.
+- WebGPU and GPU compute (experimental, off by default):
+  `omacvm enable vulkan --vm NAME`, then shut the VM down and start it again.
+  The VM gets OpenCL (rusticl on Zink), WebGPU in Firefox, and a
+  "Chromium (WebGPU)" menu entry that starts Chromium with WebGPU on the
+  Mac's GPU (the normal Chromium keeps its software WebGPU: its Vulkan mode
+  costs WebGL about a fifth), with OmacVM's own Mesa (pinned 26.2.4 with
+  five patches) in `/opt/omacvm-mesa`, and Vulkan whatever the Graphics
+  setting. The first time the VM builds that Mesa: about 3 minutes on an M4
+  Max and a 140 MB download (Mesa's source and Rust; Omarchy has LLVM and
+  Clang already). The build tools it adds (Rust, meson, ninja, bindgen) are
+  removed after the build. If the build fails, the feature stays off and
+  apply says so (log: `/var/log/omacvm-mesa-build.log` in the VM).
+  `omacvm disable vulkan` removes it. Numbers:
+  [benchmarks](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04),
+  how it works: [ADR 0022](../adr/0022-webgpu-and-opencl-on-venus.md).
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
@@ -314,8 +350,33 @@ longer goes through one QEMU thread. Measured: see
   who enabled it: it checks the connecting process's user and code signature
   (OmacVM's Developer ID team, or for an app built from source exactly that
   build: enable it again after a rebuild). It makes one vmnet interface per
-  VM, isolated from the other VMs' interfaces, and does nothing else: no
-  commands, no files, no other requests.
+  VM, isolated from the other VMs' interfaces, and the VPN NAT below; nothing
+  else: no other requests, no files but its two state files in `/var/run`,
+  and no program but `/sbin/pfctl` (fixed arguments, no shell).
+- VPNs connected while a VM runs: macOS's NAT for vmnet only covers the
+  networks that were up when its sharing service started. A VPN you connect
+  later (a new `utun`) got the VM's packets with their `192.168.77.x`
+  source, and the VPN's server dropped them (with a full tunnel the VM lost
+  the internet). The service now adds that NAT itself, while a VM is on the
+  fast network, for each network that is up and that macOS's sharing does
+  not cover: Ethernet, Wi-Fi and VPN tunnels (`en`, `utun`, `ipsec`, `ppp`,
+  `tun`, `tap`), never a bridge (Parallels' and other VM networks stay as
+  they are). IPv4, and IPv6 where the VPN has an IPv6 address. The rules are
+  the same as macOS's own (`nat on utun5 inet from 192.168.77.0/24 to any ->
+  (utun5:0) extfilter ei`) and live only in the service's own pf anchor,
+  `com.apple/org.omacvm.netd` (macOS's main ruleset already evaluates
+  `com.apple/*`); no other anchor and not the main ruleset is changed. pf is
+  enabled with a reference of the service's own (`pfctl -E`, given back with
+  `pfctl -X`), so pf stays on for whoever else wants it. The service learns
+  of new and gone networks from the kernel's routing socket (no polling) and
+  follows within a second or two; the NAT goes when the network goes, when
+  the last VM stops and when the service stops (`omacvm disable
+  fast-network`, `omacvm uninstall`). `src/net/mac/install.sh --status`
+  prints `vpn-nat: utun5` while it is on, `omacvm check` has a VPN NAT row,
+  and the service's log says each change. DNS needs nothing: the VM asks
+  the Mac (`192.168.77.1`), and the Mac asks the VPN's DNS servers where
+  macOS uses them. pf keeps the emptied anchor listed (without rules) until
+  the Mac restarts.
 - Its own network, not UTM's `192.168.64.0/24`: while UTM (or another app)
   has that one up, vmnet refuses an isolated interface on it. With its own,
   UTM VMs and the fast network run side by side (tested on the Mac mini).
@@ -346,7 +407,14 @@ longer goes through one QEMU thread. Measured: see
   down (service gone, vmnet refusing), it plugs a second network card on
   QEMU's user network into the VM and takes the first one's link down (the
   VM's NetworkManager moves over within seconds); when vmnet is back for 15 s,
-  it swaps back. A switch that fails (QEMU's monitor busy) is tried again
+  it swaps back, make before break: the user network's card stays up until
+  vmnet has worked for 12 s more, so the VM is never without a network on the
+  way back. App VMs skip the routes of a card without a link at once
+  (`/etc/sysctl.d/90-omacvm-net.conf`, `ignore_routes_with_linkdown`): before,
+  the VM kept sending on the card that just went down until NetworkManager
+  dropped its route, about 6 s. Measured on the Mac mini with two VMs (ping
+  every 0.5 s in the VM): service away -> internet back after 6.6 s (was 14.5
+  s; the rest is the app noticing), service back -> no gap (was 6.6-8 s). A switch that fails (QEMU's monitor busy) is tried again
   every 3 s, adding only what is not there yet. `logs/network` and
   `qemu.log` say which network the VM has and why; `omacvm check` shows it,
   with the service's last refusal.
@@ -396,12 +464,59 @@ What is missing before it can become the default: [below](#fast-network-not-done
 - Two app VMs at once need two launchers: the app runs one at a time (a
   second start hands over to the first), so today that takes a copy of the
   app with its own bundle identifier.
-- Not tested yet: VPN clients on the Mac, a real sleep and wake, Wi-Fi
-  changes while the VM runs, real trackpad gestures over the fast network
+- Field tests on the Mac mini (macOS 27, 3.0.0 test build, two app VMs on
+  the fast network at once, 2026-10-05):
+  - A real sleep and wake (`pmset sleepnow`, woken by `pmset schedule wake`
+    2 minutes later): both VMs stay on vmnet; the Mac pings them 2 s after
+    the wake, SSH works by the first try (+5 s), Omanotch's link is back in
+    2 s, internet in the VMs at once. No reconnect to the service was needed.
+  - Network changes on the Mac while the VMs run (Wi-Fi moved before
+    Ethernet and back; Ethernet off for 45 s and on): no ping gap over 1.5 s
+    in either VM, to the internet or to the Mac, and nothing in the service's
+    log. macOS's NAT for vmnet covers every network service the Mac has.
+  - VPNs: traffic follows the Mac's routes (a route into a VPN-like tunnel,
+    Tailscale to another Mac). But macOS's NAT for vmnet covers only the
+    interfaces it saw when it started: a tunnel that came up later got the
+    VM's packets with their `192.168.77.x` source untranslated, which a real
+    VPN server drops. Fixed by the service's VPN NAT (above).
+- VPN NAT on the Mac mini (macOS 27, 2026-10-05; an app VM's QEMU on the
+  fast network, the service installed by `install.sh`; a test tunnel
+  `utun-sink` that answers pings and DNS, with split routes for
+  `203.0.113.7` and `2001:db8:77::7`, and a resolver for one domain through
+  it):
+  - Tunnel up while the VM runs: the NAT is on within a second
+    (`install.sh --status`: `vpn-nat: utun0`); the VM reaches both addresses
+    through the tunnel, which sees the tunnel's own addresses as source
+    (`10.99.0.1`, `2001:db8:99::1`), not the VM's. In the VM a name only the
+    tunnel's DNS server knows resolves (the VM asks `192.168.77.1`).
+  - A full tunnel (`0/1` and `128/1` into the tunnel for 20 s): the VM's
+    pings to `1.1.1.1` and `9.9.9.9` went through it, NATed. Afterwards the
+    internet as before.
+  - Tunnel down: its rule goes, the VM's internet stays; up again (a new
+    `utun`): back within a second. The VM stopping: everything goes, pf's
+    references are as before. A VM starting with the tunnel up: NAT in the
+    same second.
+  - A real sleep and wake (2 minutes) with the tunnel up, twice: the rules
+    stay, the VM reaches the tunnel (IPv4 and IPv6) and the internet once the
+    Mac has its own back (about 10 s after the wake).
+  - The service killed (`kill -9`) with the NAT on: rules and reference
+    stay, the next start removes both; stopped or removed (`install.sh
+    --remove`): removed at once.
+  - Untouched: macOS's main ruleset, its own anchors (sharing, AirDrop,
+    firewall), Tailscale (the VM reaches the other Mac through it with
+    macOS's own NAT), and Parallels' `10.211.55.2`/`10.37.129.2` while
+    awake. After a wake with the test tunnel up, Parallels' two networks
+    came back as `192.168.18.1`/`192.168.19.1`; that happened with only the
+    tunnel too (no VM, no service), and not without it: Parallels' (or
+    macOS's) doing with a tunnel present, not the NAT. Quit and reopen
+    Parallels Desktop, or `sudo killall prl_naptd`, brings them back.
+- Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
+  VM runs (the test tunnel is a `utun` as theirs), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
-  `src/net/mac/test.sh`), and the MacBook (numbers there too).
+  `src/net/mac/test.sh`), and the MacBook (macOS 15: the VPN NAT, and
+  numbers).
 - SMAppService would give macOS's own approval (System Settings) instead of
   a password dialog; not done.
 

@@ -76,10 +76,6 @@ in more words.
   VMs in `~/OmacVM` (or in the folder picked in the app). VMs still in the
   old hidden folder or another folder are hidden from it, not deleted; 3.0
   finds them again.
-- Fast network (OmacVM.app, experimental): a button in the app turns it on
-  and off (Fast network › Turn On…, one password dialog), and Omanotch
-  works over it. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
-  changes.
 - Omarchy's Chromium decodes H.264 and VP9 on the Mac's media engine in
   OmacVM.app VMs, YouTube included, with no flags to set: feature
   `chromium-video`, on by default for app VMs (`omacvm disable
@@ -143,6 +139,93 @@ in more words.
   wait for events instead of looking every second; on the Mac, Gestures
   checks the pointer at 20 Hz once it rests (was 120) and Omanotch only
   polls while a VM is connected.
+- OmacVM.app: a Graphics setting per VM, **OpenGL**, **Vulkan** or
+  **Automatic** (the default), in the app's setup and VM window, with
+  `omacvm graphics --vm NAME opengl|vulkan|auto`, and on the control
+  centre's Graphics row. Vulkan gives the VM Vulkan on the Mac's GPU (Venus)
+  next to OpenGL; Automatic picks it where it is the faster path on this
+  Mac: on macOS 26 and newer with KosmicKrisp, where Vulkan apps get the
+  faster driver (vkmark +29 % over MoltenVK); on macOS 15 it stays OpenGL,
+  because MoltenVK cannot carry OpenGL or WebGL (ES 2.0 only; numbers in
+  docs/benchmarks). OpenGL stays on virgl either way. It applies at the
+  VM's next start, and `omacvm check` says what a start got. The hidden `venus` switch stays for development.
+- KosmicKrisp is in the app (about 13 MB, its licences in the app's
+  licences folder): on macOS 26 and newer Vulkan runs on it, on older macOS
+  on MoltenVK. A Mac where KosmicKrisp cannot run falls back to MoltenVK
+  and QEMU's log says why; `OMACVM_VULKAN_DRIVER=moltenvk|kosmickrisp`
+  picks one by hand. Release builds have it; building it needs Xcode 26 and
+  Homebrew's llvm, spirv-llvm-translator, spirv-tools and bison
+  (`app/runtime/build-kosmickrisp.sh --check` lists what is missing); other
+  builds keep MoltenVK only unless `OMACVM_RUNTIME_KOSMICKRISP=1`.
+- Vulkan's host memory window comes from the VM's memory plan (what the Mac
+  has beyond the VM and macOS's reserve, 1 to 32 GB) instead of a fixed
+  4 GB; what Vulkan allocates still counts against the GPU memory budget.
+- Vulkan works on a stock Omarchy: while Arch Linux ARM has Mesa 26.2.3,
+  whose Venus driver does not size GPU memory to the Mac's 16 KiB pages
+  (every Vulkan app failed with `ERROR_OUT_OF_HOST_MEMORY`), `omacvm apply`
+  builds Mesa 26.2.4's Venus driver as Arch's `vulkan-virtio` package when
+  the setting gives the VM Vulkan, and the VM builds it at its next start
+  when Vulkan was picked since. Automatic waits for it. `omacvm check` has
+  a "Vulkan (Venus)" row.
+- Vulkan windows no longer take Omarchy's desktop down: a Vulkan app on
+  Wayland (vkcube, vkmark) made Hyprland lose its GPU context for good (a
+  black desktop) when it took the app's frame as a dma-buf, which the Mac
+  cannot share with OpenGL. App VMs now present Vulkan frames through a
+  CPU copy (`MESA_VK_WSI_DEBUG=sw`), which costs full-screen Vulkan frame
+  rates.
+- OmacVM.app: WebGPU and GPU compute, experimental and off by default:
+  `omacvm enable vulkan --vm NAME`, then restart the VM. The VM gets OpenCL
+  (darktable, ffmpeg's OpenCL filters, Geekbench GPU), WebGPU in Firefox,
+  and a "Chromium (WebGPU)" menu entry with WebGPU on the Mac's GPU (the
+  normal Chromium keeps its software WebGPU), and Vulkan whatever its
+  Graphics setting. The first time, the VM builds a Mesa for it: about 3
+  minutes on an M4 Max and a 140 MB download (Mesa's source and Rust;
+  Omarchy has LLVM and Clang already). The build tools it adds are removed
+  after the build, and the feature is only turned on when the build worked.
+  WebGPU matrix multiply in that Chromium: about 5,000-6,300 GFLOPS, 84 % of
+  Chrome on the Mac in a locked batch; Geekbench 7 GPU OpenCL 45 % of the
+  Mac's own OpenCL. A 15-minute soak (OpenCL, WebGPU in both browsers,
+  ffmpeg OpenCL) passed in the app with no failure, and the host's GPU
+  memory went back down when the browsers closed. `omacvm disable vulkan`
+  removes it.
+- Fast network (OmacVM.app, experimental): a button in the app turns it on
+  and off (Fast network › Turn On…, one password dialog), and Omanotch's
+  link works over it (the strip itself not checked on a notch Mac yet).
+  Two VMs at once work (each from an app copy with its own bundle id: the
+  app runs one VM at a time).
+- Fast network: moving a running VM between the fast network and QEMU's
+  user network no longer leaves it without internet for seconds. Back to
+  the fast network had a gap of 7-8 s, now none (the user network stays
+  until the fast one has worked for 12 s); to the user network 6.6 s
+  instead of 14.5 s (app VMs skip a card's routes the moment its link goes
+  down). Measured on a Mac mini with two VMs.
+- Fast network field tests on the Mac mini: a real sleep and wake (SSH and
+  Omanotch back within 2-5 s, no reconnect), Wi-Fi/Ethernet changes (no
+  gap), two VMs at once.
+- Fast network: a VPN connected while the VM runs works for the VM. macOS
+  translates the VM's addresses only on the networks that were up when its
+  sharing service started, so a VPN's server got the VM's own addresses
+  and dropped them (a full tunnel: no internet in the VM). The fast
+  network's service now does that translation itself for such networks,
+  only while a VM is on the fast network and only in its own pf rules
+  (nothing else in the Mac's firewall changes), and takes it away when the
+  VPN goes. `omacvm check` shows it (docs/routes/app.md).
+- OmacVM.app: the sound holds while the VM and the Mac are busy. QEMU's
+  main loop, which moves the sound and runs the VM's GPU, now runs at
+  user-interactive QoS instead of competing with the VM's CPUs, and the
+  sound card no longer takes the time it missed (a new shader stops that
+  thread for 50-80 ms) from the VM all at once. In 10-minute tests on a
+  MacBook Pro with the VM's GPU busy and 8 busy threads on the Mac, breaks
+  in a test tone went from 12 to 2; with every core busy as well, from a
+  median of 365 to 50. The sound's delay is the same. `omacvm check` shows
+  it ("sound timing"); `defaults write org.omacvm.app audioClassic -bool
+  true` goes back.
+- OmacVM.app: a Mac audio device that does not answer no longer hangs the
+  VM. Up to 2.9.1 QEMU waited for it without a limit at the start (no
+  window, the VM never ran) and whenever the VM started a sound. Now it opens
+  the device on a thread of its own; after 3 s the VM runs without sound,
+  `omacvm check` says so ("sound") with the fix, and the sound comes back
+  once the device answers again.
 
 ## 2.9.1
 

@@ -397,8 +397,13 @@ enum Settings {
     /// ever misbehaves on a Mac. Everything else of the GPU stays as it is.
     /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
     static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
-    /// Vulkan in the VM (Venus on KosmicKrisp on macOS 26+, MoltenVK before),
-    /// experimental: the guest needs Mesa 26.2.4 or newer.
+    /// QEMU's sound timing as up to 2.9.1 (main loop at the default QoS, the
+    /// HDA catching up after a stall), if the new one ever misbehaves.
+    /// Hidden: defaults write org.omacvm.app audioClassic -bool true
+    static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// Vulkan (Venus) in every VM whatever its Graphics setting, for
+    /// development. Users choose per VM: Graphics (Graphics.swift) in the
+    /// setup, the VM window, `omacvm graphics` and the control centre.
     /// Hidden: defaults write org.omacvm.app venus -bool true
     static var venus: Bool { UserDefaults.standard.bool(forKey: "venus") }
     /// HDR: a 10-bit guest output is shown as BT.2100 PQ with the Mac's EDR,

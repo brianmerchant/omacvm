@@ -280,7 +280,9 @@ class Bridge:
 
     def start_job(self, action: str, features: list[str] | tuple[str, ...] = ()) -> dict:
         body: dict = {"action": action}
-        if action != "update":
+        if action == "graphics":
+            body["graphics"] = list(features)[0]   # opengl | vulkan | auto
+        elif action != "update":
             body["features"] = list(features)
         return self.call("POST", "/omacvm/jobs", body, timeout=10.0)
 

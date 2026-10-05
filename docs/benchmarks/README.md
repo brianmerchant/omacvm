@@ -14,15 +14,20 @@ end. The tools are in [`src/bench/`](../../src/bench).
 | MotionMark 1.3.1 | 2D graphics drawn through the browser | ✓ | ✓ |
 | WebGL Aquarium, 30,000 fish | 3D in the browser, frames per second | ✓ | ✓ |
 | Basemark Web 3.0 | the GPU in the browser: WebGL, canvas, SVG, plus some JavaScript and page tests | ✓ | ✓ |
-| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | OmacVM.app only, see below |
+| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | only OmacVM.app with Venus, see below |
+| WebGPU matmul (`browser-bench.py webgpu`) | GPU compute in the browser, GFLOPS | ✓ | only OmacVM.app with Venus |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
 
-**GPU compute runs only in OmacVM.app, and not released yet.** Geekbench's
-GPU test needs Vulkan or OpenCL. Parallels, UTM and VMware Fusion offer
-neither to a Linux guest, so `bench.sh` records "not available in this VM"
-there. OmacVM.app's coming Vulkan path (Venus on MoltenVK, OpenCL through
-rusticl) runs it: 45 % of the Mac, see the chart notes below.
-
+**GPU compute needs Vulkan or OpenCL in the VM.** Parallels, UTM and VMware
+Fusion offer neither to a Linux guest: Geekbench 7's Linux ARM preview lists
+no GPU there, and `bench.sh` records that as "not available in this VM".
+OmacVM.app with the vulkan feature (`omacvm enable vulkan`, experimental)
+has both: OpenCL through
+rusticl and WebGPU in Firefox and in the "Chromium (WebGPU)" launcher (ADR
+0022). One locked batch on the M4 Max: Geekbench 7 GPU OpenCL 42486 in the
+VM vs 95380 for the Mac's own OpenCL; WebGPU matmul 5071 GFLOPS in the VM's
+Chromium vs 6038 in Chrome on the Mac. Geekbench 7 for Linux has no Vulkan
+backend, so the VM has no Metal-like score.
 The browser tests (MotionMark, WebGL Aquarium, Basemark Web 3.0) and glmark2
 measure graphics, not compute. glmark2 has no Mac version, so it has no Mac
 baseline: compare its score between the routes only.
@@ -115,6 +120,33 @@ for good: that was Basemark's hang at test 5 in 2.6.0
 ([finding 23](../troubleshooting.md#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers)).
 Each runtime build also compiles the shaders of that case with the Mac's
 OpenGL (`app/runtime/Tests/virgl/test-integer-sampler-shader.c`).
+
+### GPU panel (final round)
+
+The README chart's GPU panel comes from
+[`tests/bench/final-round`](../../tests/bench/final-round/README.md): the
+runbook and the scripts for the Mac and each VM. Two of its tests are new:
+
+- [`tests/bench/gpu-throughput`](../../tests/bench/gpu-throughput/index.html):
+  pure GPU work in WebGL 2, no network. One draw per frame into a fixed
+  1920x1080 offscreen target, so the window size and vsync don't count; each
+  frame waits for the GPU before and after its draw (`gl.finish()`). Two ways
+  to time it: GPU time from Chrome's timer queries (frames of 40 ms), or wall
+  time of long frames (80 ms or more, made longer until the fixed cost of the
+  waits is under 2 % of a frame). Each system runs both; one row uses one
+  method for every system: the GPU timer where every system has a timer that
+  agrees with its own wall time, else wall time for all. The table and the
+  chart say which. Headline: a ray-march shader; also an ALU score (GFLOPS)
+  and a fill score (Gpixels/s). `run.py` runs it and prints JSON.
+- [`tests/bench/vkpeak`](../../tests/bench/vkpeak/vkpeak.sh): Vulkan compute
+  peak with [vkpeak](https://github.com/nihui/vkpeak) (MIT, downloaded or
+  built at run time, pinned). On the Mac through vkpeak's own MoltenVK 1.4.1;
+  in OmacVM.app through Venus. A VM with no GPU Vulkan device (none, or only
+  lavapipe) gets "not available".
+- Geekbench 7 GPU (OpenCL, Vulkan; the Mac: OpenCL, Metal), vkmark and
+  glmark2 run in the same round; Geekbench only on a real GPU device, never
+  PoCL or llvmpipe. glmark2 and vkmark have no macOS version: the panel shows
+  their scores between the VMs.
 
 ## Power draw and battery life
 
@@ -365,3 +397,114 @@ tests as the MacBook measurement of 2026-10-04).
   The fallback therefore plugs in a second card instead. With it, in the
   app (display on, a UTM VM running beside it): 6.9 / 6.3 Gbit/s VM → Mac,
   9.5 / 8.8 Mac → VM (1 / 4 streams).
+
+## Graphics: Automatic (2026-10-05)
+
+What OmacVM.app's Graphics setting picks when it is Automatic
+([ADR 0035](../adr/0035-graphics-setting.md)). With Vulkan on, the VM gets the
+Venus device next to virgl; the question was whether a Vulkan path is faster
+for the work people do: OpenGL apps through Zink (GL on Vulkan), Chrome's
+WebGL through ANGLE on Vulkan, and Vulkan apps themselves. The Venus device
+itself costs OpenGL nothing (MacBook, locked ABBA, gpu-next: glmark2 2,816 vs
+2,898, Aquarium 20.0 vs 19.9 fps).
+
+**macOS 15 (MacBook Pro M4 Max, Venus on MoltenVK 1.4.2).** One test VM, 8
+CPUs and 16 GB, headless, the 3.0.0 runtime, under the bench lock, median of 3.
+One test Mesa (26.2.4 with OmacVM's five patches) for virgl and Zink:
+
+| | virgl (OpenGL) | Vulkan path |
+|---|---|---|
+| glmark2 2023.01, quick set, full screen | 3,780 (Arch's Mesa 26.2.3: 3,731) | Zink on Venus: OpenGL ES 2.0 only, every scene crashes |
+| WebGL Aquarium 30k, Chrome 154 | 19.4 fps (ANGLE on GL, Wayland) | ANGLE on Vulkan: Chrome's GPU process does not start (ES 2.0 only, Chrome needs 3.0): no WebGL |
+| Basemark Web 3.0, WebGL 2 pages | runs | no WebGL on either Vulkan path |
+| vkmark, full screen, Vulkan apps | - | 387 (software present, see below) |
+
+MoltenVK has no `VK_EXT_provoking_vertex`, transform feedback or geometry
+shaders, so ANGLE and Zink stop at ES 2.0. **Automatic = OpenGL on macOS 15**;
+Vulkan (Venus on MoltenVK) is there for Vulkan apps when picked.
+
+**macOS 26 and newer (Mac mini M4, macOS 27, KosmicKrisp),** from the
+kosmickrisp track (unlocked, median of 3 unless said; tracks/kosmickrisp.md):
+
+| | OpenGL path | Vulkan path |
+|---|---|---|
+| vkmark 800x600 | - | KosmicKrisp 840 vs MoltenVK 650 on the same Mac (+29 %) |
+| glmark2-es2 off-screen, one guest Mesa | virgl 592 | Zink on KosmicKrisp 558 (ES 2.0 only) |
+| WebGL Aquarium 30k, Chrome 154 | 21.9 fps (ANGLE on GL) | 26.9 fps (ANGLE on Vulkan, X11 and flags) |
+| Basemark Web 3.0 | 1,654 | 1,511 (ANGLE on Vulkan) |
+
+KosmicKrisp also has `nullDescriptor`, `robustBufferAccess2` and `logicOp`,
+which MoltenVK lacks. **Automatic = Vulkan on macOS 26 and newer** when the
+app has KosmicKrisp: Vulkan apps get the faster, fuller driver, OpenGL stays on
+virgl (Zink is slower and ES 2.0 only), and Chrome keeps ANGLE on GL (ANGLE on
+Vulkan wins Aquarium but loses Basemark and needs X11 and flags).
+
+Vulkan windows present through a CPU copy (Mesa's software WSI,
+`MESA_VK_WSI_DEBUG=sw`, set for app VMs): a Venus image handed to Hyprland
+as a dma-buf cannot be imported by its OpenGL context on the Mac and ended
+that context (black desktop). The copy costs full-screen Vulkan frame rates
+(vkmark 387 full screen; with vkmark's headless output, no window, 4,700-5,200).
+
+## GPU compute with Venus (2026-10-04)
+
+OmacVM.app with Venus only (the other routes have no Vulkan or OpenCL in the
+VM, see above). The VM runs OmacVM's guest Mesa (ADR 0022). Two Macs:
+
+- **MacBook Pro M4 Max**, macOS 15.7.4, Venus on MoltenVK 1.4.2. Test VM with
+  8 CPUs and 16 GB, in a window. Locked batches under the bench lock (other
+  test VMs paused; one VM of another track could not be paused and ran
+  beside it): WebGPU from batch L2, Geekbench and saxpy from L2/L3 a few
+  minutes later, ffmpeg from the earlier batch L1 (guest Mesa before the
+  global-loads and OPAQUE_FD patches; two such VMs ran beside it).
+- **Mac mini M4** (10 GPU cores), macOS 27.0, Venus on KosmicKrisp. Test VM
+  with 6 CPUs and 8 GB. No bench lock (another agent's builds ran on the mini),
+  so these are indications.
+
+WebGPU matmul is `browser-bench.py webgpu` (f32, 2048x2048, GFLOPS, checked
+against the CPU). In the VM Chromium runs from the "Chromium (WebGPU)" launcher
+(Arch's Chromium 153; Google Chrome 154 gave the same adapter with the same
+flags, `omacvm-chrome-webgpu` passes them to it); the default Chromium gets
+no hardware adapter in a VM.
+Median of 3; the Mac's own number in brackets where the same batch has one.
+
+| | M4 Max, MoltenVK | M4 mini, KosmicKrisp |
+|---|---|---|
+| WebGPU matmul, Chromium in the VM | 5071 (Mac Chrome 6038: 84 %) | 1148 (mini Chrome 1614: 71 %) |
+| WebGPU matmul, Firefox 157 in the VM | 665 (Mac Firefox 319: 208 %) | 167 |
+| WebGPU computeBoids, Firefox / Chromium (fps) | 59.9 / 60 (36.4 in the locked batch) | 59.9 / 60.0 |
+| Geekbench 7 GPU OpenCL (single run) | 42486 (Mac OpenCL 95380: 45 %) | 18973 (mini OpenCL 35240: 54 %, earlier that day) |
+| OpenCL saxpy, 16M floats (GB/s) | 387-444 | 101 |
+| ffmpeg 4K `nlmeans`, OpenCL vs the VM's CPUs (fps) | 1.07 vs 0.33 (8 CPUs) | 1.13 vs 0.37 (6 CPUs) |
+
+Each run, M4 Max batch:
+
+| | WebGPU matmul 2048 (GFLOPS) |
+|---|---|
+| Mac, Chrome 154 | 6434, 6038, 4600 |
+| VM, Chromium 153 (launcher) | 5144, 5071, 5018 |
+| Mac, Firefox 157 | 285, 333, 319 |
+| VM, Firefox 157 | 667, 650, 665 |
+
+Notes:
+
+- Firefox in the VM beats Firefox on the Mac: on the Mac Firefox's WebGPU
+  (wgpu) writes Metal shaders itself, in the VM it writes SPIR-V and the
+  Vulkan driver translates it, and that translation is faster for this kernel.
+  Chrome (Dawn) is fast on both.
+- The Mac's GPU speed moved a lot between batches (Chrome 2048: 3885 in an
+  earlier locked batch, 6188 in an unlocked one): compare within a row.
+- Geekbench 7 runs every OpenCL workload and all pass validation. The VM loses
+  most where a workload launches many small kernels: each launch crosses the
+  Venus ring (Background Blur 18301 vs 61273, Face Tracking 24606 vs 91731).
+- Results: [VM](https://browser.geekbench.com/v7/gpu/252731),
+  [Mac](https://browser.geekbench.com/v7/gpu/252722),
+  [mini VM](https://browser.geekbench.com/v7/gpu/252849).
+- clpeak sizes its work by the number of compute units, and Zink reports one
+  (Vulkan has no such query): fp32 1.5 TFLOPS as reported, 8.9 with the count
+  forced to 40 (test only), Mac OpenCL 15.6-16.1.
+- ffmpeg's `nlmeans_opencl` runs many small kernels, and the mini and the
+  M4 Max are about equal: most likely the VM's latency per launch decides it,
+  not the GPU (not measured per launch).
+- Stability: 63 rounds over 36 minutes on the M4 Max and 24 rounds over 15
+  minutes on the mini (OpenCL, Firefox and Chromium WebGPU, ffmpeg OpenCL),
+  no failure.

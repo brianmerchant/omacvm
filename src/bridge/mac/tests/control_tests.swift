@@ -33,8 +33,18 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            == .startJob(JobRequest(action: .reinstall, features: ["bridge"])), "reinstall")
     expect(ok(route("POST", "/omacvm/jobs", #"{"action": "update"}"#)) == .startJob(JobRequest(action: .update, features: [])), "update")
     expect(ok(route("GET", "/omacvm/jobs/0123456789abcdef")) == .job("0123456789abcdef"), "job")
+    for g in ["opengl", "vulkan", "auto"] {
+      expect(ok(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "\#(g)"}"#))
+             == .startJob(JobRequest(action: .graphics, features: [g])), "graphics \(g)")
+    }
 
     // ---- refused ----
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "metal"}"#))?.code == "bad-body", "graphics: unknown value")
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "auto; rm -rf ~"}"#))?.code == "bad-body", "graphics: shell")
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics"}"#))?.code == "bad-body", "graphics: no value")
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "auto", "features": ["bridge"]}"#))?.code == "bad-body", "graphics with features")
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": true}"#))?.code == "bad-body", "graphics: not a string")
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["bridge"], "graphics": "auto"}"#))?.code == "bad-body", "graphics on another action")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "run", "features": ["bridge"]}"#))?.code == "bad-action", "unknown action")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["rm"]}"#))?.code == "unknown-feature", "unknown feature")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["bridge; rm -rf ~"]}"#))?.code == "bad-features", "shell metacharacters")
@@ -91,6 +101,8 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            == ["/c/omacvm", "apply", "--vm", "V", "--vm-type", "utm", "--transaction", "--yes", "--reinstall", "bridge"], "reinstall: that feature only")
     expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["gestures", "mac-clock"]), vm: "V", type: "utm", commit: nil).suffix(4)
            == ["--reinstall", "gestures", "--reinstall", "mac-clock"], "reinstall two")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .graphics, features: ["vulkan"]), vm: "My VM", type: "app", commit: nil)
+           == ["/c/omacvm", "graphics", "vulkan", "--vm", "My VM", "--vm-type", "app", "--yes"], "graphics argv")
 
     // ---- the VM's own key: requests signed with it, never sent ----
     let k = String(repeating: "5a", count: 32)
@@ -233,6 +245,8 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(versionGate(JobRequest(action: .disable, features: ["camera"]), mac: "2.9.1", vm: "2.9.0") == nil, "off after a failed update")
     expect(versionGate(JobRequest(action: .reinstall, features: ["camera"]), mac: "2.9.1", vm: "2.9.0") == nil, "repair after a failed update")
     expect(versionGate(JobRequest(action: .enable, features: ["camera"]), mac: "2.9.1", vm: "2.9.0")?.code == "update-first", "on: update first")
+    expect(versionGate(JobRequest(action: .graphics, features: ["vulkan"]), mac: "3.0.0", vm: "2.9.1") == nil, "graphics: the Mac's setting")
+    expect(versionGate(JobRequest(action: .graphics, features: ["vulkan"]), mac: "2.9.1", vm: "3.0.0")?.code == "mac-older", "graphics: Mac older")
     expect(versionGate(JobRequest(action: .disable, features: ["camera"]), mac: "2.9.0", vm: "2.9.1")?.code == "mac-older", "a newer VM: the Mac first")
     expect(versionGate(JobRequest(action: .disable, features: ["camera"]), mac: "2.9.0", vm: "1.x") == nil, "a 1.x VM may turn off")
     expect(versionLess("2.9.0", "2.10.0") == true && versionLess("2.10.0", "2.9.9") == false && versionLess("2.9", "2.9.0") == false,

@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU throughput</title>
+<!--
+  Pure GPU throughput in WebGL 2, the same on the Mac and in every VM.
+  One draw per frame into a fixed-size offscreen framebuffer (1920x1080 by
+  default, whatever the window size), with a fragment shader whose loop count
+  is a uniform. The loop count is raised until one frame takes clearly longer
+  than a display refresh (40 ms by default), so vsync never caps the result.
+  Each frame waits for the GPU before and after its draw (gl.finish + a
+  1-pixel read), and frames run back to back (no vsync wait: an idle GPU
+  lowers its clock). Without the waits ANGLE on Metal's timer counts queued
+  frames too.
+
+  Two ways to time a frame (method=...), never mixed in one result:
+    timer (default)  GPU time from EXT_disjoint_timer_query_webgl2, frames of
+                     about 40 ms. A browser without timer queries gets no
+                     score ("noTimer"): run it with method=wall. The same
+                     frames' wall time is recorded too (wallScore), as a look.
+    wall             wall time around each draw, frames of at least 80 ms so
+                     the fixed cost of the waits (and of a VM's sync path) is
+                     small. The page measures that fixed cost as
+                     2 x time(n) - time(2n) and makes the frames longer (up to
+                     1 s) until it is under 2 % of a frame (fixedShare, syncOk).
+
+  Tests:
+    throughput  (headline) a fixed-step ray march: ALU, branches, loops
+    alu         a chain of vec4 multiply-adds: GFLOPS
+    fill        blended full-screen layers in one instanced draw: Gpixels/s
+  Score: work units/s = iterations x pixels / GPU time, median of the runs.
+
+  Options (query string): json (plain page, result in window.gpuResult and
+  #result, title "DONE" or "FAILED"), runs=7, frames=10, target=40 (ms),
+  warmup=3000 (ms of load before each test's runs),
+  w=1920, h=1080, only=throughput,alu,fill, method=timer|wall (timer=wall
+  works too; wall: target=80 by default and at least 80),
+  software=1 (run on a software renderer anyway).
+  No network, no libraries: open the file directly.
+-->
+<style>
+  :root { --bg: #191724; --ink: #e0def4; --soft: #908caa; --accent: #ebbcba; --bad: #eb6f92; }
+  body { background: var(--bg); color: var(--ink); margin: 0; padding: 24px 16px;
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--soft); margin: 0 0 16px; }
+  #status { color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  td, th { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid #26233a; }
+  td.n { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  pre { white-space: pre-wrap; word-break: break-all; font: 12px ui-monospace, "SF Mono", Menlo, monospace; color: var(--soft); }
+  canvas { width: 16px; height: 16px; }
+  .bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>GPU throughput</h1>
+  <p>WebGL 2, offscreen, fixed size. Keep this tab in front until it says done.</p>
+  <div id="status">starting</div>
+  <table id="table" hidden><thead><tr><th>Test</th><th>Score</th><th>Iterations</th><th>ms / frame</th><th>CV</th></tr></thead><tbody></tbody></table>
+  <pre id="result"></pre>
+  <canvas id="c" width="16" height="16"></canvas>
+</main>
+<script>
+"use strict";
+const Q = new URLSearchParams(location.search);
+const OPT = {
+  json: Q.has("json"),
+  runs: Math.max(3, +Q.get("runs") || 7),
+  frames: Math.max(3, +Q.get("frames") || 10),
+  method: Q.get("method") === "wall" || Q.get("timer") === "wall" ? "wall" : "timer",
+  warmupMs: Q.has("warmup") ? +Q.get("warmup") : 3000,
+  w: +Q.get("w") || 1920,
+  h: +Q.get("h") || 1080,
+  only: (Q.get("only") || "throughput,alu,fill").split(","),
+  software: Q.get("software") === "1",
+};
+// Wall time needs long frames: the waits cost a few ms per frame.
+OPT.targetMs = OPT.method === "wall" ? Math.max(80, +Q.get("target") || 80) : Math.max(20, +Q.get("target") || 40);
+const MAX_TARGET_MS = 1000;
+const VERSION = 2;
+
+// Full-screen triangle from gl_VertexID: no buffers.
+const VS = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID & 1) << 2) - 1.0, float((gl_VertexID & 2) << 1) - 1.0);
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+// Headline: a ray march with a fixed number of steps (no early exit, so the
+// work is exactly uIter steps per pixel on every GPU).
+const FS_THROUGHPUT = `#version 300 es
+precision highp float;
+precision highp int;
+uniform int uIter;
+uniform vec2 uRes;
+uniform float uSeed;
+out vec4 o;
+float map(vec3 p) {
+  vec3 q = fract(p) - 0.5;
+  float s = length(q) - 0.27;
+  float t = length(vec2(length(p.xz) - 1.2, p.y)) - 0.35;
+  return min(s, t);
+}
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes * 2.0 - 1.0;
+  vec3 ro = vec3(0.3 * uSeed, 0.2, -3.0);
+  vec3 rd = normalize(vec3(uv.x * uRes.x / uRes.y, uv.y, 1.6));
+  float t = 0.0, glow = 0.0;
+  for (int i = 0; i < uIter; i++) {
+    float d = map(ro + rd * t);
+    glow += 0.02 / (0.02 + abs(d));
+    t += max(abs(d), 0.01) * 0.6;
+    t = t > 12.0 ? t - 12.0 : t;
+  }
+  o = vec4(fract(glow * 0.001), t / 12.0, 0.5, 1.0);
+}`;
+
+// ALU: per step 6 vec4 multiply-adds and 2 multiply + multiply-add = 72 flops.
+const FS_ALU = `#version 300 es
+precision highp float;
+precision highp int;
+uniform int uIter;
+uniform vec2 uRes;
+uniform float uSeed;
+out vec4 o;
+void main() {
+  vec4 a = vec4(gl_FragCoord.xy / uRes, uSeed, 1.0);
+  vec4 b = a.yzwx + 0.5;
+  const vec4 m = vec4(0.9997, 1.0003, 0.9995, 1.0001);
+  const vec4 n = vec4(1.0002, 0.9996, 1.0004, 0.9998);
+  const vec4 c = vec4(0.0001, -0.0002, 0.0003, -0.0001);
+  for (int i = 0; i < uIter; i++) {
+    a = a * m + c; b = b * n - c;
+    a = a * n + b; b = b * m - a;
+    a = a * m + c.wzyx; b = b * n + c.yxwz;
+    a = a * n - b * 0.5; b = b * m + a * 0.25;
+  }
+  o = fract(a + b);
+}`;
+
+// Fill: a trivial shader, many blended full-screen layers.
+const FS_FILL = `#version 300 es
+precision mediump float;
+uniform vec4 uColor;
+out vec4 o;
+void main() { o = uColor; }`;
+
+const status = (s) => { document.getElementById("status").textContent = s; };
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+// Between measured frames: give the page a turn, but no wait for the display.
+// Waiting for vsync left the GPU idle part of the time, and its clock dropped.
+const chan = new MessageChannel(), turns = [];
+chan.port1.onmessage = () => turns.shift()();
+const nextTurn = () => new Promise((r) => { turns.push(r); chan.port2.postMessage(0); });
+const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+const cv = (a) => { const m = mean(a); return a.length > 1 && m > 0 ? 100 * Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)) / m : 0; };
+function fnv(str) {   // FNV-1a, 32 bit, hex: names a shader source or a pixel block
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+const round = (x, d = 3) => +x.toPrecision(d + 3);
+
+async function main() {
+  const out = { bench: "omacvm-gpu-throughput", version: VERSION, ok: false, errors: [], options: OPT };
+  const gl = document.getElementById("c").getContext("webgl2", {
+    antialias: false, depth: false, stencil: false, alpha: false, preserveDrawingBuffer: false,
+    powerPreference: "high-performance", failIfMajorPerformanceCaveat: false });
+  if (!gl) throw new Error("no WebGL 2");
+  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  out.renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  out.vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+  out.webgl = gl.getParameter(gl.VERSION);
+  out.glsl = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+  out.userAgent = navigator.userAgent;
+  out.software = /swiftshader|llvmpipe|softpipe|software|lavapipe/i.test(out.renderer);
+  if (out.software && !OPT.software) {
+    out.notAvailable = "software renderer (" + out.renderer + "): not a GPU number";
+    return out;
+  }
+  const tqExt = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+  out.timerQuery = !!tqExt;
+  out.method = OPT.method;
+  if (OPT.method === "timer" && !tqExt) {
+    out.noTimer = true;
+    out.notAvailable = "no GPU timer queries in this browser (method=wall times it)";
+    return out;
+  }
+  const tq = OPT.method === "timer" ? tqExt : null;
+  const useTimer = !!tq;
+  out.timer = useTimer ? "EXT_disjoint_timer_query_webgl2" : "wall time + gl.finish, long frames";
+  const dbgShaders = gl.getExtension("WEBGL_debug_shaders");
+
+  // The target: an RGBA8 texture of a fixed size, never the canvas.
+  const max = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
+  if (OPT.w > max || OPT.h > max) throw new Error(`target ${OPT.w}x${OPT.h} larger than ${max}`);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, OPT.w, OPT.h);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error("framebuffer incomplete");
+  gl.viewport(0, 0, OPT.w, OPT.h);
+  gl.bindVertexArray(gl.createVertexArray());
+  gl.disable(gl.DEPTH_TEST);
+  const pixels = OPT.w * OPT.h;
+  out.target = { width: OPT.w, height: OPT.h, pixels, targetMs: OPT.targetMs };
+  out.shaders = {};
+
+  function program(name, fs) {
+    const p = gl.createProgram();
+    const info = { source: fnv(VS + fs) };
+    for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, fs]]) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`${name}: compile failed: ${gl.getShaderInfoLog(s)}`);
+      if (type === gl.FRAGMENT_SHADER && dbgShaders) info.translated = fnv(dbgShaders.getTranslatedShaderSource(s));
+      gl.attachShader(p, s);
+    }
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(`${name}: link failed: ${gl.getProgramInfoLog(p)}`);
+    info.log = gl.getProgramInfoLog(p) || "";
+    out.shaders[name] = info;
+    const u = (n) => gl.getUniformLocation(p, n);
+    return { p, iter: u("uIter"), res: u("uRes"), seed: u("uSeed"), color: u("uColor") };
+  }
+
+  // One test = how to draw n units of work (loop steps, or layers for fill).
+  const TESTS = {
+    throughput: { prog: program("throughput", FS_THROUGHPUT), unit: "Gunits/s", perUnit: 1 },
+    alu: { prog: program("alu", FS_ALU), unit: "GFLOPS", perUnit: 72 },
+    fill: { prog: program("fill", FS_FILL), unit: "Gpixels/s", perUnit: 1, layers: true },
+  };
+  function draw(t, n, seed) {
+    gl.useProgram(t.prog.p);
+    if (t.layers) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.uniform4f(t.prog.color, 0.01 * seed, 0.002, 0.003, 0.01);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, n);
+      gl.disable(gl.BLEND);
+    } else {
+      gl.uniform1i(t.prog.iter, n);
+      gl.uniform2f(t.prog.res, OPT.w, OPT.h);
+      gl.uniform1f(t.prog.seed, seed);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+  const px = new Uint8Array(4);
+  const sync = () => { gl.finish(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
+  const mainOf = (m) => m.main;
+
+  // One frame: everything before it done, draw, wait until the GPU is done.
+  // Timer query and wall time around the same draw.
+  const pending = [];
+  function frame(t, n, seed) {
+    sync();
+    const q = tq ? gl.createQuery() : null;
+    if (q) gl.beginQuery(tq.TIME_ELAPSED_EXT, q);
+    const t0 = performance.now();
+    draw(t, n, seed);
+    if (q) { gl.endQuery(tq.TIME_ELAPSED_EXT); pending.push(q); }
+    sync();
+    return performance.now() - t0;
+  }
+  // Timer results of the frames since the last call, in ms; null if the
+  // GPU's timer was disjoint (clock change) or a result never came.
+  async function timerResults() {
+    const qs = pending.splice(0);
+    if (!qs.length) return null;
+    // WebGL gives query results only after a return to the event loop.
+    const ready = () => gl.getQueryParameter(qs[qs.length - 1], gl.QUERY_RESULT_AVAILABLE);
+    await nextTurn();
+    for (let i = 0; i < 50 && !ready(); i++) await nextTurn();
+    for (let i = 0; i < 300 && !ready(); i++) await nextFrame();
+    const ok = ready() && !gl.getParameter(tq.GPU_DISJOINT_EXT);
+    const ms = ok ? qs.map((q) => gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6) : null;
+    qs.forEach((q) => gl.deleteQuery(q));
+    return ms && ms.every((x) => x > 0) ? ms : null;
+  }
+  // `frames` frames of n units, back to back: {wall, timer} in ms.
+  async function measure(t, n, frames) {
+    if (tq) gl.getParameter(tq.GPU_DISJOINT_EXT);   // clears the flag
+    const wall = [];
+    for (let f = 0; f < frames; f++) { wall.push(frame(t, n, f % 2)); await nextTurn(); }
+    const timer = tq ? await timerResults() : null;
+    if (useTimer && !timer) { t.fallbacks = (t.fallbacks || 0) + 1; out.errors.push(`${t.name}: no timer result, wall time used`); }
+    return { wall, timer, main: useTimer && timer ? timer : wall };
+  }
+
+  // What a frame with no work costs in wall time (the waits and a ray march
+  // with no steps), for the record: no score subtracts it.
+  {
+    const o = [];
+    for (let i = 0; i < 15; i++) { o.push(frame(TESTS.throughput, 0, 0)); await nextTurn(); }
+    if (tq) await timerResults();
+    out.overheadMs = round(median(o.slice(3)));
+  }
+
+  // Raise n until a frame takes targetMs; never more than doubles past it.
+  async function calibrate(t, targetMs, n0) {
+    let n = n0 || (t.layers ? 4 : 16), ms = 0;
+    for (let step = 0; step < 40; step++) {
+      ms = median(mainOf(await measure(t, n, 3)));
+      if (ms > 4000) throw new Error(`one frame took ${Math.round(ms)} ms at ${n}: too slow`);
+      if (ms >= targetMs * 0.9) break;
+      const want = ms > 0.5 ? n * targetMs / ms : n * 8;
+      n = Math.max(n + 1, Math.round(Math.min(want, n * 8)));
+      if (n > (1 << 24)) throw new Error("never reached the target frame time");
+    }
+    return { n, ms };
+  }
+
+  const table = document.querySelector("#table tbody");
+  out.tests = {};
+  for (const name of OPT.only) {
+    const t = TESTS[name];
+    if (!t) { out.errors.push(`unknown test ${name}`); continue; }
+    t.name = name;
+    status(`${name}: calibrating`);
+    let target = OPT.targetMs, cal = await calibrate(t, target);
+    if (!useTimer) {   // wall: frames long enough that the fixed cost is under 2 %
+      const fixed = async (n) => 2 * median((await measure(t, n, 5)).wall) - median((await measure(t, 2 * n, 5)).wall);
+      const f = await fixed(cal.n);
+      if (f / cal.ms >= 0.02 && target < MAX_TARGET_MS) {
+        target = Math.min(MAX_TARGET_MS, Math.ceil(f / 0.015));
+        status(`${name}: fixed cost ${round(f)} ms, frames of ${target} ms`);
+        cal = await calibrate(t, target, cal.n);
+      }
+    }
+    const n = cal.n;
+    const work = n * t.perUnit * pixels;   // per frame
+    // Warm-up at the calibrated work: the GPU's clock rises under steady load.
+    status(`${name}: warming up`);
+    for (const w0 = performance.now(); performance.now() - w0 < OPT.warmupMs;) await measure(t, n, 3);
+    const runs = [], frameMs = [], wallRuns = [];
+    for (let r = 0; r < OPT.runs; r++) {
+      status(`${name}: run ${r + 1} of ${OPT.runs}`);
+      const m = await measure(t, n, OPT.frames);
+      const ms = mainOf(m);
+      frameMs.push(...ms);
+      runs.push(work / (mean(ms) / 1000) / 1e9);
+      wallRuns.push(work / (mean(m.wall) / 1000) / 1e9);
+    }
+    // Does the score hold at half and twice the work? (It should: same per-unit cost.)
+    const half = Math.max(1, Math.round(n / 2));
+    const msHalf = median(mainOf(await measure(t, half, 5)));
+    const msDouble = median(mainOf(await measure(t, n * 2, 5)));
+    // A fixed amount of work and a hash of an 8x8 block of the result: the
+    // same value means the same output (precision may differ between drivers).
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    draw(t, t.layers ? 16 : 256, 0); sync();
+    const block = new Uint8Array(8 * 8 * 4);
+    gl.readPixels(OPT.w >> 1, OPT.h >> 1, 8, 8, gl.RGBA, gl.UNSIGNED_BYTE, block);
+    if (tq) await timerResults();
+    const res = {
+      score: round(median(runs)), unit: t.unit, method: useTimer ? "timer" : "wall", targetMs: target, iterations: n,
+      runs: runs.map((x) => round(x)), cv: round(cv(runs), 2),
+      msPerFrame: round(median(frameMs)), calibrationMs: round(cal.ms),
+      scaling: { half: round(work / 2 / (msHalf / 1000) / 1e9), double: round(work * 2 / (msDouble / 1000) / 1e9) },
+      checksum: fnv(Array.from(block).join(",")),
+    };
+    res.scaling.linear = Math.abs(res.scaling.half / res.score - 1) < 0.1 && Math.abs(res.scaling.double / res.score - 1) < 0.1;
+    res.stable = res.cv < 3;
+    if (!useTimer) {   // the fixed cost per frame, from n and 2n: under 2 % of a frame or the score is off
+      const fixedMs = 2 * res.msPerFrame - msDouble;
+      res.fixedMs = round(fixedMs);
+      res.fixedShare = round(fixedMs / res.msPerFrame, 2);
+      res.syncOk = res.fixedShare < 0.02;
+    }
+    if (useTimer) {   // the same frames in wall time, for comparison with browsers without timer queries
+      res.wallScore = round(median(wallRuns));
+      res.wallCv = round(cv(wallRuns), 2);
+      if (t.fallbacks) res.timerFallbacks = t.fallbacks;
+    }
+    out.tests[name] = res;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${name}</td><td class="n">${res.score} ${t.unit}</td><td class="n">${n}</td>` +
+      `<td class="n">${res.msPerFrame}</td><td class="n${res.stable ? "" : " bad"}">${res.cv} %</td>`;
+    table.appendChild(tr);
+    document.getElementById("table").hidden = false;
+  }
+  out.ok = Object.keys(out.tests).length > 0;
+  return out;
+}
+
+main().catch((e) => ({ bench: "omacvm-gpu-throughput", version: VERSION, ok: false, errors: [String(e && e.message || e)] }))
+  .then((r) => {
+    window.gpuResult = r;
+    document.getElementById("result").textContent = JSON.stringify(r, null, OPT.json ? 0 : 1);
+    status(r.ok ? "done" : r.notAvailable ? "not available: " + r.notAvailable : "failed: " + r.errors.join("; "));
+    document.title = r.ok || r.notAvailable ? "DONE" : "FAILED";
+  });
+</script>
+</body>
+</html>

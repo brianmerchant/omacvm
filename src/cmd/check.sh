@@ -32,6 +32,7 @@ done
 source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
+source "$R/src/lib/graphics.sh"
 export OMA_KEY=$KEY
 # stop RC MESSAGE: no VM to check. With --json also the JSON, one failed check.
 stop() {
@@ -170,7 +171,8 @@ netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, 
 }
 if [[ $TYPE == app ]]; then
   if [[ $FAST_NET == on ]]; then
-    case $("$R/src/net/mac/install.sh" --status 2>/dev/null) in
+    st=$("$R/src/net/mac/install.sh" --status 2>/dev/null)
+    case $(head -1 <<<"$st") in
       ok) ok "fast network service" "omacvm-netd, for this OmacVM.app" ;;
       old) bad "fast network service" "for another build of the app, or older: omacvm enable fast-network --vm \"$VM\"" ;;
       down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" ;;
@@ -185,6 +187,15 @@ if [[ $TYPE == app ]]; then
       vmnet-down*) bad "fast network" "${net#vmnet-down }$(netd_said)" ;;
       *) bad "fast network" "the app did not say which network it took (from before the fast network? omacvm update)" ;;
     esac
+    # Networks that came up after macOS's sharing started (a VPN): omacvm-netd
+    # translates the VMs' addresses there itself (its VPN NAT).
+    nat=$(sed -n 's/^vpn-nat: //p' <<<"$st")
+    natlog=$(grep 'VPN NAT' /var/log/org.omacvm.netd.log 2>/dev/null | tail -1)
+    natt=$(date -j -f '%Y-%m-%d %H:%M:%S' "${natlog:0:19}" +%s 2>/dev/null || echo 0)
+    if [[ $natlog == *"VPN NAT: "* && $natlog != *"removed what"* ]] && (( $(date +%s) - natt < 600 )); then
+      bad "VPN NAT" "$(cut -d' ' -f3- <<<"$natlog") (a VPN connected while the VM runs may not work for it)"
+    elif [[ -n $nat ]]; then ok "VPN NAT" "omacvm-netd translates the VM's addresses on $nat (came up after macOS's sharing started, e.g. a VPN)"
+    elif [[ $net == vmnet ]]; then ok "VPN NAT" "not needed: macOS's sharing covers every network that is up"; fi
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
 fi
 
@@ -299,10 +310,24 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     else ok "GPU path" "$g"; fi
   fi
 fi
+# OmacVM.app's Graphics setting: what this start got (the app says so in
+# qemu.log), and whether the next start gets something else.
+if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then
+  FEATURE=graphics
+  gl=$(sed -n 's/^OmacVM: graphics: //p' "$gd/logs/qemu.log" 2>/dev/null | tail -1)
+  gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd")
+  if [[ -z $gl ]]; then
+    skip "Graphics" "$(graphics_title "$gc"): $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start (an app from before 3.0.0 has OpenGL only)"
+  elif [[ ${gl%% *} != "$gc" || $gl != *"-> $gn "* ]]; then
+    skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $([[ $gn == vulkan ]] && echo "OpenGL and Vulkan" || echo OpenGL) from the VM's next start"
+  else ok "Graphics" "$(graphics_title "$gc"): $gl"; fi
+  FEATURE=""
+fi
 # Vulkan in an app VM (the hidden Venus switch): the Mac driver QEMU picked
 # this run (qemu.log starts fresh with each run). KosmicKrisp falls back to
 # MoltenVK when it cannot run.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  FEATURE=graphics
   v=$(grep -o 'vulkan driver: .*' "$miclog" | tail -1)
   case $v in
     "") ;;
@@ -313,6 +338,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
       else ok "Vulkan (Venus)" "MoltenVK"; fi ;;
     *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
   esac
+  FEATURE=""
 fi
 # macOS's own shortcuts while an app VM has the keyboard (this run): to the
 # VM (switched off meanwhile), kept by the user's choice, or a fallback.
@@ -324,6 +350,29 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   elif grep -q 'macOS shortcuts off' "$miclog"; then
     ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥⌘ Esc is macOS's)"
   fi
+fi
+# Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
+# user-interactive QoS, and the sound card paced (no catch-up after a stall);
+# the hidden audioClassic setting keeps QEMU's own timing for both.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  q=$(grep -o 'main loop QoS: .*' "$miclog" | tail -1)
+  p=$(grep -o 'HDA sound pacing [a-z]*' "$miclog" | tail -1)
+  case "$q|$p" in
+    "|") ;;   # a runtime before 3.0.0 says nothing
+    *refused*) warn "sound timing" "macOS refused user-interactive QoS: sound may crackle while the Mac is busy" ;;
+    *user-interactive"|HDA sound pacing on") ok "sound timing" "QEMU's main loop at user-interactive QoS, sound card paced" ;;
+    *"|HDA sound pacing off") ok "sound timing" "QEMU's own sound timing (audioClassic)" ;;
+    *) ok "sound timing" "${q:-main loop QoS: unknown}, ${p:-pacing unknown}" ;;
+  esac
+fi
+# A Mac audio device that does not answer (coreaudiod stuck): QEMU opens it off
+# its main loop and the VM runs without sound instead of hanging; qemu.log says
+# so, and when the device works again.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  case $(grep -o "OmacVM: sound: the Mac's audio device [a-z ]*" "$miclog" | tail -1) in
+    *"does not answer"*) warn "sound" "Mac audio device not answering, the VM runs without sound; fix: pick another output in System Settings > Sound, replug it, or sudo killall coreaudiod" ;;
+    *"works again"*) ok "sound" "the Mac's audio device stopped answering earlier in this run and works again" ;;
+  esac
 fi
 FEATURE=gestures
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and

@@ -19,7 +19,7 @@ final class Creator: ObservableObject {
     private var exitStatus: Int32?
     private var logURL: URL?
 
-    func start(config: VMConfig, password: String, prebuilt: Bool = false) {
+    func start(config: VMConfig, password: String, prebuilt: Bool = false, graphics: GraphicsChoice = .auto) {
         failed = nil; finished = false; step = 0
         reader?.readabilityHandler = nil
         reader = nil; run += 1; buffer = ""; exitStatus = nil
@@ -27,6 +27,8 @@ final class Creator: ObservableObject {
         title = "Preparing"
         do {
             try config.write()
+            // Read by omacvm apply at the end of the build (the VM's Venus driver).
+            try Graphics.write(graphics, folder: config.folder)
         } catch {
             failed = "Could not write the VM settings: \(error.localizedDescription)"
             return
