@@ -47,6 +47,9 @@ prepare)
   [[ -f $S/packages-before ]] || pacman -Qq > "$S/packages-before"
   # A full update now, not in the round: -S on an old database can 404, and
   # -Sy alone would be a partial upgrade. After this, nothing changes until cleanup.
+  # Omarchy 4.0.3's pacman hook refuses a direct upgrade unless this is set
+  # (it wants `omarchy update`); a benchmark VM takes the plain full update.
+  export OMARCHY_ALLOW_DIRECT_PACMAN=1
   pacman -Syu --noconfirm >/dev/null || { echo "pacman -Syu failed" >&2; exit 1; }
   # shellcheck disable=SC2086
   pacman -S --needed --noconfirm $PKGS >/dev/null || { echo "pacman -S $PKGS failed" >&2; exit 1; }
