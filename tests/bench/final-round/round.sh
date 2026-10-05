@@ -160,7 +160,8 @@ hide_apps() {   # the Mac's desktop for its idle row: every app hidden (not quit
 
 # ---------- the VMs ----------
 K=(-i "$KEY" -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
-gs() { local d=$1 p=22; shift; case $d in *:*) p=${d##*:}; d=${d%:*} ;; esac; ssh "${K[@]}" -p "$p" "root@$d" "$@" </dev/null; }
+gsi() { local d=$1 p=22; shift; case $d in *:*) p=${d##*:}; d=${d%:*} ;; esac; ssh "${K[@]}" -p "$p" "root@$d" "$@"; }   # stdin passed on
+gs() { gsi "$@" </dev/null; }
 # The guest's monitor widths (Hyprland, as the desktop user).
 widths() { gs "$1" 'U=$(id -nu 1000); sig=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
   sudo -u $U env XDG_RUNTIME_DIR=/run/user/1000 HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl monitors -j 2>/dev/null |
@@ -201,7 +202,8 @@ vm_up() {   # target: start it in full screen, wait for its desktop, check the w
       app=$(app_of "$t"); [ -d "$app" ] || { log "$t: no app at $app"; return 1; }
       [ "$t" = app-rc2 ] && for e in $RC2_APP_ENV; do envs+=(--env "$e"); done
       # A private pasteboard: the Bench VM never reaches the Mac's clipboard (STANDARDS 25).
-      open -n --env OMACVM_TEST_PASTEBOARD=org.omacvm.bench-test ${envs[@]+"${envs[@]}"} "$app" --args --start --vm "$name" || return 1
+      # -startFullScreen YES: full screen for this start only (the argument domain; the app's settings stay).
+      open -n --env OMACVM_TEST_PASTEBOARD=org.omacvm.bench-test ${envs[@]+"${envs[@]}"} "$app" --args --start --vm "$name" -startFullScreen YES || return 1
       HOST=127.0.0.1:$([ "$t" = app ] && echo "$APP_PORT" || echo "$RC2_PORT") ;;
     utm)
       open -a UTM; sleep 5
@@ -389,7 +391,7 @@ if [ "$MODE" = prepare-rc2 ]; then
   # folder name it expects, and the app may start QEMU with the folder's on-disk case
   # ("Application Support/omacvm/VMs"): the CLI then sees the VM stopped and starts it again.
   COPYFILE_DISABLE=1 tar -C "$RC2_SRC/src/app/guest" --no-xattrs -cf - venus 90-omacvm-vulkan.conf |
-    gs "$h" 'rm -rf /opt/omacvm-final-round/venus && mkdir -p /opt/omacvm-final-round && tar --no-same-owner -C /opt/omacvm-final-round -xf - &&
+    gsi "$h" 'rm -rf /opt/omacvm-final-round/venus && mkdir -p /opt/omacvm-final-round && tar --no-same-owner -C /opt/omacvm-final-round -xf - &&
       install -m644 /opt/omacvm-final-round/90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf' ||
     { rc2_stop; die "copying the Venus driver files failed"; }
   gs "$h" 'sed -i "/^OMACVM_GRAPHICS=/d" /etc/omacvm/env && echo OMACVM_GRAPHICS=vulkan >> /etc/omacvm/env &&
