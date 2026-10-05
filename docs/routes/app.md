@@ -10,6 +10,9 @@ OmacVM's version.
 
 ## Get it
 
+OmacVM.app needs macOS 15 or newer on an Apple Silicon Mac (the other
+routes run on macOS 14).
+
 - `omacvm build --vm-type app`: when the app is missing, OmacVM offers to
   download it (below) and goes on with the build.
 - Or download `OmacVM-<version>.zip` from the
