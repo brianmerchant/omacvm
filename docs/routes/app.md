@@ -505,7 +505,9 @@ peak of this run, and macOS's memory pressure.
   is bigger than all the memory macOS has left: more swapping is better
   than a black desktop.
 - When macOS is critical (red), new big buffers are refused. Before a
-  refusal QEMU frees what it can and looks again three times (100 ms).
+  refusal QEMU frees what it can and looks again three times (100 ms;
+  within a second of the last refusal it does not wait again, as the VM
+  stands still while it waits).
   Screens, cursors and small buffers are never refused for this, so the
   desktop keeps drawing as long as it can.
 

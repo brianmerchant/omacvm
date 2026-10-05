@@ -9,7 +9,8 @@
  *   test-resource-budget off        OMACVM_GPU_MEMORY_MB=0: no budget
  *   test-resource-budget default    unset: three quarters of the Mac's memory
  *   test-resource-budget critical   pressure critical: big resources refused after
- *                                   trying again, small ones, screens and cursors not
+ *                                   trying again (the next one at once), small ones,
+ *                                   screens and cursors not
  *   test-resource-budget warn       pressure warn, 100 MB left: what fits
  *   test-resource-budget status     the status file: in use, peak, a lost context */
 #include <OpenGL/OpenGL.h>
@@ -331,6 +332,14 @@ static int run_critical(void)
    check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
          "the status file says pressure=critical at once");
    check(status_value("refused", NULL, 0) == 1, "and refused=1");
+   /* the next big one within a second: refused after one look, no 100 ms hold */
+   t = now_s();
+   uint32_t big2 = tex2d(4096, 4096, 1);
+   waited = now_s() - t;
+   check(big2 == 0, "a second 64 MB texture right after is refused too");
+   snprintf(line, sizeof line, "at once, without holding the VM (%.0f ms)", waited * 1000);
+   check(waited < 0.05, line);
+   check(status_value("refused", NULL, 0) == 2, "refused=2");
    settle();
    check(status_value("in_use_mb", NULL, 0) == 64, "in_use_mb=64 (8 MB texture + 5K screen)");
    if (small)

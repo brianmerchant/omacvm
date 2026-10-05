@@ -29,6 +29,7 @@ in more words.
 - OmacVM.app: on a 4K or larger display, Omarchy's display panel says 2x is
   the sharp scale there. What in-between scales cost:
   [docs/routes/app.md](docs/routes/app.md#display-scale-on-4k-5k-and-larger-displays).
+
 ## 2.9.1
 
 A hotfix for 2.9.0: brightness keys that work with the VM in front, a

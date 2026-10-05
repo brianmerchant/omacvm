@@ -60,7 +60,8 @@ purgeable memory macOS has left (a first version kept a sixteenth of the
 Mac's memory free; the user would rather swap than see a black desktop, so
 only what cannot fit at all is refused). Critical: new
 big resources are refused, after a glFinish and three more looks over
-100 ms. Screens, cursors and small resources are never refused for pressure.
+100 ms (within a second of the last refusal after one look: each wait holds
+QEMU's main loop, so the whole VM). Screens, cursors and small resources are never refused for pressure.
 
 Rejected: sizing a budget from the displays and the VM's memory (option 4
 plus the VM's RAM): the VM's RAM is mostly not resident (free page
