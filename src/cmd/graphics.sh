@@ -57,7 +57,7 @@ if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d
 fi
 
 choice=$(graphics_choice "$d"); next=$(graphics_next_start "$d")
-last=$(sed -n 's/^OmacVM: graphics: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+last=$(sed -n 's/^OmacVM: graphics: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1) || last=""
 ready=false; [[ -e $d/venus-ready ]] && ready=true
 if (( JSON )); then
   printf '{"vm": %s, "type": "app", "graphics": "%s", "title": "%s", "next_start": "%s", "driver_ready": %s, "this_start": %s, "changed": %s%s}\n' \
