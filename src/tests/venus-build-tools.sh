@@ -29,6 +29,7 @@ while (( $# )); do [[ $1 == -o ]] && : > "$2"; shift; done
 EOF
 cat > "$T/bin/sha256sum" <<'EOF'
 #!/bin/bash
+cat > /dev/null   # all of stdin: else the writer gets SIGPIPE (status 141)
 [[ ${1:-} == -c ]] && exit 0
 echo "0123456789abcdef0123  -"
 EOF
