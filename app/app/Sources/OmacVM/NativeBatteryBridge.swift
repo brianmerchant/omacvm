@@ -20,8 +20,7 @@ final class NativeBatteryBridge: @unchecked Sendable {
     private var lastSent: HostBatterySnapshot?
     private var guestListening = false
     private var heartbeat: DispatchSourceTimer?
-    private var powerSource: CFRunLoopSource?
-    private var notificationRunLoop: CFRunLoop?
+    private let notifications = RunLoopSourceThread()
     private var stopped = false
 
     init(socketPath: String) throws {
@@ -72,12 +71,10 @@ final class NativeBatteryBridge: @unchecked Sendable {
         stopLock.lock()
         guard !stopped else { stopLock.unlock(); return }
         stopped = true
-        let source = powerSource, loop = notificationRunLoop
-        powerSource = nil; notificationRunLoop = nil
         stopLock.unlock()
         heartbeat?.cancel()
         heartbeat = nil
-        if let source, let loop { CFRunLoopRemoveSource(loop, source, .defaultMode) }
+        notifications.stop()   // ends the notification thread's wait now
         Darwin.shutdown(descriptor, SHUT_RDWR)
         Darwin.close(descriptor)
     }
@@ -85,13 +82,6 @@ final class NativeBatteryBridge: @unchecked Sendable {
     private func hasStopped() -> Bool {
         stopLock.lock(); defer { stopLock.unlock() }
         return stopped
-    }
-
-    private func registerPowerSource(_ source: CFRunLoopSource, on loop: CFRunLoop) -> Bool {
-        stopLock.lock(); defer { stopLock.unlock() }
-        guard !stopped else { return false }
-        powerSource = source; notificationRunLoop = loop
-        return true
     }
 
     /// IOKit's power notifications on a thread with its own run loop (run()
@@ -107,10 +97,10 @@ final class NativeBatteryBridge: @unchecked Sendable {
                 fputs("[battery-bridge] no IOKit power notifications; every 30 s only\n", stderr)
                 return
             }
-            let loop = CFRunLoopGetCurrent()!
-            guard self.registerPowerSource(source, on: loop) else { return }
-            CFRunLoopAddSource(loop, source, .defaultMode)
-            while !self.hasStopped() { CFRunLoopRunInMode(.defaultMode, 1.0, false) }
+            // The source goes into the loop under the same lock stop() takes,
+            // so a stop() at any moment ends this thread at once.
+            guard self.notifications.attach(source) else { return }
+            self.notifications.run()
         }
     }
 

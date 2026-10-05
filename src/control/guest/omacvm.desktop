@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OmacVM
+Comment=OmacVM's features, updates and problem reports
+Exec=omarchy-launch-or-focus-tui omacvm --window
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;
+Keywords=omacvm;mac;features;update;report;

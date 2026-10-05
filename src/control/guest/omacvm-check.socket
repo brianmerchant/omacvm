@@ -1,0 +1,16 @@
+# The control centre's guest checks: guest/check.sh as root, for the desktop
+# user only (control/guest/install.sh fills in the user).
+[Unit]
+Description=OmacVM guest checks for the control centre
+
+[Socket]
+ListenStream=/run/omacvm/check.sock
+SocketUser=@USER@
+SocketGroup=@USER@
+SocketMode=0600
+DirectoryMode=0755
+Accept=yes
+MaxConnections=2
+
+[Install]
+WantedBy=sockets.target

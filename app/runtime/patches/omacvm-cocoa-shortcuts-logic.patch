@@ -1,0 +1,100 @@
+From: OmacVM
+Subject: [PATCH] ui: when macOS's shortcuts go to the VM, and Apple's own key codes
+
+What: a header with no AppKit in it: when macOS's global shortcuts are off
+(the VM has the keyboard, and nothing says otherwise), which Linux key
+Apple's own top-row key codes become (Mission Control, Spotlight, Dictation,
+Do Not Disturb, Launchpad, Dashboard: the F-key they sit on), and the escape
+combo. Used by omacvm-cocoa-system-shortcuts.patch (which explains the why).
+
+Why its own file: so the logic is tested against macOS's whole shortcut list
+without QEMU or a display (app/runtime/Tests/keys/test-shortcuts.sh applies
+this patch to an empty folder; at build time and in CI).
+
+Upstream: not applicable (OmacVM's keyboard policy).
+Test: app/runtime/Tests/keys/test-shortcuts.c.
+
+diff --git a/ui/omacvm-shortcuts.h b/ui/omacvm-shortcuts.h
+new file mode 100644
+index 0000000..5f66de0
+--- /dev/null
++++ b/ui/omacvm-shortcuts.h
+@@ -0,0 +1,78 @@
++/*
++ * OmacVM: macOS's own shortcuts while the VM has the keyboard.
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/keys/test-shortcuts.c). ui/cocoa.m asks it when to switch
++ * macOS's shortcuts off and which Linux key a Mac-only key code becomes.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++#ifndef OMACVM_SHORTCUTS_H
++#define OMACVM_SHORTCUTS_H
++
++#include <stdbool.h>
++
++/* macOS's global shortcut switch (CGSSetGlobalHotKeyOperatingMode). */
++enum { OMACVM_HOTKEYS_ON = 0, OMACVM_HOTKEYS_OFF = 1 };
++
++/*
++ * macOS's shortcuts are off while the VM has the keyboard: full grab on, our
++ * app in front and our window key (or the mouse grabbed). `mac_keeps`: the
++ * user asked to keep them (OMACVM_MAC_SHORTCUTS=1). `stalled`: the window's
++ * thread has not answered for a while, so a hung VM window never keeps
++ * them off.
++ */
++static inline bool omacvm_shortcuts_to_vm(bool full_grab, bool app_active,
++                                          bool keyboard_captured,
++                                          bool mac_keeps, bool stalled)
++{
++    return full_grab && app_active && keyboard_captured && !mac_keeps &&
++           !stalled;
++}
++
++/*
++ * Keys of Apple keyboards that macOS knows by their own key code (the top
++ * row without fn, older keyboards' Dashboard and Launchpad keys). With the
++ * shortcuts off they reach the VM as the F-key they sit on. 0: no key for
++ * the guest (the globe key, the power key; brightness, which the Bridge
++ * handles). -1: not one of these, the normal table applies.
++ * The Linux codes are the kernel's (input-event-codes.h): F3 61, F4 62,
++ * F5 63, F6 64.
++ */
++static inline int omacvm_special_key(int mac_keycode)
++{
++    switch (mac_keycode) {
++    case 0xa0:          /* Mission Control (F3) */
++        return 61;
++    case 0x81:          /* Spotlight, older keyboards (F4) */
++    case 0x82:          /* Dashboard (F4) */
++    case 0x83:          /* Launchpad (F4) */
++    case 0xb1:          /* Spotlight (F4) */
++        return 62;
++    case 0xb0:          /* Dictation (F5) */
++        return 63;
++    case 0xb2:          /* Do Not Disturb (F6) */
++        return 64;
++    case 0x7f:          /* the power key */
++    case 0x90:          /* brightness up as a key code */
++    case 0x91:          /* brightness down as a key code */
++    case 0xb3:          /* globe */
++        return 0;
++    default:
++        return -1;
++    }
++}
++
++/*
++ * The escape combo, Control+Option+Command+Escape (Esc is key code 53).
++ * OmacVM Gestures takes it before us; only when it is not running does the
++ * VM see it, and in full screen it then hands the keyboard back to macOS
++ * (the app hides), so nobody is ever stuck in the VM.
++ */
++static inline bool omacvm_is_escape_combo(int mac_keycode, bool control,
++                                          bool option, bool command)
++{
++    return mac_keycode == 53 && control && option && command;
++}
++
++#endif

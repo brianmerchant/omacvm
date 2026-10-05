@@ -1,0 +1,253 @@
+From: OmacVM
+Subject: [PATCH] cocoa: macOS's own shortcuts go to the VM while it has the keyboard
+
+Applies after all other Cocoa patches and omacvm-cocoa-shortcuts-logic.patch
+(the header with the logic; last in build-qemu-gpu-runtime.sh).
+
+What: while the VM window has the keyboard (full grab on, our app in front,
+our window key), macOS's global shortcuts are switched off with
+CGSSetGlobalHotKeyOperatingMode (as VirtualBox and UTM do), and on again the
+moment it has not. Screenshots (Cmd+Shift+3/4/5 and the Ctrl variants),
+Mission Control, App Expose, Show Desktop, Launchpad, Ctrl+arrows,
+Spotlight, input sources, Cmd+Tab, Cmd+`, Quick Note, Force Quit's chord and
+the rest of macOS's list then reach the VM like any other key. Apple's own
+top-row key codes (Mission Control, Spotlight, Dictation, Do Not Disturb,
+Launchpad, Dashboard) reach the VM as the F-key they sit on.
+
+Why: the HID event tap from full grab sees most chords, but not all of them
+(macOS handles some before any tap, and the tap needs Accessibility), so
+Cmd+Shift+4 or Cmd+F11 could still go to macOS.
+
+Safety: the switch belongs to this process's window-server connection. When
+QEMU exits or crashes, macOS turns the shortcuts back on by itself (checked:
+a process that switched them off and was killed leaves them on); another
+process cannot keep them off. A watchdog thread turns them on when the
+window's thread has not answered for 2 s, so a hung VM window never keeps
+them. OMACVM_MAC_SHORTCUTS=1 leaves them with macOS. The escape combo
+(Ctrl+Option+Cmd+Esc) is OmacVM Gestures'; when Gestures is not running the
+VM sees it, and in full screen it then hands the keyboard back to macOS
+(shortcuts on, app hidden). Media keys are not shortcuts: the Bridge routes
+them as before.
+
+Upstream: not proposed (QEMU's Cocoa UI has no keyboard-grab policy of this
+kind; it would need an option there).
+Test: app/runtime/Tests/keys/test-shortcuts.sh (the logic in
+ui/omacvm-shortcuts.h against macOS's whole shortcut list) and
+src/tests/vm-shortcuts.sh (each chord reaches a real QEMU's input layer).
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 3995639..d76c36a 100644
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -41,6 +41,7 @@
+ #include "ui/cocoa-scroll.h"
+ #include "ui/kbd-state.h"
+ #include "ui/omacvm-pointer-guard.h"
++#include "ui/omacvm-shortcuts.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+ #include "system/runstate-action.h"
+@@ -57,6 +58,7 @@
+ #include "qemu/error-report.h"
+ #include "trace.h"
+ #include <Carbon/Carbon.h>
++#include <dlfcn.h>
+ #include <AppKit/NSOpenGL.h>
+ #ifdef CONFIG_OPENGL
+ #import <IOSurface/IOSurface.h>
+@@ -339,7 +341,12 @@ static bool cocoa_host_keyboard_is_iso(void)
+ static int cocoa_keycode_to_linux(int keycode)
+ {
+     int linux_keycode;
++    /* OmacVM: Apple's own top-row keys reach the VM as their F-key. */
++    int special = omacvm_special_key(keycode);
+ 
++    if (special >= 0) {
++        return special;
++    }
+     if (qemu_input_map_osx_to_linux_len <= keycode) {
+         error_report("(cocoa) warning unknown keycode 0x%x", keycode);
+         return 0;
+@@ -469,6 +476,147 @@ - (void) omacvmUngrabAfterDrag;
+ @end
+ 
+ QemuCocoaView *cocoaView;
++
++/*
++ * OmacVM: macOS's own shortcuts go to the VM while it has the keyboard:
++ * screenshots, Mission Control, Spotlight, Cmd+Tab, input sources, Show
++ * Desktop and the rest of macOS's list. The HID event tap alone does not get
++ * them all (macOS handles some before any tap, and the tap needs
++ * Accessibility), so while our window has the keyboard macOS's global
++ * shortcuts are switched off (CGSSetGlobalHotKeyOperatingMode, as VirtualBox
++ * and UTM do), and on again the moment it has not. The switch belongs to this
++ * process's window-server connection: when QEMU exits or crashes, macOS turns
++ * the shortcuts back on by itself, and no other process can keep them off.
++ * A watchdog thread turns them on if the window's thread stops answering, so
++ * a hung VM window never keeps them. OMACVM_MAC_SHORTCUTS=1 leaves them with
++ * macOS. Threads: the main thread decides; the watchdog only turns them on;
++ * omacvm_shortcuts_lock orders the two.
++ */
++typedef int (*OmacVMConnectionFn)(void);
++typedef int32_t (*OmacVMHotKeyModeFn)(int, int);
++static OmacVMHotKeyModeFn omacvm_hotkey_mode;
++static int omacvm_hotkey_connection;
++static bool omacvm_mac_keeps_shortcuts;
++static pthread_mutex_t omacvm_shortcuts_lock = PTHREAD_MUTEX_INITIALIZER;
++static bool omacvm_shortcuts_off;      /* written under the lock; the watchdog reads it */
++static int omacvm_shortcuts_said;      /* under the lock: log lines so far */
++static int64_t omacvm_ui_heartbeat;    /* ms; qatomic */
++static bool omacvm_ui_stalled;         /* qatomic */
++#define OMACVM_UI_STALL_MS 2000
++
++static int64_t omacvm_now_ms(void)
++{
++    return (int64_t)(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000000);
++}
++
++static void omacvm_shortcuts_set(bool off, const char *why)
++{
++    pthread_mutex_lock(&omacvm_shortcuts_lock);
++    if (omacvm_hotkey_mode && omacvm_shortcuts_off != off) {
++        int32_t err = omacvm_hotkey_mode(omacvm_hotkey_connection,
++                                         off ? OMACVM_HOTKEYS_OFF
++                                             : OMACVM_HOTKEYS_ON);
++        if (err == 0) {
++            qatomic_set(&omacvm_shortcuts_off, off);
++        }
++        /* The first changes, each failure and each special reason. */
++        if (err != 0 || why || omacvm_shortcuts_said < 2) {
++            omacvm_shortcuts_said++;
++            fprintf(stderr, "omacvm: macOS shortcuts %s%s",
++                    off ? "off: they go to the VM (it has the keyboard)"
++                        : "on again: macOS has them",
++                    why ? why : "");
++            if (err != 0) {
++                fprintf(stderr, ": FAILED, error %d", (int)err);
++            }
++            fprintf(stderr, "\n");
++        }
++    }
++    pthread_mutex_unlock(&omacvm_shortcuts_lock);
++}
++
++/* Main thread: decide again (activation, key window, every 0.5 s). */
++static void omacvm_shortcuts_update(void)
++{
++    qatomic_set(&omacvm_ui_heartbeat, omacvm_now_ms());
++    if (qatomic_read(&omacvm_ui_stalled)) {
++        qatomic_set(&omacvm_ui_stalled, false);
++        fprintf(stderr, "omacvm: the VM window answers again\n");
++    }
++    bool off = omacvm_shortcuts_to_vm(full_grab_enabled, [NSApp isActive],
++                                      cocoaView && [cocoaView isKeyboardCaptured],
++                                      omacvm_mac_keeps_shortcuts, false);
++    omacvm_shortcuts_set(off, NULL);
++}
++
++static void *omacvm_shortcuts_watchdog(void *opaque)
++{
++    for (;;) {
++        g_usleep(500 * 1000);
++        int64_t quiet = omacvm_now_ms() - qatomic_read(&omacvm_ui_heartbeat);
++        if (quiet > OMACVM_UI_STALL_MS && !qatomic_read(&omacvm_ui_stalled) &&
++            qatomic_read(&omacvm_shortcuts_off)) {
++            qatomic_set(&omacvm_ui_stalled, true);
++            omacvm_shortcuts_set(false, " (the VM window stopped answering)");
++        }
++    }
++    return NULL;
++}
++
++/* Full screen, macOS's kind or the notch kind (a borderless window over the display). */
++static bool omacvm_window_full_screen(NSWindow *w)
++{
++    return w && (([w styleMask] & NSWindowStyleMaskFullScreen) ||
++                 ([w screen] && NSEqualRects([w frame], [[w screen] frame])));
++}
++
++static void omacvm_shortcuts_init(void)
++{
++    if (!full_grab_enabled) {
++        return;
++    }
++    const char *keep = getenv("OMACVM_MAC_SHORTCUTS");
++    omacvm_mac_keeps_shortcuts = keep && !strcmp(keep, "1");
++    OmacVMConnectionFn connection = (OmacVMConnectionFn)dlsym(RTLD_DEFAULT, "SLSMainConnectionID");
++    OmacVMHotKeyModeFn mode = (OmacVMHotKeyModeFn)dlsym(RTLD_DEFAULT, "SLSSetGlobalHotKeyOperatingMode");
++    if (!connection || !mode) {
++        connection = (OmacVMConnectionFn)dlsym(RTLD_DEFAULT, "CGSMainConnectionID");
++        mode = (OmacVMHotKeyModeFn)dlsym(RTLD_DEFAULT, "CGSSetGlobalHotKeyOperatingMode");
++    }
++    if (omacvm_mac_keeps_shortcuts) {
++        fprintf(stderr, "omacvm: macOS shortcuts stay with macOS (OMACVM_MAC_SHORTCUTS=1)\n");
++        return;
++    }
++    if (!connection || !mode) {
++        fprintf(stderr, "omacvm: macOS shortcuts: macOS's switch for them was not found: "
++                "only the event tap takes them (some stay with macOS)\n");
++        return;
++    }
++    omacvm_hotkey_connection = connection();
++    omacvm_hotkey_mode = mode;
++    qatomic_set(&omacvm_ui_heartbeat, omacvm_now_ms());
++
++    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
++    for (NSNotificationName name in @[NSApplicationDidBecomeActiveNotification,
++                                      NSApplicationDidResignActiveNotification,
++                                      NSWindowDidBecomeKeyNotification,
++                                      NSWindowDidResignKeyNotification]) {
++        [nc addObserverForName:name object:nil queue:[NSOperationQueue mainQueue]
++                    usingBlock:^(NSNotification *note) { omacvm_shortcuts_update(); }];
++    }
++    [nc addObserverForName:NSApplicationWillTerminateNotification object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) { omacvm_shortcuts_set(false, NULL); }];
++    NSTimer *beat = [NSTimer timerWithTimeInterval:0.5 repeats:YES
++                                             block:^(NSTimer *t) { omacvm_shortcuts_update(); }];
++    [beat setTolerance:0.1];
++    [[NSRunLoop mainRunLoop] addTimer:beat forMode:NSRunLoopCommonModes];
++    pthread_t watchdog;
++    if (pthread_create(&watchdog, NULL, omacvm_shortcuts_watchdog, NULL) == 0) {
++        pthread_detach(watchdog);
++    }
++    omacvm_shortcuts_update();
++}
+ static VMChangeStateEntry *pinch_vm_change;
+ 
+ /* OmacVM: one window per Mac display (the code is further down). */
+@@ -1470,6 +1618,26 @@ - (bool) handleEventLocked:(NSEvent *)event
+             }
+             return true;
+         case NSEventTypeKeyDown:
++            /*
++             * OmacVM: the escape combo reaches us only when OmacVM Gestures
++             * did not take it (not running). In full screen it then hands
++             * the keyboard back to macOS: shortcuts on, the app hidden (its
++             * Dock icon brings it back). In a window it goes to the VM.
++             */
++            if (omacvm_is_escape_combo([event keyCode],
++                                       modifiers & NSEventModifierFlagControl,
++                                       modifiers & NSEventModifierFlagOption,
++                                       modifiers & NSEventModifierFlagCommand) &&
++                [self isKeyboardCaptured] &&
++                omacvm_window_full_screen([self window])) {
++                if (![event isARepeat]) {
++                    dispatch_async(dispatch_get_main_queue(), ^{
++                        omacvm_shortcuts_set(false, " (escape combo without OmacVM Gestures: the VM app is hidden)");
++                        [NSApp hide:nil];
++                    });
++                }
++                return true;
++            }
+             keycode = cocoa_keycode_to_linux([event keyCode]);
+ 
+             // Keep Command chords with the host unless the focused guest
+@@ -5847,6 +6015,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+     if (full_grab_enabled) {
+         [controller setFullGrab: nil];
+     }
++    omacvm_shortcuts_init();
+ 
+     if (opts->has_show_cursor && opts->show_cursor) {
+         cursor_hide = 0;

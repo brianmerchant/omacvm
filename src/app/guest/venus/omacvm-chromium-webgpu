@@ -1,0 +1,17 @@
+#!/bin/bash
+# OmacVM (Venus VMs): Chromium (or Google Chrome) with WebGPU on the Mac's GPU.
+# Chrome on Linux hands pages a Vulkan WebGPU adapter only when its own
+# compositor runs on Vulkan: here Skia Graphite on Dawn's Vulkan backend. Chrome
+# allows that only on X11 (Xwayland), and Venus presents there through its
+# software path (60 fps; the DRI3 path manages about 30). WebGL keeps running on
+# the GL driver (virgl) but costs about a fifth more per frame, so this is a
+# separate launcher, not the default. A browser already running with the same
+# profile ignores these flags: close it first.
+B=chromium
+[[ ${0##*/} == omacvm-chrome-webgpu ]] && B=/opt/google/chrome/google-chrome
+if [[ -z ${DISPLAY:-} ]]; then
+  echo "${0##*/}: no X11 display (Xwayland), starting without WebGPU" >&2
+  exec "$B" "$@"
+fi
+export MESA_VK_WSI_DEBUG=sw
+exec "$B" --ozone-platform=x11 --enable-skia-graphite --skia-graphite-dawn-backend=vulkan "$@"

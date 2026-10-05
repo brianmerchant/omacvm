@@ -66,9 +66,6 @@ final class GuestInfo {
     var owner: String?
     /// The VM's name in that app, from "vmname" (nil: not said).
     var name: String?
-    /// It said "hello" (owner is known, or it never will be).
-    var saidHello = false
-    let since = Date()
     /// On its lock screen (see StripView.locked).
     var locked = false
     var cursorImages: [String: (CGImage, CGPoint, Int)] = [:]
@@ -90,9 +87,6 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var guests: [Int: GuestInfo] = [:]
     private var activeGuest: GuestInfo? { state.active.flatMap { guests[$0] } }
     private var activeStream: GuestStream? { state.active.flatMap { link.stream(for: $0) } }
-    /// Title of the full-screen VM window: re-read on app and Space changes,
-    /// for another window, or (none yet, or not sure) after `wait` (0: kept).
-    private var titleCache: (window: CGWindowID, title: String?, retry: Date, wait: TimeInterval)?
     /// The VM's full-screen window on the built-in display, tracked across Spaces.
     private var vmWindow: CGWindowID?
     private var misses = 0
@@ -126,23 +120,11 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         let ws = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification,
                      NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
-            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.titleCache = nil
-                self?.evaluate()
-            }
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.evaluate() }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in self?.evaluate() }
-        // Entering and leaving full screen has no public notification for other
-        // apps' windows; a cheap once-a-second poll covers it (Space, app and
-        // screen changes are handled at once through the notifications above).
-        // Timer tolerance lets macOS batch the wake-ups with others.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
-        pollTimer?.tolerance = 0.2
-        // The guest notices a vanished helper through the connection itself;
-        // this only has to beat its watchdog (15 s) comfortably.
-        beatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.heartbeat() }
-        beatTimer?.tolerance = 0.5
+        updateTimers()
         evaluate()
         Log.info("started")
     }
@@ -167,16 +149,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             front = StripDetector.detect(vmOwners: owners)
         }
         if let f = front {
-            let candidates = connected.map { GuestCandidate(id: $0.id, owner: $0.owner, name: $0.name) }
-            // One guest per app needs no title (and no Accessibility
-            // permission). A guest that just connected says its app first.
-            let settled = candidates.filter { c in
-                guests[c.id].map { $0.saidHello || Date().timeIntervalSince($0.since) > 2 } ?? false
-            }
-            let title = GuestPicker.needsTitle(settled, front: f.owner) ? windowTitle(f) : nil
-            if let pick = GuestPicker.pick(candidates, front: FrontWindow(owner: f.owner, title: title),
-                                           current: state.active) {
-                activate(pick, title: title)
+            let candidates = connected.map { GuestCandidate(id: $0.id, owner: $0.owner) }
+            if let pick = GuestPicker.pick(candidates, owner: f.owner, current: state.active) {
+                activate(pick)
             } else {
                 front = nil  // none of the guests runs in this app
             }
@@ -223,33 +198,15 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         Log.info(on ? "strip shown, guest bar parked" : "strip hidden, guest bar restored")
     }
 
-    /// The title of the full-screen VM window, kept until the window changes
-    /// (or a Space or app change clears it). No title (no permission yet, or a
-    /// busy VM app): asked again after 3 s, then up to every 10 s. A title from
-    /// the app's focused window (two VM windows of one app at that spot) may
-    /// lag a Space switch: asked again after 1.5 s, then up to every 10 s.
-    private func windowTitle(_ g: StripGeometry) -> String? {
-        var wait: TimeInterval?
-        if let c = titleCache, c.window == g.windowID {
-            if c.wait == 0 || Date() < c.retry { return c.title }
-            wait = min(c.wait * 2, 10)
-        }
-        WindowTitle.askOnce()
-        let (title, exact) = WindowTitle.title(pid: g.ownerPID, rect: g.windowRect)
-        let next: TimeInterval = exact ? 0 : wait ?? (title == nil ? 3 : 1.5)
-        titleCache = (g.windowID, title, Date().addingTimeInterval(next), next)
-        return title
-    }
-
     /// Serves another guest: the old one gets its bar back, the new one is
     /// parked by the next evaluate().
-    private func activate(_ id: Int, title: String?) {
+    private func activate(_ id: Int) {
         guard id != state.active else { return }
         let old = state.active
         for c in state.activate(id) { link.send(c.line, to: c.guest) }
         let g = guests[id]
         Log.info("strip serves guest \(id)\(g?.name.map { " (\"\($0)\")" } ?? "")"
-                 + (old.map { ", was guest \($0)" } ?? "") + (title.map { "; front window \"\($0)\"" } ?? ""))
+                 + (old.map { ", was guest \($0)" } ?? ""))
         vmWindow = nil
         geometry = nil  // the new guest gets the geometry when its strip is shown
         misses = 0
@@ -310,7 +267,32 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
     }
 
+    /// The poll and the heartbeat run only while a guest is connected: with
+    /// no VM there is nothing to show, and Omanotch does not wake the Mac.
+    private func updateTimers() {
+        guard link.connectedIDs.isEmpty else {
+            if pollTimer == nil {
+                // Entering and leaving full screen has no public notification for
+                // other apps' windows; a cheap once-a-second poll covers it (Space,
+                // app and screen changes are handled at once through the
+                // notifications). Timer tolerance lets macOS batch the wake-ups.
+                pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
+                pollTimer?.tolerance = 0.2
+            }
+            if beatTimer == nil {
+                // The guest notices a vanished helper through the connection itself;
+                // this only has to beat its watchdog (15 s) comfortably.
+                beatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.heartbeat() }
+                beatTimer?.tolerance = 0.5
+            }
+            return
+        }
+        pollTimer?.invalidate(); pollTimer = nil
+        beatTimer?.invalidate(); beatTimer = nil
+    }
+
     private func connectionChanged(_ id: Int, _ connected: Bool) {
+        updateTimers()
         // A new session (also a takeover from the same address) starts over:
         // the guest starts unparked.
         state.reset(id, gone: !connected)
@@ -435,10 +417,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         } else if text.hasPrefix("hello ") {
             let hv = String(text.dropFirst("hello ".count))
             // An app that is not a VM app here (vmOwners) could be any of them.
-            // OmacVM.app's VMs (QEMU too) come in on 127.0.0.1.
+            // OmacVM.app's VMs (QEMU too) come in on 127.0.0.1 or its fast network.
             guest.owner = link.viaOmacVMApp(guest.id) ? OmacVMApp.owner
                 : GuestPicker.owner(hello: hv).flatMap { settings.vmOwners.contains($0) ? $0 : nil }
-            guest.saidHello = true
             Log.info("guest \(guest.id) runs in \(hv) (\(guest.owner ?? "any VM app"))")
             return true
         } else if text.hasPrefix("vmname ") {

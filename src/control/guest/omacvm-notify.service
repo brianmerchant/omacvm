@@ -1,0 +1,10 @@
+# Says once per new OmacVM version that it is out (nothing when update checks
+# are off on the Mac), and keeps the bar item's dot current.
+[Unit]
+Description=OmacVM update notice
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm notify
+TimeoutStartSec=1h

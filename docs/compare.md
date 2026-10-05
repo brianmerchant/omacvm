@@ -8,7 +8,7 @@ four, except where the table says otherwise. The short version is the
 **Which one?**
 
 - **OmacVM.app** (recommended): free, open source, nothing else to install,
-  and the only one with hardware video decoding.
+  every display, and the only one with hardware video decoding.
 - **UTM**: free and open source, one display.
 - **VMware Fusion**: free, external displays, the longest battery life.
 - **Parallels**: the least to set up and the fastest 3D, but paid.
@@ -28,20 +28,20 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
 | Web apps: Speedometer 3.1 | 70 % | 52 % | **71 %** | 67 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
-| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | no full-screen run yet · 22 % | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
-| 3D: glmark2 (score) | 1017 | 964 | 1813 | **7306** |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | no full-screen run yet · 22 % (2.6.0)<br>2.9.0 RC in a window, another VM running, not comparable: 82 % · 18 % | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
+| 3D: glmark2 (score) | 1017 (2.9.0 RC in a window: 2856) | 964 | 1813 | **7306** |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
 | YouTube 4K at 60 fps | **✓ decoded by the Mac's media engine** in Google Chrome, Brave and Firefox ([which apps](video-decode.md)) | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
-| GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | 45 %, not released yet (2.9.0) | ✗ | ✗ | ✗ |
+| GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | 45 %, not released yet | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
 | Idle desktop | 6.2 W · 16 h | being re-measured | **5.5 W · 18 h** | 5.7 W · 18 h |
 | Reading, scrolling a page | 6.8 W · 15 h | being re-measured | **5.9 W · 17 h** | 7.3 W · 14 h |
 | YouTube 4K | 21.3 W · 4.7 h (old, CPU decoding) | 39.2 W · 2.6 h | **20.4 W · 4.9 h** | 24.2 W · 4.1 h |
 | Every CPU core busy | 71 W · 1.4 h | 61 W · 1.6 h | 74 W · 1.4 h | 72 W · 1.4 h |
 | **Displays** | | | | |
-| External displays | not yet | ✗ one display | **✓ every one, in your macOS arrangement** | **✓ every one, in your macOS arrangement** |
+| External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** | **✓ every one, in your macOS arrangement** |
 | Native Retina, 120 Hz | ✓ | ✓ | ✓ | ✓ |
 | Resolution changes | **live** | fixed at boot | **live** | **live** |
 | **Mac integration** | | | | |
@@ -58,7 +58,7 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
-  <img src="images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 22, 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">
+  <img src="images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 18 (2.9.0 release candidate, in a window with another VM running), 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">
 </p>
 
 ## The Mac itself, and video
@@ -70,9 +70,10 @@ The difference for video is decoding: macOS decodes YouTube's 4K in hardware,
 and Parallels, UTM and Fusion give Linux no hardware video decoding. OmacVM.app
 does since 2.7.0: Google Chrome, Brave, Firefox (H.264 and VP9; AV1 in Chrome,
 not yet in Firefox), mpv, FFmpeg and GStreamer apps decode on the Mac's media
-engine. Omarchy's default Chromium (Arch Linux ARM) is built without VA-API,
-so it still decodes on the CPU; a route for it (V4L2) is planned. OmacVM.app's
-YouTube 4K power number above is from before, with the CPU decoding.
+engine. Omarchy's default Chromium (Arch Linux ARM) is built without VA-API;
+it decodes H.264 and VP9 (YouTube) on the media engine through a V4L2 decoder
+OmacVM adds to the VM (not in a release yet). OmacVM.app's YouTube 4K power
+number above is from before, with the CPU decoding.
 [How video decoding works](video-decode.md).
 
 ## How we measured

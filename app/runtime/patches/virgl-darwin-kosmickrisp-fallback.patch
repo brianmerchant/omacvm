@@ -1,0 +1,108 @@
+From: OmacVM
+Subject: [PATCH] venus: fall back to MoltenVK when KosmicKrisp cannot run
+
+What: before pointing the Vulkan loader at KosmicKrisp (macOS 26+), make a
+throwaway instance with it and count its devices; with none, or when it does
+not load, log once and use MoltenVK from the runtime instead.
+Why: KosmicKrisp needs a Metal 4 device. A Mac that reports macOS 26 but
+cannot run it would otherwise leave the guest without Vulkan (venus
+contexts fail) with no way back short of OMACVM_VULKAN_DRIVER=moltenvk.
+Upstream: not applicable (the driver choice is OmacVM's runtime layout,
+virgl-darwin-vulkan-beside.patch). Applies after that patch.
+Test: on the Mac mini (macOS 27) QEMU's log shows "vulkan driver:
+.../kosmickrisp_mesa_icd.json". With a runtime whose KosmicKrisp dylib is
+not a Mach-O file it logs "does not load", then "kosmickrisp_mesa_icd.json
+unusable, trying MoltenVK_icd.json"; the guest's vulkaninfo shows the Venus
+device without nullDescriptor, robustBufferAccess2 and logicOp, as with
+MoltenVK (KosmicKrisp has all three). The same with a driver that loads
+but has no device (docs/experiments/kosmickrisp/nodev-icd.c): "has no
+device", then the same fallback.
+
+--- a/src/venus/vkr_library.c
++++ b/src/venus/vkr_library.c
+@@ -52,6 +52,59 @@
+ #include <sys/sysctl.h>
+ #include <unistd.h>
+ 
++/* Whether a driver from the runtime's lib/ makes a Vulkan instance with at
++ * least one device. Only asked when another driver could take over: a
++ * KosmicKrisp that cannot run here (no Metal 4 device) falls back to
++ * MoltenVK instead of leaving the guest without Vulkan. The driver stays
++ * loaded; the loader opens the same image again. */
++static bool
++vkr_library_driver_works(const char *dir, const char *dylib)
++{
++   char path[PATH_MAX];
++   snprintf(path, sizeof(path), "%s/%s", dir, dylib);
++   void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
++   if (!handle) {
++      vkr_log("vulkan driver %s does not load: %s", dylib, dlerror());
++      return false;
++   }
++   PFN_vkGetInstanceProcAddr gipa =
++      (PFN_vkGetInstanceProcAddr)dlsym(handle, "vk_icdGetInstanceProcAddr");
++   PFN_vkCreateInstance create_instance =
++      gipa ? (PFN_vkCreateInstance)gipa(VK_NULL_HANDLE, "vkCreateInstance") : NULL;
++   if (!create_instance) {
++      vkr_log("vulkan driver %s has no vkCreateInstance", dylib);
++      return false;
++   }
++   const VkApplicationInfo app = {
++      .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
++      .apiVersion = VK_API_VERSION_1_1,
++   };
++   const VkInstanceCreateInfo info = {
++      .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
++      .pApplicationInfo = &app,
++   };
++   VkInstance instance = VK_NULL_HANDLE;
++   VkResult result = create_instance(&info, NULL, &instance);
++   if (result != VK_SUCCESS) {
++      vkr_log("vulkan driver %s: vkCreateInstance failed (%d)", dylib, result);
++      return false;
++   }
++   PFN_vkEnumeratePhysicalDevices enumerate =
++      (PFN_vkEnumeratePhysicalDevices)gipa(instance, "vkEnumeratePhysicalDevices");
++   PFN_vkDestroyInstance destroy =
++      (PFN_vkDestroyInstance)gipa(instance, "vkDestroyInstance");
++   uint32_t count = 0;
++   if (enumerate)
++      result = enumerate(instance, &count, NULL);
++   if (destroy)
++      destroy(instance, NULL);
++   if (!enumerate || result != VK_SUCCESS || !count) {
++      vkr_log("vulkan driver %s has no device", dylib);
++      return false;
++   }
++   return true;
++}
++
+ /* OmacVM: the Vulkan loader and its drivers sit in the app's runtime, beside
+  * this library (lib/) and in share/vulkan/icd.d. Load that loader, and unless
+  * VK_DRIVER_FILES or VK_ICD_FILENAMES is set, point it at one driver:
+@@ -76,18 +129,25 @@
+       if (sysctlbyname("kern.osproductversion", version, &len, NULL, 0) == 0)
+          major = atoi(version);
+       const char *order[2] = { "kosmickrisp_mesa_icd.json", "MoltenVK_icd.json" };
++      const char *dylibs[2] = { "libvulkan_kosmickrisp.dylib", "libMoltenVK.dylib" };
+       if (want && !strcmp(want, "moltenvk")) {
+          order[0] = "MoltenVK_icd.json";
++         dylibs[0] = "libMoltenVK.dylib";
+          order[1] = NULL;
+       } else if (want && !strcmp(want, "kosmickrisp")) {
+          order[1] = NULL;
+       } else if (major < 26) {
+          order[0] = "MoltenVK_icd.json";
++         dylibs[0] = "libMoltenVK.dylib";
+          order[1] = NULL;
+       }
+       for (int i = 0; i < 2 && order[i]; i++) {
+          snprintf(json, sizeof(json), "%s/../share/vulkan/icd.d/%s", dir, order[i]);
+          if (access(json, R_OK) == 0) {
++            if (i + 1 < 2 && order[i + 1] && !vkr_library_driver_works(dir, dylibs[i])) {
++               vkr_log("vulkan driver %s unusable, trying %s", order[i], order[i + 1]);
++               continue;
++            }
+             setenv("VK_DRIVER_FILES", json, 0);
+             /* Venus shares device memory as MTLHeaps: MoltenVK only backs
+              * memory with heaps when asked to. */

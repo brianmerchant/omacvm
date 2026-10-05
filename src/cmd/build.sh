@@ -19,7 +19,7 @@
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
-#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery idle-lock autologin thp-kernel)
+#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery external-brightness idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+, UTM 5, VMware Fusion 13+ or OmacVM.app, and
 # Homebrew's zstd + e2fsprogs (not for OmacVM.app, which builds the VM with its
@@ -54,14 +54,14 @@ linux_name() {
 }
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
-BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
+BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=1; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; EXT_BRIGHTNESS=1; CHROMIUM_VIDEO=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0; CONTROL=1
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0; IMAGE=0; SOURCE=""
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
 feature_flag() {   # NAME on|off
   local v; [[ $2 == on ]] && v=1 || v=0
   case $1 in
-    bridge) BRIDGE=$v; (( v )) || WALLPAPER=0 ;;
+    bridge) BRIDGE=$v; (( v )) || { WALLPAPER=0; EXT_BRIGHTNESS=0; } ;;
     wallpaper) WALLPAPER=$v ;;
     gestures) GESTURES=$v ;;
     scroll-momentum) GLIDE=$v ;;
@@ -69,9 +69,14 @@ feature_flag() {   # NAME on|off
     mac-clock) MAC_CLOCK=$v ;;
     camera) CAMERA=$v ;;
     battery) BATTERY=$v ;;
+    external-brightness) EXT_BRIGHTNESS=$v ;;
+    chromium-video) CHROMIUM_VIDEO=$v ;;
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
     thp-kernel) THP=$v ;;
+    control-centre) CONTROL=$v ;;
+    fast-network) [[ $2 == off ]] || usage "the fast network goes on after the build: omacvm enable fast-network --vm NAME" ;;
+    vulkan) [[ $2 == off ]] || usage "Vulkan goes on after the build: omacvm enable vulkan --vm NAME" ;;
     *) usage "unknown feature '$1' (omacvm features lists them)" ;;
   esac
   [[ $2 == on || $2 == off ]] || usage "--feature $1=$2: on or off"
@@ -120,10 +125,7 @@ macos=$(sw_vers -productVersion 2>/dev/null)
 (( YES )) || { : < "$TTY"; } 2>/dev/null || usage "the setup questions need a terminal (or pass --yes and the answers as options, see --help)"
 onoff() { (( $1 )) && echo on || echo off; }
 
-mac_cores=$(sysctl -n hw.ncpu)
-mac_perf=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "$mac_cores")
-mac_eff=$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null || echo 0)
-mac_mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+mac_specs
 # Free space as Finder counts it (macOS frees caches and purgeable files when
 # needed; df leaves those out), else df's.
 free_gb=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' 2>/dev/null)
@@ -154,12 +156,13 @@ fi
 # ---------- 1. Parallels, UTM, VMware Fusion or OmacVM.app ----------
 if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels, utm, fusion or app"
+  # OmacVM.app first: the README recommends it.
   ui_select pick "Where should Omarchy run?" 0 \
-    "Parallels Desktop|near-native speed, every display · paid" \
+    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · every display" \
     "UTM|free · one display, slower desktop · UTM 5 (beta)" \
-    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it (new)" \
-    "OmacVM.app|free · its own app, nothing else to install · one display (new)"
-  case $pick in 0) TYPE=parallels ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=app ;; esac
+    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it" \
+    "Parallels Desktop|near-native speed, every display · paid"
+  case $pick in 0) TYPE=app ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=parallels ;; esac
   say "    Comparison: $README_ROUTES"
 fi
 # The app itself: installed now (after asking) when it is missing.
@@ -180,7 +183,7 @@ case $TYPE in
   utm)
     if (( YES )); then [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )) || { utm_install_help >&2; needs_person "UTM 5 is not installed (brew install --cask utm@beta, then open UTM once)"; }
     else wait_for_app utm; fi
-    : ;;
+    if ! (( DRY )); then why=$(utm_scripting) || needs_person "$why"; fi ;;
   fusion)
     if (( YES )); then have_fusion || needs_person "VMware Fusion is not installed: download it from support.broadcom.com (free, needs a sign-in), then open it once"
     else wait_for_app fusion; fi
@@ -203,27 +206,43 @@ esac
 i=$(feature_index battery)
 if [[ -z $BATTERY ]]; then [[ $(feature_default "$i") == on ]] && BATTERY=1 || BATTERY=0
 elif (( BATTERY )) && ! feature_available "$i"; then (( JSON )) || info "${FTITLE[$i]}: off ($REASON)"; BATTERY=0; fi
+# Chromium's video on the Mac's media engine: OmacVM.app VMs only.
+[[ $TYPE == app ]] || CHROMIUM_VIDEO=0
 # Homebrew and its zstd, e2fsprogs and OpenSSL (installed after asking), for
 # the routes that build the disk here. OmacVM.app brings its own tools.
 (( DRY )) || [[ $TYPE == app ]] || ensure_brew_tools
 # ---------- build it here, or download a prebuilt VM ----------
 build_minutes() { case $TYPE in fusion) echo "45 to 85" ;; app) echo "10 to 30" ;; *) echo "30 to 70" ;; esac; }
 PB_OK=0
-# OmacVM.app has no prebuilt VMs: it builds its own.
-if [[ $SOURCE != build ]] && ! (( IMAGE )) && [[ $TYPE != app ]]; then
-  prebuilt_lookup "$TYPE" 2>/dev/null && PB_OK=1
+# An older installed OmacVM.app has no script for images (omacvm update brings it).
+APP_OLD=0
+[[ $TYPE == app && -n ${APP:-} ]] && ! app_has_prebuilt "$APP" && APP_OLD=1
+# The version the image must fit: the app's when it makes the VM (it may be
+# older or newer than this omacvm), so both find the same image.
+PB_FOR=$(cat "$R/src/VERSION")
+if [[ $SOURCE != build ]] && ! (( IMAGE || APP_OLD )); then
+  if [[ $TYPE == app && -n ${APP:-} ]]; then
+    PB_FOR=$(app_version "$APP" || cat "$R/src/VERSION")
+    app_prebuilt_lookup "$APP" && PB_OK=1
+  else
+    prebuilt_lookup "$TYPE" 2>/dev/null && PB_OK=1
+  fi
 fi
 if [[ -z $SOURCE ]]; then
   SOURCE=build
   if (( PB_OK && ! YES )); then
     ui_select how "How should OmacVM make the VM?" 1 \
       "Build it yourself|about $(build_minutes) minutes, everything from Arch Linux ARM and omarchy-mac" \
-      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, updated to OmacVM $(cat "$R/src/VERSION") on the way"
+      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, updated to OmacVM $PB_FOR on the way"
     (( how == 1 )) && SOURCE=prebuilt
   fi
 elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
   # No image for this app and OmacVM version (or no connection): build it here.
-  (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM $(cut -d. -f1 < "$R/src/VERSION").x up to $(cat "$R/src/VERSION"): building it here instead (about $(build_minutes) minutes)."
+  if (( APP_OLD )); then
+    (( PLAN && JSON )) || info "OmacVM.app $(app_version "$APP") makes no VMs from prebuilt images (omacvm update updates it): building it here instead (about $(build_minutes) minutes)."
+  else
+    (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM ${PB_FOR%%.*}.x up to $PB_FOR: building it here instead (about $(build_minutes) minutes)."
+  fi
   SOURCE=build
 fi
 # OmacVM.app also takes at most 64 characters and no '..' (VMConfig.validName).
@@ -350,7 +369,10 @@ fi
 case $TYPE in
   parallels) [[ ! -e $VM_DIR/$VM.pvm ]] || usage "$VM_DIR/$VM.pvm already exists (choose another --vm-name)" ;;
   fusion) [[ ! -e $(fusion_bundle "$VM") ]] || usage "$(fusion_bundle "$VM") already exists (choose another --vm-name)" ;;
-  app) [[ ! -e $VM_DIR/$VM ]] || usage "$VM_DIR/$VM already exists (choose another --vm-name)"
+  app) if d=$(app_missing_drive "$VM_DIR"); then
+         needs_person "$d is not connected, and OmacVM.app's VMs folder is on it ($VM_DIR): connect it, or pick another folder in the app"
+       fi
+       [[ ! -e $VM_DIR/$VM ]] || usage "$VM_DIR/$VM already exists (choose another --vm-name)"
        if [[ -d $VM_DIR ]]; then p=$(vm_dir_problem "$VM_DIR"); [[ -z $p ]] || needs_person "$VM_DIR (OmacVM.app's VMs): $p"; fi ;;
 esac
 
@@ -360,8 +382,8 @@ fvar() {
   case $1 in
     bridge) echo BRIDGE ;; wallpaper) echo WALLPAPER ;; gestures) echo GESTURES ;;
     scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; camera) echo CAMERA ;; idle-lock) echo IDLE_LOCK ;;
-    battery) echo BATTERY ;;
-    autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;;
+    battery) echo BATTERY ;; external-brightness) echo EXT_BRIGHTNESS ;; chromium-video) echo CHROMIUM_VIDEO ;;
+    autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;; control-centre) echo CONTROL ;;
   esac
 }
 fget() { local v; v=$(fvar "$1"); echo "${!v:-0}"; }
@@ -369,6 +391,7 @@ fput() { local v; v=$(fvar "$1"); [[ -n $v ]] && printf -v "$v" '%s' "$2"; retur
 explain_features() {
   local i v state
   for ((i = 0; i < ${#FN[@]}; i++)); do
+    feature_has_tag "$i" app-only && continue
     v=$(fget "${FN[$i]}")
     state=$( ((v)) && echo on || echo off)
     [[ ${FN[$i]} == idle-lock ]] && state=$( ((v)) && echo kept || echo "off, the Mac's lock")
@@ -380,6 +403,8 @@ explain_features() {
 if (( ! YES )); then
   UI_KEYS=(); UI_LABELS=(); UI_DETAILS=(); UI_ON=(); UI_TAG=(); UI_OFF_REASON=(); UI_NEEDS=()
   for ((i = 0; i < ${#FN[@]}; i++)); do
+    # Opt-in after the build (omacvm enable): the fast network.
+    feature_has_tag "$i" app-only && continue
     UI_KEYS+=("${FN[$i]}"); UI_LABELS+=("${FTITLE[$i]}"); UI_DETAILS+=("${FSUM[$i]}")
     UI_ON+=("$(fget "${FN[$i]}")")
     t=""; feature_has_tag "$i" experimental && t=experimental; feature_has_tag "$i" slow && t=slow
@@ -392,7 +417,7 @@ if (( ! YES )); then
   for ((i = 0; i < ${#UI_KEYS[@]}; i++)); do fput "${UI_KEYS[$i]}" "${UI_ON[$i]}"; done
 fi
 (( GESTURES )) || GLIDE=0
-(( BRIDGE )) || WALLPAPER=0
+(( BRIDGE )) || { WALLPAPER=0; EXT_BRIGHTNESS=0; }
 
 # ---------- 4. you ----------
 : "${FULL:=$(id -F 2>/dev/null || echo "$U")}"
@@ -421,7 +446,8 @@ esac
 (( IMAGE )) && { KB=us; KB_NOTE=""; KB_SHOWN=us; TZ_MAC=UTC; LANG_VM=en_US.UTF-8; }
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
-       mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
+       mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" external-brightness "$EXT_BRIGHTNESS" chromium-video "$CHROMIUM_VIDEO" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP"
+       control-centre "$CONTROL")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
   (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."
@@ -458,7 +484,7 @@ human_steps() {
     parallels_profile_emptied || echo "Let Cmd+C/V/X reach Omarchy as Super: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels)."
     parallels_sends_shortcuts || echo "Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > \"Send macOS system shortcuts: Always\" (an alert shows where)." ;;
   utm)
-    echo "UTM: put the VM in full screen on the built-in display (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower." ;;
+    echo "UTM: put the VM in full screen on the main display, a MacBook's own screen (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower." ;;
   fusion)
     echo "VMware Fusion asks for Accessibility on its first start: click OK, then turn on VMware Fusion in System Settings > Privacy & Security > Accessibility (keyboard and mouse in the VM)."
     echo "VMware Fusion: put the VM in full screen (View > Full Screen; gestures and media keys need it)." ;;
@@ -577,7 +603,7 @@ fi
 
 # From here on: numbered steps, and everything also into a log file.
 STEP=0; STEPS=$(case $TYPE in (parallels) (( IMAGE )) && echo 5 || echo 6 ;; (app) echo 2 ;; (*) echo 5 ;; esac)
-[[ $SOURCE == prebuilt ]] && STEPS=4
+[[ $SOURCE == prebuilt && $TYPE != app ]] && STEPS=4
 step() { STEP=$((STEP + 1)); ui_step "$STEP" "$STEPS" "$*"; }
 BUILD_LOG=~/Library/Logs/omacvm-build-$(date +%Y%m%d-%H%M%S).log
 mkdir -p "$HOME/Library/Logs"
@@ -585,6 +611,7 @@ exec > >(tee -a "$BUILD_LOG") 2>&1
 UI_LOG=$BUILD_LOG
 build_end() {
   local rc=$1
+  if [[ $SOURCE == prebuilt ]]; then prebuilt_exit; fi   # the seed and an unused unpacked image go
   (( rc == 0 && DONE )) && return
   (( rc )) || rc=1
   printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
@@ -602,13 +629,22 @@ started=$(date +%s)
 if [[ $TYPE == app ]]; then
 # ---------- OmacVM.app: its own create script, then omacvm apply ----------
 # The same script the app runs when you build in it (live installer, Arch
-# Linux ARM, Omarchy, OmacVM from the copy inside the app); it leaves the VM
-# shut down. Its STEP lines become ==> lines, curl's progress bar is dropped.
-step "OmacVM.app builds the VM (10-30 minutes, its logs in $(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM")/logs)"
+# Linux ARM, Omarchy, OmacVM from the copy inside the app), or with --prebuilt
+# the one that makes it from the image (download, first boot with a seed); it
+# leaves the VM shut down. Its STEP lines become ==> lines, curl's progress
+# bar is dropped.
+pb_arg=()
+if [[ $SOURCE == prebuilt ]]; then
+  pb_arg=(--prebuilt)
+  step "OmacVM.app makes the VM from the prebuilt image ($(pb_gb "$PB_SIZE") GB download, its logs in $(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM")/logs)"
+else
+  step "OmacVM.app builds the VM (10-30 minutes, its logs in $(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM")/logs)"
+fi
 port=$(app_free_port) || die "no free port for the VM's SSH (52222-52421)"
 fv=""
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do fv+=" ${FEATS[$k]}=$(onoff "${FEATS[k+1]}")"; done
-printf '%s\n' "$PW" | app_create "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
+# --no-mac: the app's own build leaves the Mac's helpers alone too.
+printf '%s\n' "$PW" | OMACVM_CREATE_NO_MAC=${NO_MAC:-0} app_create ${pb_arg[@]+"${pb_arg[@]}"} "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
   SSH_PORT="$port" VM_USER="$U" VM_FULLNAME="$FULL" VM_HOSTNAME="$HOST" VM_TZ="$TZ_MAC" VM_LANG="$LANG_VM" \
   KEYBOARD="$KB" FEATURES="${fv# }" 2>&1 |
   sed -l -e $'s/.*\r//' -e '/^#.*%$/d' -e '/^READY /d' -e 's|^STEP \([0-9]*/[0-9]*\) |==> \1 |' |
@@ -618,6 +654,7 @@ unset PW PW2
 
 step "OmacVM: the Mac side, then the VM side (the VM starts in OmacVM.app)"
 args=(--vm "$VM" --vm-type app --user "$U" --keyboard "$KB" --reset-host-key)
+(( ${NO_MAC:-0} )) && args+=(--no-mac)
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do
   args+=(--feature "${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)")
 done
@@ -664,7 +701,7 @@ elif [[ $TYPE == fusion ]]; then
   fusion_start "$VM"
   ui_spin_val IP "The live installer gets its address" fusion_ip "$VM" 300 || die "the live installer got no IP address"
 else
-  LIVE="$HOME/Library/Caches/omacvm/live/$VM-live.img"
+  LIVE="$HOME/Library/Caches/omacvm/build-live/$VM-live.img"
   "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
   utm_tune_app
   log "UTM VM with a ${DISK_GB} GB NVMe disk"
@@ -768,12 +805,12 @@ mac_steps=$(human_steps | sed 's/^/    * /')
 ssh_to="root@$IP"; [[ $IP == *:* ]] && ssh_to="-p ${IP##*:} root@${IP%:*}"   # OmacVM.app: 127.0.0.1:PORT
 cat <<EOF
 
-  Done in $(( ($(date +%s) - started) / 60 )) minutes${PB_TIMES:+ ($PB_TIMES)}. VM '$VM' ($TYPE) is rebooting into Omarchy.
+  Done in $(mins=$(( ($(date +%s) - started) / 60 )); (( mins == 1 )) && echo "1 minute" || echo "$mins minutes")${PB_TIMES:+ ($PB_TIMES)}. VM '$VM' ($TYPE) is rebooting into Omarchy.
 
   One-time steps on the Mac:
 $mac_steps
   In full screen, the trackpad and ⌘ shortcuts belong to Omarchy.
-  ${UB}⌃⌥ Esc (Control + Option + Escape) gives them back to macOS.${UR}
+  ${UB}⌃⌥⌘ Esc (Control + Option + Command + Escape) takes you back to macOS; in macOS, back into the VM.${UR}
 
   SSH: ssh -i "$KEY" $ssh_to
   Check everything: omacvm check --vm "$VM"

@@ -16,6 +16,9 @@ final class Runner {
 
     var isRunning: Bool { process?.isRunning ?? false }
 
+    /// virtio-gpu outputs: the window and up to four more Mac displays.
+    static let maxOutputs = 5
+
     func arguments() -> [String] {
         let c = config
         // QEMU option values split at commas; a comma in a value is written twice.
@@ -24,6 +27,8 @@ final class Runner {
         // older VMs keep the Mac's pointer.
         let guestPointer = FileManager.default.fileExists(
             atPath: c.folder.appendingPathComponent("guest-pointer").path)
+        let g = Runner.graphicsPlan(c)
+        graphics = g
         var a: [String] = [
             "-name", q(c.name),
             "-machine", "virt,gic-version=3",
@@ -39,11 +44,13 @@ final class Runner {
             "-drive", "if=pflash,format=raw,file=\(q(c.efiVars.path))",
             "-drive", "if=none,id=disk,file=\(q(c.disk.path)),format=raw,cache=writeback,discard=unmap",
             "-device", "nvme,serial=omacvm,drive=disk,bootindex=0",
-            // QEMU's user network: the Mac is 10.0.2.2 for the VM; SSH from the Mac on 127.0.0.1.
-            "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:\(c.sshPort)-:22",
-            "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56,romfile=",
-            "-device", "virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile=",
-            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=on,swap-opt-cmd=off",
+        ] + networkArguments() + [
+            // One output per Mac display in full screen (Virtual-1 is the window;
+            // QEMU's window code opens the others): the built-in and four more.
+            // Venus (Vulkan: the VM's Graphics setting, see Graphics.swift)
+            // needs blobs and a host memory window for them.
+            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(g.venus ? ",blob=true,venus=true,hostmem=\(g.hostmemGB)G" : "")",
+            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
             "-object", "rng-random,id=rng0,filename=/dev/urandom",
@@ -61,11 +68,15 @@ final class Runner {
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
         // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
-        if Settings.useNotch, let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
+        if Settings.useNotch, let s = Mac.notchScreen {
             let k = s.backingScaleFactor
             let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
             a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
+        }
+        // HDR: the guest's display sync reads it (omacvm-app-host).
+        if Settings.hdrActive {
+            a += ["-smbios", "type=11,value=omacvm.hdr=1"]
         }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
@@ -82,8 +93,74 @@ final class Runner {
               "-device", "virtserialport,bus=vser0.0,nr=3,chardev=batt0,name=org.omacvm.battery",
               // The Mac's camera, while a Linux app reads it (omacvm-camera in the VM).
               "-chardev", "socket,id=cam0,path=\(q(c.cameraSocket.path)),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=4,chardev=cam0,name=org.omacvm.camera"]
+              "-device", "virtserialport,bus=vser0.0,nr=4,chardev=cam0,name=org.omacvm.camera",
+              // The displays: QEMU's window code tells the VM the Mac's arrangement,
+              // the VM says where its outputs are and whether it wants the
+              // external displays (omacvm-displays in the VM).
+              "-chardev", "socket,id=disp0,path=\(q(c.displaySocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=5,chardev=disp0,name=org.omacvm.display",
+              // The control centre's requests (omacvm in the VM), passed on to OmacVM Bridge.
+              "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=6,chardev=ctl0,name=org.omacvm.control"]
+        // The fast network: an empty PCIe slot for the user network's NIC
+        // should vmnet fail while the VM runs (useUserNetwork). Last,
+        // so no other device moves.
+        if network.vmnet { a += ["-device", "pcie-root-port,id=netfb"] }
         return a
+    }
+
+    /// The display for the VM's window: under the pointer, else the one with
+    /// the active menu bar; nil with one display.
+    static func placement() -> UInt32? {
+        let screens = NSScreen.screens.compactMap { s -> WindowPlacement.Screen? in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return nil }
+            return WindowPlacement.Screen(id: id, frame: s.frame)
+        }
+        let menuBar = NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+        return WindowPlacement.display(pointer: NSEvent.mouseLocation, screens: screens, menuBar: menuBar)
+    }
+
+    /// QEMU shows a window now (on any display).
+    nonisolated static func hasWindow(_ pid: pid_t) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid && $0[kCGWindowLayer as String] as? Int == 0 }
+    }
+
+    /// The graphics this start got (Graphics.swift).
+    private(set) var graphics: GraphicsPlan?
+
+    /// The VM's Graphics setting on this Mac now: the macOS version, whether
+    /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
+    static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
+        let lib = Paths.qemu.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("lib/libvulkan_kosmickrisp.dylib")
+        let forced = Settings.venus || FileManager.default.fileExists(
+            atPath: c.folder.appendingPathComponent("vulkan").path)
+        return Graphics.plan(choice: Graphics.read(folder: c.folder),
+                             macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+                             kosmicKrisp: FileManager.default.fileExists(atPath: lib.path),
+                             driverReady: Graphics.driverReady(folder: c.folder), forced: forced,
+                             macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024)
+    }
+
+    /// The path the network took at the last start (FastNetwork).
+    private(set) var network = FastNetwork.Choice(vmnet: false, mac: FastNetwork.defaultMAC, record: "slirp off")
+
+    private func networkArguments() -> [String] {
+        let c = config
+        let choice = FastNetwork.choose(for: c)
+        network = choice
+        if choice.vmnet {
+            // vmnet (shared, its own 192.168.77.0/24: the Mac is .1) through omacvm-netd; QEMU
+            // connects again within a second if the daemon restarts. The NIC
+            // sits right on it: through a QEMU hub (to swap networks) VM -> Mac
+            // lost a quarter of its speed. The fallback adds a NIC instead.
+            return ["-netdev", "stream,id=fast,server=off,reconnect-ms=1000,addr.type=unix,addr.path=\(FastNetwork.socket)",
+                    "-device", "virtio-net-pci,id=nic0,netdev=fast,mac=\(choice.mac),romfile="]
+        }
+        // QEMU's user network: the Mac is 10.0.2.2 for the VM; SSH from the Mac on 127.0.0.1.
+        return ["-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:\(c.sshPort)-:22",
+                "-device", "virtio-net-pci,netdev=net0,mac=\(choice.mac),romfile="]
     }
 
     func start() throws {
@@ -91,16 +168,23 @@ final class Runner {
         try FileManager.default.createDirectory(at: c.folder.appendingPathComponent("logs"),
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
+        try? FileManager.default.removeItem(at: c.displaySocket)
         let p = Process()
         p.executableURL = Paths.qemu
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
+        // Named under the boot logo when the VM is slow to show anything.
+        env["OMACVM_LOGS"] = c.folder.appendingPathComponent("logs").path
         if let icon = Paths.icon { env["OMACVM_ICON"] = icon.path }
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
-        // ports: Omanotch, Gestures and Bridge (patched libslirp).
-        env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
-        env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
+        // ports (patched libslirp), and only for its features that are on:
+        // Omanotch, Gestures, Bridge.
+        links = MacLinks.load(folder: c.folder)
+        env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
+        env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
+        if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
+        if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
@@ -108,36 +192,229 @@ final class Runner {
            v.contains("av1") {
             env["OMACVM_VIDEO_AV1"] = "1"
         }
+        // QEMU's window code talks to the VM's display agent over this port.
+        env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // The window opens on the display the user is using (WindowPlacement).
+        // QEMU's hook for that (omacvm-cocoa-displays.patch) still has the name
+        // its first user, the display tests, gave it; it is no test mode.
+        if let d = Runner.placement() { env["OMACVM_TEST_MAIN_DISPLAY"] = String(d) }
+        if Settings.hdrActive {
+            env["OMACVM_GL_HDR"] = "1"
+        }
+        if Settings.gpuSafeMode {
+            env["OMACVM_VIRGL_POLL_FENCES"] = "1"
+            env["OMACVM_GL_PRESENT"] = "layer"
+            env["OMACVM_GL_PRESENT_ON_TICK"] = "1"
+        }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         let log = try FileHandle(forWritingTo: logURL)
+        // Which network this start took, for omacvm check and the omacvm command
+        // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
+        log.write(Data("OmacVM: network: \(network.record)\n".utf8))
+        log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
+        if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
+        try? Data("\(network.record)\n".utf8).write(to: c.folder.appendingPathComponent("logs/network"))
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
         }
+        if Settings.hdr && !Mac.hasHDRDisplay {
+            log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
+        }
         p.standardOutput = log
         p.standardError = log
+        let agentPath = c.agentSocket.path
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
+            GuestAgent.release(socketPath: agentPath)
             Task { @MainActor in
                 self?.stopObserving()
                 self?.clipboard?.stop()
                 self?.battery?.stop()
+                self?.control?.stop()
                 self?.onExit?(status)
             }
         }
         // QEMU records through SDL in its own process, which cannot ask macOS
         // for the microphone (its AudioQueueStart just fails): the app asks,
         // once, and QEMU records under its grant from then on.
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+        // Not in a hidden test run (OMACVM_COCOA_HIDDEN): no prompt there.
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined,
+           ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] == nil {
             AVCaptureDevice.requestAccess(for: .audio) { _ in }
         }
         try p.run()
         process = p
+        if network.vmnet { watchFastNetwork() }
         observeSleep()
+        observeActivation()
         startClipboard()
-        startBattery()
-        startCamera()
+        // A feature that is off: nothing of the Mac on its port.
+        if links.battery { startBattery() }
+        if links.camera { startCamera() }
+        startControl()
+        // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
+        Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
+    }
+
+    /// What of the Mac this start of the VM may use (its features).
+    private(set) var links = MacLinks()
+
+    /// omacvm-netd may still refuse QEMU (another build, the limit), vmnet
+    /// may not start, or the daemon may go away later: then QEMU only tries
+    /// to connect again and again, and the VM has no network. Watched for the
+    /// whole run: when vmnet stays down, QEMU's user network takes over
+    /// (switchNetwork); when it is back for a whole window, vmnet takes over
+    /// again. A switch that fails or is only half done (QMP busy or timed
+    /// out) is tried again at the next poll: switching is safe to repeat.
+    /// logs/network and qemu.log say what the VM has now (omacvm check,
+    /// app_ip). launchd accepts every connect at first, so one "connected"
+    /// poll proves nothing: most of the last polls must see it.
+    private func watchFastNetwork() {
+        let qmpPath = config.qmpSocket.path
+        let sshPort = config.sshPort
+        let pid = process?.processIdentifier
+        // Polls and switches off the main thread (QMP blocks); the verdicts back here.
+        Task { [weak self] in
+            var recent: [Bool] = []
+            var toUser = false     // the network the VM should be on: the user network, else vmnet
+            var done = true        // ... and the last switch to it went through
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            while self?.isRun(pid) == true {
+                if let up = await Task.detached(operation: { Runner.fastLinkUp(qmpPath: qmpPath) }).value {
+                    recent.append(up)
+                    if recent.count > Runner.watchWindow { recent.removeFirst() }
+                }
+                let ups = recent.filter { $0 }.count
+                if recent.count == Runner.watchWindow {
+                    if !toUser, ups * 2 < recent.count { toUser = true; done = false }
+                    else if toUser, ups == recent.count { toUser = false; done = false }
+                }
+                if !done {
+                    let user = toUser
+                    let links = await Task.detached(operation: {
+                        Runner.switchNetwork(qmpPath: qmpPath, sshPort: sshPort, toUser: user)
+                    }).value
+                    guard let self, self.isRun(pid) else { return }
+                    done = links.error == nil
+                    if done { recent.removeAll() }
+                    if let line = Runner.networkRecord(links, toUser: user) {
+                        self.recordNetwork(line, note: line == "vmnet" ? "the fast network is back" : nil)
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
+    /// What logs/network says after a switch: what the VM has now (nil:
+    /// nothing changed for it).
+    nonisolated static func networkRecord(_ l: NetLinks, toUser: Bool) -> String? {
+        let why = "the fast network stopped working (QEMU could not stay connected to omacvm-netd; its log: /var/log/org.omacvm.netd.log)"
+        if toUser {
+            if l.user == true {
+                return "slirp fallback: \(why): QEMU's user network took over until it is back"
+                    + (l.fast == false ? "" : " (the fast network's NIC is still up: trying again)")
+            }
+            return "vmnet-down \(why), and the user network could not take over yet (\(l.error ?? "unknown")): trying again every 3 s (omacvm check; omacvm disable fast-network)"
+        }
+        // Back to vmnet once its NIC is up again; until then the user network stays.
+        return l.fast == true ? "vmnet" : nil
+    }
+
+    /// logs/network (first line: vmnet, slirp or vmnet-down, then why) and a
+    /// line in qemu.log; a retry that changes nothing writes nothing.
+    private func recordNetwork(_ line: String, note: String? = nil) {
+        if line == network.record { return }
+        try? Data("\(line)\n".utf8).write(to: config.folder.appendingPathComponent("logs/network"))
+        if let h = FileHandle(forWritingAtPath: config.folder.appendingPathComponent("logs/qemu.log").path) {
+            h.seekToEndOfFile()
+            h.write(Data("OmacVM: network: \(line)\(note.map { " (\($0))" } ?? "")\n".utf8))
+            try? h.close()
+        }
+        network = FastNetwork.Choice(vmnet: line == "vmnet", mac: network.mac, record: line)
+    }
+
+    /// QEMU of the run with this pid still runs.
+    private func isRun(_ pid: Int32?) -> Bool { isRunning && process?.processIdentifier == pid }
+
+    /// Polls in the watch window (one every 3 s): a daemon restart (about a
+    /// second) never fills it, a refusing or missing daemon does in 9-15 s.
+    nonisolated static let watchWindow = 5
+
+    /// Is QEMU connected to omacvm-netd? nil when QMP did not answer (busy).
+    /// "info network" shows "fast: index=0,type=stream,unix:<path>" while
+    /// connected, "connecting" or an error while not.
+    nonisolated static func fastLinkUp(qmpPath: String) -> Bool? {
+        guard let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-net") else { return nil }
+        defer { qmp.close() }
+        guard let r = try? qmp.execute("human-monitor-command", arguments: ["command-line": "info network"]),
+              let text = r["text"] as? String else { return nil }
+        let line = text.split(whereSeparator: \.isNewline).first { $0.contains("fast: index=") } ?? ""
+        return line.contains("type=stream,unix:") && !line.contains("link=down")
+    }
+
+    /// The two NICs after a switch: true/false once set, nil when the switch
+    /// stopped before (error says why).
+    struct NetLinks { var fast: Bool?; var user: Bool?; var error: String? }
+
+    /// To QEMU's user network (toUser) or back to vmnet; safe to repeat after
+    /// a half-done switch. The user network is as at a start without the fast
+    /// network (SSH on 127.0.0.1:sshPort): its netdev ("slow") and its NIC
+    /// ("nic1", in the empty slot; the guest's NetworkManager takes it up with
+    /// DHCP: 10.0.2.15) are added the first time, only what is not there yet;
+    /// later its link goes up again. The vmnet NIC's link goes down, so its
+    /// address and route go. Its netdev stays: QEMU keeps a NIC's netdev until
+    /// the NIC goes (and cannot unplug this one), and its reconnects are what
+    /// tells that vmnet is back. Back: the vmnet NIC's link up (the guest asks
+    /// DHCP), the user network's down.
+    nonisolated static func switchNetwork(qmpPath: String, sshPort: Int, toUser: Bool) -> NetLinks {
+        var l = NetLinks()
+        guard let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-net") else {
+            l.error = "QEMU's monitor did not answer"
+            return l
+        }
+        defer { qmp.close() }
+        do {
+            let have = networkNames(try qmp.execute("human-monitor-command", arguments: ["command-line": "info network"])["text"] as? String ?? "")
+            if toUser {
+                if !have.contains("slow") {
+                    _ = try qmp.execute("netdev_add", arguments: [
+                        "type": "user", "id": "slow", "hostfwd": [["str": "tcp:127.0.0.1:\(sshPort)-:22"]]])
+                }
+                if !have.contains("nic1") {
+                    _ = try qmp.execute("device_add", arguments: [
+                        "driver": "virtio-net-pci", "id": "nic1", "netdev": "slow", "bus": "netfb",
+                        "mac": FastNetwork.defaultMAC, "romfile": ""])
+                } else {
+                    _ = try qmp.execute("set_link", arguments: ["name": "nic1", "up": true])
+                }
+                l.user = true
+                _ = try qmp.execute("set_link", arguments: ["name": "nic0", "up": false])
+                l.fast = false
+            } else {
+                _ = try qmp.execute("set_link", arguments: ["name": "nic0", "up": true])
+                l.fast = true
+                if have.contains("nic1") { _ = try qmp.execute("set_link", arguments: ["name": "nic1", "up": false]) }
+                l.user = false
+            }
+        } catch {
+            l.error = error.localizedDescription
+        }
+        return l
+    }
+
+    /// The NICs and netdevs "info network" lists: "nic0: index=0,...", its
+    /// netdev indented after a backslash, a netdev without a NIC on its own line.
+    nonisolated static func networkNames(_ text: String) -> Set<String> {
+        var names = Set<String>()
+        for line in text.split(whereSeparator: \.isNewline) {
+            var l = line.drop { $0 == " " }
+            if l.hasPrefix("\\ ") { l = l.dropFirst(2) }
+            if let colon = l.firstIndex(of: ":"), l[colon...].hasPrefix(": index=") { names.insert(String(l[..<colon])) }
+        }
+        return names
     }
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
@@ -177,7 +454,10 @@ final class Runner {
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
                    let bridge = try? NativeClipboardBridge(socketPath: path) {
-                    DispatchQueue.main.sync { self?.clipboard = bridge }
+                    DispatchQueue.main.sync {
+                        self?.clipboard = bridge
+                        bridge.setVMActive(self?.qemuIsActive ?? true)
+                    }
                     try? bridge.run()
                     bridge.stop()
                 }
@@ -207,6 +487,27 @@ final class Runner {
         }
     }
 
+    // MARK: The control centre's port (NativeControlBridge.swift), reconnected while QEMU runs.
+
+    private var control: NativeControlBridge?
+
+    private func startControl() {
+        let path = config.controlSocket.path, name = config.name
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name) {
+                    DispatchQueue.main.sync { self?.control = bridge }
+                    try? bridge.run()
+                    bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
     // MARK: The Mac's camera (camera.swift, shared with OmacVM Bridge), reconnected while QEMU runs.
 
     private let camera = CameraHub { FileHandle.standardError.write(Data("camera: \($0)\n".utf8)) }
@@ -223,6 +524,25 @@ final class Runner {
                 }
                 Thread.sleep(forTimeInterval: 1)
             }
+        }
+    }
+
+    /// QEMU's window is the active app (the clipboard polls only then).
+    private var qemuIsActive: Bool {
+        guard let pid = process?.processIdentifier else { return false }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    }
+
+    /// The clipboard polls fast only while QEMU's window is the active app.
+    private func observeActivation() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.clipboard?.setVMActive(self.qemuIsActive)
+                }
+            })
         }
     }
 

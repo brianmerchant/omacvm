@@ -46,16 +46,41 @@ if want geekbench; then
     rec geekbench-cpu "$i" null "\"url\":\"${url:-}\""
   done
 fi
+# A VM's GPU device for an API, or why there is none. Only a real GPU counts:
+# a CPU device (PoCL, llvmpipe, lavapipe, SwiftShader) next to it could be the
+# one Geekbench picks, so that is "not available" too, with the reason.
+CPU_DEV='pocl|llvmpipe|lavapipe|swiftshader|softpipe|PHYSICAL_DEVICE_TYPE_CPU| CPU$'
+gpu_device() {   # OpenCL|Vulkan -> prints the device; exit 1 with the reason on stdout
+  local devs   # one line per device: "name type" (OpenCL) or "type name" (Vulkan)
+  if [[ $1 == OpenCL ]]; then
+    command -v clinfo >/dev/null || { echo "clinfo missing (pacman -S clinfo)"; return 1; }
+    devs=$(clinfo 2>/dev/null | grep -E '^ *Device (Name|Type) ' | sed 's/^ *Device [A-Za-z]* *//' | paste -d' ' - -)
+  else
+    command -v vulkaninfo >/dev/null || { echo "vulkaninfo missing (pacman -S vulkan-tools)"; return 1; }
+    devs=$(vulkaninfo --summary 2>/dev/null | grep -E '^\s*(deviceType|deviceName) *=' | sed 's/.*= *//' | paste -d' ' - -)
+  fi
+  [[ -n $devs ]] || { echo "no $1 device in this VM"; return 1; }
+  if grep -Eqi "$CPU_DEV" <<<"$devs"; then
+    grep -Evqi "$CPU_DEV" <<<"$devs" || { echo "CPU $1 only ($(head -1 <<<"$devs")), no GPU"; return 1; }
+    echo "a CPU $1 device next to the GPU ($(grep -Ei "$CPU_DEV" <<<"$devs" | head -1)): remove it so it can't be picked"; return 1
+  fi
+  head -1 <<<"$devs"
+}
 if want gpu; then
-  # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where Geekbench lists them
-  # (its Linux ARM preview lists none and has no GPU test so far).
+  # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where Geekbench lists
+  # them and the VM has a GPU device for them (OmacVM.app with Venus and
+  # rusticl); the other VMs have none.
   apis=$([[ $OS == Darwin ]] && echo "Metal OpenCL" || echo "Vulkan OpenCL")
   for api in $apis; do
-    "$GB" --gpu-list 2>&1 | grep -qi "$api" || [[ $OS == Darwin ]] || { rec "geekbench-gpu-$api" 1 null '"error":"not available in this VM"'; continue; }
+    dev=
+    if [[ $OS != Darwin ]]; then
+      dev=$(gpu_device "$api") || { rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: $dev\""; continue; }
+      "$GB" --gpu-list 2>&1 | grep -qi "$api" || { rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: Geekbench lists no $api device\""; continue; }
+    fi
     for ((i = 1; i <= RUNS; i++)); do
       say "Geekbench 7 GPU ($api), run $i/$RUNS"
       url=$(gb_run --gpu "$api")
-      rec "geekbench-gpu-$api" "$i" null "\"url\":\"${url:-}\""
+      rec "geekbench-gpu-$api" "$i" null "\"url\":\"${url:-}\",\"device\":\"${dev//\"/}\""
     done
   done
 fi
@@ -87,7 +112,7 @@ browser_start() {
   for _ in $(seq 30); do curl -fs http://127.0.0.1:9222/json/version >/dev/null && return 0; sleep 1; done
   echo "the browser did not start" >&2; return 1
 }
-browser_stop() { kill "$BROWSER" 2>/dev/null; wait "$BROWSER" 2>/dev/null; rm -rf "$PROFILE"; }
+browser_stop() { kill "$BROWSER" 2>/dev/null; wait "$BROWSER" 2>/dev/null; rm -rf "$PROFILE" "$PROFILE.err"; }
 if want speedometer || want motionmark || want aquarium || want basemark; then
   browser_start || exit 1
   version=$(curl -fs http://127.0.0.1:9222/json/version | python3 -c 'import json,sys; print(json.load(sys.stdin)["Browser"])')
@@ -95,9 +120,11 @@ if want speedometer || want motionmark || want aquarium || want basemark; then
     want $t || continue
     for ((i = 1; i <= RUNS; i++)); do
       say "$t, run $i/$RUNS ($version)"
-      v=$(python3 "$here/browser-bench.py" "$t")
+      v=$(python3 "$here/browser-bench.py" "$t" 2>"$PROFILE.err")
       [[ $v =~ ^[0-9.]+$ ]] || v=null
-      rec "$t" "$i" "$v" "\"browser\":\"$version\""
+      # The page size Chrome gave the test (it must be the same everywhere).
+      vp=$(sed -n 's/^viewport //p' "$PROFILE.err" | head -1)
+      rec "$t" "$i" "$v" "\"browser\":\"$version\",\"viewport\":\"$vp\""
       [[ $v == null ]] && break   # no result: the next runs would end the same way
     done
   done

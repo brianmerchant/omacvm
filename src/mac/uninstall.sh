@@ -14,8 +14,23 @@ done
 "$R/gestures/mac/uninstall.sh"
 "$R/clipboard/mac/uninstall.sh"
 "$R/omanotch/mac/uninstall.sh"
+# OmacVM.app's fast network (a system service: macOS asks for the password):
+# off for this Mac user; off the Mac when no other user has it.
+"$R/net/mac/install.sh" --remove || echo "the fast network's service stays (src/net/mac/install.sh --remove takes it off)" >&2
 tccutil reset Accessibility org.omacvm.gestures >/dev/null 2>&1 || true
 tccutil reset ListenEvent org.omacvm.gestures >/dev/null 2>&1 || true
-rm -rf "$HOME/Library/Application Support/omacvm/installed"
-[[ -n $PURGE ]] && rm -rf "$HOME/.local/share/omacvm" "$HOME/Library/Application Support/omacvm"   # also the VMs' SSH host keys
+S="$HOME/Library/Application Support/omacvm"
+rm -rf "$S/installed"
+# Only OmacVM's own files: on macOS's usual case-insensitive disk this is the
+# same folder as OmacVM.app's "Application Support/OmacVM", which holds the
+# app's VMs.
+if [[ -n $PURGE ]]; then
+  rm -rf "$HOME/.local/share/omacvm" "$S/known_hosts" "$S/gestures-legacy"   # known_hosts: the VMs' SSH host keys
+  rmdir "$S" 2>/dev/null || true
+fi
 echo "OmacVM removed from this Mac"
+# What stays: the omacvm command itself and OmacVM.app (which may hold VMs).
+top=$(cd "$R/.." && pwd)
+link=$(command -v omacvm 2>/dev/null) || link=""
+echo "Still here: the omacvm command ($top${link:+ and $link}); delete ${link:+them}${link:-it} to remove it."
+echo "OmacVM.app, if installed, stays too: drag it to the Bin (its VMs stay in ~/OmacVM, or ~/Library/Application Support/OmacVM/VMs from before 2.9.0)."

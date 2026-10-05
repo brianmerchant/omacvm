@@ -5,9 +5,9 @@ import Foundation
 /// OmacVM.app: its VM window belongs to the app's QEMU, whose process may carry
 /// any name the user gave the app. Its executable is always
 /// <app>/Contents/Resources/runtime/bin/OmacVM, so windows of that process
-/// count as owner "OmacVM". Its VMs reach the Mac at 127.0.0.1 and must
-/// prove they know OmacVM's Bridge token first, since any Mac program can
-/// connect there (GuestAuth).
+/// count as owner "OmacVM". Its VMs reach the Mac at 127.0.0.1 (or at
+/// 192.168.77.1 on its fast network) and must prove they know OmacVM's Bridge
+/// token first, since any Mac program can connect there (GuestAuth).
 enum OmacVMApp {
     static let owner = "OmacVM"
 

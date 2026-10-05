@@ -1,0 +1,38 @@
+From: OmacVM
+Subject: [PATCH] venus: keep VK_KHR_incremental_present in the guest
+
+What: treat VK_KHR_incremental_present like VK_KHR_swapchain when creating
+the renderer-side device: block it (and the other guest-WSI extensions)
+from the host's extension list.
+Why: venus lists VK_KHR_incremental_present itself (common WSI), but only
+strips the WSI extensions when the app also enables VK_KHR_swapchain.
+Chrome's ANGLE on Vulkan enables incremental_present without a swapchain,
+venus forwards it, and a host driver without it (KosmicKrisp, MoltenVK)
+fails vkCreateDevice with VK_ERROR_EXTENSION_NOT_PRESENT: no ANGLE on
+Vulkan in Chrome at all.
+Upstream: upstreamable to Mesa (src/virtio/vulkan), not sent.
+Applies to: Mesa main e5f0687867f5 and 26.2.4 (from the kosmickrisp track).
+Test: Chrome 154 --use-angle=vulkan in the VM: chrome://gpu shows
+"ANGLE (Apple, Vulkan 1.4.334 (Virtio-GPU Venus (Apple M4)))", WebGL 2.
+
+--- a/src/virtio/vulkan/vn_device.c
++++ b/src/virtio/vulkan/vn_device.c
+@@ -258,7 +258,8 @@
+ 
+    /* fix for WSI (treat AHB as WSI extension for simplicity) */
+    const bool has_wsi =
+-      app_exts->KHR_swapchain || app_exts->ANDROID_native_buffer ||
++      app_exts->KHR_swapchain || app_exts->KHR_incremental_present ||
++      app_exts->ANDROID_native_buffer ||
+       app_exts->ANDROID_external_memory_android_hardware_buffer;
+    if (has_wsi) {
+       if (renderer_exts->EXT_image_drm_format_modifier &&
+@@ -279,7 +280,7 @@
+             VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
+       }
+ 
+-      if (app_exts->KHR_swapchain) {
++      if (app_exts->KHR_swapchain || app_exts->KHR_incremental_present) {
+          /* see vn_physical_device_get_native_extensions */
+          block_exts[block_count++] = VK_KHR_PRESENT_ID_EXTENSION_NAME;
+          block_exts[block_count++] = VK_KHR_PRESENT_ID_2_EXTENSION_NAME;

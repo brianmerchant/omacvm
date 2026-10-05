@@ -20,6 +20,8 @@ readonly PINNED_PCRE2_ROOT=pcre2/10.47_1
 readonly PINNED_ZSTD_ROOT=zstd/1.5.7_1
 readonly PINNED_LZ4_ROOT=lz4/1.10.0
 readonly PINNED_XZ_ROOT=xz/5.8.3
+readonly PINNED_MOLTENVK_ROOT=molten-vk/1.4.2
+readonly PINNED_VULKAN_LOADER_ROOT=vulkan-loader/1.4.357.0
 
 readonly PINNED_GLIB_ARCHIVE=glib--2.88.3.arm64_sequoia.bottle.1.tar.gz
 readonly PINNED_PIXMAN_ARCHIVE=pixman--0.46.4.arm64_sequoia.bottle.1.tar.gz
@@ -32,6 +34,8 @@ readonly PINNED_PCRE2_ARCHIVE=pcre2--10.47_1.arm64_sequoia.bottle.tar.gz
 readonly PINNED_ZSTD_ARCHIVE=zstd--1.5.7_1.arm64_sequoia.bottle.tar.gz
 readonly PINNED_LZ4_ARCHIVE=lz4--1.10.0.arm64_sequoia.bottle.1.tar.gz
 readonly PINNED_XZ_ARCHIVE=xz--5.8.3.arm64_sequoia.bottle.tar.gz
+readonly PINNED_MOLTENVK_ARCHIVE=molten-vk--1.4.2.arm64_sequoia.bottle.tar.gz
+readonly PINNED_VULKAN_LOADER_ARCHIVE=vulkan-loader--1.4.357.0.arm64_sequoia.bottle.tar.gz
 
 pinned_core_bottle_manifest() {
   cat <<EOF
@@ -46,6 +50,8 @@ pcre2	10.47_1	$PINNED_PCRE2_ARCHIVE	$PINNED_PCRE2_ROOT	bef2e718b92e5e819a5172315
 zstd	1.5.7_1	$PINNED_ZSTD_ARCHIVE	$PINNED_ZSTD_ROOT	d72adf48460a8384b256f88061cd7b9df4977df7fa2e0794051d427db754a565
 lz4	1.10.0	$PINNED_LZ4_ARCHIVE	$PINNED_LZ4_ROOT	5bd143b7b784989e549637ea4e484af85ba481e640dde69bc35f3843ae25abc6
 xz	5.8.3	$PINNED_XZ_ARCHIVE	$PINNED_XZ_ROOT	c4be907ac8459f8b3e764c06287cc88b79c1d5c16a2db1c0335e1facf4fd4dbe
+molten-vk	1.4.2	$PINNED_MOLTENVK_ARCHIVE	$PINNED_MOLTENVK_ROOT	fb4d355feaf8f36631695721b1ea2ac2e63cfdced0f3044c85ed8e6305a9acbc
+vulkan-loader	1.4.357.0	$PINNED_VULKAN_LOADER_ARCHIVE	$PINNED_VULKAN_LOADER_ROOT	de7b6b62a8ad6853bad4d8ea7d75f08f41c21ccfc20d9cd62530a56964e8c9b0
 EOF
 }
 
@@ -64,6 +70,8 @@ $PINNED_ZSTD_ARCHIVE	$PINNED_ZSTD_ROOT/bin/zstd	bin/zstd
 $PINNED_ZSTD_ARCHIVE	$PINNED_ZSTD_ROOT/lib/libzstd.1.5.7.dylib	lib/libzstd.1.dylib
 $PINNED_LZ4_ARCHIVE	$PINNED_LZ4_ROOT/lib/liblz4.1.10.0.dylib	lib/liblz4.1.dylib
 $PINNED_XZ_ARCHIVE	$PINNED_XZ_ROOT/lib/liblzma.5.dylib	lib/liblzma.5.dylib
+$PINNED_MOLTENVK_ARCHIVE	$PINNED_MOLTENVK_ROOT/lib/libMoltenVK.dylib	lib/libMoltenVK.dylib
+$PINNED_VULKAN_LOADER_ARCHIVE	$PINNED_VULKAN_LOADER_ROOT/lib/libvulkan.1.4.357.dylib	lib/libvulkan.1.dylib
 EOF
 }
 

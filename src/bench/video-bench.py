@@ -2,10 +2,10 @@
 """YouTube 4K in a Chrome-family browser: which decoder plays it (hardware or
 software), at what resolution, and how many frames it drops.
 
-  video-bench.py [--port 9222] [--video ID] [--seconds 60]
+  video-bench.py [--port 9222] [--video ID] [--seconds 60] [--quality hd2160]
 
 Chrome must run with --remote-debugging-port. Opens the video's embed page
-(no cookie banner), asks for 2160p, plays it muted for --seconds and prints one
+(no cookie banner), asks for 2160p (--quality: hd1080, hd1440, ...), plays it muted for --seconds and prints one
 JSON line: {"test": "youtube-4k", "decoder", "hardware", "height", "fps",
 "dropped_pct", "seconds"}. The decoder comes from Chrome's media events
 (VaapiVideoDecoder, V4L2..., VideoToolbox... = hardware; Dav1d, Vpx, FFmpeg
@@ -45,6 +45,7 @@ def main():
     # SDR on purpose: HDR video makes the Mac's display brighter (more power) than a VM's.
     video = arg("--video", "aqz-KE-bpKQ")   # "Big Buck Bunny 60fps 4K", Blender Foundation
     seconds = int(arg("--seconds", 60))
+    quality = arg("--quality", "hd2160")
     # YouTube refuses embeds without a page around them (error 153): serve one.
     page = (f'<!doctype html><body style="margin:0;background:#000">'
             f'<iframe src="https://www.youtube-nocookie.com/embed/{video}?autoplay=1&mute=1&controls=0" '
@@ -79,7 +80,7 @@ def main():
         if t.js("!!document.querySelector('video') && !!document.getElementById('movie_player')"):
             break
     t.js("(() => { const p = document.getElementById('movie_player'); p.mute(); "
-         "p.setPlaybackQualityRange && p.setPlaybackQualityRange('hd2160', 'hd2160'); p.playVideo(); })()")
+         f"p.setPlaybackQualityRange && p.setPlaybackQualityRange('{quality}', '{quality}'); p.playVideo(); }})()")
     time.sleep(10)   # quality switch and buffering
     q0 = t.js("(() => { const q = document.querySelector('video').getVideoPlaybackQuality(); return [q.totalVideoFrames, q.droppedVideoFrames] })()") or [0, 0]
     time.sleep(seconds)

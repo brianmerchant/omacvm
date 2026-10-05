@@ -1,0 +1,379 @@
+From: OmacVM
+Subject: [PATCH] ui: the full-screen pointer guard's maths
+
+What: a header with no AppKit in it: where the guest's pointer goes for each
+mouse event while the Mac's cursor is kept off display corners and the
+Dock's edge, when to detach, warp and attach the cursor, and which of our
+windows has the pointer's place (and where in it). Used by
+omacvm-cocoa-fullscreen-edges.patch (which explains the why).
+
+Why its own file: so the motion maths is unit tested without QEMU or a
+display (app/runtime/Tests/display/test-pointer-guard.sh applies this patch
+to an empty folder and runs test-pointer-guard.c; at build time and in CI).
+
+Upstream: not applicable (OmacVM's display windows).
+Test: app/runtime/Tests/display/test-pointer-guard.c.
+
+diff --git a/ui/omacvm-pointer-guard.h b/ui/omacvm-pointer-guard.h
+new file mode 100644
+index 0000000..52f1f61
+--- /dev/null
++++ b/ui/omacvm-pointer-guard.h
+@@ -0,0 +1,357 @@
++/*
++ * OmacVM: the pointer maths of the full-screen guard (Dock and hot corners).
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-pointer-guard.c). ui/cocoa.m feeds it the
++ * mouse events and does what each step asks (detach, warp, attach).
++ *
++ * Coordinates are CoreGraphics' global space: points, top-left origin.
++ *
++ * While the VM has the pointer in full screen, the Mac's cursor must never
++ * reach a corner of its display (a macOS hot corner) or the Dock's edge.
++ * Near them (the zone: 200 points) the cursor is detached from the mouse and
++ * the pointer the guest sees moves on by each event's delta. That delta is
++ * the motion macOS itself moves the cursor by (after its acceleration, in
++ * points), so the pointer moves exactly as fast in the zone as outside it,
++ * and crossing the zone's border is not felt.
++ *
++ * A warp adds its own distance to the next event made after it, so every
++ * warp's distance is taken out of that event's delta again (as SDL and GLFW
++ * do on macOS). 2.8.0 to 2.9.0 RC4 warped the detached cursor along on every
++ * event without that, so each delta carried all the earlier ones and the
++ * pointer raced away near the corners.
++ *
++ * When the guest draws its own pointer the detached cursor (hidden) stays
++ * where it is; the only warp then is the one that takes it off an outer edge
++ * when it got there in one go. When the Mac's cursor is the visible pointer
++ * (follow: VMs whose guest hides its pointer, show-cursor=on) it follows the
++ * guest's pointer, kept the gap off corners and the Dock's edge, with at most
++ * one warp in flight.
++ */
++#ifndef OMACVM_POINTER_GUARD_H
++#define OMACVM_POINTER_GUARD_H
++
++#include <math.h>
++#include <stdbool.h>
++#include <string.h>
++
++#define OMACVM_GUARD_ZONE 200.0   /* points from a corner or the Dock's edge */
++#define OMACVM_GUARD_GAP 3.0      /* the Mac's cursor stays this far off them */
++
++enum { OMACVM_DOCK_BOTTOM, OMACVM_DOCK_LEFT, OMACVM_DOCK_RIGHT };
++
++typedef struct OmacVMRect {
++    double x, y, w, h;
++} OmacVMRect;
++
++/* The Mac's displays and our full-screen windows on them. */
++typedef struct OmacVMGuardScreens {
++    const OmacVMRect *displays;
++    int ndisplays;
++    const OmacVMRect *ours;
++    int nours;
++    int dock_edge;
++} OmacVMGuardScreens;
++
++typedef struct OmacVMGuard {
++    bool follow;        /* the Mac's cursor is the visible pointer (caller sets it) */
++    bool held;          /* the Mac's cursor is detached */
++    double x, y;        /* the pointer's place while held */
++    double cx, cy;      /* where the Mac's cursor is meanwhile */
++    bool warp_pending;  /* the next event made after a warp carries ... */
++    double wdx, wdy;    /* ... this distance; events made before it ... */
++    double ox, oy;      /* ... are still at this place */
++    bool let_go;        /* let go; events made before that are still ... */
++    double fx[2], fy[2];/* ... at one of the held cursor's places */
++    bool seen;          /* an event was handled ... */
++    double last_time;   /* ... with this time stamp ... */
++    bool last_place;    /* ... and the guest got (x, y) for it */
++} OmacVMGuard;
++
++/*
++ * What the caller does after one event, in this order: warp, then (de)tach.
++ * place: the guest gets (x, y) of the guard for this event, not the event's
++ * location (held, or just let go).
++ */
++typedef struct OmacVMGuardStep {
++    bool place;
++    bool warp;
++    double wx, wy;
++    bool detach;
++    bool attach;
++} OmacVMGuardStep;
++
++/* Top edge in, bottom edge out: CoreGraphics' pixel rows. */
++static inline bool omacvm_guard_in(const OmacVMRect *r, double x, double y)
++{
++    return x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h;
++}
++
++/*
++ * A window's frame in AppKit's space (bottom-left origin) in CoreGraphics'
++ * space; top is the top of the main display's frame (NSMaxY of the first
++ * NSScreen).
++ */
++static inline OmacVMRect omacvm_guard_rect_from_cocoa(double top, double x,
++                                                      double y, double w,
++                                                      double h)
++{
++    OmacVMRect r = { x, top - (y + h), w, h };
++
++    return r;
++}
++
++/*
++ * Which of our windows has the place (x, y), and the place in that window's
++ * own coordinates (AppKit's: bottom-left origin, points; the top row is y = h).
++ * Tested the guard's way (omacvm_guard_in), so the window's top row counts:
++ * the guard stops the pointer there. -1: in none.
++ */
++static inline int omacvm_guard_window_point(const OmacVMGuardScreens *s,
++                                            double x, double y,
++                                            double *wx, double *wy)
++{
++    for (int i = 0; i < s->nours; i++) {
++        const OmacVMRect *r = &s->ours[i];
++
++        if (omacvm_guard_in(r, x, y)) {
++            *wx = x - r->x;
++            *wy = r->h - (y - r->y);
++            return i;
++        }
++    }
++    return -1;
++}
++
++static inline int omacvm_guard_display_at(const OmacVMGuardScreens *s,
++                                          double x, double y)
++{
++    for (int i = 0; i < s->ndisplays; i++) {
++        if (omacvm_guard_in(&s->displays[i], x, y)) {
++            return i;
++        }
++    }
++    return -1;
++}
++
++static inline bool omacvm_guard_ours(const OmacVMGuardScreens *s,
++                                     double x, double y)
++{
++    for (int i = 0; i < s->nours; i++) {
++        if (omacvm_guard_in(&s->ours[i], x, y)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++/*
++ * Keep (*x, *y) on display d. With gap, also keep it gap points off each
++ * outer edge (no display beyond it) that a corner or the Dock makes
++ * dangerous. Returns whether the place is in the zone.
++ */
++static inline bool omacvm_guard_fit(const OmacVMGuardScreens *s, int d,
++                                    double *x, double *y, double gap)
++{
++    const OmacVMRect *r = &s->displays[d];
++    double minx = r->x, maxx = r->x + r->w - 1;
++    double miny = r->y, maxy = r->y + r->h - 1;
++    double px = fmin(fmax(*x, minx), maxx);
++    double py = fmin(fmax(*y, miny), maxy);
++    bool outl = omacvm_guard_display_at(s, minx - 1, py) < 0;
++    bool outr = omacvm_guard_display_at(s, maxx + 1, py) < 0;
++    bool outt = omacvm_guard_display_at(s, px, miny - 1) < 0;
++    bool outb = omacvm_guard_display_at(s, px, maxy + 1) < 0;
++    bool corner = fmin(px - minx, maxx - px) < OMACVM_GUARD_ZONE &&
++                  fmin(py - miny, maxy - py) < OMACVM_GUARD_ZONE;
++    bool dock = (s->dock_edge == OMACVM_DOCK_BOTTOM && outb &&
++                 maxy - py < OMACVM_GUARD_ZONE) ||
++                (s->dock_edge == OMACVM_DOCK_LEFT && outl &&
++                 px - minx < OMACVM_GUARD_ZONE) ||
++                (s->dock_edge == OMACVM_DOCK_RIGHT && outr &&
++                 maxx - px < OMACVM_GUARD_ZONE);
++
++    if (gap > 0 && (corner || dock)) {
++        if (outl && (corner || s->dock_edge == OMACVM_DOCK_LEFT)) {
++            px = fmax(px, minx + gap);
++        }
++        if (outr && (corner || s->dock_edge == OMACVM_DOCK_RIGHT)) {
++            px = fmin(px, maxx - gap);
++        }
++        if (outt && corner) {
++            py = fmax(py, miny + gap);
++        }
++        if (outb && (corner || s->dock_edge == OMACVM_DOCK_BOTTOM)) {
++            py = fmin(py, maxy - gap);
++        }
++    }
++    *x = px;
++    *y = py;
++    return corner || dock;
++}
++
++/* A warp of the detached cursor to (x, y); the next event made after it carries it. */
++static inline void omacvm_guard_warp(OmacVMGuard *g, OmacVMGuardStep *step,
++                                     double x, double y)
++{
++    g->wdx = x - g->cx;
++    g->wdy = y - g->cy;
++    g->ox = g->cx;
++    g->oy = g->cy;
++    g->warp_pending = true;
++    g->cx = x;
++    g->cy = y;
++    step->warp = true;
++    step->wx = x;
++    step->wy = y;
++}
++
++/* Where the Mac's cursor goes when it is attached again: never on an edge. */
++static inline void omacvm_guard_release(OmacVMGuard *g,
++                                        const OmacVMGuardScreens *s,
++                                        OmacVMGuardStep *step)
++{
++    double x = g->x, y = g->y;
++    int d = omacvm_guard_display_at(s, x, y);
++
++    if (d >= 0) {
++        omacvm_guard_fit(s, d, &x, &y, OMACVM_GUARD_GAP);
++    }
++    step->warp = true;
++    step->wx = x;
++    step->wy = y;
++    step->attach = true;
++    if (g->held) {
++        g->let_go = true;
++        g->fx[0] = g->fx[1] = g->cx;
++        g->fy[0] = g->fy[1] = g->cy;
++        if (g->warp_pending) {
++            g->fx[1] = g->ox;
++            g->fy[1] = g->oy;
++        }
++    }
++    g->held = false;
++    g->warp_pending = false;
++}
++
++/*
++ * One mouse event: time is its time stamp, (lx, ly) its location, (dx, dy)
++ * its delta; (cur_x, cur_y) is where the Mac's cursor is now. While held, the
++ * guest gets (g->x, g->y); else the event's own location. With no windows of
++ * ours (s->nours == 0: guard off) it never takes hold, but still moves the
++ * pointer for events queued before the let-go.
++ */
++static inline void omacvm_guard_event(OmacVMGuard *g,
++                                      const OmacVMGuardScreens *s,
++                                      double time, double lx, double ly,
++                                      double dx, double dy,
++                                      double cur_x, double cur_y,
++                                      OmacVMGuardStep *step)
++{
++    double px, py;
++    int d;
++
++    memset(step, 0, sizeof(*step));
++    /* AppKit can hand the same event to a view twice (tracking area and responder). */
++    if (g->seen && time == g->last_time) {
++        step->place = g->last_place;
++        return;
++    }
++    g->seen = true;
++    g->last_time = time;
++    g->last_place = false;
++
++    if (!g->held && g->let_go) {
++        if ((fabs(lx - g->fx[0]) < 0.5 && fabs(ly - g->fy[0]) < 0.5) ||
++            (fabs(lx - g->fx[1]) < 0.5 && fabs(ly - g->fy[1]) < 0.5)) {
++            /*
++             * Made while held, handled after the let-go (queued): its
++             * location is the held cursor's, not the pointer's. It moves the
++             * pointer by its delta and does not take hold again.
++             */
++            px = g->x + dx;
++            py = g->y + dy;
++            d = omacvm_guard_display_at(s, g->x, g->y);
++            if (omacvm_guard_display_at(s, px, py) >= 0) {
++                d = omacvm_guard_display_at(s, px, py);
++            }
++            if (d >= 0) {
++                omacvm_guard_fit(s, d, &px, &py, 0);
++                g->x = px;
++                g->y = py;
++            }
++            step->place = g->last_place = true;
++            return;
++        }
++        g->let_go = false;
++    }
++
++    if (g->held) {
++        /* Made after the warp (it is at the warp's place): carries its distance. */
++        if (g->warp_pending && fabs(lx - g->cx) < 0.5 && fabs(ly - g->cy) < 0.5) {
++            dx -= g->wdx;
++            dy -= g->wdy;
++            g->warp_pending = false;
++        }
++        px = g->x + dx;
++        py = g->y + dy;
++        d = omacvm_guard_display_at(s, px, py);
++        if (d < 0) {
++            /* Past an outer edge: it slides along the display it was on. */
++            d = omacvm_guard_display_at(s, g->x, g->y);
++            if (d < 0) {
++                omacvm_guard_release(g, s, step);
++                step->place = g->last_place = true;
++                return;
++            }
++        }
++    } else {
++        px = lx;
++        py = ly;
++        d = omacvm_guard_display_at(s, px, py);
++        if (d < 0) {
++            return;
++        }
++    }
++    if (!omacvm_guard_fit(s, d, &px, &py, 0) || !omacvm_guard_ours(s, px, py)) {
++        if (g->held) {
++            /* Out of the zone, or off our windows: macOS moves it again. */
++            g->x = px;
++            g->y = py;
++            omacvm_guard_release(g, s, step);
++            step->place = g->last_place = true;
++        }
++        return;
++    }
++    if (!g->held) {
++        double fx = cur_x, fy = cur_y;
++        int fd = omacvm_guard_display_at(s, fx, fy);
++
++        g->held = true;
++        g->warp_pending = false;
++        step->detach = true;
++        if (fd >= 0) {
++            omacvm_guard_fit(s, fd, &fx, &fy, OMACVM_GUARD_GAP);
++        }
++        g->cx = cur_x;
++        g->cy = cur_y;
++        if (fx != cur_x || fy != cur_y) {
++            /* Got onto an outer edge in one go: off it. */
++            omacvm_guard_warp(g, step, fx, fy);
++        }
++    }
++    g->x = px;
++    g->y = py;
++    if (g->follow && !g->warp_pending) {
++        /* The visible cursor goes where the pointer is, the gap off the edges. */
++        double tx = round(px), ty = round(py);
++
++        omacvm_guard_fit(s, d, &tx, &ty, OMACVM_GUARD_GAP);
++        if (tx != g->cx || ty != g->cy) {
++            omacvm_guard_warp(g, step, tx, ty);
++        }
++    }
++    step->place = g->last_place = true;
++}
++
++#endif

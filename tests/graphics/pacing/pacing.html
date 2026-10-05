@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pacing</title>
+<style>html,body{margin:0;background:#000;overflow:hidden;height:100%}canvas{display:block;width:100vw;height:100vh}</style></head>
+<body><canvas id="c"></canvas>
+<script>
+// Frame pacing probe: each rAF draws its frame number as 16 bits (cells 1..16) between a white
+// marker (cell 0) and a black marker (cell 17), plus a moving bar. rAF intervals go to /stats.
+// ?fps=24 draws a new frame only when a 24 fps clock ticks (video-like content at a fixed rate);
+// ?hz=60 on a 60 Hz display (default 120).
+const c = document.getElementById('c'), g = c.getContext('2d', {alpha: false});
+const q = new URLSearchParams(location.search);
+const secs = +(q.get('secs') || 20), load = +(q.get('load') || 0), fps = +(q.get('fps') || 0), hz = +(q.get('hz') || 120);
+let n = 0, last = 0, t0 = 0, mark = 0, tick = -1; const iv = [];
+addEventListener('keydown', () => { mark ^= 1; });
+function size() { c.width = innerWidth * devicePixelRatio; c.height = innerHeight * devicePixelRatio; }
+addEventListener('resize', size); size();
+function frame(t) {
+  if (fps) {
+    if (!t0) t0 = t;
+    // rAF times sit on vblanks: start the clock half a refresh early so that it always ticks
+    // between two vblanks, never on one (no jitter from rounding). ?hz= the display's rate.
+    const k = Math.floor((t - t0 + 500 / hz) * fps / 1000);
+    if (k == tick) { requestAnimationFrame(frame); return; }
+    tick = k;
+  }
+  const W = c.width, H = c.height, cell = Math.floor(W / 24);
+  g.fillStyle = '#202020'; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 18; i++) {
+    const bit = i == 0 ? 1 : i == 17 ? 0 : (n >> (i - 1)) & 1;
+    g.fillStyle = bit ? '#fff' : '#000';
+    g.fillRect(cell * (i + 1), cell, cell, cell);
+  }
+  g.fillStyle = mark ? '#fff' : '#000'; g.fillRect(cell, cell * 2.2, cell, cell);
+  const x = (n * 8) % W; g.fillStyle = '#4af'; g.fillRect(x, cell * 3, cell / 2, H - cell * 4);
+  for (let i = 0; i < load; i++) { g.fillStyle = `hsl(${(i*7+n)%360},60%,50%)`; g.fillRect((i*37)%W, cell*3+(i*53)%(H-cell*4), 40, 40); }
+  if (last) iv.push(t - last); else t0 = t;
+  last = t; n++;
+  if (t - t0 < secs * 1000) requestAnimationFrame(frame);
+  else fetch('/stats', {method: 'POST', body: JSON.stringify({ua: navigator.userAgent, frames: n, iv})});
+}
+requestAnimationFrame(frame);
+</script></body></html>

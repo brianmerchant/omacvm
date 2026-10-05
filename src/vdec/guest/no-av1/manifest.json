@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "OmacVM: YouTube in VP9",
+  "version": "1.0",
+  "description": "This Chromium decodes AV1 only on the CPU but VP9 on the Mac's media engine, so YouTube is told AV1 is not supported.",
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*", "*://*.youtube-nocookie.com/*"],
+      "js": ["no-av1.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}

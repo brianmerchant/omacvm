@@ -1,0 +1,56 @@
+# Mesa's Vulkan driver for virtio-gpu (Venus), for OmacVM.app VMs while Arch
+# Linux ARM still ships an older one. Mesa 26.2.4 sizes GPU memory to the
+# Mac's 16 KiB pages (VIRTGPU_PARAM_BLOB_ALIGNMENT); 26.2.3 does not, and the
+# guest kernel then refuses every blob, so vkCreateInstance fails with
+# ERROR_OUT_OF_HOST_MEMORY. Same name, files and dependencies as the distro's
+# vulkan-virtio; pkgrel 0.1 so the distro's own 26.2.4-1 (or newer) replaces
+# it on the next pacman -Syu. Built and installed by vulkan-virtio.sh.
+pkgname=vulkan-virtio
+epoch=1
+pkgver=26.2.4
+pkgrel=0.1
+pkgdesc="Open-source Vulkan driver for Virtio-GPU (Venus), built by OmacVM for 16 KiB host pages"
+arch=(aarch64)
+url="https://www.mesa3d.org/"
+license=('MIT AND BSD-3-Clause AND SGI-B-2.0')
+depends=(expat glibc libdisplay-info libdrm libgcc libx11 libxcb libxshmfence systemd-libs
+         vulkan-icd-loader vulkan-mesa-implicit-layers wayland xcb-util-keysyms zlib zstd)
+makedepends=(meson ninja python-mako python-yaml python-packaging glslang wayland-protocols
+             libxrandr libxext libxfixes libxxf86vm xorgproto bison flex)
+optdepends=("vulkan-mesa-layers: additional vulkan layers")
+provides=(vulkan-driver)
+options=(!debug)
+source=("https://archive.mesa3d.org/mesa-$pkgver.tar.xz")
+sha256sums=('bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9')
+
+build() {
+  # arch-meson's settings, but optional features left to what this VM has
+  # (arch-meson turns every one on, as the full Mesa package needs).
+  meson setup "mesa-$pkgver" build \
+    --prefix /usr --libexecdir lib --sbindir bin --buildtype plain --wrap-mode nodownload \
+    -D b_pie=true -D python.bytecompile=1 -D b_ndebug=true \
+    -D platforms=x11,wayland \
+    -D gallium-drivers= \
+    -D vulkan-drivers=virtio \
+    -D vulkan-layers= \
+    -D vulkan-loader-rpath= \
+    -D vulkan-manifest-per-architecture=false \
+    -D opengl=false -D glx=disabled -D egl=disabled -D gbm=disabled \
+    -D gles1=disabled -D gles2=disabled \
+    -D llvm=disabled -D video-codecs= \
+    -D valgrind=disabled -D libunwind=disabled -D android-libbacktrace=disabled \
+    -D microsoft-clc=disabled
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir" --no-rebuild
+  install -Dm644 "mesa-$pkgver/docs/license.rst" -t "$pkgdir/usr/share/licenses/$pkgname"
+  # The driver defaults (drirc.d) belong to the distro's mesa package.
+  rm -r "$pkgdir/usr/share/drirc.d"
+  # Exactly the distro package's files, nothing else.
+  local f
+  f=$(cd "$pkgdir" && find . -type f | sort | tr '\n' ' ')
+  [[ $f == "./usr/lib/libvulkan_virtio.so ./usr/share/licenses/vulkan-virtio/license.rst ./usr/share/vulkan/icd.d/virtio_icd.json " ]] ||
+    { echo "vulkan-virtio: unexpected files: $f" >&2; return 1; }
+}

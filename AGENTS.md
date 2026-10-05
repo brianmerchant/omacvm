@@ -1,14 +1,63 @@
 # AGENTS.md: operating manual for coding agents
 
-Read this before changing anything. It describes how to set OmacVM up for a
-person (section 0), how the full setup is built on each route (Parallels
-Desktop, UTM, VMware Fusion), how the pieces talk to each other, how to verify it, and what
-has already been tried and does not work.
+## Start here
 
 OmacVM = Omarchy (omarchy-mac, Arch Linux ARM) in a VM on an Apple Silicon Mac,
-made to feel native. Omanotch (Omarchy's bar beside the notch) is part of it:
-`src/omanotch/`, brought in with its history by `git subtree`; its own
-[README](src/omanotch/README.md).
+made to feel native. One command, `omacvm`, builds and looks after the VM on
+four routes: OmacVM.app (its own QEMU, in `app/`), UTM, VMware Fusion and
+Parallels Desktop. Small Mac helpers (Bridge, Gestures, Omanotch) pass the
+Mac's hardware to the VM over its private network, with a token.
+
+**Where things are** (all of it: section 3)
+
+| Path | What |
+|---|---|
+| `omacvm`, `src/cmd/` | The command and its subcommands |
+| `src/lib/` | Mac-side libraries: finding VMs, the four apps, signing |
+| `src/guest/` | The VM side: `install.sh` (root, idempotent) and `check.sh` |
+| `src/<feature>/` | One folder per feature, `mac/` and `guest/` inside; the list is `src/features.tsv` |
+| `src/omanotch/` | Omanotch, the bar beside the notch (`git subtree`, history kept, [own README](src/omanotch/README.md)) |
+| `app/` | OmacVM.app: Swift launcher, QEMU runtime build, patches in `app/runtime/patches/` |
+| `docs/` | For users; `docs/notes/findings.md` for developers |
+
+**Rules that matter**
+
+- The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`,
+  `${x,,}`.
+- Code changes go through a PR; CI (`.github/workflows/check.yml`) must pass.
+  One concern per PR, one change per commit, plain messages
+  ([CONTRIBUTING.md](CONTRIBUTING.md)).
+- Installers are idempotent. Every feature has a line in `omacvm check`. The
+  new-feature checklist is in section 9.
+- The guest is untrusted on the Mac side: check sizes, counts and state of
+  everything it sends.
+- Never edit `/usr/share/omarchy`; Omarchy 4's Hyprland config is Lua.
+  Section 8 lists the other dead ends: read it before trying the obvious.
+- Only a person grants macOS permissions, installs the VM apps or picks a
+  password. Hand it over (exit 3), never work around it.
+- No personal data in the repo.
+
+**Test without touching the person's setup**
+
+- No VM needed: the CI steps ([CONTRIBUTING.md](CONTRIBUTING.md#test-your-change)),
+  `./omacvm build --plan --json --vm-type ROUTE`, `src/omanotch/mac/test.sh`.
+- Use your own VM, named for the test (`--vm-name "OmacVM Test-<topic>"`), never
+  the person's. Check it with `./omacvm check --vm NAME --json` (read-only;
+  without `--vm` it picks the person's VM). `--no-mac` on `build` and `apply`
+  leaves the Mac's installed helpers as they are; `OMACVM_HEADLESS=1` starts
+  VMs without a window (UTM, Fusion, Parallels Pro or trial).
+- Ask before anything that changes the Mac side: `src/mac/install.sh`,
+  `omacvm update`, `omacvm uninstall`, `build` or `apply` without `--no-mac`
+  (`build` ends in `apply`). They replace or remove the person's Bridge,
+  Gestures and Omanotch.
+- Never rebuild an app bundle that is running. Don't switch Spaces, go full
+  screen or inject input on a Mac someone is using.
+- Done means section 1 holds and `omacvm check --vm NAME` passes. Then shut
+  down and delete your test VMs.
+
+The rest of this file: how to set OmacVM up for a person (section 0), how the
+full setup is built on each route, how the pieces talk to each other, how to
+verify it, and what has already been tried and does not work.
 
 ## 0. Recipes: setting OmacVM up for someone
 
@@ -21,7 +70,7 @@ offers it in a terminal); with `--yes` it stops with the exact command (exit 3).
 Everything goes through `./omacvm` (or `omacvm` once `install.sh` put it on
 the PATH). Without a terminal it never asks: give options, read `--json`.
 Exit codes: 0 done, 1 failed, 2 usage (a missing option is named), 3 needs a
-person (the message says what). Only the person can grant macOS permissions,
+person (the message says what), 4 failed and rolled back (`--transaction`). Only the person can grant macOS permissions,
 change Parallels' "Send macOS system shortcuts" setting, install Parallels or
 UTM, or choose their password: hand those over, never work around them.
 
@@ -36,15 +85,16 @@ UTM, or choose their password: hand those over, never work around them.
      display, paid: Standard 4 CPUs / 8 GB per VM), UTM (free, one display,
      slower) or VMware Fusion (free, every display, GPU in Chrome, about 71 %
      of the Mac in the browser, about 15 more build minutes, Broadcom sign-in to
-     download) or OmacVM.app (free, one display; `--vm-type app` installs the
+     download) or OmacVM.app (free, every display in full screen; `--vm-type app` installs the
      app if it is missing, after asking, and runs its own create script); the resource tiers; each feature (`omacvm features --json` has
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
-     is experimental and off by default: offer
-     it, do not decide it.
+     is experimental and on by default; it only ever takes a trackpad's
+     scrolling (mice scroll one to one), so a Mac with only mice is unaffected.
      `prebuilt.available` in the plan: a prebuilt VM exists for this app
-     (same major version, up to this one; never for OmacVM.app); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
+     (same major version, up to this one; for OmacVM.app only when the
+     installed app has `scripts/prebuilt-vm.sh`); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
      minutes) or a build here (`--build`, the default with `--yes`).
   3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes, OmacVM.app 10-30, Fusion 45-85:
      `minutes` in the plan; run it in the background and follow its output). Exit 3 = something to install first.
@@ -56,6 +106,18 @@ UTM, or choose their password: hand those over, never work around them.
   then `omacvm enable|disable FEATURE... --vm NAME --yes`, then
   `omacvm check --vm NAME --json`. Dependencies are handled (scroll-momentum brings
   gestures, bridge off takes wallpaper).
+- **CPUs and memory** of an existing VM: `omacvm resources --vm NAME --json`
+  (what it has, `limits`, `resource_tiers`), then
+  `omacvm resources --vm NAME --resources low|balanced|high|best` or
+  `--cpus N --memory-gb N`. Parallels, UTM and Fusion: the VM must be stopped
+  (exit 3 otherwise: ask the person to shut it down); OmacVM.app: written to
+  `vm.env`, applies on the next start. A name in two apps (or twice in one):
+  exit 2; add `--vm-type`.
+- **Graphics** of an OmacVM.app VM: `omacvm graphics --vm NAME --json`
+  (`graphics`: opengl|vulkan|auto, `next_start`, `this_start` from qemu.log,
+  `driver_ready`), then `omacvm graphics --vm NAME opengl|vulkan|auto`:
+  written to the VM folder's `graphics` file, applies on the next start; a
+  running VM that gets Vulkan builds its Venus driver at once.
 - **An Omarchy installed by hand**: `omacvm apply --vm NAME`. Exit 3 with a
   command in the message = the person runs that command once in the VM's
   terminal (it adds OmacVM's SSH key), then apply again.
@@ -82,6 +144,11 @@ A build is done when all of this holds:
    the mode from `src/display/mac-display.swift` (e.g. 3456x2160@120).
    Fusion: in full screen one monitor per Mac display, placed as in macOS
    (`omacvm-fusion-displays` user unit; `omacvm check` counts the outputs).
+   OmacVM.app: the same in full screen (Virtual-2, ... at each display's size
+   and scale) while "Use external displays" is on; `omacvm-displays status`
+   in the VM shows the switch, the Mac's arrangement and Hyprland's outputs;
+   `$XDG_RUNTIME_DIR/omacvm/builtin` names the MacBook's output, which
+   Omanotch (NOTCH, the parked bar) follows.
 5. On the Mac: `lsof -nP -iTCP -sTCP:LISTEN` shows 47830 (Gestures) and 47831
    (Bridge) on 10.211.55.2, 192.168.64.1 and/or the `.1` of Fusion's vmnet8
    (see "VMware Fusion settings" below); `launchctl list | grep omacvm`
@@ -98,7 +165,7 @@ A build is done when all of this holds:
 
 | Requirement | Value |
 |---|---|
-| Host | Apple Silicon, macOS 14+ (verified 15.7.4, MacBook Pro M4 Max) |
+| Host | Apple Silicon, macOS 14+ (OmacVM.app: macOS 15+; verified 15.7.4, MacBook Pro M4 Max) |
 | Parallels route | Parallels Desktop 19+ (verified 27.0.2, Pro trial). Per-VM limits from `prlsrvctl info --license` (`cpu_total`, `max_memory`): Standard 4 CPUs / 8 GB, Pro/Business/trial 32 CPUs (18 tested on Apple Silicon) / 128 GB; build.sh never writes more than the licence allows (Parallels would reject the config). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
 | UTM route | UTM 5 (verified 5.0.6, QEMU 10.0.12); required: on UTM 4.7 GL clients map but never paint (black windows) unless rendering is forced to software (ggalancs/omarchy-arm-utm#7). OmacVM never sets `LIBGL_ALWAYS_SOFTWARE`; VirGL (virtio-gpu-gl), Vulkan off. VM creation through UTM's AppleScript dictionary (`/Applications/UTM.app/Contents/Resources/UTM.sdef`), `utmctl` for start/stop/status/ip-address |
 | VMware Fusion route (new) | VMware Fusion 13+ (verified 26.0.1). Needs Hyprland with the vmwgfx fix (`src/fusion/guest/`); see `docs/routes/vmware-fusion.md` (and the build log `docs/experiments/vmware-fusion.md`). `vmcli VM Create`, `vmware-vdiskmanager`, `vmrun start/list` from `VMware Fusion.app/Contents/Library`; the rest is the `.vmx` (`src/vm/fusion.sh`). VMs in `~/Virtual Machines.localized` or `$OMACVM_FUSION_DIR` |
@@ -117,21 +184,24 @@ GitHub.
 
 | Path | What |
 |---|---|
-| `omacvm` | The command: dispatches to `src/cmd/*.sh` (`build`, `apply`, `check`, `vms`, `update`, `features`/`enable`/`disable` → `features.sh`, no command → `home.sh`, the menu; without a terminal it prints the help, exit 2). Resolves its own symlink, so it works from the PATH |
+| `omacvm` | The command: dispatches to `src/cmd/*.sh` (`build`, `apply`, `check`, `vms`, `update`, `resources`, `features`/`enable`/`disable` → `features.sh`, no command → `home.sh`, the menu; without a terminal it prints the help, exit 2). Resolves its own symlink, so it works from the PATH |
 | `install.sh` | Bootstrap: clones to `~/.omacvm` (or links the clone it runs from), symlinks `omacvm` into Homebrew's bin (else `~/.local/bin`), starts it on `/dev/tty` (works piped from curl) |
 | `src/VERSION` | OmacVM's version; copied into the VM with `src/` (what `omacvm vms` reports per VM); also OmacVM.app's version |
 | `app/` | OmacVM.app (`git subtree` of the former omacvm-app repo, history kept): `app/` the launcher (Swift, `swift build`), `runtime/` QEMU's build scripts and patches (GPL-2.0: this public repo is the source offer), `scripts/create-vm.sh` (the build the app and `omacvm build --vm-type app` run), `scripts/build-app.sh` (takes `src/` as committed; `--release` needs a clean tree; the commit goes into Info.plist `OmacVMCommit`), `scripts/package-release.sh` (`dist/OmacVM-<version>.zip` + `.sha256` for the GitHub release `v<version>`). Its own README and THIRD_PARTY_NOTICES |
 | `src/lib/app.sh` | OmacVM.app from the Mac: its VMs (`app_list`, `app_ip`, `app_start`), the installed app (`app_bundle`), `app_create`, and the download (`app_published`, `app_install`, `app_install_cmd`; curl sets no quarantine) |
-| `src/features.tsv` | **The feature list**: name, default (`on`/`off`/`notch`/`laptop`: on with a battery, never on Parallels), sides, tags (`experimental`, `slow`, `notch`, `laptop`, `not-parallels`), needs, title, summary. `feature_default`/`feature_available` in `src/lib/features.sh` turn defaults and tags into on/off and reasons (with `NOTCH` and the VM's `TYPE`). Read by `src/lib/features.sh` (Mac, bash 3.2), `src/guest/install.sh` (VM), `features.sh`; a new feature also needs its case in `build.sh` (`feature_flag`, question), the VM installer and the checks |
-| `src/lib/vm.sh` | Finding VMs without starting UTM (`vms_list`: Parallels via prlctl, UTM via utmctl when it runs, else UTM's `Registry` preference, which knows VMs outside its folder, and Fusion's VM folders), `vm_type` (running first, Parallels' "invalid" last), `resolve_vm` (no name: "Omarchy", else the only running VM), `vm_probe` (user, version, env, features set up before 2.0), `ssh_setup_command` |
-| `src/cmd/build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels, UTM, VMware Fusion or OmacVM.app (waits until installed; UTM ≥ 5, Fusion ≥ 13; a missing OmacVM.app is downloaded after asking: `OmacVM-<version>.zip` of this OmacVM's GitHub release, checked against its `.sha256`, into /Applications or ~/Applications; no zip for this version: exit 3; `--yes`: exit 3 with the command), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence; custom values also ask Fusion's graphics memory), where the VM goes (Parallels, Fusion), one checklist of every feature in `features.tsv` (defaults on, experimental ones marked), user/full name, summary, password. Options: `--vm-type --vm-name --vm-dir --resources --cpus --memory-gb --disk-gb --graphics-gb --user --full-name --hostname` (`--graphics-gb`: Fusion only, 1-8 GB of the VM's memory) (`--vm-dir`: Parallels and Fusion only; the drive must be APFS or Mac OS Extended with 30 GB free), `--feature NAME=on|off` / `--FEATURE` / `--no-FEATURE`, `--yes --dry-run --plan --json`, `--parallels-edition standard|pro` (only while Parallels reports "No license installed", a fresh install whose trial starts with the first VM: the edition to size by; the questionnaire asks it, default standard), hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes`. Ends with one `apply` call (Mac side, VM side, Omanotch). `--vm-type app`: vm.env into OmacVM.app's VMs folder, the app's own `Contents/Resources/scripts/create-vm.sh` builds the VM (password on stdin), then the same `apply` |
-| `src/cmd/check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL; `--json` (guest side `--tsv`) with `needs_human` per check. Add a line here for every new feature |
-| `src/cmd/apply.sh` | OmacVM onto a running VM (a stopped one is started): reads the VM (`vm_probe`), merges `--feature` changes (dependencies via `features_fix`), installs the Mac side those features need (`src/mac/install.sh --quiet`, `--omanotch` with that feature), copies the bridge token and `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), runs `src/guest/install.sh` with every feature explicit, Dock icon (Parallels). No SSH access: exit 3 with the command for the VM's terminal; another SSH host key than the one remembered: exit 3 (`--reset-host-key` after a rebuild) |
+| `src/net/mac/` | The fast network for OmacVM.app (feature `fast-network`, opt-in): `omacvm-netd.c`, a root daemon (launchd socket `/var/run/org.omacvm.netd.sock`) that gives OmacVM.app's QEMU (`-netdev stream`) one isolated vmnet shared-mode interface per connection on its own `192.168.77.0/24` (UTM's `192.168.64.0/24` refuses isolated interfaces while UTM uses it) after checking the caller's user and code signature, with a back-off after vmnet failures (each failed start leaks a descriptor in macOS's InternetSharing); `install.sh` installs the copy built and signed inside the app (`Contents/Library/LaunchServices`, by `build-app.sh`; built here only for older apps), `--status`, `--remove` (this Mac user; the service when none is left), `OMACVM_ADMIN_PROMPT=gui` for macOS's password dialog (the app's Fast network button, `FastNetwork.turnOn/turnOff`); `test.sh` offline tests. For app VMs the VM's `fast-network` file is the switch (button, apply, check). The app picks vmnet or slirp per start (`FastNetwork.swift`, `logs/network`) and swaps to a hot-plugged user-network card and back while the VM runs (`Runner.watchFastNetwork`); `app_ip` then finds the VM in `/var/db/dhcpd_leases` by the MAC in the VM's `fast-network` file |
+| `src/features.tsv` | **The feature list**: name, default (`on`/`off`/`notch`/`laptop`: on with a battery, never on Parallels), sides, tags (`experimental`, `slow`, `notch`, `laptop`, `not-parallels`, `app-only`), needs, title, summary. `feature_default`/`feature_available` in `src/lib/features.sh` turn defaults and tags into on/off and reasons (with `NOTCH` and the VM's `TYPE`). Read by `src/lib/features.sh` (Mac, bash 3.2), `src/guest/install.sh` (VM), `features.sh`; a new feature also needs its case in `build.sh` (`feature_flag`, question), the VM installer and the checks |
+| `src/lib/vm.sh` | Finding VMs without starting UTM (`vms_list`: Parallels via prlctl, UTM via utmctl when it runs and answers within 15 s, else UTM's `Registry` preference, which knows VMs outside its folder (state `unknown` while UTM runs: no answer, e.g. over SSH or while macOS asks whether the terminal may control UTM; `resolve_vm` then stops with exit 3, never starts it), and Fusion's VM folders), `vm_type` (running first, Parallels' "invalid" last), `resolve_vm` (no name: "Omarchy", else the only running VM), `vm_probe` (user, version, env, features set up before 2.0), `ssh_setup_command` |
+| `src/cmd/build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels, UTM, VMware Fusion or OmacVM.app (waits until installed; UTM ≥ 5, Fusion ≥ 13; a missing OmacVM.app is downloaded after asking: `OmacVM-<version>.zip` of this OmacVM's GitHub release, checked against the release's signed `OmacVM-appcast.json` (SHA-256, size, Developer ID teams), into ~/Applications; no zip for this version: exit 3; `--yes`: exit 3 with the command), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence; custom values also ask Fusion's graphics memory), where the VM goes (Parallels, Fusion), one checklist of every feature in `features.tsv` (defaults on, experimental ones marked), user/full name, summary, password. Options: `--vm-type --vm-name --vm-dir --resources --cpus --memory-gb --disk-gb --graphics-gb --user --full-name --hostname` (`--graphics-gb`: Fusion only, 1-8 GB of the VM's memory) (`--vm-dir`: Parallels and Fusion only; the drive must be APFS or Mac OS Extended with 30 GB free), `--feature NAME=on|off` / `--FEATURE` / `--no-FEATURE`, `--yes --dry-run --plan --json`, `--parallels-edition standard|pro` (only while Parallels reports "No license installed", a fresh install whose trial starts with the first VM: the edition to size by; the questionnaire asks it, default standard), hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes`. Ends with one `apply` call (Mac side, VM side, Omanotch). `--vm-type app`: vm.env into OmacVM.app's VMs folder (`app_vms_root`: ~/OmacVM unless set in the app; `app_vms_roots` also lists older folders and the old hidden one), the app's own `Contents/Resources/scripts/create-vm.sh` builds the VM (password on stdin), then the same `apply` |
+| `src/cmd/check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL (WARN = works on a fallback, e.g. an app VM's Vulkan on MoltenVK because KosmicKrisp could not run; it does not fail the check); `--json` (guest side `--tsv`) with `needs_human` and `feature` (the `features.tsv` name, "" = general; set with `FEATURE=` before the lines) per check; `--mac-only` skips the guest. Add a line here for every new feature |
+| `src/cmd/apply.sh` | OmacVM onto a running VM (a stopped one is started): reads the VM (`vm_probe`), merges `--feature` changes (dependencies via `features_fix`), installs the Mac side those features need (`src/mac/install.sh --quiet`, `--omanotch` with that feature), copies the bridge token, the VM's control key (control-centre on) and `src/` to `/usr/local/share/omacvm` (unpacked beside the old copy, swapped in when complete; same layout there, without `src/`), runs `src/guest/install.sh` with every feature explicit, Dock icon (Parallels). `--reinstall F` repairs one feature (its Mac helper with `--force-app`, `guest/install.sh --only F`); `--transaction` (the control centre's jobs) goes back to the old copy and features on failure and exits 4; `--yes` asks nothing. No SSH access: exit 3 with the command for the VM's terminal; another SSH host key than the one remembered: exit 3 (`--reset-host-key` after a rebuild) |
+| `src/cmd/graphics.sh` + `src/lib/graphics.sh` | `omacvm graphics`: OmacVM.app's Graphics setting (the VM folder's `graphics` file: opengl, vulkan, auto). The same rules as the app's `Graphics.swift` (Automatic: Vulkan on macOS 26+ with KosmicKrisp in the app and the VM's Venus driver there, `venus-ready` from apply; the Venus host memory window from the memory plan); `src/tests/graphics-setting.sh` checks both agree |
+| `src/cmd/resources.sh` + `src/lib/resources.sh` | `omacvm resources`: a VM's CPUs and memory, read (`res_get`) and changed (`res_set`) in its app's own settings: Parallels `prlctl set` (Standard has none: `pvs.py resources` while unregistered, as the build), UTM `System.CPUCount`/`MemorySize` in config.plist (through UTM's scripting while UTM runs, it keeps what it read), Fusion `numvcpus`/`memsize` (and `svga.graphicsMemoryKB` lowered when it would no longer fit), OmacVM.app `CPUS`/`MEM_MB` in vm.env. Tiers and limits from `src/lib/setup.sh` (`mac_specs`, `tier_values`, `parallels_limits`), as the build. Refuses a name found in two apps or twice in one. Tests: `src/tests/resources.sh` (fixtures; `--live` also on throwaway VMs it creates and deletes, none started) |
 | `src/cmd/features.sh` | `features` (list, `--json`, or a checklist in a terminal), `enable`/`disable`; changes go through `apply.sh` |
 | `src/cmd/update.sh`, `vms.sh`, `home.sh` | `update`: git pull (clean clone only, then re-exec), Mac side as installed (Omanotch included), OmacVM.app when installed and older than `src/VERSION` and that zip is published (in place, its install name kept; not while the app or one of its VMs runs), `apply --no-mac` on every running OmacVM VM. `vms`: table or `--json`. `home.sh`: the menu |
 | `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper, Omanotch (`--omanotch`, its own `mac/install.sh`); an app whose sources and options are unchanged since its install is skipped (stamps in `~/Library/Application Support/omacvm/installed`, `--force`). `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
 | `src/guest/install.sh` | Guest side, root, idempotent. Detects the VM type (DMI vendor Parallels/QEMU), writes `/etc/omacvm/env`, runs the shared features and the per-type ones |
-| `src/prebuilt/` | Prebuilt VMs (`docs/prebuilt.md`): `make-image.sh ROUTE [build generalize package upload clean]` makes one (`omacvm build --image`: placeholder user `omacvmuser`, nothing of the Mac, no Parallels Tools), `guest/generalize.sh` strips it in the VM, `guest/omacvm-firstboot` + its service (before SDDM: grows the disk, user from the OMACVM-SEED ISO or console questions, home from `/var/lib/omacvm/prebuilt/home`), `lib.sh` (lookup on GitHub releases `prebuilt-*`: newest image, same major, version up to ours; download, unpack, seed ISO), `vm.sh` (`omacvm build --prebuilt`: unpack, new ids/MACs, seed, first boot, `apply`, seed removed), `vmconfig.py` (config.pvs/config.plist/.vmx edits), `manifest.py` |
+| `src/prebuilt/` | Prebuilt VMs (`docs/prebuilt.md`): `make-image.sh ROUTE [build generalize package upload clean]` makes one (`omacvm build --image`: placeholder user `omacvmuser`, nothing of the Mac, no Parallels Tools), `guest/generalize.sh` strips it in the VM, `guest/omacvm-firstboot` + its service (before SDDM: grows the disk, user from the OMACVM-SEED ISO or console questions, home from `/var/lib/omacvm/prebuilt/home`), `lib.sh` (lookup on GitHub releases `prebuilt-*`: newest image, same major, version up to ours; download, unpack, seed ISO), `vm.sh` (`omacvm build --prebuilt`: unpack, new ids/MACs, seed, first boot, `apply`, seed removed), `vmconfig.py` (config.pvs/config.plist/.vmx edits), `manifest.py`, `sha512crypt.py` (`$6$` hash without Homebrew, for the app). OmacVM.app: `make-image.sh app` (the app's `create-vm.sh` with `OMACVM_CREATE_IMAGE=1`, headless, disk.img only), `app/scripts/prebuilt-vm.sh` (the app's twin of `create-vm.sh`: download, unpack, seed, headless first boot, apply) |
 | `src/vm/live/` | Temporary live installer (from vincenzopalazzo/omarchy-parallels, MIT): try-omarchy → bootable ARM64 Linux with SSH; a Parallels VM, or `--raw-image` for UTM |
 | `src/vm/base-install.sh` | In the live system: GPT + btrfs on the NVMe disk, pacstrap, locale/keyboard/user, GRUB |
 | `src/vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended; SSH rule for the Mac's network |
@@ -144,19 +214,24 @@ GitHub.
 | `src/omanotch/` | Omanotch (`git subtree`, history kept): `mac/` (Omanotch.app, Swift; `mac/test.sh` = offline tests), `guest/` (`notchcast`, the bar and background patches, `notchbar.lua`). Its own README. Work on it here; github.com/gillesgoetsch/omanotch is archived and points here |
 | `src/lib/install-plugin.sh`, `src/lib/omacvm-plugins` | Omarchy shell plugin install; queues until the shell runs (first login); restarts the shell once when a plugin's files changed |
 | `src/lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
-| `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, shared event stream, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr,nightshift}`. Night light: the Mac's Night Shift only; the guest install hides Omarchy's NightLight indicator (`items` of `omarchy.indicators` in `shell.json`, original kept in `~/.local/state/omacvm/nightlight-indicator`, restored with bridge=off) and stops `hyprsunset` |
-| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap; also hides the Mac's pointer over the full-screen VM), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
+| `src/control/` | Feature `control-centre` (docs/adr/0030-0032): `omacvm` in the VM, a Textual TUI (`omacvm_cc/tui.py`; `state.py` = the pure status rules, `controller.py` = data, `bridge.py` = the client with the Bridge's proof, `report.py` + `collect.py` = report a problem with redaction and a gate, also run by the Mac's `omacvm report` with macOS's python3 3.9). `omacvm status [--json]`, `omacvm report`, `omacvm notify` (user timer: one notice per new version unless update checks are off). Guest install (`guest/install.sh`): `python-textual`, `/usr/local/bin/omacvm`, root socket `omacvm-check.socket` (runs `guest/check.sh --tsv` for the desktop user, nothing read from the caller), desktop entry, a marked row in `~/.config/omarchy/extensions/omarchy-menu.jsonc`, bar plugin `plugins/omacvm.control`. Tests: `tests/` (pytest + Textual Pilot against `tests/fakes.py`), `tests/vm_e2e.py` drives the real TUI in a test VM |
+| `src/release/` | Update manifests (ADR 0032): `parts.tsv` (files → parts, first match wins, `core` last), `manifest.py digests|build|parts`, `sign.swift keygen|sign|verify` (Ed25519), `release-key.sh sign|team|teams|spare` (signs with the Keychain key and checks it), `keys.py` (verify on the command line: plain-python Ed25519, either key, kept spares). `omacvm apply` writes the digests it installed to the VM's `/etc/omacvm/installed.json`. Release keys: `src/lib/release-key.pub` (main) and `release-key-spare.pub`, either one signs; documents carry `kind` and `devid_teams`; who holds the private halves and how to rotate: `docs/release-keys.md`. Tests use `OMACVM_FEED_URL` + `OMACVM_FEED_KEY` (Bridge), `OMACVM_APPCAST_KEY` (app test builds), `OMACVM_RELEASE_TEST_KEYS` (command line), all throwaway keys |
+| `src/lib/helpers.sh` | OmacVM.app's prebuilt Bridge and Gestures (`Contents/Helpers`, Developer ID; `app/scripts/build-app.sh` builds and signs them): `src/mac/install.sh` installs them (`install.sh --prebuilt`) when built from the same sources, else builds; `src/tests/prebuilt-helpers.sh` |
+| `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, shared event stream, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr,nightshift}`. External display brightness (feature `external-brightness`): `mac/external-brightness.swift` (DDC/CI over IOAVService, Apple displays over DisplayServices, found per display at run time; one serial queue, coalesced writes), `mac/external-model.swift` (steps, DDC packets, which display; `mac/test.sh` offline, `--live` on this Mac's displays, always restoring), `/display/external*` in the API, `guest/omacvm-ddcutil` as `/usr/local/bin/ddcutil` in the VM so Omarchy's own DDC path asks the Bridge (`src/tests/external-brightness.sh`). Night light: the Mac's Night Shift only; the guest install hides Omarchy's NightLight indicator (`items` of `omarchy.indicators` in `shell.json`, original kept in `~/.local/state/omacvm/nightlight-indicator`, restored with bridge=off) and stops `hyprsunset`. `mac/control_policy.swift` + `control.swift`: the control centre's fixed request list under `/omacvm/` (ADR 0031; the VM is worked out from the peer address via `omacvm vms --json` and proves itself by signing each request with its own key, which never leaves it, jobs run the CLI named in `~/Library/Application Support/omacvm/cli` (written only by the installed checkout, `cli_for_bridge` in `src/lib/mac.sh`: a worktree that runs `src/mac/install.sh` does not take it over; `OMACVM_SET_CLI=1` forces it) with posix_spawn, own session, responsibility disclaimed so macOS's Local Network privacy lets its ssh through; job files in `omacvm-bridge/jobs/`); `mac/tests/run.sh` tests the policy |
+| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥⌘ Esc moves the display under the pointer out of the VM with macOS's own Space shortcut (`EscapeSwipe` = `all` in `org.omacvm.gestures`: every display), and back; falls back to a Dock swipe, then Mission Control, never out of full screen; `mac/test-escape.c` tests it against a made-up world of displays and Spaces; also hides the Mac's pointer over the full-screen VM; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
 | `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
 | `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
-| `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
+| `src/app/guest/` | OmacVM.app's VM side: `omacvm-display-sync` (each output follows its Mac window or display: mode, scale by EDID, position from the Mac's arrangement; Omarchy's zoom only for Virtual-1), `omacvm-displays` (user service on virtio port `org.omacvm.display`: hello and the switch to QEMU, the arrangement from it, Hyprland's outputs back for the pointer; `external on\|off\|toggle`, `status`), `monitor-widget/` (bar widget `omacvm.monitor` = Omarchy's display panel built from the installed Omarchy plus MAC DISPLAYS "Use external displays"; rebuilt by the agent after an Omarchy update), clipboard, guest agent, notch strip |
+| `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua` (Virtual-1 IDs 1..10, Virtual-N (N-1)\*10+1..; an unplugged display's workspaces park on Virtual-1 and go back on replug), bindings, `plugins/omacvm.workspaces`, `tests/` (park and unpark against a fake Hyprland) |
 | `src/clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
 | `src/battery/` | The Mac's battery (feature `battery`; UTM, Fusion, OmacVM.app; Parallels has its own): DKMS module `omacvm_battery` (BAT0, ADP0; from try-omarchy, GPL-2.0-only), root agent `omacvm-battery` (OmacVM.app: virtio port `org.omacvm.battery`; UTM/Fusion: the Bridge's `battery` events through `bridge/guest/omacvm-bridge`), UPower never suspends for it. Mac side: `bridge/mac/battery.swift`, OmacVM.app's `NativeBatteryBridge.swift`. Its README |
 | `src/wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
 | Video decoding (OmacVM.app) | Guest VA-API (Mesa virgl) → virglrenderer's video protocol → VideoToolbox backend (`app/runtime/patches/virgl-videotoolbox-decode.patch`: `src/vrend/virgl_video_vt.c`; SPS/PPS rebuilt for H.264, VPS/SPS/PPS for HEVC with an explicit short-term RPS rewritten into every slice header (VA-API omits the SPS's sets), AV1 frames cut from the temporal unit by the first tile's offset, VP9 frames as they come; bit-exact against FFmpeg's software decoding; IOSurface → GPU copy into the guest's textures). VM side in `src/app/guest/install.sh`: `vainfo`, VA driver shim `omacvm_drv_video.c` (`LIBVA_DRIVER_NAME=omacvm`, `/usr/local/lib/dri`: NV12 surfaces only, AV1 only for Chromium-based processes), Firefox pref. QEMU env: `OMACVM_VIDEO_DECODE=0`, `OMACVM_VIDEO_DEBUG=1`, `OMACVM_VIDEO_AV1=1` (the app sets it when the VM folder has `video-decode` = `av1`, written by `apply`). Guest profile numbers are Mesa ≥ 26's (`OMACVM_VIRGL_VIDEO_ABI=legacy`). `docs/video-decode.md` |
+| Chromium video (OmacVM.app) | Feature `chromium-video` (tag `app-only`: on in OmacVM.app VMs, off elsewhere). Arch Linux ARM's Chromium has no VA-API, only V4L2 (ADR 0025). `src/vdec/guest/`: kernel module `omacvm-vdec` (DKMS, `module/`: V4L2 stateful decoder, no decoding of its own; CAPTURE = single-plane ARGB (`V4L2_PIX_FMT_ABGR32`) dmabufs the daemon hands in; protocol in `module/omacvm-vdec.h` (`OVD_VERSION`: daemon and module of different builds refuse each other, daemon exit 3), control device `/dev/omacvm-vdec`; instance ids cyclic (never reused); max 8 open, 256 unread messages per decoder; daemon gone = errors, not hangs) + `omacvm-vdecd` (FFmpeg VA-API decode, GL pass NV12→ARGB into GBM buffers, EGL fences with a 1 s timeout; one failing video fails alone; H.264 + VP9, HEVC only with `OMACVM_VDEC_HEVC=1` since Chromium 153's stateful V4L2 decoder lacks it; service `omacvm-vdecd` as user `omacvm-vdec`, `WatchdogSec=5`, status in `/run/omacvm-vdec/status`, `OMACVM_VDEC_DEBUG=1`). Module update while an app has it open: installed, loaded at the next VM start (`omacvm check` says so). DKMS helpers shared with battery/camera: `src/guest/dkms.sh`. `chromium-flags.py` (as the user) adds `AcceleratedVideoDecoder` and the `no-av1` extension (YouTube sends VP9) to the last `--enable-features`/`--load-extension` of `~/.config/chromium-flags.conf`, marker `~/.local/state/omacvm/chromium-v4l2-flags.json`. `install.sh USER on|off` from `guest/install.sh` (app VMs). Test: `test/vdec-test.c` (V4L2 like Chromium vs FFmpeg software; `--churn`, `--early-drain`, `--expect-fail`, `--stall`, `--flood`). `docs/video-decode.md` |
 | `src/camera/` | Feature `camera` (from try-omarchy): guest `omacvm-camera` (user service) feeds `/dev/video42` "Mac Camera" (v4l2loopback via DKMS, `exclusive_caps`) and asks the Mac for frames only while v4l2loopback reports a reader: Bridge `GET /camera` (UTM, Fusion; `src/bridge/mac/camera.swift`) or OmacVM.app's virtio port `org.omacvm.camera` (same Swift file, linked into `app/app/Sources/OmacVM`). Parallels passes the camera itself (a USB camera, `uvcvideo`, "MacBook Pro Camera" on /dev/video0; `SharedCamera` in config.pvs): nothing installed there. `omacvm-camera --status` for the check |
 | `src/keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
 | `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; opt-in memory-optimized kernel (THP always + MGLRU) from ALARM's PKGBUILD, built only with `--thp-kernel`. ALARM's stock `linux-aarch64` has `# CONFIG_TRANSPARENT_HUGEPAGE is not set` and `# CONFIG_LRU_GEN is not set` (verified 7.2.8), so the THP/MGLRU tmpfiles lines are no-ops there (systemd-tmpfiles skips missing files) |
-| Feature switches | `src/guest/install.sh --feature NAME=on\|off` for every feature in `src/features.tsv`, kept in `/etc/omacvm/env`; `omacvm apply` passes all of them (also `--[no-]FEATURE`). omanotch=on: `omacvm-omanotch.service` installs Omanotch from the copy of `src/omanotch` in the session (now if Hyprland runs, else at the next login), again when that copy changed; the clone earlier versions made in `~/.local/share/omanotch` is removed; off: Omanotch's own `guest/uninstall.sh` in the session. scroll-momentum ("glide" in the code): `gestures/guest/glide.sh` on/off (`omacvm_glide.lua` required from `hyprland.lua`, `--disable-smooth-scrolling` in existing `chromium-flags.conf`/`chrome-flags.conf`, marker `~/.local/state/omacvm/glide-flags` so off removes only what it added). idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets). battery: `battery/guest/install.sh on|off` (forced off on Parallels); on UTM and Fusion `omacvm apply` installs the Bridge for it even with bridge=off. Gestures off: the VM's daemon says so in its hello (on UTM it still runs, for Cmd as Super) and the Mac helper leaves that VM's trackpad to macOS; on Parallels the daemon is not installed. `--keys-only` on the Mac app is a Mac-wide off switch |
+| Feature switches | `src/guest/install.sh --feature NAME=on\|off` for every feature in `src/features.tsv`, kept in `/etc/omacvm/env`; `omacvm apply` passes all of them (also `--[no-]FEATURE`). omanotch=on: `omacvm-omanotch.service` installs Omanotch from the copy of `src/omanotch` in the session (now if Hyprland runs, else at the next login), again when that copy changed; the clone earlier versions made in `~/.local/share/omanotch` is removed; off: `src/guest/off.sh` (Omanotch's own `guest/uninstall.sh` in the session, its files also without one, and an install queued for the next login). scroll-momentum ("glide" in the code; the old key in /etc/omacvm/env still maps to it): `gestures/guest/glide.sh` on/off (`omacvm_glide.lua` required from `hyprland.lua`, `--disable-smooth-scrolling` in existing `chromium-flags.conf`/`chrome-flags.conf`, marker `~/.local/state/omacvm/glide-flags` so off removes only what it added). idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets; nobody logged in: at the next login, `pending-plugins-off`) and removes the client. battery: `battery/guest/install.sh on|off` (forced off on Parallels); chromium-video: `vdec/guest/install.sh USER on|off` (OmacVM.app VMs; forced off on the other routes); on UTM and Fusion `omacvm apply` installs the Bridge for it even with bridge=off. Gestures off: the VM's daemon is disabled on every route (also UTM, Fusion and OmacVM.app, where it typed Cmd as Super), so the VM does not connect to the Mac's Gestures. `--keys-only` on the Mac app is a Mac-wide off switch |
 | `src/icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`src/vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
 | `docs/` | Index `docs/README.md`. `images/`: README graphics (hand-written SVG + SMIL; `parallels-shortcuts.svg` stays in `docs/`, `src/mac/parallels-system-shortcuts.sh` opens it). `routes/` (one page per app: `app.md`, `utm.md`, `vmware-fusion.md`, `parallels.md`), `guide.md` (build and everyday use in full), `how-it-works.md`, `features.md`, `benchmarks/README.md` (method + results, behind `compare.md`, the full comparison of the four apps; tools in `src/bench/`), `troubleshooting.md` (user problems: symptom, cause, fix, code), `notes/findings.md` (developer findings: reviews, measuring pitfalls, VM app internals), `experiments/` |
 
@@ -176,6 +251,8 @@ VM bundle (.pvm)   ──▶ share "vmlog" (ro) ───────▶ paralle
 Omanotch.app (src/omanotch) :47811     ◀────────── notchcast
 OmacVMBridge.app /battery, events ──────────────▶ omacvm-battery (root) → module → BAT0 → UPower (UTM, Fusion)
 OmacVM.app: virtio port org.omacvm.battery ─────▶ omacvm-battery (root) → module → BAT0 → UPower
+OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (user) → omacvm-display-sync → Hyprland
+  org.omacvm.display: arrangement out; hello, "Use external displays", Hyprland's outputs back
 ```
 
 - The Mac is **10.211.55.2** on Parallels' shared network (not .1), the
@@ -202,9 +279,44 @@ OmacVM.app: virtio port org.omacvm.battery ─────▶ omacvm-battery (ro
   (the exact name first, else the longest name in the title); without a match
   (older daemons, a VM renamed since its last `omacvm apply`) to every VM of
   that app. The helper captures the trackpad only when those VMs all want it,
-  and the scroll momentum (macOS's continuous scroll events dropped,
-  `A`/`W`/`P` sent, every two-finger frame forwarded) only when they all want
-  that.
+  and the scroll momentum (a trackpad's scroll events dropped, `A`/`W`/`P`
+  sent, every two-finger frame forwarded) only when they all want that.
+  Which scroll is a trackpad's: `mac/scroll-model.h`, per event (phases and
+  momentum of a scroll made while a trackpad has two fingers on it); wheel
+  mice, smooth-scrolling mice and a Magic Mouse always pass to the VM app.
+- OmacVM.app's keyboard: while QEMU's window has the keyboard (full grab, app
+  active, window key) macOS's global shortcuts are off
+  (CGSSetGlobalHotKeyOperatingMode, `omacvm-cocoa-system-shortcuts.patch`;
+  logic in `omacvm-cocoa-shortcuts-logic.patch`, tested against macOS's whole
+  list by `app/runtime/Tests/keys/test-shortcuts.sh` and in a real QEMU by
+  `src/tests/vm-shortcuts.sh`). The switch belongs to QEMU's window-server
+  connection (macOS restores it when QEMU dies); a watchdog thread turns it
+  on after 2 s without the main thread. Off by default since 2.9.1 (not
+  always handed back on the Mac mini): `macShortcuts` (org.omacvm.app,
+  default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
+  turns the switch on. Gestures' tap still takes ⌃⌥⌘ Esc first; the Bridge
+  still routes media keys.
+- Escape combo (Gestures): NEVER take the VM out of full screen or hide it
+  (user, 2026-10-05). Out = macOS's own "Move left/right a space" shortcut
+  (symbolic hotkeys 79/81, read per press: key, modifiers, enabled), posted
+  at the HID level once the combo's keys are up, marked 0x0BAC0E5C (our tap
+  and QEMU, `omacvm-cocoa-keys-for-macos.patch`, let it through), toward the
+  Space the display showed before (`cameFrom`). Each move is checked: not
+  moved → Dock swipe → Mission Control (hotkey 32 for OmacVM.app, else its
+  app). Back in: the shortcut, else the VM's window to the front. An
+  OmacVM.app window with the
+  keyboard: the combo gives it to the app from before / Finder
+  (`COMBO_WINDOW_OUT`), again in macOS brings the window back.
+- Bridge media keys: the tap is at `.cghidEventTap` (macOS 27 sends volume
+  only there). Brightness keys reach no tap on macOS 27: `hid-keys.swift`
+  reads them with IOHIDManager (not seized; Input Monitoring): F1/F2 through
+  the keyboard's own `FnFunctionUsageMap` (IORegistry; none on an Apple
+  keyboard, also Bluetooth vendor 0x004C: Apple's F1/F2 default) and
+  `com.apple.keyboard.fnState`, or the consumer/Apple brightness usages;
+  acted on only with an OmacVM.app VM in front (`MediaRoute`), deduplicated
+  against the tap (`BrightnessOnce`), and not stepped again when macOS
+  changed the display itself (`OwnSteps`: not when the Bridge stepped it
+  itself meanwhile). Held keys repeat at macOS's key repeat speed.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.
@@ -340,7 +452,7 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
 - **Bridge from the guest**: `omacvm-bridge state|audio|display|events`; from the Mac:
   `curl -H "Authorization: Bearer $(cat ~/Library/Application\ Support/omacvm-bridge/token)" http://10.211.55.2:47831/state`.
 - **Permissions**: Location Services (bridge), Accessibility (bridge, gestures), Input Monitoring
-  (gestures), Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
+  (gestures), none for Omanotch, Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
   first uses it), Microphone (the VM's app). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and `org.omacvm.gestures`,
   `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omacvm.<app>`.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
@@ -363,11 +475,11 @@ The less obvious ones, with causes and where the fix lives, are in
 | Updated widget does not change | a running shell keeps loaded plugins | `src/lib/install-plugin.sh` flags changes; `src/guest/install.sh` runs `omarchy-restart-shell` |
 | Disabling an old clone brings the stock widget back next to the new one | `clonedFrom` hand-back | rename ids in `shell.json` instead, or disable the stock widget |
 | SSIDs null, `location_authorized: false` | Location Services not granted (new bundle id or reset) | Privacy & Security › Location Services |
-| Media keys still show the macOS popup | Accessibility missing, VM not full screen, or capture switched off in the bridge menu | `media keys:` lines in the bridge log |
+| Media keys still show the macOS popup | Accessibility missing (`permissions:` line, `omacvm check`), no VM in front (Parallels/UTM/Fusion: not full screen), or capture switched off in the bridge menu | `media keys:` / `media key ...: to macOS:` lines in the bridge log |
 | Build stops right after the Omarchy install | Omarchy enables ufw; new SSH connections from the Mac are refused | `src/vm/omarchy-install.sh` adds the rule while its own session is open |
 | `ERROR: problem running` from ufw | rule stored but not applicable live right after the install | ignored on purpose; verified with `ufw show added` |
 | UTM desktop blank after a resolution change | virgl under UTM cannot switch modes live | fixed mode in `monitors.lua`, reboot to change it |
-| OmacVM.app: video still decodes on the CPU | Arch Linux ARM's Chromium has no VA-API; or the app predates video decoding; or `vainfo` lists nothing | Google Chrome, Brave or Firefox; `omacvm check` (video decoding); `OMACVM_VIDEO_DEBUG=1` logs each stream in the VM's `logs/qemu.log` (`docs/video-decode.md`) |
+| OmacVM.app: video still decodes on the CPU | the app predates video decoding, or `vainfo` lists nothing; in Arch's Chromium: `omacvm-vdecd` not running, no module for the running kernel, the flags not in `~/.config/chromium-flags.conf`, or the codec is AV1/HEVC/10-bit | `omacvm check` (video decoding, video decoding in Chromium); `journalctl -u omacvm-vdecd`; `OMACVM_VIDEO_DEBUG=1` logs each stream in the VM's `logs/qemu.log` (`docs/video-decode.md`) |
 | UTM VM very slow | UTM started with `open -g` (background priority) or Vulkan driver on | start UTM normally; `QEMUVulkanDriver` 1 |
 | VM resumes a dead state after a hard kill (Parallels) | suspend files | delete `<pvm>/*.mem*` and `vm.lock` |
 | The Mac's pointer shows over the full-screen VM | another app's window over the VM hit-test area (Bartender's menu-bar overlay brings it back) | the gestures helper hides the pointer by AppKit hit test (click-through overlays such as `screencaptureui`'s are skipped); quit such menu-bar tools |
@@ -421,7 +533,13 @@ The less obvious ones, with causes and where the fix lives, are in
 - One commit per change, message says what the user gets.
 - A new feature: a line in `src/features.tsv`, its `feature_flag` case and
   question in `src/cmd/build.sh`, its on/off in `src/guest/install.sh`, its
-  checks, the README's tables and `docs/guide.md`'s feature list. Experimental features are off by default
+  checks (with `FEATURE=` so the control centre maps them), a part in
+  `src/release/parts.tsv` when it has its own files, the README's tables and
+  `docs/guide.md`'s feature list. Off means
+  off on every route: nothing of it runs in the VM or connects to the Mac
+  (a `*_off` in `src/guest/off.sh` that runs whenever it is off, also with
+  nobody logged in), the Mac side does not serve that VM, `omacvm check`
+  says "off"; a line in `src/tests/features-off.sh`'s table says how. Experimental features are off by default
   and say so wherever they are offered.
 - Verify on real VMs before committing behaviour changes: `omacvm apply` against a
   test VM, `omacvm build --vm-name "OmacVM Test"` (and `--vm-type utm`) for the full path,
