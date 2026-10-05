@@ -25,6 +25,8 @@ func cliEnvironment(extra: [String: String] = [:]) -> [String: String] {
   var e = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": home,
            "USER": NSUserName(), "LOGNAME": NSUserName(), "LANG": "en_US.UTF-8", "TERM": "dumb",
            "TMPDIR": NSTemporaryDirectory()]
+  // The test identity's omacvm uses the test folders and helpers (src/lib/mac.sh).
+  if testIdentity { e["OMACVM_TEST_IDENTITY"] = "1" }
   for (k, v) in extra { e[k] = v }
   return e
 }

@@ -105,6 +105,19 @@ json_out() {   # the collected rows as JSON
   printf '\n]}\n'
 }
 running() { launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running'; }
+# The test identity (OMACVM_TEST_IDENTITY=1): its own helpers (started with open,
+# no LaunchAgent) on their own ports.
+BRIDGE_PORT=47831 GESTURES_PORT=47830
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+  BRIDGE_PORT=47931 GESTURES_PORT=47930
+  running() {
+    case $1 in
+      org.omacvm.bridge) pgrep -f "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
+      org.omacvm.gestures) pgrep -f "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
+      *) return 1 ;;
+    esac
+  }
+fi
 # listeners PORT: the addresses something listens on for that port
 listeners() { lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { sub(/:[0-9]+$/, "", $9); print $9 }' | sort -u | tr '\n' ' '; }
 last_line() { grep -E "$2" "$1" 2>/dev/null | tail -1 | sed 's/^.*omacvm-[a-z]*: //'; }
@@ -202,19 +215,19 @@ fi
 FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
-    a=$(listeners 47831)
+    a=$(listeners "$BRIDGE_PORT")
     if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"
     elif [[ " $a " == *" $HOST "* ]]; then ok "Bridge" "listening on $a"
     else bad "Bridge" "not listening on $HOST (only: ${a:-nothing})"; fi
   else bad "Bridge" "OmacVM Bridge is not running (src/mac/install.sh)"; fi
-  T=~/Library/Application\ Support/omacvm-bridge/token
+  T=$OMA_BRIDGE_SUPPORT/token
   if [[ -s $T ]]; then
     [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
     # The token only to this user's Bridge (on 127.0.0.1 any Mac program could
     # listen), and through a header file, never on a command line.
-    bget() { curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831$1"; }
-    lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1 ||
-      { bad "Bridge" "$HOST:47831 is not held by this user's OmacVM Bridge: token not sent"; bget() { :; }; }
+    bget() { curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:$BRIDGE_PORT$1"; }
+    lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":"$BRIDGE_PORT" -sTCP:LISTEN >/dev/null 2>&1 ||
+      { bad "Bridge" "$HOST:$BRIDGE_PORT is not held by this user's OmacVM Bridge: token not sent"; bget() { :; }; }
     st=$(bget /state)
     if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
     else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)" human; fi
@@ -236,7 +249,7 @@ if [[ $BRIDGE == on ]]; then
     *) ok "Bridge permissions" "${pm#permissions: }" ;;
   esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
-  c=~/Library/Application\ Support/omacvm-bridge/config.json
+  c=$OMA_BRIDGE_SUPPORT/config.json
   if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
     skip "keyboard light" "this Mac has none (Shift + brightness keys stay macOS's)"
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
@@ -379,7 +392,7 @@ FEATURE=gestures
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
   if running org.omacvm.gestures; then
-    a=$(listeners 47830)
+    a=$(listeners "$GESTURES_PORT")
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
     # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
     # Gestures refuses it (and it tries again every 2 s) until it is updated.
@@ -437,10 +450,10 @@ if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
   elif ! running org.omacvm.bridge; then
     bad "battery (Mac)" "OmacVM Bridge is not running: it serves the battery to $TYPE VMs (omacvm apply)"
   else
-    T=~/Library/Application\ Support/omacvm-bridge/token b=""
+    T=$OMA_BRIDGE_SUPPORT/token b=""
     # The token only to this user's Bridge (as above).
-    if [[ -s $T ]] && lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1; then
-      b=$(curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831/battery")
+    if [[ -s $T ]] && lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":"$BRIDGE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      b=$(curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:$BRIDGE_PORT/battery")
     fi
     case $(jq -r '.present | tostring' <<<"$b" 2>/dev/null) in
       true) ok "battery (Mac)" "the Bridge serves it: $(jq -r '"\(.percentage) %, \(.state)"' <<<"$b")" ;;

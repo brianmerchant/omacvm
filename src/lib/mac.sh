@@ -61,7 +61,17 @@ LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 # OMA_PIN_NEW=1 lets a connection record the key when there is none yet. A VM
 # without a remembered key (and OMA_PIN_NEW unset) is reached as before.
 # IP:PORT for OmacVM.app's VMs (127.0.0.1 and the VM's SSH port).
-OMA_PINS="$HOME/Library/Application Support/omacvm/known_hosts"
+# OMACVM_TEST_IDENTITY=1: the test identity ("OmacVM Test", app/scripts/build-app.sh
+# --test-identity, whose Bridge runs omacvm with it): its own folders, never the
+# installed helpers' token, keys or pins.
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+  OMA_SUPPORT="$HOME/Library/Application Support/omacvm-test"
+  OMA_BRIDGE_SUPPORT="$HOME/Library/Application Support/omacvm-test-bridge"
+else
+  OMA_SUPPORT="$HOME/Library/Application Support/omacvm"
+  OMA_BRIDGE_SUPPORT="$HOME/Library/Application Support/omacvm-bridge"
+fi
+OMA_PINS="$OMA_SUPPORT/known_hosts"
 gssh() {
   local ip=$1 port=22; shift
   [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }
@@ -99,7 +109,7 @@ hostkey_error() {   # the VM's name (VM) and how apply names it (OMA_PIN_ARGS) c
 
 # The Bridge's token (the Bridge makes it on its first start). The VMs' gestures
 # daemons say it too, so it is made here when Gestures comes without the Bridge.
-BRIDGE_TOKEN="$HOME/Library/Application Support/omacvm-bridge/token"
+BRIDGE_TOKEN="$OMA_BRIDGE_SUPPORT/token"
 bridge_token_ensure() {
   [[ -f $BRIDGE_TOKEN && $(tr -d '[:space:]' < "$BRIDGE_TOKEN" | wc -c) -ge 32 ]] && return 0
   mkdir -p "$(dirname "$BRIDGE_TOKEN")" && chmod 700 "$(dirname "$BRIDGE_TOKEN")"
@@ -110,7 +120,7 @@ bridge_token_ensure() {
 # only when its request carries this key, so a VM that takes another VM's
 # address cannot act for it (src/bridge/mac/control.swift reads it). Made at
 # the VM's first apply, again with "new" (apply --reset-host-key: a rebuilt VM).
-VM_KEYS="$HOME/Library/Application Support/omacvm/vm-keys"
+VM_KEYS="$OMA_SUPPORT/vm-keys"
 vm_key_file() { printf '%s/%s' "$VM_KEYS" "$(printf '%s/%s' "$1" "$2" | shasum -a 256 | cut -c1-32)"; }
 vm_key_ensure() {   # TYPE NAME [new] -> the key's file
   local f; f=$(vm_key_file "$1" "$2")

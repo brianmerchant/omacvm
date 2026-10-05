@@ -33,7 +33,9 @@
 APP_DOWNLOADS=https://github.com/gillesgoetsch/omacvm/releases/download
 
 # The app's settings (OMACVM_APP_ID: another bundle id, for tests only).
-APP_ID=${OMACVM_APP_ID:-org.omacvm.app}
+# The test identity (OMACVM_TEST_IDENTITY=1) is "OmacVM Test" (org.omacvm.app.test).
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then APP_ID=${OMACVM_APP_ID:-org.omacvm.app.test}
+else APP_ID=${OMACVM_APP_ID:-org.omacvm.app}; fi
 
 # Where new VMs go, as the app decides (app/app/Sources/OmacVM/VMsFolder.swift;
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,

@@ -254,16 +254,17 @@ if command -v swiftc >/dev/null; then
 import Foundation
 let a = CommandLine.arguments
 let l = a.count > 1 ? MacLinks.load(folder: URL(fileURLWithPath: a[1])) : MacLinks()
-print("ports=\(l.hostPorts) battery=\(l.battery) camera=\(l.camera)")
+print("ports=\(l.hostPorts) battery=\(l.battery) camera=\(l.camera) test=\(l.hostPorts(test: true))")
 EOF
   if swiftc -O -o "$T/links" "$R/app/app/Sources/OmacVM/MacLinks.swift" "$T/main.swift" 2>"$T/swiftc.log"; then
-    expect "app: only gestures' port, camera served, battery not" "ports=47830 battery=false camera=true" "$("$T/links" "$T/vm")"
+    expect "app: only gestures' port, camera served, battery not" "ports=47830 battery=false camera=true test=47830>47930" "$("$T/links" "$T/vm")"
     app_features_write "$T/vm" "bridge=off wallpaper=off gestures=off omanotch=off battery=off camera=off"
-    expect "app: all off: no port to the Mac, no battery, no camera" "ports= battery=false camera=false" "$("$T/links" "$T/vm")"
+    expect "app: all off: no port to the Mac, no battery, no camera" "ports= battery=false camera=false test=" "$("$T/links" "$T/vm")"
     app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on"
-    expect "app: all on" "ports=47811,47830,47831 battery=true camera=true" "$("$T/links" "$T/vm")"
+    # The test identity: its own helpers' ports, never Omanotch (it has none).
+    expect "app: all on" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/vm")"
     mkdir -p "$T/old"
-    expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true" "$("$T/links" "$T/old")"
+    expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/old")"
   else
     echo "FAIL MacLinks.swift does not compile:"; cat "$T/swiftc.log"; fail=1
   fi
