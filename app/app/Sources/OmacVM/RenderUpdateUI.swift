@@ -16,7 +16,7 @@ enum RenderUpdateUI {
         let current = u.currentVersion
         let next = "2.10.0"
         let notes = URL(string: "https://github.com/gillesgoetsch/omacvm/releases/tag/v\(next)")
-        let staged = Updater.Staged(version: next, app: URL(fileURLWithPath: "/nonexistent.app"), notes: notes)
+        let staged = Updater.Staged(version: next, app: URL(fileURLWithPath: "/nonexistent.app"), notes: notes, teams: [])
         let state = AppState()
         var c = VMConfig()
         c.user = "omarchy"
