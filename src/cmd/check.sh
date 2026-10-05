@@ -316,6 +316,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   # the peak of this run from QEMU's status file (logs/gpu-memory, written
   # while the VM runs), else the peak QEMU's log has (512 MB steps). Refused
   # only past the runaway budget or when macOS itself was short of memory.
+  FEATURE=graphics   # the control centre shows it on the Graphics row
   gm="$(dirname "$miclog")/gpu-memory"
   gmv() { sed -n "s/^$1=//p" "$gm" 2>/dev/null | head -1; }
   gb() { awk -v m="$1" 'BEGIN { printf (m < 1024 ? "%d MB" : "%.1f GB"), (m < 1024 ? m : m / 1024) }'; }
@@ -332,6 +333,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
       bad "graphics memory" "refused this run (budget $budget MB or macOS short of memory): an app may have lost its GPU context (restart the VM)"
     else ok "graphics memory" "${peak:+peak about $(gb "$peak"), }no fixed limit (runaway guard $(gb "$budget"))"; fi
   fi
+  FEATURE=""
 fi
 # The GPU path an app VM took this run (qemu.log starts fresh with each run):
 # fences from the sync thread or polled, frames as IOSurfaces or with a
