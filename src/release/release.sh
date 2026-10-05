@@ -217,10 +217,12 @@ step_build() {
   codesign --verify --deep --strict "$APP" || die "the app's signature does not verify"
   local h team; team=$("$R/src/release/release-key.sh" team "$APP")
   for h in "$APP"/Contents/Helpers/*.app; do
-    codesign -dv "$h" 2>&1 | grep -q "TeamIdentifier=$team" || die "$(basename "$h") is not team $team"
-    codesign -dv "$h" 2>&1 | grep -q '^Timestamp=' || die "$(basename "$h") has no timestamp"
+    # Into a variable first: grep -q would end codesign early (pipefail).
+    local info; info=$(codesign -dv "$h" 2>&1)
+    [[ $info == *"TeamIdentifier=$team"* ]] || die "$(basename "$h") is not team $team"
+    [[ $info == *$'\nTimestamp='* ]] || die "$(basename "$h") has no timestamp"
   done
-  grep -q 'Ok: *[0-9]' "$OUT/build.log" && note "$(grep -m1 -E 'Ok: *[0-9]+.*Fail: *0' "$OUT/build.log" || true)"
+  note "build tests: $(grep -c -E '(^| )(ok|passed|PASS)' "$OUT/build.log") ok lines, no FAIL"
   note "app $VERSION, OmacVMCommit $m, team $team, $(du -sh "$APP" | cut -f1)"
 }
 
