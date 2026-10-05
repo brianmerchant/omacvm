@@ -115,7 +115,7 @@ wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 a
 # rule of the rounds: idle power is a laptop's number), and its one display
 # instead of a built-in one. FINAL_ROUND_IDLE_DESKTOP=1 keeps the idle rows
 # (macOS still reports SystemPowerIn on an M4 Mac mini).
-desktop_mac() { ioreg -rw0 -c AppleSmartBattery 2>/dev/null | grep -q '"BatteryInstalled" = Yes' && return 1; return 0; }
+desktop_mac() { ioreg -rw0 -c AppleSmartBattery 2>/dev/null | grep -q '"BatteryInstalled" = No'; }
 NO_IDLE=""
 if desktop_mac && [ "${FINAL_ROUND_IDLE_DESKTOP:-0}" != 1 ]; then
   NO_IDLE=$(echo "$STEPS" | awk '$3 == "idle" { print $1 }' | paste -sd, -)
