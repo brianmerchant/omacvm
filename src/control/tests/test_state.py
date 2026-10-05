@@ -295,6 +295,17 @@ def test_gpu_memory_row_ignores_junk():
     assert r.status is S.Status.WORKS and r.note == "0 MB (peak 0 MB)"
 
 
+def test_graphics_memory_check_on_one_row_only():
+    # check.sh sends it with FEATURE=gpu-memory; older RCs sent FEATURE=graphics:
+    # either way it is on the Graphics memory row and not on the Graphics row.
+    st = {"graphics": {"graphics": "auto", "next_start": "opengl", "this_start": "opengl"}}
+    for feat in ("gpu-memory", "graphics"):
+        c = S.Check("mac", "fail", "graphics memory", "1 allocation(s) refused this run", False, feat)
+        assert S.gpu_memory_row(GM, "app", checks=[c]).checks == (c,)
+        g = S.graphics_row(st, "app", checks=[c])
+        assert g.checks == () and g.status is S.Status.WORKS
+
+
 def test_gpu_memory_row_carries_the_macs_check():
     c = S.Check("mac", "ok", "graphics memory", "1.1 GB now (peak 1.6 GB)", False, "")
     other = S.Check("mac", "ok", "microphone", "", False, "")

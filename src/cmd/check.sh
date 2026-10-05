@@ -316,7 +316,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   # the peak of this run from QEMU's status file (logs/gpu-memory, written
   # while the VM runs), else the peak QEMU's log has (512 MB steps). Refused
   # only past the runaway budget or when macOS itself was short of memory.
-  FEATURE=graphics   # the control centre shows it on the Graphics row
+  FEATURE=gpu-memory   # the control centre's Graphics memory row (only there)
   gm="$(dirname "$miclog")/gpu-memory"
   gmv() { sed -n "s/^$1=//p" "$gm" 2>/dev/null | head -1; }
   gb() { awk -v m="$1" 'BEGIN { printf (m < 1024 ? "%d MB" : "%.1f GB"), (m < 1024 ? m : m / 1024) }'; }
