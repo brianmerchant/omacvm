@@ -66,12 +66,16 @@ fi
 install -m644 PKGBUILD "$B/"
 chown -R nobody: "$B"
 # makepkg refuses root: build as nobody (it downloads and checks the sha256 itself).
-( cd "$B" && runuser -u nobody -- env HOME="$B" PKGDEST="$B" BUILDDIR="$B/build" SRCDEST="$B" LOGDEST="$B" \
+( cd "$B" && runuser -u nobody -- env HOME="$B" PKGDEST="$B" BUILDDIR="$B/build" SRCDEST="$B" LOGDEST="$B" PACKAGER="OmacVM <omacvm@users.noreply.github.com>" \
     makepkg --nodeps --noconfirm --noprogressbar ) >>"$LOG" 2>&1 || fail "the build failed"
 pkg=""
-for f in "$B"/vulkan-virtio-"${FIXED#*:}"-*-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=$f; done
+# name-epoch:pkgver-pkgrel-arch
+for f in "$B"/vulkan-virtio-"$FIXED"-*-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=$f; done
 [[ -n $pkg ]] || fail "the build made no package"
-pacman -U --noconfirm "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
+# Keep how the distro's package was installed (a dependency of Omarchy's, or by hand).
+reason=--asexplicit
+pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
+pacman -U --noconfirm "$reason" "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
 s=$(status)
 [[ ${s%% *} == ok ]] || fail "installed, but: ${s#* }"
 echo "Vulkan (Venus): ${s#* } (restart Vulkan apps)"

@@ -24,9 +24,11 @@ source=("https://archive.mesa3d.org/mesa-$pkgver.tar.xz")
 sha256sums=('bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9')
 
 build() {
-  # Arch's own options for this driver (mesa PKGBUILD), Venus only.
-  arch-meson "mesa-$pkgver" build \
-    -D b_ndebug=true \
+  # arch-meson's settings, but optional features left to what this VM has
+  # (arch-meson turns every one on, as the full Mesa package needs).
+  meson setup "mesa-$pkgver" build \
+    --prefix /usr --libexecdir lib --sbindir bin --buildtype plain --wrap-mode nodownload \
+    -D b_pie=true -D python.bytecompile=1 -D b_ndebug=true \
     -D platforms=x11,wayland \
     -D gallium-drivers= \
     -D vulkan-drivers=virtio \
@@ -44,6 +46,8 @@ build() {
 package() {
   meson install -C build --destdir "$pkgdir" --no-rebuild
   install -Dm644 "mesa-$pkgver/docs/license.rst" -t "$pkgdir/usr/share/licenses/$pkgname"
+  # The driver defaults (drirc.d) belong to the distro's mesa package.
+  rm -r "$pkgdir/usr/share/drirc.d"
   # Exactly the distro package's files, nothing else.
   local f
   f=$(cd "$pkgdir" && find . -type f | sort | tr '\n' ' ')
