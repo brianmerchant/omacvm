@@ -132,6 +132,15 @@ in more words.
 - Boot logo: the firmware's logo is as big as the app's start animation
   (810 x 190 at 1920 x 1080) and smaller on a small screen (a small window
   after a restart) instead of none.
+- OmacVM.app wakes the Mac less while Omarchy sits idle. QEMU's screen tick
+  slows to 500 ms when nothing changes (`OMACVM_IDLE_REFRESH=0` keeps the
+  old rate), the app holds the guest agent's connection, and the Mac
+  clipboard is polled fast only while the VM is in front: on an idle
+  desktop QEMU wakes about 65-120 times a second instead of 130-190, the
+  app 1.2 instead of 5. In the VM the clipboard, display and camera agents
+  wait for events instead of looking every second; on the Mac, Gestures
+  checks the pointer at 20 Hz once it rests (was 120) and Omanotch only
+  polls while a VM is connected.
 
 ## 2.9.1
 
