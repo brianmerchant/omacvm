@@ -17,7 +17,8 @@ import Foundation
 /// "devid_teams" (required, 1 to 4) are the Apple Developer ID teams the new
 /// app may be signed by: a change of team is announced by a feed signed
 /// with our own key that names both. "next_spare_key" (optional) names a
-/// new spare release key (ReleaseKeys).
+/// new spare release key, "revoked_keys" (optional) named keys that are no
+/// longer trusted (ReleaseKeys).
 public struct Appcast: Equatable, Sendable {
     public var version: Version
     public var url: URL
@@ -89,6 +90,7 @@ public struct Appcast: Equatable, Sendable {
             guard let s = k as? String, ReleaseKeys.key(s) != nil else { return .failure(.malformed("next_spare_key")) }
             spare = s
         }
+        if let r = o["revoked_keys"], ReleaseKeys.revokedKeys(r) == nil { return .failure(.malformed("revoked_keys")) }
         return .success(Appcast(version: version, url: url, length: length, sha256: sha,
                                 minimumMacOS: minimum, notesURL: notes, teams: teams, nextSpareKey: spare))
     }

@@ -4,10 +4,15 @@
 # throwaway keys: either shipped key signs, other keys and changed documents
 # are refused, the Developer ID teams come from the signed document (missing,
 # empty or another team: refused), a named spare is trusted from then on,
-# test keys count nowhere inside a release app. No network beyond 127.0.0.1.
+# a revoked one is not, junk in the kept folder changes nothing, test keys
+# count nowhere inside a release app, and the fast network's root service
+# trusts a Developer ID team only when a signed feed lists it. No network
+# beyond 127.0.0.1, no root.
 #   src/tests/release-keys.sh
 # OMACVM_TEST_DEVID_APP: a Developer ID signed org.omacvm.app (a release
-# build) for the download that passes; skipped without it.
+# build) for the download that passes; OMACVM_TEST_DEVID_SIGN: a Developer ID
+# Application identity, for a fake app's QEMU (the fast network part); each
+# part is skipped without it.
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 fail=0
@@ -101,6 +106,67 @@ doc "$D" control-manifest "" next-key
 expect "a bare key file in the folder: not trusted" refused "$(verdict control-manifest "$D")"
 rm -rf "$STORE"
 
+# ---- a leaked named spare: revoked by a document a shipped key signed ----
+"$T/sign" keygen "$T/other-key" > "$T/other-key.pub"
+doc "$T/naming.json" app-feed ", \"next_spare_key\": \"$(cat "$T/next-key.pub")\"" spare-key
+verdict app-feed "$T/naming.json" >/dev/null
+doc "$T/naming2.json" control-manifest ", \"next_spare_key\": \"$(cat "$T/third-key.pub")\"" next-key
+verdict control-manifest "$T/naming2.json" >/dev/null
+doc "$D" control-manifest "" third-key
+expect "before: the chain of named spares is trusted" good "$(verdict control-manifest "$D")"
+doc "$T/r.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/test-key.pub")\", \"$(cat "$T/spare-key.pub")\"]" next-key
+verdict app-feed "$T/r.json" >/dev/null
+doc "$D" control-manifest
+expect "a named spare revoking the shipped keys: ignored" good "$(verdict control-manifest "$D")"
+while IFS='|' read -r what field; do
+  doc "$T/r.json" app-feed ", \"revoked_keys\": $field"
+  expect "revoked_keys $what: refused" refused "$(verdict app-feed "$T/r.json")"
+done <<EOF
+empty|[]
+as a string|"$(cat "$T/next-key.pub")"
+not a key|["bm90IGEga2V5"]
+twice the same|["$(cat "$T/next-key.pub")", "$(cat "$T/next-key.pub")"]
+EOF
+doc "$T/r.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]" stranger-key
+verdict app-feed "$T/r.json" >/dev/null
+doc "$D" control-manifest "" next-key
+expect "a revocation signed by a stranger: nothing changes" good "$(verdict control-manifest "$D")"
+doc "$T/r.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]"
+expect "a feed revoking the leaked spare (signed by the main key)" good "$(verdict app-feed "$T/r.json")"
+expect "the revoked spare: refused from then on" refused "$(verdict control-manifest "$D")"
+doc "$D" control-manifest "" third-key
+expect "the one it named: refused too" refused "$(verdict control-manifest "$D")"
+doc "$T/n.json" app-feed ", \"next_spare_key\": \"$(cat "$T/next-key.pub")\""
+verdict app-feed "$T/n.json" >/dev/null
+doc "$D" control-manifest "" next-key
+expect "the revoked key named again: still refused" refused "$(verdict control-manifest "$D")"
+# A later release ships the spare as main: the old main's revocation no longer counts, the spare's does.
+rotated="$(cat "$T/spare-key.pub") $(cat "$T/other-key.pub")"
+expect "keys rotated: a revocation only the old main signed no longer counts" good "$(OMACVM_RELEASE_TEST_KEYS=$rotated verdict control-manifest "$D")"
+doc "$T/r2.json" app-feed ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]" spare-key
+verdict app-feed "$T/r2.json" >/dev/null
+expect "the same revocation signed by the spare: kept too" 8 "$(ls "$STORE" | wc -l | tr -d ' ')"
+expect "after the rotation the leaked key stays revoked" refused "$(OMACVM_RELEASE_TEST_KEYS=$rotated verdict control-manifest "$D")"
+OMACVM_REVOKED_KEYS="$(cat "$T/next-key.pub") $(cat "$T/next-key.pub")" "$R/src/release/release-key.sh" revoked > "$T/field"
+expect "release-key.sh revoked: the field, once per key" ", \"revoked_keys\": [\"$(cat "$T/next-key.pub")\"]" "$(cat "$T/field")"
+expect "release-key.sh revoked: not a key refused" 1 "$(OMACVM_REVOKED_KEYS=bm90 "$R/src/release/release-key.sh" revoked >/dev/null 2>&1; echo $?)"
+rm -rf "$STORE"
+
+# ---- junk in the folder (names that sort first) counts toward nothing ----
+mkdir -p "$STORE"
+for i in 0 1 2 3 4 5 6 7 8 9; do
+  n=000000000000000$i
+  printf '{"kind": "app-feed", "next_spare_key": "%s"}' "$(cat "$T/other-key.pub")" > "$STORE/$n.json"
+  cp "$T/doc.json.sig" "$STORE/$n.json.sig"
+done
+doc "$D" control-manifest "" other-key
+expect "10 junk documents: their key is not trusted" refused "$(verdict control-manifest "$D")"
+doc "$T/naming.json" app-feed ", \"next_spare_key\": \"$(cat "$T/next-key.pub")\"" spare-key
+verdict app-feed "$T/naming.json" >/dev/null
+doc "$D" control-manifest "" next-key
+expect "10 junk documents first: a real one is still kept and trusted" good "$(verdict control-manifest "$D")"
+rm -rf "$STORE"
+
 # ---- test keys count nowhere inside a release app ----
 fake() {   # BUNDLE-ID: a copy of keys.py and the shipped keys in an app bundle
   local a=$T/Fake-$1.app
@@ -156,6 +222,54 @@ printf 'x' >> "$T/www/v9.9.9/OmacVM-9.9.9.zip"
 expect "zip changed after the feed was signed: refused" yes "$([[ $(download 9.9.9) == *"checksum"* ]] && echo yes || echo no)"
 release 9.9.9 "$A" '"722686Y34B"'
 expect "an ad hoc app: refused (no team the feed names)" yes "$([[ $(download 9.9.9) == *"Developer ID the signed feed names (722686Y34B)"* ]] && echo yes || echo no)"
+# ---- the fast network's root service: whose QEMU it trusts (src/net/mac/install.sh --trust) ----
+# A copy of the scripts it needs, fetching feeds from the test server.
+tree() {   # DIR: src/ under DIR
+  mkdir -p "$1/src/net/mac" "$1/src/lib" "$1/src/release"
+  cp "$R/src/net/mac/install.sh" "$R/src/net/mac/omacvm-netd.c" "$1/src/net/mac/"
+  cp "$R"/src/lib/release-key*.pub "$1/src/lib/"
+  cp "$KEYS" "$1/src/release/"
+  sed "s|^APP_DOWNLOADS=.*|APP_DOWNLOADS=$APP_DOWNLOADS|" "$R/src/lib/app.sh" > "$1/src/lib/app.sh"
+}
+fakeapp() {   # APP SIGN-ID: an org.omacvm.app 9.9.9 whose QEMU is signed with SIGN-ID ("-": ad hoc)
+  mkdir -p "$1/Contents/Resources/runtime/bin"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string org.omacvm.app" -c "Add :CFBundleShortVersionString string 9.9.9" "$1/Contents/Info.plist" >/dev/null
+  echo 'int main(void) { return 0; }' | xcrun clang -x c -o "$1/Contents/Resources/runtime/bin/OmacVM" -
+  codesign --force --timestamp=none --sign "$2" --identifier org.omacvm.app.qemu "$1/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null
+}
+trust() { "$T/cli/src/net/mac/install.sh" --trust --app "$1" 2>/dev/null; }   # APP
+tree "$T/cli"
+feed99() {   # TEAMS [KEY]: the signed feed of release 9.9.9
+  mkdir -p "$T/www/v9.9.9"
+  printf '{"schema": 1, "kind": "app-feed", "version": "9.9.9", "url": "%s", "length": 1, "sha256": "%s", "devid_teams": [%s]}\n' \
+    "$APP_DOWNLOADS/v9.9.9/OmacVM-9.9.9.zip" "$(printf '%064d' 0)" "$1" > "$T/www/v9.9.9/OmacVM-appcast.json"
+  sign_doc "$T/www/v9.9.9/OmacVM-appcast.json" "${2:-}"
+}
+fakeapp "$T/adhoc-net/OmacVM.app" -
+feed99 '"722686Y34B"'
+expect "fast network, an ad hoc app: its exact build only" "exact build" "$(trust "$T/adhoc-net/OmacVM.app")"
+if [[ -n ${OMACVM_TEST_DEVID_SIGN:-} ]]; then
+  N=$T/devid-net/OmacVM.app
+  fakeapp "$N" "$OMACVM_TEST_DEVID_SIGN"
+  NT=$(codesign -dv "$N/Contents/Resources/runtime/bin/OmacVM" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+  rm -rf "$T/www/v9.9.9"
+  expect "fast network, Developer ID app, no feed for its release: its exact build only" "exact build" "$(trust "$N")"
+  feed99 '"0000000000", "ABCDE12345"'
+  expect "fast network, a team the signed feed does not list (a fake app of another team): refused, exact build only" "exact build" "$(trust "$N")"
+  feed99 "\"$NT\"" stranger-key
+  expect "fast network, the team in a feed signed by another key: refused" "exact build" "$(trust "$N")"
+  feed99 "\"0000000000\", \"$NT\"" spare-key
+  expect "fast network, the team in the signed feed (spare key): the team" "team $NT" "$(trust "$N")"
+  rm -rf "$T/www/v9.9.9"
+  tree "$N/Contents/Resources/omacvm"
+  expect "fast network, the app's own copy of the script (its button): the team, no feed needed" "team $NT" \
+    "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$N" 2>/dev/null)"
+  expect "fast network, another app's copy of the script: no feed, exact build only" "exact build" \
+    "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$T/adhoc-net/OmacVM.app" 2>/dev/null)"
+else
+  echo "skip the fast network's Developer ID checks (set OMACVM_TEST_DEVID_SIGN to a Developer ID Application identity)"
+fi
+
 if [[ -n ${OMACVM_TEST_DEVID_APP:-} ]]; then
   V=$(defaults read "$OMACVM_TEST_DEVID_APP/Contents/Info" CFBundleShortVersionString)
   TEAM=$(codesign -dv "$OMACVM_TEST_DEVID_APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')

@@ -65,6 +65,65 @@ from `OMACVM_SIGN_ID` when there is no app.
 If both private keys are lost, installed copies cannot be updated
 automatically any more. Everyone has to download the app by hand once.
 
+## When a named spare leaks
+
+A spare that a signed document named (`next_spare_key`) is not in `src/lib`
+of the installed copies: they trust it because they kept that document. A
+release that ships other keys drops it, but copies that have not updated yet
+would trust it for good. So a document can revoke it:
+
+1. Make a new spare (step 2 above) if the leaked one was the current spare.
+2. Sign the next release with the main key (or the spare that `src/lib`
+   ships, never with a named one) and list the leaked key:
+   `OMACVM_REVOKED_KEYS="<leaked public key>" app/scripts/package-release.sh`
+   (and `manifest.py build --out`, so copies that only run the Bridge get it
+   too). Add `OMACVM_NEXT_SPARE_KEY` in the same run to name the new spare.
+   The feed then has `"revoked_keys": ["<key>"]` (1 to 8 keys).
+3. Each copy that reads it keeps it (like a naming document) in
+   `~/Library/Application Support/omacvm/release-keys`. From then on the
+   revoked key signs nothing it accepts, and keys that the revoked key named
+   are dropped too. OmacVM.app, the Bridge and the command line share that
+   folder, so one of them reading the feed is enough.
+4. Keep the key in `OMACVM_REVOKED_KEYS` for a few releases, for copies that
+   skip one. Copies that never read such a feed trust the key until they
+   update to a release that does not ship the key that named it; say so in
+   the release notes.
+5. A revocation counts only while a key that signed it still ships. So when
+   the main key is lost later (see above), list the revoked keys again in
+   the first release signed with the spare: copies keep that copy too, and
+   the key stays revoked after they update to the release without the old
+   main key.
+
+The rules that keep this safe:
+
+- Only a document signed by a key in `src/lib` (shipped) can revoke. A
+  leaked named spare can sign a document that lists the main key, but the
+  apps ignore it.
+- A shipped key cannot be revoked by a document. To drop one, ship a
+  release without it (see "When the main key is lost").
+- A key once revoked stays revoked, even when a later document names it
+  again.
+
+## The kept folder
+
+`~/Library/Application Support/omacvm/release-keys` holds signed documents
+only (`<16 hex>.json` and `.json.sig`). A bare key file, a changed document
+or any other junk there adds nothing: only documents whose signature checks
+out (against a shipped key, or a key a checked document named) count, and
+at most 8 of them. Junk does not count toward the 8, so it cannot crowd
+out the real ones. At most 256 files there are looked at.
+
+## Which Developer ID the fast network trusts
+
+The fast network's root service (`src/net/mac/install.sh`) takes the
+Developer ID team of the app's QEMU only when OmacVM's release key vouches
+for it: the signed update feed of that app's release lists the team, or the
+script is the app's own copy (its Fast Network button). Otherwise, for
+example an app that is not a published release, or a fake app signed with
+someone else's Developer ID, it trusts only that exact build of the QEMU
+(its cdhash), as for an app built from source. `install.sh --trust` shows
+what an install would trust.
+
 ## When the Developer ID team changes
 
 The release key, not the Apple team, decides what gets installed. So a new

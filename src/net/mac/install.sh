@@ -14,14 +14,21 @@
 #                                        longer tries until a restart or install)
 #   src/net/mac/install.sh --remove      not for this Mac user any more; off this
 #                                        Mac when no other user has it (sudo)
+#   src/net/mac/install.sh --trust [--app APP]
+#                                        what an install would trust (no root):
+#                                        "team TEAM" or "exact build", and why
 # The daemon comes built and signed inside OmacVM.app (Contents/Library/
 # LaunchServices, Developer ID for published apps): no Xcode needed. Apps from
 # before that: built here from this source (needs Xcode's Command Line Tools).
 # Accepted callers: processes of the Mac users who installed it (each user who
 # runs this is added) that are QEMU signed with the Developer ID team of the
 # app's own QEMU (the app the person installs it for; a later app of another
-# team asks again), or, for an app signed ad hoc (built from source), exactly
-# that app's QEMU (its cdhash: install again after rebuilding the app).
+# team asks again), when OmacVM's release key vouches for that team: the
+# signed update feed of the app's release lists it (src/release/keys.py, main
+# or spare key), or this script is the app's own copy (its Fast Network
+# button: the app vouches for itself). Else (an app signed ad hoc, built from
+# source, or a Developer ID no feed lists): exactly that app's QEMU (its
+# cdhash: install again after rebuilding the app).
 # OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
 # terminal (OmacVM.app's Fast Network button runs this script that way).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask
@@ -46,12 +53,14 @@ while (( $# )); do
     --app) APP=$2; shift 2 ;;
     --status) MODE=status; shift ;;
     --remove) MODE=remove; shift ;;
-    -h|--help) sed -n '2,19s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --trust) MODE=trust; shift ;;
+    -h|--help) sed -n '2,22s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "net/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
 
-source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app
+source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app; app_version, APP_DOWNLOADS
+KEYS_PY=$HERE/../../release/keys.py
 
 # The Developer ID team APP's QEMU is signed with, if it is a Developer ID build.
 qemu_team() {
@@ -60,16 +69,37 @@ qemu_team() {
   [[ $t =~ ^[A-Z0-9]{10}$ ]] && codesign --verify -R="$(devid "$t" org.omacvm.app.qemu)" "$q" 2>/dev/null && echo "$t"
 }
 
-# The code requirement for APP's QEMU: its team for a Developer ID build, else
-# that exact build.
-requirement() {
-  local q=$1/Contents/Resources/runtime/bin/OmacVM h t
+# The code requirement for exactly APP's QEMU (its cdhash).
+hash_req() {
+  local q=$1/Contents/Resources/runtime/bin/OmacVM h
   [[ -x $q ]] || { echo "no QEMU in $1" >&2; return 1; }
-  if t=$(qemu_team "$1"); then devid "$t" org.omacvm.app.qemu; echo; return 0; fi
   codesign --verify "$q" 2>/dev/null || { echo "$q has no valid signature" >&2; return 1; }
   h=$(codesign -dvvv "$q" 2>&1 | sed -n 's/^CDHash=//p' | head -1)
   [[ $h =~ ^[0-9a-f]{40}$ ]] || { echo "no cdhash for $q" >&2; return 1; }
   echo "cdhash H\"$h\""
+}
+# The code requirement for the QEMU of any build of APP's team (Developer ID only).
+team_req() { local t; t=$(qemu_team "$1") && devid "$t" org.omacvm.app.qemu && echo; }
+
+# This script is APP's own copy (the app's Fast Network button runs that one).
+own_copy() {
+  local mine theirs
+  mine=$(cd "$HERE" && pwd -P) && theirs=$(cd "$1/Contents/Resources/omacvm/src/net/mac" 2>/dev/null && pwd -P) && [[ $mine == "$theirs" ]]
+}
+
+# APP TEAM: the signed update feed of APP's release lists TEAM (OmacVM's
+# release key, main or spare, vouches for it). Says why not on stderr.
+feed_lists() {
+  local v=$1 out t
+  v=$(app_version "$1") && [[ $v =~ ^[0-9]{1,4}(\.[0-9]{1,4}){1,3}$ ]] || { echo "$1 has no release version" >&2; return 1; }
+  if ! curl -fsL --max-time 30 -o "$T/feed.json" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json" ||
+     ! curl -fsL --max-time 30 -o "$T/feed.json.sig" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json.sig"; then
+    echo "no signed update feed for OmacVM.app $v (offline, or not a published release)" >&2; return 1
+  fi
+  out=$(python3 "$KEYS_PY" app-feed "$T/feed.json" "$v" 2>&1) || { echo "the update feed of OmacVM.app $v does not check out (${out#keys.py: })" >&2; return 1; }
+  for t in ${out#* * }; do [[ $t == "$2" ]] && return 0; done
+  echo "the signed update feed of OmacVM.app $v does not list team $2" >&2
+  return 1
 }
 
 # What this source builds: the source's hash, compiled into the binary.
@@ -91,11 +121,12 @@ installed_users() {   # the uids it takes connections from, one per line
 
 status() {
   [[ -x $BIN && -f $PLIST ]] || { echo missing; return 0; }
-  local want h
+  local have h
   installed_users | grep -qx "$(id -u)" || { echo missing; return 0; }   # only for other Mac users
   if [[ -n $APP ]] || APP=$(app_bundle); then
-    want=$(requirement "$APP" 2>/dev/null) || { echo old; return 0; }
-    [[ $(installed_req) == "$want" ]] || { echo old; return 0; }
+    # Installed for the team of the app's QEMU (vouched for then), or for exactly this QEMU.
+    have=$(installed_req) && [[ -n $have ]] || { echo old; return 0; }
+    [[ $have == "$(team_req "$APP" 2>/dev/null)" || $have == "$(hash_req "$APP" 2>/dev/null)" ]] || { echo old; return 0; }
     # The app's own daemon (its code); apps without one: this source's.
     if h=$(bundled "$APP"); then [[ -n $(cdhash "$h") && $(cdhash "$h") == "$(cdhash "$BIN")" ]] || { echo old; return 0; }
     elif [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
@@ -189,8 +220,34 @@ EOF
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 ME=$(id -u)
 
+# What the QEMU (REQ) and the daemon (DREQ) must satisfy: for a Developer ID
+# app whose team OmacVM's release key vouches for, that team (and each one's
+# identifier); else exactly the files checked here, by their cdhash (an app
+# built from source, a daemon built here, or a team no signed feed lists: a
+# fake app signed by someone else's Developer ID gets no more than its own
+# exact files). Any file can be signed ad hoc, so "a valid signature" alone
+# would let a swapped file through. DREQ stays empty for the cdhash case
+# (set from the daemon file below).
+decide() {
+  REQ=$(hash_req "$APP") || exit 1
+  DREQ=""
+  if QTEAM=$(qemu_team "$APP"); then
+    if own_copy "$APP" || feed_lists "$APP" "$QTEAM"; then
+      REQ=$(team_req "$APP") && DREQ=$(devid "$QTEAM" "$LABEL")
+      return 0
+    fi
+    echo "==> not trusting all of team $QTEAM (above): the fast network takes only this exact build of $(basename "$APP")'s QEMU" >&2
+  fi
+  QTEAM=""
+}
+
 case $MODE in
   status) status; exit 0 ;;
+  trust)
+    [[ -n $APP ]] || APP=$(app_bundle) || { echo "no OmacVM.app installed (in /Applications or ~/Applications)" >&2; exit 1; }
+    decide
+    if [[ -n $QTEAM ]]; then echo "team $QTEAM"; else echo "exact build"; fi
+    exit 0 ;;
   remove)
     [[ -e $BIN || -e $PLIST ]] || exit 0
     others=$(installed_users | grep -vx "$ME" || true)
@@ -213,7 +270,7 @@ case $MODE in
 esac
 
 [[ -n $APP ]] || APP=$(app_bundle) || { echo "no OmacVM.app installed (in /Applications or ~/Applications)" >&2; exit 1; }
-REQ=$(requirement "$APP") || exit 1
+hash_req "$APP" > /dev/null || exit 1
 case $(status) in
   ok) exit 0 ;;
   stopped)
@@ -222,12 +279,7 @@ case $(status) in
     echo "==> fast network: vmnet is tried again"
     exit 0 ;;
 esac
-# What the daemon must satisfy: for a Developer ID app, the team of its QEMU
-# and the daemon's identifier; else (ad hoc: an app built from source, or
-# built here) exactly the file checked here, by its cdhash. Any file can be
-# signed ad hoc, so "a valid signature" alone would let a swapped file through.
-DREQ=""
-QTEAM=$(qemu_team "$APP") && DREQ=$(devid "$QTEAM" "$LABEL")
+decide
 if h=$(bundled "$APP"); then
   # The app's daemon, checked on a copy first (a clear message), and again
   # as root on the installed file before launchd may run it.

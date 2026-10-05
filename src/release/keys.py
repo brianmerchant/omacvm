@@ -12,8 +12,9 @@
 Trusted: the main and the spare key in src/lib (either one), plus a spare a
 trusted document named ("next_spare_key"), kept as that document and its
 signature in ~/Library/Application Support/omacvm/release-keys (the folder
-OmacVM.app and the Bridge use, see ReleaseKeys.swift). Nothing of a document
-is used before its signature checks out.
+OmacVM.app and the Bridge use, see ReleaseKeys.swift), minus the keys a
+document signed by a shipped key revoked ("revoked_keys", kept the same
+way). Nothing of a document is used before its signature checks out.
 
 Tests: OMACVM_RELEASE_TEST_KEYS (public keys, space-separated) instead of
 the shipped ones; ignored when this copy lies inside OmacVM.app
@@ -40,7 +41,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.dirname(HERE)
 KINDS = ("app-feed", "control-manifest", "prebuilt-manifest")
 MAX_DOC = 256 * 1024
-MAX_KEPT = 8
+MAX_KEPT = 8        # documents used from the folder
+MAX_SCAN = 256      # files looked at there
+MAX_REVOKED = 8
 TEAM = re.compile(r"[A-Z0-9]{10}")
 
 # ---- Ed25519 verification (RFC 8032) ----
@@ -171,21 +174,74 @@ def signed(data: bytes, sig_raw: bytes, keys: list) -> bool:
     return s is not None and any(ed25519_verify(k, data, s) for k in keys)
 
 
-def named_key(data: bytes) -> bytes | None:
-    """The new spare a document names, if well-formed."""
+def revoked_keys(v) -> list | None:
+    """"revoked_keys": 1 to MAX_REVOKED distinct keys, else None."""
+    if not isinstance(v, list) or not 1 <= len(v) <= MAX_REVOKED:
+        return None
+    out = [key(x) for x in v]
+    return out if all(out) and len(set(out)) == len(out) else None
+
+
+def _doc(data: bytes, sig: bytes):
+    """A document that may change the trusted keys: (data, sig, the key it
+    names or None, the keys it revokes). None for anything else."""
+    if len(data) > MAX_DOC or len(sig) > 1024 or _sig(sig) is None:
+        return None
     try:
-        o = json.loads(data) if len(data) <= MAX_DOC else None
+        o = json.loads(data)
     except ValueError:
         return None
     if not isinstance(o, dict) or o.get("kind") not in KINDS:
         return None
-    return key(o.get("next_spare_key"))
+    named, revokes = key(o.get("next_spare_key")), revoked_keys(o.get("revoked_keys")) or []
+    return (data, sig, named, revokes) if named or revokes else None
+
+
+def _resolve(keys: list, docs: list):
+    """The trusted keys, the revoked keys and the documents used (indexes).
+    Revocations count only when a shipped key signed them, and never revoke
+    a shipped key (a release drops one by not shipping it), so a leaked
+    named spare cannot revoke the keys that would replace it. A revocation
+    is used once per shipped key that signs it, so it still holds after a
+    release stops shipping one of them. Then the named spares, each signed
+    by a trusted key that is not revoked: what a revoked key signed (and the
+    chain after it) is not trusted. At most MAX_KEPT documents are used; a
+    document that does not verify uses none."""
+    shipped = list(dict.fromkeys(keys))
+    revoked, used, by = set(), [], {}
+    for i, (data, sig, _, revokes) in enumerate(docs):
+        signer = next((k for k in shipped if signed(data, sig, [k])), None) if revokes and len(used) < MAX_KEPT else None
+        new = set(revokes) - set(shipped) - by.get(signer, set()) if signer else set()
+        if new:
+            by.setdefault(signer, set()).update(new)
+            revoked |= new
+            used.append(i)
+    trusted, fresh = list(shipped), list(shipped)
+    left = [i for i, d in enumerate(docs) if d[2]]
+    # Each document is checked once against each key, as the key comes in.
+    while fresh and left:
+        added = []
+        for i in list(left):
+            data, sig, named, _ = docs[i]
+            if not signed(data, sig, fresh):
+                continue
+            left.remove(i)
+            if named in revoked or named in trusted or (i not in used and len(used) >= MAX_KEPT):
+                continue
+            trusted.append(named)
+            added.append(named)
+            if i not in used:
+                used.append(i)
+        fresh = added
+    return trusted, revoked, used
 
 
 def _kept() -> list:
+    """The documents in the folder that could matter (at most MAX_SCAN files
+    looked at; junk is skipped and counts toward nothing)."""
     d = store()
     try:
-        names = sorted(n for n in os.listdir(d) if re.fullmatch(r"[0-9a-f]{16}\.json", n))[:MAX_KEPT]
+        names = sorted(n for n in os.listdir(d) if re.fullmatch(r"[0-9a-f]{16}\.json", n))[:MAX_SCAN]
     except OSError:
         return []
     out = []
@@ -197,35 +253,28 @@ def _kept() -> list:
                 sig = f.read(1025)
         except OSError:
             continue
-        if len(data) <= MAX_DOC and len(sig) <= 1024:
-            out.append((data, sig))
+        doc = _doc(data, sig)
+        if doc:
+            out.append(doc)
     return out
 
 
 def trusted(hooks: bool = True) -> list:
-    keys = shipped(hooks)
-    left = _kept()
-    grew = True
-    while grew and left:
-        grew = False
-        for doc in list(left):
-            if signed(doc[0], doc[1], keys):
-                left.remove(doc)
-                k = named_key(doc[0])
-                if k and k not in keys:
-                    keys.append(k)
-                    grew = True
-    return keys
+    return _resolve(shipped(hooks), _kept())[0]
 
 
-def remember(data: bytes, sig: bytes) -> bytes | None:
-    """Keeps a verified document that names a key not trusted yet."""
-    k = named_key(data)
-    keys = trusted()
-    if not k or k in keys or not signed(data, sig, keys) or len(_kept()) >= MAX_KEPT:
-        return None
+def remember(data: bytes, sig: bytes) -> bool:
+    """Keeps a verified document that names a key not trusted yet or revokes
+    one not revoked yet (and that fits under MAX_KEPT)."""
+    doc = _doc(data, sig)
+    if not doc:
+        return False
+    keys, kept = shipped(), _kept()
+    before, after = _resolve(keys, kept), _resolve(keys, kept + [doc])
+    if len(kept) not in after[2] or (set(after[0]) <= set(before[0]) and after[1] <= before[1] and not doc[3]):
+        return False
     d = store()
-    name = hashlib.sha256(k).hexdigest()[:16]
+    name = hashlib.sha256(data + sig).hexdigest()[:16]   # one file per signer
     try:
         os.makedirs(d, exist_ok=True)
         for suffix, content in ((".json.sig", sig), (".json", data)):
@@ -234,8 +283,8 @@ def remember(data: bytes, sig: bytes) -> bytes | None:
                 f.write(content)
             os.replace(tmp, os.path.join(d, name + suffix))
     except OSError:
-        return None
-    return k
+        return False
+    return True
 
 
 class Refused(ValueError):
@@ -268,6 +317,8 @@ def load_bytes(data: bytes, sig: bytes, kind: str) -> dict:
     teams(o.get("devid_teams"))
     if "next_spare_key" in o and not key(o["next_spare_key"]):
         raise Refused("bad next_spare_key")
+    if "revoked_keys" in o and not revoked_keys(o["revoked_keys"]):
+        raise Refused("bad revoked_keys")
     remember(data, sig)
     return o
 

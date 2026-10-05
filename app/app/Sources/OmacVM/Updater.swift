@@ -278,8 +278,11 @@ final class Updater: ObservableObject {
             return failed("no connection to the update feed (\(error.localizedDescription))")
         }
 
-        // A new spare named by the feed: trusted from now on.
-        if let k = keys.remember(feedData, signature: feedSig) { log("the update feed names a new spare release key: \(k)") }
+        // A new spare named by the feed: trusted from now on; a key it revokes: not any more.
+        if let r = keys.remember(feedData, signature: feedSig) {
+            for k in r.named { log("the update feed names a new spare release key: \(k)") }
+            for k in r.revoked { log("the update feed revokes the release key \(k)") }
+        }
 
         let os = Version(ProcessInfo.processInfo.operatingSystemVersion)
         // Asked for by hand: a skipped version is offered again.

@@ -11,8 +11,9 @@
       "part<TAB>note" lines (one line per changed part). "devid_teams": --teams, else the
       Developer ID team of --app (default app/dist/OmacVM.app, the release build) or of
       OMACVM_SIGN_ID, plus OMACVM_EXTRA_TEAMS (release-key.sh teams). OMACVM_NEXT_SPARE_KEY:
-      "next_spare_key". --out: writes FILE and signs it (FILE.sig, release-key.sh sign:
-      the main key from the Keychain), then reads it back as the Bridge would
+      "next_spare_key"; OMACVM_REVOKED_KEYS: "revoked_keys" (docs/release-keys.md). --out:
+      writes FILE and signs it (FILE.sig, release-key.sh sign: the main key from the
+      Keychain), then reads it back as the Bridge would
   manifest.py parts [--src DIR]
       every file with its part (to check parts.tsv)
 
@@ -163,6 +164,11 @@ def main() -> int:
         if not keys.key(spare):
             ap.error("OMACVM_NEXT_SPARE_KEY is not a public key")
         m["next_spare_key"] = spare
+    revoked = list(dict.fromkeys(os.environ.get("OMACVM_REVOKED_KEYS", "").split()))
+    if revoked:
+        if not keys.revoked_keys(revoked):
+            ap.error("OMACVM_REVOKED_KEYS: 1 to %d public keys" % keys.MAX_REVOKED)
+        m["revoked_keys"] = revoked
     if not a.out:
         json.dump(m, sys.stdout, indent=1, sort_keys=True)
         print()

@@ -634,7 +634,7 @@ final class Control {
     case .failure(let e): out["error"] = e.message
     case .success(let m):
       out["ok"] = true
-      if keys.remember(data, signature: sig) { log("control: the release names a new spare release key") }
+      if keys.remember(data, signature: sig) { log("control: the release names a new spare release key or revokes one") }
       out["raw"] = data.base64EncodedString(); out["sig"] = sig.base64EncodedString()
       log("control: update check: \(m.version) (\(m.parts.count) parts)")
     }
