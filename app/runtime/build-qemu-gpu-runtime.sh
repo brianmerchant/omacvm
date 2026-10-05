@@ -64,9 +64,15 @@ native_dir=$(cd "$(dirname "$0")" && pwd -P)
 # OMACVM_RUNTIME_KOSMICKRISP=1. Its build needs Homebrew LLVM and SPIR-V tools,
 # so check the build machine before the long QEMU build. Without it the
 # runtime has MoltenVK only.
+# OMACVM_KOSMICKRISP_FROM=DIR: one built on another Mac (import-kosmickrisp.sh).
 case ${OMACVM_RUNTIME_KOSMICKRISP:-0} in
   0) with_kosmickrisp=0 ;;
-  1) "$native_dir/build-kosmickrisp.sh" --check; with_kosmickrisp=1 ;;
+  1) if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+       "$native_dir/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM" --stamp >/dev/null
+     else
+       "$native_dir/build-kosmickrisp.sh" --check
+     fi
+     with_kosmickrisp=1 ;;
   *) echo 'qemu-source-build: OMACVM_RUNTIME_KOSMICKRISP must be 0 or 1' >&2; exit 64 ;;
 esac
 texture_patch="$native_dir/patches/qemu-texture-borrowing-11.1.patch"
@@ -1136,7 +1142,11 @@ fi
 
 kosmickrisp_args=()
 if ((with_kosmickrisp)); then
-  "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+    "$native_dir/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM"
+  else
+    "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  fi
   kosmickrisp_args=(--source-kosmickrisp "$native_dir/.build/kosmickrisp/libvulkan_kosmickrisp.dylib")
 fi
 
