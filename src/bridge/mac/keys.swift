@@ -307,9 +307,11 @@ final class MediaKeys {
 
   /// The new tap goes in before the old one is removed: no gap without one.
   /// A failed re-creation keeps the old tap and is logged once.
+  /// At the HID level: on macOS 27 (Mac mini, Magic Keyboard) the volume keys
+  /// never reach a session-level tap, only play/next/previous do.
   private func install(again why: String?) {
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
-    guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+    guard let t = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
       // check() may create a new tap and invalidate this one: not from inside its own callback.
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { DispatchQueue.main.async { mediaKeys.check() } }

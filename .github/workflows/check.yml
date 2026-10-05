@@ -100,3 +100,6 @@ jobs:
 
       - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
         run: src/tests/app-notch.sh
+
+      - name: Benchmark chart and the pages that quote it agree
+        run: src/tests/bench-docs.sh

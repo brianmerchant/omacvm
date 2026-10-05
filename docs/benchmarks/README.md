@@ -297,6 +297,30 @@ Notes:
   opened on the external one (page 1920x1200, 60 Hz) and gave 41 to 43 fps and
   Basemark 2072 to 2596. Those runs are not in the table.
 
+### OmacVM.app 2.9.0 release candidate (2026-10-05)
+
+RC2 (gpu-2.9.0 at 5586df7) against the runtime of the released 2.8.0, on the
+same MacBook, in turns (2.8.0, RC2, RC2, 2.8.0), benchmark lock held for each
+session. A throwaway app VM (8 CPUs, 16 GB), its window on the built-in
+display, not full screen; another test VM (about one core) kept running.
+Median of 6 runs (Aquarium: the first run of each session is a warm-up and
+left out), range in brackets.
+
+| | 2.8.0 | 2.9.0 RC2 |
+|---|---|---|
+| glmark2 short set | 1,124 (1,113-1,138) | 2,856 (2,706-2,970) |
+| WebGL Aquarium, 30,000 fish (fps) | 19.9 (19.4-21.0) | 19.0 (18.8-19.1) |
+| Basemark Web 3.0 | 2,482 (2,224-2,748) | 2,669 (2,339-2,871) |
+| QEMU CPU during the session | 106 % | 130 % |
+| testufo on a virtual 120 Hz display, new frames a second | 88.8-90.6 | 116.6-119.6 |
+
+The chart in the README shows RC2's Aquarium against the Mac's full-screen
+numbers above, tagged "2.9.0 RC", because it is not taken the same way. RC2's
+Basemark is not in the chart: in a window it came out above the other apps'
+full-screen numbers, and that is not a fair comparison (the page size was not
+recorded; see the 2157 run above). The release run in full screen, with the
+VM alone, fills both.
+
 ## Fast network (OmacVM.app)
 
 QEMU's user network (libslirp, the default) against the fast network (vmnet
