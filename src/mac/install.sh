@@ -54,7 +54,7 @@ if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   test_helper() {   # NAME LOG: start "NAME.app" from H (output to ~/Library/Logs/LOG) unless it runs
     local app="$H/$1.app"
     [[ -d $app ]] || { echo "src/mac/install.sh: test identity: $app is missing" >&2; return 1; }
-    pgrep -f "$app/Contents/MacOS/" >/dev/null && return 0
+    pgrep -af "$app/Contents/MacOS/" >/dev/null && return 0   # -a: the Bridge may be our parent
     open -g -n --stdout ~/Library/Logs/"$2" --stderr ~/Library/Logs/"$2" "$app" && echo "==> test identity: started $1"
   }
   rc=0

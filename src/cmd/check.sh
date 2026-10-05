@@ -112,8 +112,8 @@ if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   BRIDGE_PORT=47931 GESTURES_PORT=47930
   running() {
     case $1 in
-      org.omacvm.bridge) pgrep -f "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
-      org.omacvm.gestures) pgrep -f "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
+      org.omacvm.bridge) pgrep -af "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
+      org.omacvm.gestures) pgrep -af "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
       *) return 1 ;;
     esac
   }
