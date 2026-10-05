@@ -104,5 +104,5 @@ jobs:
       - name: Benchmark chart and the pages that quote it agree
         run: src/tests/bench-docs.sh
 
-      - name: Sound on a busy Mac (glitch detector, main loop QoS switch and log lines)
+      - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh

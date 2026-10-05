@@ -320,6 +320,15 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *) ok "sound timing" "${q:-main loop QoS: unknown}, ${p:-pacing unknown}" ;;
   esac
 fi
+# A Mac audio device that does not answer (coreaudiod stuck): QEMU opens it off
+# its main loop and the VM runs without sound instead of hanging; qemu.log says
+# so, and when the device works again.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  case $(grep -o "OmacVM: sound: the Mac's audio device [a-z ]*" "$miclog" | tail -1) in
+    *"does not answer"*) warn "sound" "Mac audio device not answering, the VM runs without sound; fix: pick another output in System Settings > Sound, replug it, or sudo killall coreaudiod" ;;
+    *"works again"*) ok "sound" "the Mac's audio device stopped answering earlier in this run and works again" ;;
+  esac
+fi
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
