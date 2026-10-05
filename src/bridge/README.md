@@ -349,10 +349,14 @@ so the Bridge also reads them from the keyboard (`mac/hid-keys.swift`,
 IOHIDManager, never seized: macOS still gets every key; Input Monitoring).
 Apple keyboards send F1/F2; the keyboard's own `FnFunctionUsageMap`
 (IORegistry) and macOS's "standard function keys" setting say when they
-are brightness. Other keyboards' consumer-page brightness keys count too.
+are brightness; an Apple keyboard without that map (a Bluetooth Magic
+Keyboard: vendor 0x004C; USB: 0x05AC) gets Apple's usual F1 down, F2 up.
+Other keyboards' consumer-page brightness keys count too.
 They act only while an OmacVM.app VM is in front, by the same rule; a press
 that also came through the tap acts once, and a display macOS already
-changed itself is not stepped again. Tests: `mac/test-models.sh`,
+changed itself is not stepped again (unless the Bridge stepped it itself
+meanwhile: quick presses each step). HID sends no key repeat, so a held key
+repeats at macOS's key repeat speed until it is released. Tests: `mac/test-models.sh`,
 `mac/test-hid.sh` (made-up keyboards, and this Mac's own maps read only).
 
 Anything else, or any key while no VM is in front, passes through untouched.

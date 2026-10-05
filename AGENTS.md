@@ -295,11 +295,13 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
 - Bridge media keys: the tap is at `.cghidEventTap` (macOS 27 sends volume
   only there). Brightness keys reach no tap on macOS 27: `hid-keys.swift`
   reads them with IOHIDManager (not seized; Input Monitoring): F1/F2 through
-  the keyboard's own `FnFunctionUsageMap` (IORegistry) and
+  the keyboard's own `FnFunctionUsageMap` (IORegistry; none on an Apple
+  keyboard, also Bluetooth vendor 0x004C: Apple's F1/F2 default) and
   `com.apple.keyboard.fnState`, or the consumer/Apple brightness usages;
   acted on only with an OmacVM.app VM in front (`MediaRoute`), deduplicated
   against the tap (`BrightnessOnce`), and not stepped again when macOS
-  changed the display itself.
+  changed the display itself (`OwnSteps`: not when the Bridge stepped it
+  itself meanwhile). Held keys repeat at macOS's key repeat speed.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.
