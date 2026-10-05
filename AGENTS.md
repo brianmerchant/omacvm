@@ -209,7 +209,7 @@ GitHub.
 | `src/lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
 | `src/lib/helpers.sh` | OmacVM.app's prebuilt Bridge and Gestures (`Contents/Helpers`, Developer ID; `app/scripts/build-app.sh` builds and signs them): `src/mac/install.sh` installs them (`install.sh --prebuilt`) when built from the same sources, else builds; `src/tests/prebuilt-helpers.sh` |
 | `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, shared event stream, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr,nightshift}`. External display brightness (feature `external-brightness`): `mac/external-brightness.swift` (DDC/CI over IOAVService, Apple displays over DisplayServices, found per display at run time; one serial queue, coalesced writes), `mac/external-model.swift` (steps, DDC packets, which display; `mac/test.sh` offline, `--live` on this Mac's displays, always restoring), `/display/external*` in the API, `guest/omacvm-ddcutil` as `/usr/local/bin/ddcutil` in the VM so Omarchy's own DDC path asks the Bridge (`src/tests/external-brightness.sh`). Night light: the Mac's Night Shift only; the guest install hides Omarchy's NightLight indicator (`items` of `omarchy.indicators` in `shell.json`, original kept in `~/.local/state/omacvm/nightlight-indicator`, restored with bridge=off) and stops `hyprsunset` |
-| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥⌘ Esc swipes the display under the pointer out of the VM (a synthesized Dock swipe; `EscapeSwipe` = `all` in `org.omacvm.gestures`: every display), and back; falls back to the app switch, then to hiding the VM app; `mac/test-escape.c` tests it against a made-up world of displays and Spaces; also hides the Mac's pointer over the full-screen VM; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
+| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥⌘ Esc moves the display under the pointer out of the VM with macOS's own Space shortcut (`EscapeSwipe` = `all` in `org.omacvm.gestures`: every display), and back; falls back to a Dock swipe, then Mission Control, never out of full screen; `mac/test-escape.c` tests it against a made-up world of displays and Spaces; also hides the Mac's pointer over the full-screen VM; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
 | `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
 | `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
 | `src/app/guest/` | OmacVM.app's VM side: `omacvm-display-sync` (each output follows its Mac window or display: mode, scale by EDID, position from the Mac's arrangement; Omarchy's zoom only for Virtual-1), `omacvm-displays` (user service on virtio port `org.omacvm.display`: hello and the switch to QEMU, the arrangement from it, Hyprland's outputs back for the pointer; `external on\|off\|toggle`, `status`), `monitor-widget/` (bar widget `omacvm.monitor` = Omarchy's display panel built from the installed Omarchy plus MAC DISPLAYS "Use external displays"; rebuilt by the agent after an Omarchy update), clipboard, guest agent, notch strip |
@@ -286,10 +286,15 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
   turns the switch on. Gestures' tap still takes ⌃⌥⌘ Esc first; the Bridge
   still routes media keys.
-- Escape combo (Gestures): every way out of a full-screen VM ends in
-  `verifyOut` (front app not the VM, its full-screen window not on the
-  pointer's display); still in → AXFullScreen false + hide, and the next
-  combo restores full screen (`restoreFull`). An OmacVM.app window with the
+- Escape combo (Gestures): NEVER take the VM out of full screen or hide it
+  (user, 2026-10-05). Out = macOS's own "Move left/right a space" shortcut
+  (symbolic hotkeys 79/81, read per press: key, modifiers, enabled), posted
+  at the HID level once the combo's keys are up, marked 0x0BAC0E5C (our tap
+  and QEMU, `omacvm-cocoa-keys-for-macos.patch`, let it through), toward the
+  Space the display showed before (`cameFrom`). Each move is checked: not
+  moved → Dock swipe → Mission Control (hotkey 32 for OmacVM.app, else its
+  app). Back in: the shortcut, else the VM's window to the front. An
+  OmacVM.app window with the
   keyboard: the combo gives it to the app from before / Finder
   (`COMBO_WINDOW_OUT`), again in macOS brings the window back.
 - Bridge media keys: the tap is at `.cghidEventTap` (macOS 27 sends volume

@@ -60,24 +60,26 @@ says which way it went.
 
 **⌃⌥⌘ Esc** (Control + Option + Command + Escape) in the VM takes you
 straight back to macOS: the trackpad and keys go back to macOS and the
-monitor under the pointer swipes to the Space beside the VM's, with macOS's
-own animation. Only that monitor changes; the keyboard goes to what it shows.
+monitor under the pointer moves to the Space beside the VM's, toward the one
+you came from, with macOS's own "Move left/right a space" shortcut (System
+Settings › Keyboard › Keyboard Shortcuts › Mission Control; ⌃← and ⌃→
+unless you changed them) and its own animation. The VM stays full screen in
+its Space. Only that monitor changes; the keyboard goes to what it shows.
 No trackpad needed, so it works with a mouse too. Press **⌃⌥⌘ Esc** there
-again to swipe back into the VM: full screen as before, with the trackpad
-and keys. Coming back with a swipe or Mission Control works as well.
+again to go back into the VM, with the trackpad and keys. Coming back with
+a swipe or Mission Control works as well.
 
 OmacVM.app's **Escape combo** setting: *Swipe the monitor under the pointer*
 (the default) or *Swipe all monitors*, every monitor that shows the VM. For
 Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
 EscapeSwipe all` (or `pointer`).
 
-Never stuck: if the swipe cannot be made (the VM's Space has no neighbour,
-or macOS gives no Spaces information) or does not land, the app you were in
-before comes to the front instead, with its Space (Finder if it has quit).
-Every way out ends with a check: if the VM is still in front or its full
-screen still shows, its window leaves full screen and the VM's app is
-hidden, so macOS has the keyboard and the screen. ⌃⌥⌘ Esc brings it back,
-in full screen again.
+Never stuck, and never out of full screen: every move is checked. If the
+shortcut is off or the Space did not change, OmacVM tries a Dock swipe (the
+events a three-finger swipe makes); if that does not land either, or macOS
+gives no Spaces information, Mission Control opens and you pick a Space.
+Back in, if the shortcut does not land, the VM's window comes to the front
+and macOS shows its Space.
 
 In an OmacVM.app window, ⌃⌥⌘ Esc gives the keyboard back to macOS (the app
 you were in before, else Finder); press it again in macOS to get the window

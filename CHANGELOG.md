@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+### Fixed
+
+- ⌃⌥⌘ Esc in the full-screen VM no longer takes the VM out of full screen.
+  It moves the monitor under the pointer to the Space you came from with
+  macOS's own "Move left/right a space" shortcut (as set in System Settings
+  › Keyboard › Keyboard Shortcuts, ⌃← and ⌃→ by default), with macOS's own
+  animation; pressed again in macOS, it moves back into the VM. On macOS 27
+  the swipe OmacVM made before did nothing on a Mac mini. If the shortcut
+  is off or does not move, a Dock swipe is tried, then Mission Control
+  opens so you pick a Space. The VM is never hidden.
+
 ## 2.9.1
 
 A hotfix for 2.9.0: brightness keys that work with the VM in front, a
