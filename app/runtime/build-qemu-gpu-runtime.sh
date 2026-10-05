@@ -993,6 +993,8 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
 # OmacVM Venus: MoltenVK cannot compile zero-initialized workgroup memory.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
+# OmacVM: a compositor's dma-buf import (a Vulkan window) no longer ends its context on macOS OpenGL.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-set-type-without-egl.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
