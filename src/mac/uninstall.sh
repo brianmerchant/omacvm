@@ -33,4 +33,4 @@ echo "OmacVM removed from this Mac"
 top=$(cd "$R/.." && pwd)
 link=$(command -v omacvm 2>/dev/null) || link=""
 echo "Still here: the omacvm command ($top${link:+ and $link}); delete ${link:+them}${link:-it} to remove it."
-echo "OmacVM.app, if installed, stays too: drag it to the Bin (its VMs stay in ~/Library/Application Support/OmacVM)."
+echo "OmacVM.app, if installed, stays too: drag it to the Bin (its VMs stay in ~/OmacVM, or ~/Library/Application Support/OmacVM/VMs from before 2.9.0)."

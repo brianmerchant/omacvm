@@ -1,0 +1,367 @@
+{
+ "machine": "Mac mini M4 10-core, 16 GB, macOS 27.0 (26A428)",
+ "vm": "OmacVM M-kk, 6 CPU, 8 GB, Omarchy, kernel 7.2.8",
+ "runtime": "branch kosmickrisp (gpu-venus base: virgl fence poll 1 ms), KosmicKrisp Mesa e5f0687867f5, MoltenVK 1.4.2",
+ "guest_mesa": "e5f0687867f5 + mesa-venus-incremental-present.patch (/opt/mesa-kk)",
+ "date": "2026-10-04",
+ "conditions": "mini screen locked; mini load average 0.7-2.7, spike 10-20 at 12:59-13:05 (another agent's build); only this VM",
+ "results": [
+  {
+   "test": "vkmark headless 800x600",
+   "driver": "kosmickrisp",
+   "runs": [
+    840,
+    912,
+    805
+   ],
+   "median": 840
+  },
+  {
+   "test": "vkmark headless 1920x1080",
+   "driver": "kosmickrisp",
+   "runs": [
+    676
+   ],
+   "median": 676
+  },
+  {
+   "test": "vkmark headless 800x600",
+   "driver": "moltenvk",
+   "runs": [
+    666,
+    647,
+    650
+   ],
+   "median": 650
+  },
+  {
+   "test": "vkmark headless 1920x1080",
+   "driver": "moltenvk",
+   "runs": [
+    654
+   ],
+   "median": 654
+  },
+  {
+   "test": "glmark2-es2 --off-screen 800x600",
+   "path": "zink on venus/kosmickrisp",
+   "runs": [
+    560,
+    555,
+    429
+   ],
+   "median": 555,
+   "note": "run 3 during the load spike"
+  },
+  {
+   "test": "glmark2-es2 --off-screen 800x600",
+   "path": "virgl",
+   "runs": [
+    494,
+    480,
+    494
+   ],
+   "median": 494,
+   "note": "run 2 during the load spike"
+  },
+  {
+   "test": "aquarium 30000 fish fps",
+   "path": "chrome angle-vulkan x11, list restart off",
+   "runs": [
+    25.9,
+    25.9,
+    25.1
+   ],
+   "median": 25.9,
+   "canvas": "3568x1847@1"
+  },
+  {
+   "test": "aquarium 30000 fish fps",
+   "path": "chrome virgl gl x11",
+   "runs": [
+    22.0,
+    21.8,
+    21.9
+   ],
+   "median": 21.9,
+   "canvas": "3568x1847@1"
+  },
+  {
+   "test": "aquarium 30000 fish fps",
+   "path": "chrome virgl gl wayland (default)",
+   "runs": [
+    22.4,
+    22.2,
+    22.4
+   ],
+   "median": 22.4,
+   "canvas": "1784x880@2"
+  },
+  {
+   "test": "aquarium fps 100/1000/5000/30000",
+   "path": "chrome angle-vulkan x11, list restart ON",
+   "runs": [
+    30.6,
+    5.0,
+    1.0,
+    null
+   ],
+   "note": "30000: device lost, GPU process abort"
+  },
+  {
+   "test": "aquarium fps 100/1000/5000/30000",
+   "path": "chrome angle-vulkan x11, list restart off",
+   "runs": [
+    50.9,
+    49.7,
+    49.9,
+    25.3
+   ]
+  },
+  {
+   "test": "basemark web 3.0",
+   "path": "chrome angle-vulkan x11, list restart off",
+   "runs": [
+    1620
+   ],
+   "webgl1": 3189.02,
+   "webgl2": 1933.64
+  },
+  {
+   "test": "basemark web 3.0",
+   "path": "chrome virgl gl x11",
+   "runs": [
+    null
+   ],
+   "note": "no score after 625 s (known virgl hang)"
+  },
+  {
+   "test": "geekbench 7 gpu opencl (vm)",
+   "path": "rusticl/zink/venus/kosmickrisp",
+   "runs": [
+    19080,
+    18580,
+    18886
+   ],
+   "median": 18886,
+   "urls": [
+    "https://browser.geekbench.com/v7/gpu/251525",
+    "https://browser.geekbench.com/v7/gpu/251541",
+    "https://browser.geekbench.com/v7/gpu/251554"
+   ]
+  },
+  {
+   "test": "geekbench 7 gpu metal (mac mini)",
+   "runs": [
+    56610,
+    56025,
+    55883
+   ],
+   "median": 56025,
+   "urls": [
+    "https://browser.geekbench.com/v7/gpu/251778",
+    "https://browser.geekbench.com/v7/gpu/251785",
+    "https://browser.geekbench.com/v7/gpu/251793"
+   ]
+  },
+  {
+   "test": "geekbench 7 gpu opencl (mac mini)",
+   "runs": [
+    35307,
+    35240,
+    35169
+   ],
+   "median": 35240,
+   "urls": [
+    "https://browser.geekbench.com/v7/gpu/251799",
+    "https://browser.geekbench.com/v7/gpu/251806",
+    "https://browser.geekbench.com/v7/gpu/251814"
+   ]
+  },
+  {
+   "test": "clpeak vulkan backend",
+   "fp32_tflops": 4.01,
+   "fp16_tflops": 4.01,
+   "int32_tops": 1.01,
+   "int8dp_gops": 766,
+   "global_bw_gbs": 97.5,
+   "local_bw_tbs": 1.79,
+   "image_bw_gbs": 104,
+   "h2d_gbs": 44.5,
+   "d2h_gbs": 44.7,
+   "dispatch_us": 364,
+   "roundtrip_ms": 1.5
+  },
+  {
+   "test": "clpeak opencl (rusticl)",
+   "fp32_gflops": 378,
+   "fp16_gflops": 320,
+   "global_bw_gbs": 47.9,
+   "image_bw_gbs": 35.1,
+   "h2d_gbs": 32.2,
+   "note": "zink reports 1 compute unit; clpeak under-fills"
+  },
+  {
+   "test": "soak 30 min (vkmark venus loop + chrome webgl + mpv)",
+   "verdict": "pass",
+   "seconds": 1793,
+   "heartbeat_misses": 0,
+   "vkmark_loops": 13,
+   "vkmark_scores": "637-643",
+   "webgl_frames": 108220,
+   "fences": 1766376,
+   "qemu_rss_mb_first_last_max": [
+    3614,
+    1672,
+    3614
+   ]
+  }
+ ],
+ "round2": {
+  "date": "2026-10-04 17:04-18:14",
+  "conditions": "Mac mini screen unlocked, no VM besides this one, mini VM lock held; load average 0.3-3.4 from other work on the mini; no benchmark lock exists there",
+  "chrome": {
+   "mac": "Google Chrome 154.0.8037.93",
+   "vm": "Google Chrome 154.0.8037.97"
+  },
+  "results": [
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, fullscreen",
+    "viewport": "2560x1322@2",
+    "runs": [
+     60.0,
+     60.0,
+     60.0
+    ],
+    "median": 60.0,
+    "note": "60 Hz vsync cap"
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, fullscreen, --disable-gpu-vsync --disable-frame-rate-limit",
+    "viewport": "2560x1322@2",
+    "runs": [
+     103.0,
+     103.2,
+     98.0
+    ],
+    "median": 103.0
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, 1920x1080 window",
+    "viewport": "1920x993@2",
+    "runs": [
+     60.0,
+     60.0,
+     60.0
+    ],
+    "median": 60.0,
+    "note": "60 Hz vsync cap"
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, 1920x1080 window, no vsync",
+    "viewport": "1920x993@2",
+    "runs": [
+     101.3,
+     101.8,
+     103.2
+    ],
+    "median": 101.8
+   },
+   {
+    "test": "basemark web 3.0",
+    "path": "Mac, native Chrome, fullscreen",
+    "runs": [
+     1925,
+     2013,
+     1948
+    ],
+    "median": 1948
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "VM, ANGLE on Vulkan, Venus on KosmicKrisp (x11, sw WSI, list restart off), runtime eebaf11",
+    "viewport": "3568x1847@1",
+    "runs": [
+     26.8,
+     26.9,
+     26.9
+    ],
+    "median": 26.9
+   },
+   {
+    "test": "basemark web 3.0",
+    "path": "VM, ANGLE on Vulkan, Venus on KosmicKrisp",
+    "runs": [
+     1511,
+     1558,
+     1466
+    ],
+    "median": 1511,
+    "webgl1": 3733.97,
+    "webgl2": 2225.02,
+    "draw_call_stress": 151.83,
+    "note": "subtests from run 2"
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "VM, virgl, OmacVM.app 2.6.0 runtime, Chrome default (Wayland)",
+    "viewport": "1784x880@2",
+    "runs": [
+     22.1,
+     21.6,
+     21.9
+    ],
+    "median": 21.9
+   },
+   {
+    "test": "basemark web 3.0",
+    "path": "VM, virgl, OmacVM.app 2.6.0 runtime",
+    "runs": [
+     1654,
+     1793,
+     1599
+    ],
+    "median": 1654,
+    "webgl1": [
+     5165.69,
+     5317.28,
+     5188.19
+    ],
+    "webgl2": [
+     3232.89,
+     2896.73,
+     3081.13
+    ],
+    "draw_call_stress": [
+     81.17,
+     177.07,
+     79.43
+    ]
+   },
+   {
+    "test": "glmark2-es2 --off-screen 800x600",
+    "path": "VM, Zink on Venus on KosmicKrisp, guest Mesa e5f0687",
+    "runs": [
+     558,
+     558,
+     561
+    ],
+    "median": 558
+   },
+   {
+    "test": "glmark2-es2 --off-screen 800x600",
+    "path": "VM, virgl, same guest Mesa e5f0687",
+    "runs": [
+     591,
+     592,
+     592
+    ],
+    "median": 592
+   }
+  ]
+ }
+}

@@ -45,8 +45,9 @@ final class Runner {
         ] + networkArguments() + [
             // One output per Mac display in full screen (Virtual-1 is the window;
             // QEMU's window code opens the others): the built-in and four more.
-            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=",
-            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=on,swap-opt-cmd=off",
+            // Venus (Vulkan) needs blobs and a host memory window for them.
+            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(Settings.venus ? ",blob=true,venus=true,hostmem=4G" : "")",
+            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
             "-object", "rng-random,id=rng0,filename=/dev/urandom",
@@ -64,11 +65,15 @@ final class Runner {
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
         // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
-        if Settings.useNotch, let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
+        if Settings.useNotch, let s = Mac.notchScreen {
             let k = s.backingScaleFactor
             let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
             a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
+        }
+        // HDR: the guest's display sync reads it (omacvm-app-host).
+        if Settings.hdrActive {
+            a += ["-smbios", "type=11,value=omacvm.hdr=1"]
         }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
@@ -96,6 +101,23 @@ final class Runner {
         // so no other device moves.
         if network.vmnet { a += ["-device", "pcie-root-port,id=netfb"] }
         return a
+    }
+
+    /// The display for the VM's window: under the pointer, else the one with
+    /// the active menu bar; nil with one display.
+    static func placement() -> UInt32? {
+        let screens = NSScreen.screens.compactMap { s -> WindowPlacement.Screen? in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return nil }
+            return WindowPlacement.Screen(id: id, frame: s.frame)
+        }
+        let menuBar = NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+        return WindowPlacement.display(pointer: NSEvent.mouseLocation, screens: screens, menuBar: menuBar)
+    }
+
+    /// QEMU shows a window now (on any display).
+    nonisolated static func hasWindow(_ pid: pid_t) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid && $0[kCGWindowLayer as String] as? Int == 0 }
     }
 
     /// The path the network took at the last start (FastNetwork).
@@ -133,7 +155,8 @@ final class Runner {
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
         // ports: Omanotch, Gestures and Bridge (patched libslirp).
         env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
-        env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
+        env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
+        if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
@@ -143,6 +166,18 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // The window opens on the display the user is using (WindowPlacement).
+        // QEMU's hook for that (omacvm-cocoa-displays.patch) still has the name
+        // its first user, the display tests, gave it; it is no test mode.
+        if let d = Runner.placement() { env["OMACVM_TEST_MAIN_DISPLAY"] = String(d) }
+        if Settings.hdrActive {
+            env["OMACVM_GL_HDR"] = "1"
+        }
+        if Settings.gpuSafeMode {
+            env["OMACVM_VIRGL_POLL_FENCES"] = "1"
+            env["OMACVM_GL_PRESENT"] = "layer"
+            env["OMACVM_GL_PRESENT_ON_TICK"] = "1"
+        }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
@@ -153,6 +188,9 @@ final class Runner {
         try? Data("\(network.record)\n".utf8).write(to: c.folder.appendingPathComponent("logs/network"))
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
+        }
+        if Settings.hdr && !Mac.hasHDRDisplay {
+            log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
         }
         p.standardOutput = log
         p.standardError = log

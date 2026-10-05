@@ -272,6 +272,44 @@ func audioControl(_ path: String, _ body: [String: Any]) throws -> String {
   }
 }
 
+/// GET or POST /display/external-brightness: the external display the VM is
+/// on. Everything from the VM is checked: a box (x, y, width, height: an
+/// OmacVM.app output from its layout) only picks among the displays that show
+/// an OmacVM.app window, without one the VM app in front decides; the display
+/// must be external and settable; levels are 0-100.
+func externalBrightnessRequest(_ query: [URLQueryItem], body: Data?) throws -> [String: Any] {
+  guard config.externalBrightness else { throw APIError(409, "off on this Mac (external_brightness in the Bridge's config.json)") }
+  let names = ["x", "y", "width", "height"]
+  let given = names.compactMap { n in query.first { $0.name == n }?.value }
+  var box: CGRect?
+  if !given.isEmpty {
+    let v = given.compactMap { Double($0) }
+    guard given.count == 4, v.count == 4 else { throw APIError(400, "a box needs x, y, width and height (numbers)") }
+    let b = CGRect(x: v[0], y: v[1], width: v[2], height: v[3])
+    guard DisplayPick.validBox(b) else { throw APIError(400, "box out of range") }
+    box = b
+  }
+  var percent: Double?, delta: Double?
+  if let body {
+    guard let o = (body.isEmpty ? nil : try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
+      throw APIError(400, "send {\"brightness\": 0-100} or {\"delta\": -100..100}")
+    }
+    percent = (o["brightness"] as? NSNumber)?.doubleValue
+    delta = (o["delta"] as? NSNumber)?.doubleValue
+    guard (percent == nil) != (delta == nil) else { throw APIError(400, "send {\"brightness\": 0-100} or {\"delta\": -100..100}") }
+    if let p = percent, !(p.isFinite && (0...100).contains(p)) { throw APIError(400, "brightness: 0-100") }
+    if let d = delta, !(d.isFinite && (-100...100).contains(d)) { throw APIError(400, "delta: -100..100") }
+  }
+  // Windows and the front app: read on the main thread (this one is a connection's).
+  let target: MacDisplay? = DispatchQueue.main.sync {
+    if let box { return VMScreens.forBox(box) }
+    return VMScreens.front(windowed: true)?.display
+  }
+  guard let t = target else { throw APIError(404, "no VM window in front on a display (or this output is not on one)") }
+  guard !t.builtin else { throw APIError(409, "the built-in display: its brightness stays macOS's") }
+  return body == nil ? try externalBrightness.get(t.id) : try externalBrightness.set(t.id, percent: percent, delta: delta)
+}
+
 func handle(_ fd: Int32, peer: String) {
   var one: Int32 = 1
   setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
@@ -340,6 +378,19 @@ func handle(_ fd: Int32, peer: String) {
     respond(fd, 200, hub.current("audio"))
   case ("GET", "/display"):
     respond(fd, 200, hub.current("display"))
+  case ("GET", "/display/external"):
+    respond(fd, 200, ["enabled": config.externalBrightness, "displays": externalBrightness.report()])
+  case (let m, "/display/external-brightness") where m == "GET" || m == "POST":
+    do {
+      let r = try externalBrightnessRequest(query, body: m == "POST" ? Data(body) : nil)
+      if m == "POST" { log("\(path) from \(peer): \(r["display"] ?? "") -> \(r["brightness"] ?? "")") }
+      respond(fd, 200, r)
+    } catch let e as APIError {
+      if m == "POST" { log("\(path) from \(peer) failed: \(e.message)") }
+      respond(fd, e.status, ["error": e.message])
+    } catch {
+      respond(fd, 500, ["error": "\(error)"])
+    }
   case ("GET", "/bluetooth"):
     respond(fd, 200, hub.current("bluetooth"))
   case ("GET", "/battery"):
@@ -409,7 +460,7 @@ func handle(_ fd: Int32, peer: String) {
   case ("POST", "/power"), ("POST", "/join"), ("POST", "/disconnect"):
     respond(fd, 501, ["error": "Wi-Fi control is not implemented yet (stage 2)"])
   case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/bluetooth"), (_, "/battery"), (_, "/wifi/password"), (_, "/events"),
-       (_, "/camera"), (_, "/camera/status"):
+       (_, "/camera"), (_, "/camera/status"), (_, "/display/external"), (_, "/display/external-brightness"):
     respond(fd, 405, ["error": "method not allowed"])
   default:
     respond(fd, 404, ["error": "not found"])

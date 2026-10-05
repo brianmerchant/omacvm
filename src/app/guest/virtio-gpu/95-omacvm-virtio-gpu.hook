@@ -1,0 +1,13 @@
+# OmacVM.app, HDR: rebuild the 10-bit virtio-gpu module for a new kernel
+# (only once HDR was turned on with omacvm-virtio-gpu-build).
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux-aarch64
+Target = linux-aarch64-headers
+
+[Action]
+Description = OmacVM: virtio-gpu with 10-bit scanout for the new kernel
+When = PostTransaction
+Exec = /usr/local/bin/omacvm-virtio-gpu-build --hook

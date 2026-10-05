@@ -22,6 +22,8 @@ show() {
   omarchy-osd -i "$icon" -p "$value" || true
 }
 
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0   # sourced (tests): show() only
+
 while true; do
   event=""
   while IFS= read -r line; do

@@ -3,17 +3,19 @@
 # forwards the VM's SSH to 127.0.0.1:SSH_PORT, so its "IP" here is
 # 127.0.0.1:PORT (gssh understands that).
 #   app_list            NAME<TAB>app<TAB>running|stopped, one line per VM
+#   app_vms_root        the folder with the VM folders (~/OmacVM by default)
 #   app_dir NAME        the VM's folder
 #   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address)
 #   app_any_fast_network  one of the VMs has the fast network on
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
-#   app_bundle          the installed OmacVM.app (any name it was installed under)
+#   app_bundle          the installed OmacVM.app (any name it was installed under;
+#                       ~/Applications first, then /Applications)
 #   app_create DIR KEY=VALUE...  a new VM in DIR through the app's own create
 #                       script (the password on stdin), as when built in the app
 #   app_published VERSION   that OmacVM release has OmacVM-VERSION.zip
-#   app_install VERSION [APP]  download, check and install it (in /Applications,
-#                       else ~/Applications; or in place of APP); prints the path
+#   app_install VERSION [APP]  download, check and install it (in ~/Applications,
+#                       or in place of APP, /Applications too); prints the path
 #   app_install_cmd VERSION    the same as one command, for a person to run
 # omacvm apply writes guest-pointer ("omarchy") into the folder once the VM
 # draws Omarchy's own pointer: the app hides the Mac's pointer only then.
@@ -22,10 +24,28 @@
 # OmacVM release, the app's version the same as OmacVM's.
 APP_DOWNLOADS=https://github.com/gillesgoetsch/omacvm/releases/download
 
+# The app's settings (OMACVM_APP_ID: another bundle id, for tests only).
+APP_ID=${OMACVM_APP_ID:-org.omacvm.app}
+
+# The VMs folder, as the app finds it (app/app/Sources/OmacVM/VMsFolder.swift;
+# src/tests/app-paths.sh checks that both agree): the folder set in the app,
+# else ~/OmacVM when it is there, else the old place while it holds VMs
+# (nothing is moved), else ~/OmacVM (the app makes it on first use).
+APP_VMS_OLD="Library/Application Support/OmacVM/VMs"
 app_vms_root() {
-  local r
-  r=$(defaults read org.omacvm.app vmsRoot 2>/dev/null)
-  echo "${r:-$HOME/Library/Application Support/OmacVM/VMs}"
+  local r d new=$HOME/OmacVM
+  r=$(defaults read "$APP_ID" vmsRoot 2>/dev/null)
+  [[ -n $r ]] && { echo "$r"; return; }
+  app_vms_ours "$new" && { echo "$new"; return; }
+  for d in "$HOME/$APP_VMS_OLD"/*; do
+    [[ -f $d/vm.env ]] && { echo "$HOME/$APP_VMS_OLD"; return; }
+  done
+  # Taken by something else (a file, ~/omacvm on a case-insensitive drive).
+  [[ -e $new ]] && { echo "$HOME/$APP_VMS_OLD"; return; }
+  echo "$new"
+}
+app_vms_ours() {   # DIR: a folder under exactly that name, no git clone
+  [[ -d $1 && ! -e $1/.git ]] && ls -1 "$(dirname "$1")" 2>/dev/null | grep -xF -- "$(basename "$1")" >/dev/null   # no -q: pipefail
 }
 
 app_env() {   # DIR KEY: one value from vm.env (single quotes stripped)
@@ -99,14 +119,17 @@ app_other_running() {   # NAME -> another app VM that runs (the app runs one at 
 }
 
 app_start() {
-  # -n: a new launcher passes the request on when one already runs.
-  open -n -b org.omacvm.app --args --start --vm "$1" || return 1
+  # -n: a new launcher passes the request on when one already runs. The app
+  # app_bundle finds, not any copy LaunchServices knows (an older one, say).
+  local a
+  if a=$(app_bundle); then open -n "$a" --args --start --vm "$1" || return 1
+  else open -n -b org.omacvm.app --args --start --vm "$1" || return 1; fi
   app_ip "$1" 60
 }
 
-app_bundle() {   # in /Applications or ~/Applications, by its bundle id
+app_bundle() {   # in ~/Applications, else /Applications, by its bundle id
   local a
-  for a in /Applications/*.app "$HOME"/Applications/*.app; do
+  for a in "$HOME"/Applications/*.app /Applications/*.app; do
     [[ -f $a/Contents/Resources/scripts/create-vm.sh ]] || continue
     [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app ]] && { echo "$a"; return 0; }
   done
@@ -154,13 +177,11 @@ app_published() {   # VERSION: its checksum file is there (small; the zip is not
   curl -fsSL --max-time 30 -o /dev/null "$(app_zip_url "$1").sha256" 2>/dev/null
 }
 
-app_install_dir() {   # where a new OmacVM.app goes, as the app installs itself
-  if [[ -w /Applications ]]; then echo /Applications; else echo "$HOME/Applications"; fi
-}
+app_install_dir() { echo "$HOME/Applications"; }   # where a new OmacVM.app goes, as the app installs itself
 
 app_install_cmd() {   # VERSION
   local u z; u=$(app_zip_url "$1"); z=OmacVM-$1.zip
-  echo "cd \$(mktemp -d) && curl -fLO $u && curl -fLO $u.sha256 && shasum -a 256 -c $z.sha256 && ditto -x -k $z $(app_install_dir)"
+  echo "cd \$(mktemp -d) && curl -fLO $u && curl -fLO $u.sha256 && shasum -a 256 -c $z.sha256 && ditto -x -k $z \"$(app_install_dir)\""
 }
 
 # curl sets no quarantine attribute (a browser does), so Gatekeeper does not

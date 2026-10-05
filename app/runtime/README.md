@@ -118,6 +118,17 @@ commit 82927e9. Changes here:
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked
   (`.build/qemu-gpu-runtime.test-hooks`) and `build-app.sh` rebuilds instead of
   shipping it. `Tests/virgl/test-context-loss.c` runs in every build
+- GLSL and limits that Apple's core profile accepts (one refused shader or GL
+  error stopped the guest's whole GL context; the app drew black from then on):
+  `patches/virgl-shader-core-glsl-version.patch` (GLSL 3.30, no extensions that
+  are core), `virgl-shader-shadow-lod-extension.patch`,
+  `virgl-shader-integer-outputs.patch`, `virgl-blitter-core-glsl-version.patch`,
+  `virgl-blitter-integer-msaa.patch`, `virgl-framebuffer-no-attachments.patch`,
+  `virgl-caps-sampler-limit.patch`. Checked at build time by
+  `Tests/virgl/test-core-glsl-shaders.c`, `test-blitter-shaders.c`,
+  `test-empty-framebuffer.c` and `test-sampler-limit.c` on the Mac's OpenGL
+  (shared CGL setup: `Tests/virgl/cgl-context.h`)
+  (docs/architecture/graphics.md, ADR 0019)
 
 Every build also replays `Tests/virgl/fuzz-regressions/` (inputs that once
 crashed QEMU, asked for 4 GiB or reached past a buffer) through the fuzz

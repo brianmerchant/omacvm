@@ -15,8 +15,12 @@ final class AppState: ObservableObject {
     @Published var screen: Screen = .setup
     @Published var config: VMConfig
     @Published var message: String?
+    /// This Mac's built-in display has a notch right now (follows displays
+    /// being plugged in, the lid and resolution changes).
+    @Published var hasNotch = Mac.hasNotch
     let creator = Creator()
     var startVM: () -> Void = {}
+    private var screensObserver: NSObjectProtocol?
 
     init() {
         if let existing = VMConfig.existing() {
@@ -37,6 +41,10 @@ final class AppState: ObservableObject {
         }
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
+        screensObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hasNotch = Mac.hasNotch }
+        }
     }
 
     /// What the window shows once the install question is answered.
@@ -170,7 +178,7 @@ struct SetupView: View {
         state.config.hostname = "omarchy"
         let on = { (b: Bool) in b ? "on" : "off" }
         // Omanotch off for now: see VMConfig.features.
-        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=\(on(gestures)) omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         state.screen = .building
         state.creator.start(config: state.config, password: password)
         password = ""; password2 = ""
@@ -239,6 +247,8 @@ struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
+    @State private var keepDockAway = Settings.keepDockAway
+    @State private var escape = EscapeSetting.current()
     @State private var resourcesNote: String?
     @State private var fastNetOn = false
     @State private var fastNetBusy = false
@@ -286,8 +296,16 @@ struct ReadyView: View {
             }
             Toggle("Start in full screen", isOn: $fullScreen)
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
-            if Mac.hasNotch {
-                Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
+            Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
+                .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
+            Picker("Escape combo (⌃⌥⌘ Esc)", selection: $escape) {
+                ForEach(EscapeSetting.Choice.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .help("In a full-screen VM, Control-Option-Command-Esc swipes back to macOS with macOS's own animation, and again to the VM. The keyboard follows the pointer's monitor.")
+            .onChange(of: escape) { _, v in EscapeSetting.set(v) }
+            if state.hasNotch {
+                Toggle("Use the notch for the menu bar", isOn: $notch)
+                    .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
             fastNetwork

@@ -4,20 +4,36 @@ import SwiftUI
 /// First start from a download or build folder: the app installs itself under
 /// the name the user picks (OmacVM, Omarchy or their own) and opens from there.
 enum Installer {
-    static var isInstalled: Bool {
-        let path = Bundle.main.bundleURL.deletingLastPathComponent().standardizedFileURL.path
-        let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path
-        return path == "/Applications" || path == home
-            || UserDefaults.standard.string(forKey: "installedPath") == Bundle.main.bundleURL.standardizedFileURL.path
-            || UserDefaults.standard.bool(forKey: "skipInstall")
-            || ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] != nil
+    static var memory: InstallMemory {
+        let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        return InstallMemory(defaults: .standard, bundleID: Bundle.main.bundleIdentifier ?? "org.omacvm.app",
+                             appFolders: [home, URL(fileURLWithPath: "/Applications")])
     }
 
-    /// /Applications when this user may write there, else ~/Applications.
+    static var isInstalled: Bool {
+        memory.isInstalled(thisCopy) || ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] != nil
+    }
+
+    /// Where this copy is, as the user sees it. A download that macOS runs
+    /// from a temporary place (App Translocation, new path each time) gives
+    /// its real place, so "Run Without Installing" sticks to it.
+    static let thisCopy: URL = originalURL(of: Bundle.main.bundleURL) ?? Bundle.main.bundleURL
+
+    /// Security.framework's SecTranslocateCreateOriginalPathForURL (public
+    /// symbol, no header): nil when the app is not translocated.
+    private static func originalURL(of url: URL) -> URL? {
+        guard url.path.contains("/AppTranslocation/"),
+              let lib = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY),
+              let sym = dlsym(lib, "SecTranslocateCreateOriginalPathForURL") else { return nil }
+        typealias Fn = @convention(c) (CFURL, UnsafeMutablePointer<Unmanaged<CFError>?>?) -> Unmanaged<CFURL>?
+        let original = unsafeBitCast(sym, to: Fn.self)(url as CFURL, nil)
+        return original?.takeRetainedValue() as URL?
+    }
+
+    /// The user's own Applications folder (~/Applications): no admin rights
+    /// needed, and the omacvm command looks there first.
     static var defaultFolder: URL {
-        FileManager.default.isWritableFile(atPath: "/Applications")
-            ? URL(fileURLWithPath: "/Applications")
-            : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
     }
 
     static func validName(_ name: String) -> Bool {
@@ -28,13 +44,24 @@ enum Installer {
 
     /// FOLDER/NAME.app is this very app: nothing to copy.
     static func isSelf(name: String, in folder: URL) -> Bool {
-        folder.appendingPathComponent("\(name).app").standardizedFileURL.path == Bundle.main.bundleURL.standardizedFileURL.path
+        let target = InstallMemory.path(folder.appendingPathComponent("\(name).app"))
+        return target == InstallMemory.path(thisCopy) || target == InstallMemory.path(Bundle.main.bundleURL)
     }
 
     /// Remembers the copy in a folder of the user's choice as installed (the
     /// copies share their settings: same bundle id).
     static func markInstalled(_ app: URL) {
-        UserDefaults.standard.set(app.standardizedFileURL.path, forKey: "installedPath")
+        memory.markInstalled(app)
+    }
+
+    /// An app runs from APP (a VM's window is QEMU inside the bundle): it
+    /// must not be replaced under it.
+    static func inUse(_ app: URL) -> Bool {
+        let root = InstallMemory.path(app) + "/"
+        return NSWorkspace.shared.runningApplications.contains {
+            guard let exe = $0.executableURL, !$0.isTerminated else { return false }
+            return InstallMemory.path(exe).hasPrefix(root)
+        }
     }
 
     /// Copies this app to FOLDER/NAME.app with NAME as its name and returns the
@@ -48,6 +75,9 @@ enum Installer {
             throw HelperError.io("this app is already there under that name")
         }
         if fm.fileExists(atPath: target.path) {
+            guard !inUse(target) else {
+                throw HelperError.io("\(name) in \(folder.path) is running. Quit it (and its VM) first")
+            }
             try fm.trashItem(at: target, resultingItemURL: nil)
         }
         try fm.copyItem(at: Bundle.main.bundleURL, to: target)
@@ -80,10 +110,25 @@ enum Installer {
 
 struct InstallView: View {
     var onDone: () -> Void
-    @State private var choice = 0
-    @State private var custom = ""
-    @State private var folder = Installer.defaultFolder
+    private let memory: InstallMemory
+    @State private var choice: Int
+    @State private var custom: String
+    @State private var folder: URL
     @State private var error: String?
+
+    /// Starts on the name and folder of the copy installed before, so a new
+    /// version replaces it in place; the first install on OmacVM in the
+    /// default folder.
+    init(memory: InstallMemory = Installer.memory, firstFolder: URL = Installer.defaultFolder,
+         onDone: @escaping () -> Void) {
+        self.onDone = onDone
+        self.memory = memory
+        let pick = memory.preselection(for: Installer.thisCopy, name: "OmacVM", folder: firstFolder)
+        let preset = ["OmacVM", "Omarchy"].firstIndex(of: pick.name)
+        _choice = State(initialValue: preset ?? 2)
+        _custom = State(initialValue: preset == nil ? pick.name : "")
+        _folder = State(initialValue: pick.folder)
+    }
 
     private var name: String {
         switch choice {
@@ -113,10 +158,13 @@ struct InstallView: View {
                 Text(folder.path).foregroundStyle(.secondary)
                 Button("Change…") { pick() }
             }
+            if let replaced {
+                Text(replaced).font(.callout).foregroundStyle(.secondary)
+            }
             if let error { Text(error).foregroundStyle(.red) }
             HStack {
                 Button("Run Without Installing") {
-                    UserDefaults.standard.set(true, forKey: "skipInstall")
+                    memory.skip(Installer.thisCopy)
                     onDone()
                 }
                 Spacer()
@@ -125,6 +173,15 @@ struct InstallView: View {
                     .disabled(!Installer.validName(name))
             }
         }
+    }
+
+    /// Says so when Install replaces a copy that is there already.
+    private var replaced: String? {
+        guard Installer.validName(name), !Installer.isSelf(name: name, in: folder) else { return nil }
+        let target = folder.appendingPathComponent("\(name).app")
+        guard FileManager.default.fileExists(atPath: target.path) else { return nil }
+        let version = InstallMemory.version(of: target).map { " \($0)" } ?? ""
+        return "Replaces \(name)\(version) in this folder. Your VMs and settings stay."
     }
 
     private func pick() {

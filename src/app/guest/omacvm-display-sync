@@ -268,6 +268,26 @@ raise SystemExit(1)
 PY
 }
 
+# OmacVM.app, HDR: with the app's HDR setting on (omacvm.hdr=1 from the Mac)
+# and the 10-bit virtio-gpu module loaded (omacvm-virtio-gpu-build), the
+# output runs at 10 bits in BT.2100 PQ; QEMU shows it as HDR on the Mac.
+# QEMU's EDID has no HDR block, so the output's HDR support is stated here.
+# SDR white is 203 nits (BT.2408), which the Mac shows as its SDR white.
+# Only the main window's output (Virtual-1): the other displays' windows
+# draw through an 8-bit layer without PQ (omacvm-cocoa-displays.patch).
+hdr_fields() {
+  local OMACVM_HDR=""
+  [[ ${1:-} == Virtual-1 ]] || return 0
+  [[ -r /run/omacvm/host.env ]] && source /run/omacvm/host.env
+  [[ $OMACVM_HDR == 1 ]] || return 0
+  # The running driver must be the 10-bit one (installed and booted): the
+  # stock one is in tree, ours is out of tree (taint O).
+  [[ $(modinfo -F filename virtio-gpu 2>/dev/null) == */updates/* ]] || return 0
+  [[ $(cat /sys/module/virtio_gpu/taint 2>/dev/null) == *O* ]] || return 0
+  printf ', bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = %s, min_luminance = 0.0005, sdr_max_luminance = 203' \
+    "${OMACVM_HDRNITS:-1600}"
+}
+
 # A rule in monitors.lua that names OUTPUT (not in a comment).
 user_rule() {
   [[ -r $monitor_config ]] &&
@@ -390,7 +410,7 @@ apply_preferred_modes() {
       fi
       continue
     fi
-    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"$position\", scale = \"$scale\" })"
+    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"$position\", scale = \"$scale\"$(hdr_fields "$output") })"
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2

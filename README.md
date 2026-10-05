@@ -22,12 +22,12 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 |---|---|
 | 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. |
 | 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
-| 🎮 **Real GPU performance**<br>Vulkan, WebGPU and OpenCL in the VM. *(coming with 2.9.0)* | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
+| 🎮 **Real GPU performance**<br>A fast GPU path that keeps up with your display's refresh, up to 120 Hz. Vulkan, WebGPU and OpenCL *(coming)*. | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
 | 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
 | 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
 | ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
 | 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
-| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
+| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups, for external displays too. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
 | 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
 | 📷 **Camera and microphone**<br>Video calls in the VM. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
 | 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
@@ -51,9 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Omanotch | ✅ | ✅ | ✅ | ✅ |
 | Hardware video decoding | ✅ | ❌ | ❌ | ❌ |
 | GPU in desktop and browsers | ✅ | ✅ | ✅ | ✅ |
-| Vulkan, WebGPU, OpenCL | 🔜 2.9.0 | ❌ | ❌ | ❌ |
+| Vulkan, WebGPU, OpenCL | 🔜 ⁴ | ❌ | ❌ | ❌ |
 | External monitors | ✅ | ❌ | ✅ | ✅ |
-| 120 Hz ProMotion | 🔜 2.9.0 | ✅ | ✅ | ✅ |
+| 120 Hz ProMotion | ✅ | ✅ | ✅ | ✅ |
 | Trackpad gestures | ✅ | ✅ | ✅ | ✅ |
 | Momentum scrolling (optional) | ✅ | ✅ | ✅ | ✅ |
 | Cmd as Super | ✅ | ✅ | ✅ | ✅ ¹ |
@@ -61,16 +61,17 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Battery in the bar | ✅ | ✅ | ✅ | ✅ |
 | Volume and brightness | ✅ | ✅ | ✅ | ✅ |
 | Keyboard backlight (Shift+F1/F2) | ✅ | ✅ | ✅ | ✅ |
+| External display brightness | ✅ | ✅ ⁵ | ✅ ⁵ | ✅ ⁵ |
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
 | Prebuilt VM (5 min) | 🔜 ³ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes · ⁴ Vulkan since 2.9.0 as a hidden, experimental switch; WebGPU and OpenCL come later · ⁵ with the VM in full screen on that display
 
 <p align="center">
-  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 22, 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 18 (2.9.0 release candidate, in a window with another VM running), 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">
 </p>
 
 Full comparison with benchmarks: [docs/compare.md](docs/compare.md).
@@ -131,9 +132,9 @@ omacvm resources --vm NAME      # change its CPUs and memory
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
 omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.
 
-Put the VM in full screen for the gestures and media keys. **⌃⌥⌘ Esc** gives
-the trackpad back to macOS, for example to swipe to your other Spaces; press it
-again to hand it back ([more](docs/features.md#full-screen-and-the-escape-keys)).
+Put the VM in full screen for the gestures. **⌃⌥⌘ Esc** swipes the monitor
+under the pointer from the VM back to macOS; press it there again to swipe
+back into the VM ([more](docs/features.md#full-screen-and-the-escape-keys)).
 Everything else: [docs/guide.md](docs/guide.md).
 
 ## How it works
@@ -153,8 +154,9 @@ Start with `omacvm check`: it names what is wrong and what to do.
 
 - **The Mac's menu bar stays over the full-screen VM**: System Settings › Menu
   Bar › Automatically hide and show the menu bar: **In Full Screen Only**.
-- **Gestures do nothing**: the VM must be full screen and in front; ⌃⌥⌘ Esc
-  may have handed the trackpad to macOS (press it again).
+- **Gestures do nothing**: the VM must be full screen and in front; if ⌃⌥⌘ Esc
+  left you in the VM without the trackpad, press it again. `omacvm check`
+  says when the helpers miss a permission.
 - **"answers with another SSH host key"** after a rebuild:
   `omacvm apply --vm NAME --reset-host-key`.
 

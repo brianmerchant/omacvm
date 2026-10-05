@@ -20,6 +20,10 @@
 //   POST /display/brightness   {"brightness": 0..1} or {"delta": -1..1}
 //   POST /display/night-shift  {"enabled": true|false|"toggle", "strength": 0..1}
 //   POST /display/true-tone    {"enabled": true|false|"toggle"}
+//   GET  /display/external     every external display: how its brightness is set (ddc, apple or none + reason)
+//   GET  /display/external-brightness[?x=&y=&width=&height=]   the brightness (0-100) of the external
+//                          display the VM is on; the box: an OmacVM.app output from its layout
+//   POST /display/external-brightness[?box]  {"brightness": 0-100} or {"delta": -100..100}
 //   GET  /wifi/password[?ssid=]  saved password + QR string (macOS asks first)
 //   GET  /bluetooth        Bluetooth power and paired devices (kind, connected, battery)
 //   POST /bluetooth/power      {"enabled": true|false|"toggle"}
@@ -80,7 +84,8 @@ let isoFormat = ISO8601DateFormatter()
 func log(_ s: String) { print("\(logFormat.string(from: Date())) omacvm-bridge: \(s)") }
 
 // ---- token ----
-let supportDir = FileManager.default.homeDirectoryForCurrentUser
+// OMACVM_BRIDGE_SUPPORT_DIR: a test Bridge's own token and config (never the installed one's).
+let supportDir = ProcessInfo.processInfo.environment["OMACVM_BRIDGE_SUPPORT_DIR"] ?? FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Application Support/omacvm-bridge").path
 let tokenPath = supportDir + "/token"
 
@@ -135,6 +140,7 @@ let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
+let externalBrightness = ExternalBrightness { config.externalBrightness }
 let menuBar = MenuBar()
 
 log("starting (pid \(getpid()), token \(tokenPath))")
@@ -152,8 +158,11 @@ hub.start()
 osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
 mediaKeys.start()
+externalBrightness.onKey = { value, name in osdEvents.externalBrightnessSet(value, display: name, source: "keys") }
+externalBrightness.start()
+config.onExternalBrightness = { externalBrightness.displaysChanged() }   // off: forget the displays; on: look at them
 if config.menuBarIcon { menuBar.show() }
-log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps)")
+log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps) external_brightness=\(config.externalBrightness)")
 // A Mac mini, iMac or Studio has no keyboard light: Shift + brightness stays macOS's.
 log("keyboard light: \(KeyboardLight.get() != nil ? "found" : "none on this Mac")")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)

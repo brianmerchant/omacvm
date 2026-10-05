@@ -1,24 +1,51 @@
+From: OmacVM
+Subject: [PATCH] cocoa: hidden or background windows for tests
+
+OMACVM_COCOA_HIDDEN=1 keeps the VM out of sight (no window, no Dock icon)
+for tests that need the GPU but not the screen (video decode checks).
+OMACVM_BACKGROUND=1 opens the window behind the others and never takes the
+focus, for test runs while someone works at the Mac (Venus, GPU tests).
+Neither is set by OmacVM.app.
+
+Applies after omacvm-cocoa-displays.patch, which has its own test mode
+(OMACVM_TEST_SKIP_DISPLAYS) at the same two places; this patch merges the
+former qemu-cocoa-hidden-for-tests.patch and omacvm-cocoa-background.patch.
+Upstream: not applicable (test switches).
+Test: a VM started with each switch: no window / window behind, the
+front app keeps the focus.
+
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -1942,7 +1942,9 @@
+@@ -1942,7 +1942,11 @@ - (id) init
              ? [NSString stringWithUTF8String:qemu_name]
              : @"QEMU"];
          [window setContentView:cocoaView];
 -        if (omacvm_test_mode()) {
 +        if (getenv("OMACVM_COCOA_HIDDEN")) {
 +            [window orderOut:self];
++        } else if (getenv("OMACVM_BACKGROUND")) {
++            [window orderBack:self];
 +        } else if (omacvm_test_mode()) {
              [window orderFront:self];   /* OmacVM test: never take the focus */
          } else {
              [window makeKeyAndOrderFront:self];
-@@ -4298,7 +4300,9 @@
+@@ -4298,13 +4302,17 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
 -    if (!omacvm_test_mode()) {
-+    /* OmacVM: OMACVM_COCOA_HIDDEN=1 keeps the VM out of sight (no window, no
-+     * Dock icon) for tests that need the GPU but not the screen. */
-+    if (!omacvm_test_mode() && !getenv("OMACVM_COCOA_HIDDEN")) {
++    /* OmacVM tests: OMACVM_COCOA_HIDDEN=1 keeps the VM out of sight (no
++     * window, no Dock icon) for tests that need the GPU but not the screen;
++     * OMACVM_BACKGROUND=1 opens the window behind the others, never active. */
++    bool background = getenv("OMACVM_COCOA_HIDDEN") || getenv("OMACVM_BACKGROUND");
++    if (!omacvm_test_mode() && !background) {
          TransformProcessType(&psn, kProcessTransformToForegroundApplication);
      }
  
+     [[NSProcessInfo processInfo] setProcessName:omacvm_product_name()];
+     [QemuApplication sharedApplication];
+-    if (omacvm_test_mode()) {
++    if (omacvm_test_mode() || background) {
+         /* OmacVM test: windows, but never the focus (the user works meanwhile). */
+         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+     }

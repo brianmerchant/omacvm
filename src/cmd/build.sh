@@ -19,7 +19,7 @@
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
-#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery idle-lock autologin thp-kernel)
+#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery external-brightness idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+, UTM 5, VMware Fusion 13+ or OmacVM.app, and
 # Homebrew's zstd + e2fsprogs (not for OmacVM.app, which builds the VM with its
@@ -54,14 +54,14 @@ linux_name() {
 }
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
-BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
+BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=1; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; EXT_BRIGHTNESS=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0; IMAGE=0; SOURCE=""
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
 feature_flag() {   # NAME on|off
   local v; [[ $2 == on ]] && v=1 || v=0
   case $1 in
-    bridge) BRIDGE=$v; (( v )) || WALLPAPER=0 ;;
+    bridge) BRIDGE=$v; (( v )) || { WALLPAPER=0; EXT_BRIGHTNESS=0; } ;;
     wallpaper) WALLPAPER=$v ;;
     gestures) GESTURES=$v ;;
     scroll-momentum) GLIDE=$v ;;
@@ -69,6 +69,7 @@ feature_flag() {   # NAME on|off
     mac-clock) MAC_CLOCK=$v ;;
     camera) CAMERA=$v ;;
     battery) BATTERY=$v ;;
+    external-brightness) EXT_BRIGHTNESS=$v ;;
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
     thp-kernel) THP=$v ;;
@@ -359,7 +360,7 @@ fvar() {
   case $1 in
     bridge) echo BRIDGE ;; wallpaper) echo WALLPAPER ;; gestures) echo GESTURES ;;
     scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; camera) echo CAMERA ;; idle-lock) echo IDLE_LOCK ;;
-    battery) echo BATTERY ;;
+    battery) echo BATTERY ;; external-brightness) echo EXT_BRIGHTNESS ;;
     autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;;
   esac
 }
@@ -394,7 +395,7 @@ if (( ! YES )); then
   for ((i = 0; i < ${#UI_KEYS[@]}; i++)); do fput "${UI_KEYS[$i]}" "${UI_ON[$i]}"; done
 fi
 (( GESTURES )) || GLIDE=0
-(( BRIDGE )) || WALLPAPER=0
+(( BRIDGE )) || { WALLPAPER=0; EXT_BRIGHTNESS=0; }
 
 # ---------- 4. you ----------
 : "${FULL:=$(id -F 2>/dev/null || echo "$U")}"
@@ -423,7 +424,7 @@ esac
 (( IMAGE )) && { KB=us; KB_NOTE=""; KB_SHOWN=us; TZ_MAC=UTC; LANG_VM=en_US.UTF-8; }
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
-       mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
+       mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" external-brightness "$EXT_BRIGHTNESS" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
   (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."
@@ -777,7 +778,7 @@ cat <<EOF
   One-time steps on the Mac:
 $mac_steps
   In full screen, the trackpad and ⌘ shortcuts belong to Omarchy.
-  ${UB}⌃⌥⌘ Esc (Control + Option + Command + Escape) gives them back to macOS.${UR}
+  ${UB}⌃⌥⌘ Esc (Control + Option + Command + Escape) takes you back to macOS; in macOS, back into the VM.${UR}
 
   SSH: ssh -i "$KEY" $ssh_to
   Check everything: omacvm check --vm "$VM"

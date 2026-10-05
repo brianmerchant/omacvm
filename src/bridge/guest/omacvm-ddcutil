@@ -1,0 +1,78 @@
+#!/bin/bash
+# omacvm-ddcutil, installed as /usr/local/bin/ddcutil (feature external-brightness):
+# Omarchy's brightness keys, `omarchy brightness display` and its monitor
+# panel drive an external display over DDC/CI with ddcutil
+# (omarchy-brightness-display-ddc: `detect --brief`, `getvcp 10 --brief`,
+# `setvcp 10 N` on the focused output's I2C bus). A VM's outputs (Virtual-N)
+# have no I2C bus: this answers those three through OmacVM Bridge, which sets
+# the external Mac display the output is on (DDC/CI there, or an Apple
+# display's own control) and refuses the Mac's built-in display, as before.
+# An output's "bus" is its number (Virtual-2: bus 2); its maximum is 100.
+# Anything else goes to the real ddcutil (/usr/bin/ddcutil) when installed.
+set -uo pipefail
+REAL=${OMACVM_DDCUTIL_REAL:-/usr/bin/ddcutil}
+BRIDGE=${OMACVM_DDCUTIL_BRIDGE:-/usr/local/bin/omacvm-bridge}
+DRM=${OMACVM_DDCUTIL_DRM:-/sys/class/drm}
+[[ -r /etc/omacvm/env ]] && source /etc/omacvm/env
+RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+args=("$@")
+real() {
+  [[ -x $REAL ]] && exec "$REAL" "${args[@]}"
+  echo "ddcutil: not installed (OmacVM answers only detect, getvcp 10 and setvcp 10)" >&2
+  exit 1
+}
+
+bus=""; words=()
+while (( $# )); do
+  case $1 in
+    --bus|-b) bus=${2:-}; shift 2 || shift ;;
+    --bus=*) bus=${1#--bus=}; shift ;;
+    --skip-ddc-checks|--noverify|--brief|-t|--terse) shift ;;
+    -*) real ;;
+    *) words+=("$1"); shift ;;
+  esac
+done
+
+# The VM's connected outputs, without the one on the Mac's built-in display
+# (OmacVM.app names it; the Mac would refuse it anyway).
+outputs() {
+  local s n builtin=""
+  [[ -r $RUNTIME/omacvm/builtin ]] && read -r builtin < "$RUNTIME/omacvm/builtin"
+  for s in "$DRM"/card*-Virtual-*/status; do
+    [[ -r $s && $(<"$s") == connected ]] || continue
+    n=${s%/status}; n=${n##*-Virtual-}
+    [[ $n =~ ^[0-9]+$ && Virtual-$n != "$builtin" ]] && echo "$n"
+  done | sort -un
+}
+
+# Off OmacVM.app the Mac picks the display of the VM window in front, so only
+# Hyprland's focused output may ask (another one would set the wrong display).
+may_ask() {
+  [[ ${OMACVM_VM_TYPE:-} == app ]] && return 0
+  local f
+  f=$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused == true) | .name' 2>/dev/null) || return 0
+  [[ -z $f || $f == "Virtual-$1" ]]
+}
+
+case "${words[0]:-}:${words[1]:-}" in
+  detect:*)
+    i=0
+    for n in $(outputs); do
+      i=$((i + 1))
+      printf 'Display %d\n   I2C bus:  /dev/i2c-%s\n   DRM connector:           card0-Virtual-%s\n   Monitor:                 OmacVM:Mac display:Virtual-%s\n\n' "$i" "$n" "$n" "$n"
+    done
+    (( i )) || echo "No displays found."
+    ;;
+  getvcp:10|getvcp:0x10)
+    [[ $bus =~ ^[0-9]+$ ]] && may_ask "$bus" || exit 1
+    p=$("$BRIDGE" external-brightness --output "Virtual-$bus" 2>/dev/null | jq -r '.brightness // empty' 2>/dev/null)
+    [[ $p =~ ^[0-9]+$ ]] || exit 1
+    echo "VCP 10 C $p 100"
+    ;;
+  setvcp:10|setvcp:0x10)
+    v=${words[2]:-}
+    [[ $bus =~ ^[0-9]+$ && $v =~ ^[0-9]+$ ]] && (( 10#$v <= 100 )) && may_ask "$bus" || exit 1
+    "$BRIDGE" external-brightness --output "Virtual-$bus" "$((10#$v))" >/dev/null 2>&1 || exit 1
+    ;;
+  *) real ;;
+esac

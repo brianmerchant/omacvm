@@ -1,7 +1,12 @@
-// Media keys (stage 1c): while the VM is full screen, the volume, brightness
-// and keyboard-backlight keys are swallowed (no macOS popup) and applied here
-// (Shift + brightness: the keyboard backlight, as in Omarchy); every change, ours or not, goes out as an "osd" event so the VM
-// can draw its own popup. Plus the config file and the menu-bar switch.
+// Media keys (stage 1c): while a VM is in front (OmacVM.app full screen or in
+// a window; Parallels, UTM and Fusion full screen), the volume, brightness and
+// keyboard-backlight keys are swallowed (no macOS popup) and applied here
+// (Shift + brightness: the keyboard backlight, as in Omarchy); every change,
+// ours or not, goes out as an "osd" event so the VM can draw its own popup.
+// A Mac output without a software volume (an audio interface such as a
+// Scarlett 2i2), and play/pause, next and previous, go into an OmacVM.app VM
+// as its own keys (vm-keys.swift). Which key goes where: MediaRoute
+// (keys-model.swift). Plus the config file and the menu-bar switch.
 import AppKit
 import ApplicationServices
 
@@ -11,21 +16,50 @@ final class Config {
   var captureKeys = true       // media keys go to the VM while it is full screen
   var menuBarIcon = true
   var keyboardLowSteps = true  // keyboard light: KeyboardLight.lowSteps below macOS's lowest step
+  var externalBrightness = true  // brightness keys set the external display a VM is on (external-brightness.swift)
+  var onExternalBrightness: (() -> Void)?   // external_brightness switched in the file
+  private var stamp: Date?
 
   init() {
-    guard let d = FileManager.default.contents(atPath: path),
-          let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { save(); return }
+    guard load() else { save(); return }
+    if !has("keyboard_low_steps") || !has("external_brightness") { save() }   // shows the switches in the file
+  }
+
+  private var object: [String: Any]? {
+    guard let d = FileManager.default.contents(atPath: path) else { return nil }
+    return try? JSONSerialization.jsonObject(with: d) as? [String: Any]
+  }
+
+  private func has(_ key: String) -> Bool { object?[key] != nil }
+
+  private func load() -> Bool {
+    stamp = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    guard let o = object else { return false }
     captureKeys = o["capture_keys"] as? Bool ?? captureKeys
     menuBarIcon = o["menu_bar_icon"] as? Bool ?? menuBarIcon
     keyboardLowSteps = o["keyboard_low_steps"] as? Bool ?? keyboardLowSteps
-    if o["keyboard_low_steps"] == nil { save() }   // shows the switch in the file
+    externalBrightness = o["external_brightness"] as? Bool ?? externalBrightness
+    return true
+  }
+
+  /// omacvm apply switches external_brightness in the file: taken without a restart.
+  func reloadIfChanged() {
+    let now = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    guard now != stamp else { return }
+    let was = externalBrightness
+    _ = load()
+    guard was != externalBrightness else { return }
+    log("config: external_brightness=\(externalBrightness)")
+    onExternalBrightness?()
   }
 
   func save() {
-    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps]
+    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps,
+                            "external_brightness": externalBrightness]
     if let d = try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys]) {
       FileManager.default.createFile(atPath: path, contents: d)
     }
+    stamp = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
   }
 }
 
@@ -41,6 +75,9 @@ enum Brightness {
   private static let setFn = dlsym(lib, "DisplayServicesSetBrightness").map { unsafeBitCast($0, to: Set.self) }
   private static let canFn = dlsym(lib, "DisplayServicesCanChangeBrightness").map { unsafeBitCast($0, to: Can.self) }
 
+  /// The display get() and set() use (MediaRoute: whether a key on the VM's display may).
+  static var displayID: CGDirectDisplayID? { display }
+
   /// The built-in display; on a Mac without one (or with the lid closed) the
   /// display macOS dims itself (Studio Display, LG UltraFine), the main one
   /// first. nil when there is none.
@@ -55,7 +92,14 @@ enum Brightness {
   }
 
   static func get() -> Float? {
-    guard let getFn, let d = display else { return nil }
+    guard let d = display else { return nil }
+    return level(d)
+  }
+
+  /// Any display macOS dims itself (built-in, Apple's and LG UltraFine
+  /// displays); nil for the others (DDC/CI monitors).
+  static func level(_ d: CGDirectDisplayID) -> Float? {
+    guard let getFn else { return nil }
     var v: Float = 0
     return getFn(d, &v) == 0 ? v : nil
   }
@@ -181,6 +225,11 @@ final class OSDEvents {
     }
   }
 
+  /// An external display's brightness changed (external-brightness.swift).
+  func externalBrightnessSet(_ value: Int, display: String, source: String) {
+    q.async { [self] in emit("brightness", value: value, muted: false, source: source, device: display) }
+  }
+
   func keyboardSet(source: String) {
     q.async { [self] in
       emit("keyboard", value: KeyboardLight.get().map(percent), muted: false, source: source, device: "Keyboard")
@@ -199,95 +248,233 @@ final class OSDEvents {
   }
 }
 
-// ---- media key capture ----
-enum MediaKey: Int {   // NX_KEYTYPE_* (IOKit/hidsystem/ev_keymap.h)
-  case volumeUp = 0, volumeDown = 1, brightnessUp = 2, brightnessDown = 3, mute = 7
-  case keyboardUp = 21, keyboardDown = 22, keyboardToggle = 23
-}
+// ---- media key capture (MediaKey and the rules: keys-model.swift) ----
 
 final class MediaKeys {
   private var tap: CFMachPort?
+  private var source: CFRunLoopSource?
+  private var rearm = TapRearm()
   private var askedAX = false
   private let work = DispatchQueue(label: "omacvm-bridge.keys")
-  private(set) var vmFullScreen = false
+  private(set) var vmInFront = false
+  private let vmKeys = VMKeys()
+  private var once = OnceLog()          // main thread
+  private var permissions: String?      // main thread: the last "permissions:" line
+  private let brightnessKeys = BrightnessKeys()
+  private var brightnessOnce = BrightnessOnce()   // main thread
+  private var ownSteps = OwnSteps()               // main thread
 
   var status: String {
     if !config.captureKeys { return "Media keys: off (macOS handles them)" }
     if tap == nil { return "Media keys: waiting for Accessibility permission" }
-    return vmFullScreen ? "Media keys: going to the VM" : "Media keys: armed (VM not full screen)"
+    return vmInFront ? "Media keys: going to the VM" : "Media keys: armed (no VM in front)"
+  }
+
+  /// Logged at start and whenever one changes; omacvm check reads the last
+  /// line. The media keys need Accessibility; Input Monitoring is shown too.
+  private func logPermissions() {
+    let p = "Accessibility \(AXIsProcessTrusted() ? "granted" : "MISSING"), " +
+      "Input Monitoring \(CGPreflightListenEventAccess() ? "granted" : "MISSING")"
+    guard p != permissions else { return }
+    permissions = p
+    log("permissions: \(p)")
   }
 
   func start() {
+    brightnessKeys.onKey = { [weak self] key in self?.keyboardBrightness(key) }
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
     t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
+    // An app switch is checked at once, not up to 2 s later.
+    NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                      object: nil, queue: .main) { [weak self] _ in self?.check() }
     check()
   }
 
-  /// Creates the tap once Accessibility is granted; keeps it enabled.
+  /// Creates the tap once Accessibility is granted; keeps it enabled, and
+  /// creates it again when an OmacVM VM comes to the front (TapRearm) or
+  /// macOS invalidated it. Main thread.
   func check() {
+    config.reloadIfChanged()
+    logPermissions()
+    let front = NSWorkspace.shared.frontmostApplication
+    // An OmacVM.app VM, also when LaunchServices names no executable for QEMU.
+    let vm = VMApp.of(front) == .omacvm ? front?.processIdentifier : nil
+    let again = rearm.front(vm)
     guard config.captureKeys else { return }
-    if let tap { if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }; return }
+    brightnessKeys.ensure()
+    if let tap {
+      if !CFMachPortIsValid(tap) { install(again: "macOS invalidated it") }
+      else if again { install(again: "an OmacVM VM came to the front") }
+      else if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
+      return
+    }
     if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
       if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)") }
       askedAX = true
       return
     }
+    install(again: nil)
+  }
+
+  /// The new tap goes in before the old one is removed: no gap without one.
+  /// A failed re-creation keeps the old tap and is logged once.
+  /// At the HID level: on macOS 27 (Mac mini, Magic Keyboard) the volume keys
+  /// never reach a session-level tap, only play/next/previous do.
+  private func install(again why: String?) {
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
-    guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+    guard let t = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
-      if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { mediaKeys.check() }
+      // check() may create a new tap and invalidate this one: not from inside its own callback.
+      if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { DispatchQueue.main.async { mediaKeys.check() } }
       return mediaKeys.handle(type, event) ? nil : Unmanaged.passUnretained(event)
-    }, userInfo: nil) else {
-      log("media keys: cannot create the event tap although Accessibility is granted; retrying")
+    }, userInfo: nil), let s = CFMachPortCreateRunLoopSource(nil, t, 0) else {
+      if let why {
+        if rearm.failed() { log("media keys: cannot create the event tap again (\(why)); keeping the old one") }
+      } else {
+        log("media keys: cannot create the event tap although Accessibility is granted; retrying")
+      }
       return
     }
-    CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, t, 0), .commonModes)
+    CFRunLoopAddSource(CFRunLoopGetMain(), s, .commonModes)
+    if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes); CFRunLoopSourceInvalidate(source) }
+    if let tap { CFMachPortInvalidate(tap) }
     tap = t
-    log("media keys: event tap installed")
+    source = s
+    rearm.worked()
+    log(why.map { "media keys: event tap created again (\($0))" } ?? "media keys: event tap installed")
   }
 
-  /// Parallels (prl_client_app), UTM, VMware Fusion or OmacVM.app is frontmost and its VM window spans a whole
-  /// display (it sits below the menu bar/notch strip, so allow a gap on top).
-  private func parallelsFullScreen() -> Bool {
-    guard let app = NSWorkspace.shared.frontmostApplication,
-          ["prl_client_app", "UTM", "VMware Fusion", "OmacVM"].contains(app.executableURL?.lastPathComponent ?? ""),
-          let wins = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-    else { return false }
-    var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0
-    CGGetActiveDisplayList(16, &ids, &n)
-    let displays = ids.prefix(Int(n)).map { CGDisplayBounds($0) }
-    return wins.contains { w in
-      guard w[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier, w[kCGWindowLayer as String] as? Int == 0,
-            let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) else { return false }
-      return displays.contains { abs(r.width - $0.width) < 2 && r.height >= $0.height - 80 && abs(r.minX - $0.minX) < 2 }
-    }
+  /// The VM app in front and the display it is on: OmacVM.app also in a
+  /// window, Parallels, UTM and VMware Fusion full screen (their VM window
+  /// spans a display below the menu bar or notch strip).
+  private func frontVM(_ front: FrontWindows) -> FrontVM? {
+    guard let app = front.app, let kind = VMApp.of(app), let t = VMScreens.front(windowed: false, front) else { return nil }
+    let omacvm = kind == .omacvm
+    return FrontVM(omacvm: omacvm, fullScreen: t.fullScreen, display: t.display.id, builtin: t.display.builtin,
+                   vmKeys: omacvm && vmKeys.socket(for: app.processIdentifier) != nil)
   }
 
-  /// Runs in the tap callback (main thread): true = swallow the event.
-  func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-    guard config.captureKeys, type.rawValue == 14, let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
-    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
-    guard var key = MediaKey(rawValue: code) else { return false }
-    vmFullScreen = parallelsFullScreen()
-    // As in Omarchy: Shift + brightness keys = keyboard backlight (a MacBook has
-    // no keys of its own for it), Option + brightness keys = small steps.
-    let shift = event.flags.contains(.maskShift), option = event.flags.contains(.maskAlternate)
+  /// The VM in front, the key after Shift (as in Omarchy: Shift + brightness
+  /// keys = keyboard backlight, a MacBook has no keys of its own for it;
+  /// Option + brightness keys = small steps) and where it goes (MediaRoute,
+  /// keys-model.swift). nil: no VM in front.
+  private func decide(_ pressed: MediaKey, _ flags: CGEventFlags, _ front: FrontWindows)
+    -> (vm: FrontVM, key: MediaKey, route: KeyRoute, fine: Bool)? {
+    let vm = frontVM(front)
+    vmInFront = vm != nil
+    guard let vm else { return nil }
+    var key = pressed
+    let shift = flags.contains(.maskShift), option = flags.contains(.maskAlternate)
     if shift && !option {
       if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
     }
-    guard vmFullScreen, canApply(key) else { return false }   // macOS handles it as usual
-    let fine = option
-    if down { work.async { self.apply(key, fine: fine) } }   // key-up is swallowed too
+    // Only what this key needs is asked (CoreAudio, the display cache).
+    let volume = key == .volumeUp || key == .volumeDown, brightness = key == .brightnessUp || key == .brightnessDown
+    let route = MediaRoute.route(key, vm: vm,
+                                 volumeSettable: volume && audio.outputVolumeSettable,
+                                 muteSettable: key == .mute && audio.outputMuteSettable,
+                                 macBrightness: brightness ? Brightness.displayID : nil,
+                                 external: brightness ? externalState(vm) : .unknown,
+                                 keyboardLight: [.keyboardUp, .keyboardDown, .keyboardToggle].contains(key) && KeyboardLight.get() != nil)
+    return (vm, key, route, option)
+  }
+
+  /// Runs in the tap callback (main thread): true = swallow the event. Where
+  /// each key goes: MediaRoute (keys-model.swift).
+  func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+    guard config.captureKeys, type.rawValue == 14, event.getIntegerValueField(.eventSourceUserData) != VMKeys.marker,
+          let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
+    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
+    guard let pressed = MediaKey(rawValue: code) else { return false }
+    let front = FrontWindows()   // one copy of the window list for every question below
+    guard let d = decide(pressed, event.flags, front) else { return false }   // no VM: macOS's keys
+    let (vm, key, route, option) = d
+    switch route {
+    case .macOS(let why):
+      // Never swallowed without a word: macOS gets it, and the log says why once.
+      if let why, down, once.first("\(key) \(vm.display) \(why)") { log("media key \(key): to macOS: \(why)") }
+      return false
+    case .external, .mac:
+      // The same press read from the keyboard already acted (BrightnessKeys): swallowed only.
+      let brightness = pressed == .brightnessUp || pressed == .brightnessDown
+      if down, brightness, !brightnessOnce.take(.tap, pressed, at: ProcessInfo.processInfo.systemUptime) { return true }
+      if case .external(let id) = route {
+        if down { ownSteps.stepped(id, at: ProcessInfo.processInfo.systemUptime); externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
+      } else if down {
+        if brightness, let id = Brightness.displayID { ownSteps.stepped(id, at: ProcessInfo.processInfo.systemUptime) }
+        work.async { self.apply(key, fine: option) }   // key-up is swallowed too
+      }
+    case .vm(let qcode):
+      guard down else { return true }
+      guard let pid = front.app?.processIdentifier, let path = vmKeys.socket(for: pid) else { return false }
+      work.async {
+        let ok = VMKeys.press(qcode, socket: path)
+        DispatchQueue.main.async { self.typed(key, into: pid, ok) }
+      }
+    }
     return true
   }
 
-  private func canApply(_ key: MediaKey) -> Bool {
-    switch key {
-    case .volumeUp, .volumeDown: audio.outputVolumeSettable
-    case .mute: audio.outputMuteSettable
-    case .brightnessUp, .brightnessDown: Brightness.get() != nil
-    case .keyboardUp, .keyboardDown, .keyboardToggle: KeyboardLight.get() != nil
+  /// A brightness key read from the keyboard (main thread). Only while an
+  /// OmacVM VM is in front, to the display the rule picks (MediaRoute);
+  /// anything else is macOS's, which handles these keys itself.
+  private func keyboardBrightness(_ pressed: MediaKey) {
+    guard config.captureKeys, let d = decide(pressed, CGEventSource.flagsState(.combinedSessionState), FrontWindows()),
+          d.vm.omacvm else { return }
+    let (vm, key, route, fine) = d
+    let display: CGDirectDisplayID?
+    switch route {
+    case .macOS(let why):
+      if let why, once.first("keyboard \(key) \(vm.display) \(why)") { log("brightness key \(key) (from the keyboard): left to macOS: \(why)") }
+      return
+    case .vm: return
+    case .external(let id): display = id
+    case .mac: display = key == .keyboardUp || key == .keyboardDown ? nil : Brightness.displayID
+    }
+    guard brightnessOnce.take(.keyboard, pressed, at: ProcessInfo.processInfo.systemUptime) else { return }
+    if once.first("keyboard brightness") { log("brightness keys: read from the keyboard while an OmacVM VM is in front (macOS gives no key event for them)") }
+    let act = { [self] in
+      if case .external(let id) = route { externalBrightness.step(id, up: key == .brightnessUp, fine: fine) }
+      else { work.async { self.apply(key, fine: fine) } }
+    }
+    // macOS may still handle the key itself (it reaches no tap, so it cannot be
+    // swallowed): a moment later, a display macOS dims that already changed is
+    // not stepped again, unless the Bridge stepped it itself meanwhile (quick
+    // presses, a held key: OwnSteps), so every press steps once.
+    guard let display, let before = Brightness.level(display) else { act(); return }
+    let at = ProcessInfo.processInfo.systemUptime
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
+      if ownSteps.macOSDidIt(display, pressAt: at, before: before, after: Brightness.level(display)) {
+        if once.first("macOS brightness \(display)") { log("brightness key \(key): macOS changed display \(display) itself: not stepped again") }
+        return
+      }
+      ownSteps.stepped(display, at: ProcessInfo.processInfo.systemUptime)
+      act()
+    }
+  }
+
+  /// After a key went to the VM (main thread): the first one per VM is
+  /// logged; one that did not go through goes to macOS instead.
+  private func typed(_ key: MediaKey, into pid: pid_t, _ ok: Bool) {
+    if ok {
+      if once.first("typed \(pid)") { log("media keys: typed into the VM (pid \(pid)) through QEMU's control socket, e.g. \(key)") }
+      return
+    }
+    if once.first("untyped \(pid)") { log("media key \(key): the VM did not take it (QEMU's control socket busy or gone): to macOS") }
+    VMKeys.repost(key)
+  }
+
+  /// What is known about the VM's display when it is external (cache only:
+  /// never waits; an unknown one is looked at meanwhile).
+  private func externalState(_ vm: FrontVM) -> ExternalState {
+    guard !vm.builtin else { return .unknown }
+    guard config.externalBrightness else { return .off }
+    switch externalBrightness.method(vm.display) {
+    case nil: return .unknown
+    case .some(let m) where m.works: return .works
+    case .some(.none(let why)): return .no(why)
+    default: return .unknown
     }
   }
 
@@ -314,6 +501,8 @@ final class MediaKeys {
       }
     case .keyboardToggle:
       if KeyboardLight.toggle() { osdEvents.keyboardSet(source: "keys"); result = "toggled" }
+    case .play, .next, .previous, .fast, .rewind:
+      return   // the VM's (MediaRoute), never set here
     }
     log("media key \(key)\(fine ? " (fine)" : "") -> \(result)")
   }
@@ -338,7 +527,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
-    let capture = NSMenuItem(title: "Send Media Keys to Full-Screen VM", action: #selector(toggleCapture), keyEquivalent: "")
+    let capture = NSMenuItem(title: "Send Media Keys to the VM in Front", action: #selector(toggleCapture), keyEquivalent: "")
     capture.state = config.captureKeys ? .on : .off
     capture.target = self
     menu.addItem(capture)

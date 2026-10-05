@@ -68,6 +68,7 @@ GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-o
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
+EXT_BRIGHTNESS=${OMACVM_FEATURE_external_brightness:-off}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -116,6 +117,14 @@ if [[ $BRIDGE == on ]]; then
   else bad "shared event stream" "$n connections to the Mac (widgets from before it: log out and in)"; fi
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
+  # Omarchy's brightness commands reach the external Mac display an output is on.
+  if [[ $EXT_BRIGHTNESS != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
+  elif ! grep -qs '^# omacvm-ddcutil' /usr/local/bin/ddcutil; then bad "external brightness" "/usr/local/bin/ddcutil is not OmacVM's (omacvm apply)"
+  elif ex=$(as_user omacvm-bridge external 2>/dev/null) && jq -e .displays >/dev/null 2>&1 <<<"$ex"; then
+    ok "external brightness" "$(jq -r 'if (.enabled | not) then "off on the Mac (the Bridge'"'"'s config.json)"
+      elif (.displays | length) == 0 then "no external display on the Mac now"
+      else [.displays[] | "\(.name): \(if .method == "ddc" then "DDC/CI" elif .method == "apple" then "its own control" else "not settable" end)"] | join(", ") end' <<<"$ex")"
+  else bad "external brightness" "the Bridge does not answer /display/external (an older Bridge: omacvm update on the Mac)"; fi
   # Right after the first login omacvm-plugins may still be enabling the widgets.
   for _ in $(seq 60); do
     [[ -s $H/.local/state/omacvm/pending-plugins &&
@@ -231,7 +240,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
   if [[ -f $H/.config/hypr/omacvm_glide.lua ]] && grep -qxF 'require("hypr.omacvm_glide")' "$H/.config/hypr/hyprland.lua"; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
-else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
+else skip "scroll momentum" "off (omacvm enable scroll-momentum turns it on: trackpads only)"; fi
 if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   if [[ $GESTURES == on ]]; then
     check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"

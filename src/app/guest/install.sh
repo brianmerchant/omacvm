@@ -11,6 +11,7 @@
 #    (browser-video-encode.py)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
+#  * HDR's 10-bit virtio-gpu module builder (not built until the user asks)
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
@@ -18,6 +19,12 @@ H=$(getent passwd "$U" | cut -d: -f6)
 pacman -S --needed --noconfirm qemu-guest-agent python >/dev/null 2>&1 || true
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
+# HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
+# module's builder, and a pacman hook that rebuilds it for new kernels.
+install -Dm755 virtio-gpu/omacvm-virtio-gpu-build /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-build
+install -Dm644 virtio-gpu/linux-virtio-gpu-deep-color.patch /usr/local/lib/omacvm/virtio-gpu/linux-virtio-gpu-deep-color.patch
+ln -sf /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-build /usr/local/bin/omacvm-virtio-gpu-build
+install -Dm644 virtio-gpu/95-omacvm-virtio-gpu.hook /etc/pacman.d/hooks/95-omacvm-virtio-gpu.hook
 # Clipboard both ways, over a virtio port (the agent is try-omarchy's).
 pacman -S --needed --noconfirm wl-clipboard >/dev/null 2>&1 || true
 # uaccess: the logged-in user may open the port (before 73-seat-late.rules).

@@ -42,8 +42,10 @@ hostkey_changed() {
 
 hostkey_error() {   # the VM's name (VM) and how apply names it (OMA_PIN_ARGS) come from vm_pin
   printf '\033[1;31merror:\033[0m %s answers with another SSH host key than the one OmacVM remembered for it.\n' "${VM:-the VM}" >&2
-  printf 'If you rebuilt or reinstalled it, forget the old key:\n\n  omacvm apply %s --reset-host-key\n\nIf not, something else may answer at its address: do not go on.\n' \
-    "${OMA_PIN_ARGS:-}" >&2
+  local how="omacvm apply ${OMA_PIN_ARGS:-} --reset-host-key"
+  [[ -n ${OMA_RESET_HINT:-} ]] && how=$OMA_RESET_HINT   # OmacVM.app's apply-vm.sh
+  printf 'If you rebuilt or reinstalled it, forget the old key:\n\n  %s\n\nIf not, something else may answer at its address: do not go on.\n' \
+    "$how" >&2
 }
 
 # The Bridge's token (the Bridge makes it on its first start). The VMs' gestures

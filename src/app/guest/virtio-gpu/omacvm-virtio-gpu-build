@@ -1,0 +1,74 @@
+#!/bin/bash
+# OmacVM.app, HDR (optional, off by default): build the guest's virtio-gpu
+# module with 10-bit scanout formats (linux-virtio-gpu-deep-color.patch) and
+# install it into /lib/modules/<kernel>/updates. Needs linux-aarch64-headers.
+# The driver sources are the upstream stable release of the kernel's version,
+# from kernel.org.
+# Usage (root):
+#   omacvm-virtio-gpu-build             build for the running kernel
+#   omacvm-virtio-gpu-build --kernel V  build for kernel V (pacman hook)
+#   omacvm-virtio-gpu-build --hook      build for every installed kernel that
+#                                       has headers, if HDR was turned on
+#   omacvm-virtio-gpu-build --remove    back to the stock driver
+set -euo pipefail
+marker=/etc/omacvm/virtio-gpu-deep-color
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+patch_file=${OMACVM_VIRTIO_GPU_PATCH:-$here/linux-virtio-gpu-deep-color.patch}
+
+build() {
+  local kernel=$1
+  local updates=/lib/modules/$kernel/updates/virtio-gpu.ko
+  local version=${kernel%%-*}
+  [[ $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "omacvm-virtio-gpu: unexpected kernel version $kernel" >&2; return 1; }
+  [[ -d /lib/modules/$kernel/build ]] || { echo "omacvm-virtio-gpu: no headers for $kernel (pacman -S linux-aarch64-headers)" >&2; return 1; }
+  local work
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' RETURN
+  local src=$work/drivers/gpu/drm/virtio
+  mkdir -p "$src"
+  local base="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/drivers/gpu/drm/virtio"
+  local f
+  for f in Makefile virtgpu_debugfs.c virtgpu_display.c virtgpu_drv.c virtgpu_drv.h \
+           virtgpu_fence.c virtgpu_gem.c virtgpu_ioctl.c virtgpu_kms.c virtgpu_object.c \
+           virtgpu_plane.c virtgpu_prime.c virtgpu_submit.c virtgpu_trace.h \
+           virtgpu_trace_points.c virtgpu_vq.c virtgpu_vram.c; do
+    curl --fail --silent --show-error --location --proto '=https' --retry 3 \
+      -o "$src/$f" "$base/$f?h=v$version"
+  done
+  patch -s -d "$work" -p1 -f -i "$patch_file"
+  # Out of tree: the trace header sits next to the sources.
+  sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
+  echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
+  make -s -C "/lib/modules/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules
+  install -Dm644 "$src/virtio-gpu.ko" "$updates"
+  depmod -a "$kernel"
+  echo "omacvm-virtio-gpu: installed $updates (10-bit scanout)"
+}
+
+case ${1:-} in
+  --remove)
+    rm -f /lib/modules/*/updates/virtio-gpu.ko "$marker"
+    depmod -a "$(uname -r)"
+    echo "omacvm-virtio-gpu: removed; the stock driver loads after a reboot"
+    ;;
+  --hook)
+    # After a kernel update: only if HDR was turned on before.
+    [[ -e $marker ]] || exit 0
+    for d in /lib/modules/*/build; do
+      k=$(basename "$(dirname "$d")")
+      [[ -e /lib/modules/$k/updates/virtio-gpu.ko ]] || build "$k" || true
+    done
+    ;;
+  --kernel)
+    build "${2:?--kernel needs a version}"
+    ;;
+  "")
+    build "$(uname -r)"
+    install -Dm644 /dev/null "$marker"
+    echo "omacvm-virtio-gpu: takes effect after a reboot"
+    ;;
+  *)
+    echo "usage: omacvm-virtio-gpu-build [--kernel VERSION | --hook | --remove]" >&2
+    exit 2
+    ;;
+esac

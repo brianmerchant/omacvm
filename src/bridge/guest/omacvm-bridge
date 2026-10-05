@@ -9,6 +9,9 @@
 #   omacvm-bridge mic-volume 60 | mic-mute [on|off|toggle]
 #   omacvm-bridge output <uid> | input <uid> (UIDs: omacvm-bridge audio | jq '.devices')
 #   omacvm-bridge brightness +5 | -5 | 40    the Mac's built-in display
+#   omacvm-bridge external-brightness [--output Virtual-N] [+5 | -5 | 40]
+#                                            the external Mac display this VM (output) is on
+#   omacvm-bridge external                   every external Mac display, and how its brightness is set
 #   omacvm-bridge night-shift [on|off|toggle] [strength 0-100]
 #   omacvm-bridge true-tone [on|off|toggle]
 #   omacvm-bridge password [ssid]            Wi-Fi password + QR string (the Mac asks first)
@@ -114,6 +117,31 @@ case ${1:-} in
   mic-mute) check_switch mic-mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}"), \"scope\": \"input\"}" ;;
   output|input) post "/audio/$1" "{\"uid\": \"${2:?device uid}\"}" ;;
   brightness) check_percent brightness "${2:-}"; post /display/brightness "$(level_json brightness "$2")" ;;
+  external) req "$URL/display/external" ;;
+  external-brightness)
+    shift; out=""
+    if [[ ${1:-} == --output ]]; then
+      out=${2:-}
+      [[ $out =~ ^Virtual-[0-9]+$ ]] || { echo "external-brightness: --output Virtual-N" >&2; exit 2; }
+      shift 2
+    fi
+    q=""
+    # OmacVM.app: the output's box from the app's layout says which Mac display
+    # it is on (omacvm-displays keeps it). Elsewhere the VM app in front decides.
+    if [[ ${OMACVM_VM_TYPE:-} == app && -n $out ]]; then
+      layout=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm/displays.json
+      q=$(jq -r --arg o "$out" 'first(.layout[]? | select(.output == $o)
+            | select([.x, .y, .width, .height] | all(type == "number"))
+            | "x=\(.x)&y=\(.y)&width=\(.width)&height=\(.height)") // empty' "$layout" 2>/dev/null)
+      [[ -n $q ]] || { echo "external-brightness: $out is not on a Mac display" >&2; exit 1; }
+    fi
+    if [[ -z ${1:-} ]]; then req "$URL/display/external-brightness${q:+?$q}"
+    else
+      check_percent external-brightness "$1"
+      n=$(awk -v p="$1" 'BEGIN { printf "%g", p }')   # JSON: no "+", no leading zeros
+      case $1 in +*|-*) body="{\"delta\": $n}" ;; *) body="{\"brightness\": $n}" ;; esac
+      post "/display/external-brightness${q:+?$q}" "$body"
+    fi ;;
   night-shift)
     body="{"
     if [[ ${2:-} == strength ]]; then
@@ -129,5 +157,5 @@ case ${1:-} in
     req -X POST -H 'Content-Type: application/octet-stream' -H "X-Omarchy-Theme: ${3:-}" \
       --data-binary "@$2" "$URL/wallpaper" ;;
   password) req --max-time 75 "$URL/wifi/password${2:+?ssid=$(urlencode "$2")}" ;;
-  *) sed -n '2,20s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,23s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac
