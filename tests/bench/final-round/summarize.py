@@ -138,6 +138,20 @@ def main():
     modes = [l.get("mac_state", {}).get("power_mode") for l in sorted(lines, key=lambda l: l.get("target") != "mac")]
     round_mode = next((m for m in modes if m), None)
 
+    # The app's rows name the build: "OmacVM 2.9.1", "OmacVM 3.0.0 RC2 · Vulkan".
+    labels = {}
+    for line in lines:
+        hv = str((line.get("result") or {}).get("hypervisor") or "")
+        m = re.match(r"OmacVM\.app (\S+)", hv)
+        if line["target"] in ("app", "app-rc2") and m and m.group(1) != "unknown":
+            labels[line["target"]] = "OmacVM " + m.group(1).replace("-rc", " RC").replace("-RC", " RC") + \
+                (" · Vulkan" if line["target"] == "app-rc2" else "")
+    for x in a.label:
+        tg, _, lb = x.partition("=")
+        if tg in TARGETS and lb:
+            labels[tg] = lb
+    for tg, lb in labels.items():
+        NAMES[tg] = lb
     gb = {}
     if a.geekbench_scores:
         gb = json.load(open(a.geekbench_scores))
@@ -152,6 +166,7 @@ def main():
     runs = collections.defaultdict(lambda: collections.defaultdict(list))   # target -> key -> values
     page = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))  # target -> method -> key
     missing = collections.defaultdict(dict)
+    scene_s = set()   # glmark2's seconds per scene (one value in a fair round)
     excluded, prelim, versions = [], False, collections.defaultdict(lambda: collections.defaultdict(set))
 
     def drop(line, key, why, value=None):
@@ -207,6 +222,8 @@ def main():
             elif r.get("url"):
                 drop(line, key, f"Geekbench score not read ({r['url']}): --geekbench-scores or --fetch-geekbench")
         elif t in ("vkmark", "glmark2"):
+            if t == "glmark2" and r.get("scene_seconds") is not None:
+                scene_s.add(r["scene_seconds"])
             if r.get("value") is not None:
                 runs[tg][t].append(r["value"])
             elif r.get("not_available") or r.get("error"):
@@ -265,25 +282,13 @@ def main():
     missing = {tg: d for tg, d in missing.items() if d}
 
     warnings = []
+    if len(scene_s) > 1:
+        warnings.append("glmark2 scene lengths differ: " + ", ".join(f"{x:g} s" for x in sorted(scene_s)))
     for k, per in versions.items():
         seen = {v for vs in per.values() for v in vs}
         if len(seen) > 1:
             warnings.append(f"{k} versions differ: " + "; ".join(f"{NAMES[tg]} {', '.join(sorted(vs))}" for tg, vs in sorted(per.items())))
 
-    # The app's rows name the build: "OmacVM 2.9.1", "OmacVM 3.0.0 RC2 · Vulkan".
-    labels = {}
-    for line in lines:
-        hv = str((line.get("result") or {}).get("hypervisor") or "")
-        m = re.match(r"OmacVM\.app (\S+)", hv)
-        if line["target"] in ("app", "app-rc2") and m and m.group(1) != "unknown":
-            labels[line["target"]] = "OmacVM " + m.group(1).replace("-rc", " RC").replace("-RC", " RC") + \
-                (" · Vulkan" if line["target"] == "app-rc2" else "")
-    for x in a.label:
-        tg, _, lb = x.partition("=")
-        if tg in TARGETS and lb:
-            labels[tg] = lb
-    for tg, lb in labels.items():
-        NAMES[tg] = lb
     targets = [tg for tg in TARGETS if tg in med or tg in missing]
     mac = med.get("mac", {})
     print("| | " + " | ".join(NAMES[tg] for tg in targets) + " |")
@@ -316,7 +321,8 @@ def main():
     if prelim:
         print("\nPRELIMINARY: lines from a busy or not agreed Mac are included (--include-preliminary).")
     if a.json:
-        json.dump({"baseline": "mac", "preliminary": prelim, "labels": labels, "medians": med, "missing": missing,
+        json.dump({"baseline": "mac", "preliminary": prelim, "labels": labels,
+                   "glmark2_scene_seconds": scene_s.pop() if len(scene_s) == 1 else None, "medians": med, "missing": missing,
                    "runs": {tg: dict(ks) for tg, ks in runs.items()}, "methods": methods,
                    "validation": validation, "excluded": excluded, "warnings": warnings},
                   open(a.json, "w"), indent=1)

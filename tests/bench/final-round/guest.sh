@@ -26,10 +26,13 @@ CACHE=/home/$U/.cache/omacvm-bench
 PKGS="glmark2 vkmark vulkan-tools clinfo opencl-mesa mesa-utils git cmake base-devel"
 CPU_DEV='llvmpipe|lavapipe|swiftshader|softpipe'
 as_user() {
-  local sig
+  local sig senv=()
   sig=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
+  # OmacVM's own session settings (environment.d), which sudo does not read: e.g. MESA_VK_WSI_DEBUG=sw
+  # in app VMs with Vulkan, without which a Vulkan app on Wayland ends Hyprland's GPU context.
+  while IFS= read -r l; do senv+=("$l"); done < <(cat /etc/environment.d/90-omacvm*.conf 2>/dev/null | grep -E '^[A-Z_][A-Z0-9_]*=')
   sudo -u "$U" env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE="$sig" \
-    HOME="/home/$U" OMACVM_BENCH_SRC="$B/src/bench" "$@"
+    HOME="/home/$U" OMACVM_BENCH_SRC="$B/src/bench" ${senv[@]+"${senv[@]}"} "$@"
 }
 chrome_version() {
   local c
@@ -136,9 +139,11 @@ vkmark)
   types=$(vulkaninfo --summary 2>/dev/null | sed -n 's/.*deviceType *= *//p' | sort -u | tr '\n' ' ')
   [[ -n $types ]] || { echo "{\"not_available\":\"no Vulkan device\",\"vkmark\":\"$v\"}"; exit 0; }
   [[ $types == "PHYSICAL_DEVICE_TYPE_CPU " ]] && { echo "{\"not_available\":\"CPU Vulkan only, no GPU\",\"vkmark\":\"$v\"}"; exit 0; }
-  dev=()   # the first device that is not a CPU one, where vkmark can be told
+  dev=()   # the first device that is not a CPU one, by vkmark's own list (vulkaninfo's UUIDs differ from vkmark's)
   if vkmark --help 2>&1 | grep -q -- --use-device; then
-    uuid=$(vulkaninfo --summary 2>/dev/null | awk '/deviceType *=/ { t = $NF } /deviceUUID *=/ && t != "PHYSICAL_DEVICE_TYPE_CPU" && u == "" { u = $NF } END { print u }')
+    uuid=$(as_user vkmark --list-devices 2>/dev/null | awk -v cpu="$CPU_DEV" '
+      /Device Name:/ { sub(/.*Device Name: */, ""); n = $0 }
+      /Device UUID:/ && u == "" && tolower(n) !~ cpu { u = $NF } END { print u }')
     [[ -n $uuid ]] && dev=(--use-device "$uuid")
   fi
   for ((i = 1; i <= RUNS; i++)); do

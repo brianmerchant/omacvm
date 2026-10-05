@@ -197,6 +197,8 @@ def gpu_panel(*args):
         if not base and not any(med.get(n, {}).get(key) for n, _, _ in routes):
             continue
         m = data.get("methods", {}).get(key, {}).get("method")
+        if key == "glmark2" and data.get("glmark2_scene_seconds") not in (None, 10):   # shorter scenes than glmark2's own
+            bench += f" · {data['glmark2_scene_seconds']:g} s scenes"
         tests.append((key, label, bench + (f" · {METHOD[m]}" if m in METHOD else ""), headline, base))
 
     def row_routes(key):
@@ -277,7 +279,11 @@ def gpu_panel(*args):
             first = name == routes[0][0]
             num = f"{round(p)} %" if base else f"{med[name][key]:g}"
             s.append(text(f"{tx:.1f}", by + 11.5, num, 13, INK, MONO, "600" if first else None, halo=True))
-            s.append(text(f"{tx + 10 + textw(num, 13):.1f}", by + 11.5, rl, 11, SOFT, halo=True))
+            lx = tx + 10 + textw(num, 13)
+            if lx + textw(rl, 11) > W - 12 and w > textw(rl, 11) + 16:   # no room right of a long bar: inside its end
+                s.append(text(f"{left + w - 8:.1f}", by + 11, rl, 11, BG, weight="600", anchor="end"))
+            else:
+                s.append(text(f"{lx:.1f}", by + 11.5, rl, 11, SOFT, halo=True))
         y += group + gap
     if banner:
         s.append(f'<rect x="24" y="{H - 44}" width="{W - 48}" height="28" rx="6" fill="#eb6f92" fill-opacity="0.15" stroke="#eb6f92"/>')
