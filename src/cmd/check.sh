@@ -180,7 +180,8 @@ if [[ $TYPE == app ]]; then
     # translates the VMs' addresses there itself (its VPN NAT).
     nat=$(sed -n 's/^vpn-nat: //p' <<<"$st")
     natlog=$(grep 'VPN NAT' /var/log/org.omacvm.netd.log 2>/dev/null | tail -1)
-    if [[ $natlog == *"VPN NAT: "* && $natlog != *"removed what"* ]]; then
+    natt=$(date -j -f '%Y-%m-%d %H:%M:%S' "${natlog:0:19}" +%s 2>/dev/null || echo 0)
+    if [[ $natlog == *"VPN NAT: "* && $natlog != *"removed what"* ]] && (( $(date +%s) - natt < 600 )); then
       bad "VPN NAT" "$(cut -d' ' -f3- <<<"$natlog") (a VPN connected while the VM runs may not work for it)"
     elif [[ -n $nat ]]; then ok "VPN NAT" "omacvm-netd translates the VM's addresses on $nat (came up after macOS's sharing started, e.g. a VPN)"
     elif [[ $net == vmnet ]]; then ok "VPN NAT" "not needed: macOS's sharing covers every network that is up"; fi
