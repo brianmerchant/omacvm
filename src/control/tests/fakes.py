@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import shutil
 import socket
 import tempfile
 import threading
@@ -236,6 +237,13 @@ def vm_env(tmp: str, mac_port: int, check_sock: str, extra: str = "") -> dict:
     with open(installed, "w") as f:
         json.dump({"version": "2.7.0", "parts": {"gestures": {"digest": "sha256:" + "a" * 64, "release": "2.7.0"},
                                                  "bridge": {"digest": "sha256:" + "b" * 64, "release": "2.7.0"}}}, f)
-    return {"OMACVM_SHARE": os.path.abspath(SRC), "OMACVM_ENV": env_file, "OMACVM_INSTALLED": installed,
+    # The VM's own OmacVM is pinned at 2.9.0, so a release bump of src/VERSION
+    # does not change which fake manifests count as newer.
+    share = os.path.join(tmp, "share")
+    os.makedirs(share, exist_ok=True)
+    shutil.copy(os.path.join(SRC, "features.tsv"), share)
+    with open(os.path.join(share, "VERSION"), "w") as f:
+        f.write("2.9.0\n")
+    return {"OMACVM_SHARE": share, "OMACVM_ENV": env_file, "OMACVM_INSTALLED": installed,
             "OMACVM_CHECK_SOCKET": check_sock, "OMACVM_BRIDGE_URL": f"http://127.0.0.1:{mac_port}",
             "OMACVM_BRIDGE_TOKEN_FILE": token, "OMACVM_VM_KEY_FILE": vm_key, "XDG_CACHE_HOME": os.path.join(tmp, "cache")}
