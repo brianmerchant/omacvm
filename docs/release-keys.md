@@ -113,6 +113,17 @@ out (against a shipped key, or a key a checked document named) count, and
 at most 8 of them. Junk does not count toward the 8, so it cannot crowd
 out the real ones. At most 256 files there are looked at.
 
+## Which Developer ID the fast network trusts
+
+The fast network's root service (`src/net/mac/install.sh`) takes the
+Developer ID team of the app's QEMU only when OmacVM's release key vouches
+for it: the signed update feed of that app's release lists the team, or the
+script is the app's own copy (its Fast Network button). Otherwise, for
+example an app that is not a published release, or a fake app signed with
+someone else's Developer ID, it trusts only that exact build of the QEMU
+(its cdhash), as for an app built from source. `install.sh --trust` shows
+what an install would trust.
+
 ## When the Developer ID team changes
 
 The release key, not the Apple team, decides what gets installed. So a new
