@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """docs/images/benchmarks.svg from a results JSON: each route as a share of the Mac.
 
-  chart.py docs/benchmarks/chart.json docs/images/benchmarks.svg "MacBook Pro M4 Max · macOS 15.7 · Chrome 154"
+  chart.py [--panel gpu] docs/benchmarks/chart.json docs/images/benchmarks.svg "MacBook Pro M4 Max · macOS 15.7 · Chrome 154"
 
 The JSON is report.py's ("medians", "missing"), plus optional "unreleased":
 {route: [test, ...]} for numbers from a build that is not out yet, or
@@ -9,6 +9,12 @@ The JSON is report.py's ("medians", "missing"), plus optional "unreleased":
 tagged ("not released" without a name). An optional "note" (a string, or a
 list for several lines) replaces the line under the chart. Tests without a Mac
 value are left out.
+
+--panel gpu draws the GPU panel instead (tests/bench/final-round): GPU
+throughput first, then GPU compute (vkpeak) and Basemark, macOS = 100 %. A
+route without a number gets an empty "not available" bar with the reason from
+"missing". "placeholder": true in the JSON marks the whole chart as made-up
+data (for drafts), "preliminary": true (summarize.py) as taken on a busy Mac.
 """
 import json, sys
 from xml.sax.saxutils import escape
@@ -45,8 +51,11 @@ def textw(s, size):
 
 
 def main():
-    data = json.load(open(sys.argv[1]))
-    out, subtitle = sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else ""
+    args = sys.argv[1:]
+    if args[:2] == ["--panel", "gpu"]:
+        return gpu_panel(*args[2:])
+    data = json.load(open(args[0]))
+    out, subtitle = args[1], args[2] if len(args) > 2 else ""
     med, missing = data["medians"], data.get("missing", {})
     unrel = {}  # (route, test) -> tag on the bar
     for r, ts in data.get("unreleased", {}).items():
@@ -130,6 +139,99 @@ def main():
         y += group + gap
     for i, line in enumerate(notes):
         s.append(text(W / 2, H - 14 - 16 * (len(notes) - 1 - i), line, 12, MUTED, anchor="middle"))
+    s.append('</svg>')
+    open(out, "w").write("\n".join(s) + "\n")
+
+
+GPU_TESTS = [  # key, label, benchmark, headline
+    ("gpu-throughput", "GPU throughput", "WebGL 2 shaders, offscreen 1080p", True),
+    ("vkpeak-fp32", "GPU compute", "vkpeak fp32 (Vulkan)", False),
+    ("basemark", "Browser graphics", "Basemark Web 3.0", False),
+    ("aquarium", "Browser 3D", "WebGL Aquarium, 30,000 fish", False),
+]
+
+
+def gpu_panel(src, out, subtitle=""):
+    """The GPU panel: one group per test, a bar per route, macOS = 100 %."""
+    data = json.load(open(src))
+    med, missing = data["medians"], data.get("missing", {})
+    mac = med.get("mac", {})
+    placeholder = data.get("placeholder", False)
+    banner = ("PLACEHOLDER DATA: made-up numbers to show the layout. Not measured." if placeholder else
+              "PRELIMINARY: measured on a busy Mac, not the final round." if data.get("preliminary") else None)
+    routes = [r for r in ROUTES if r[0] in med or r[0] in missing]
+    tests = [t for t in GPU_TESTS if mac.get(t[0])]
+
+    W, left, full = 1000, 250, 560
+    pitch, bar, gap, top = 22, 14, 26, 112
+    group = len(routes) * pitch
+    H = top + len(tests) * (group + gap) + (58 if banner else 34)
+
+    def share(name, key):
+        v = med.get(name, {}).get(key)
+        return None if v is None else 100 * v / mac[key]
+
+    def why(name, key):
+        return missing.get(name, {}).get(key, "not available")
+
+    desc = []
+    for key, label, bench, _ in tests:
+        parts = [f"{rl} {round(share(n, key))} percent" if share(n, key) is not None else f"{rl} {why(n, key)}"
+                 for n, rl, _ in routes]
+        desc.append(f"{label} ({bench}): " + ", ".join(parts))
+
+    s = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-labelledby="t d">',
+         '<title id="t">GPU speed of Omarchy in OmacVM.app, UTM, VMware Fusion and Parallels, as a share of macOS itself</title>',
+         f'<desc id="d">{banner + " " if banner else ""}{escape(". ".join(desc))}. macOS itself is 100 percent.</desc>',
+         '<defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><rect x="20" y="20" width="2" height="2" fill="#26233a"/></pattern>',
+         f'<pattern id="na" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="8" fill="{MUTED}" fill-opacity="0.35"/></pattern>',
+         '</defs>',
+         f'<rect width="{W}" height="{H}" fill="{BG}"/><rect width="{W}" height="{H}" fill="url(#dots)"/>',
+         text(W / 2, 34, "How fast is the GPU in a VM?", 20, weight="600", anchor="middle"),
+         text(W / 2, 56, subtitle, 13, SOFT, anchor="middle")]
+
+    items = [(rl, col) for _, rl, col in routes] + [("macOS = 100 %", None)]
+    widths = [18 + textw(rl, 13) + 22 for rl, _ in items]
+    x = (W - sum(widths) + 22) / 2
+    for (rl, col), w in zip(items, widths):
+        if col:
+            s.append(f'<rect x="{x:.0f}" y="69" width="12" height="12" rx="3" fill="{col}"/>')
+        else:
+            s.append(f'<line x1="{x + 6:.0f}" y1="67" x2="{x + 6:.0f}" y2="83" stroke="{INK}" stroke-opacity="0.6" stroke-dasharray="3 3"/>')
+        s.append(text(f"{x + 18:.0f}", 80, rl, 13, weight="600" if rl == routes[0][1] else None))
+        x += w
+
+    bottom = top + len(tests) * (group + gap) - gap
+    s.append(f'<line x1="{left + full}" y1="{top - 6}" x2="{left + full}" y2="{bottom + 4}" stroke="{INK}" stroke-opacity="0.45" stroke-dasharray="3 3"/>')
+    y = top
+    for key, label, bench, headline in tests:
+        if headline:   # the headline row sits on a faint band
+            s.append(f'<rect x="24" y="{y - 8}" width="{W - 48}" height="{group + 16}" rx="8" fill="{INK}" fill-opacity="0.04"/>')
+        s.append(text(40, y + group / 2 - 4, label, 16 if headline else 15, weight="600"))
+        s.append(text(40, y + group / 2 + 14, bench, 12, MUTED))
+        for i, (name, rl, col) in enumerate(routes):
+            by = y + i * pitch + (pitch - bar) / 2
+            p = share(name, key)
+            if p is None:   # an empty bar to 100 %, hatched, with the reason
+                s.append(f'<rect x="{left}" y="{by:.1f}" width="{full}" height="{bar}" rx="4" fill="url(#na)" stroke="{MUTED}" stroke-opacity="0.5" stroke-dasharray="4 3"/>')
+                s.append(text(left + 10, by + 11, f"{rl}: {why(name, key)}", 11, SOFT, halo=True))
+                continue
+            w = max(3, min(full * 1.15, full * p / 100))
+            s.append(f'<rect x="{left}" y="{by:.1f}" width="{w:.1f}" height="{bar}" rx="4" fill="{col}"/>')
+            tx = left + w + 8
+            if tx - 8 < left + full < tx + 140:  # keep the Mac's line out from behind the label
+                s.append(f'<rect x="{left + w + 1:.1f}" y="{by - 3:.1f}" width="150" height="{bar + 6}" fill="{BG}"/>')
+            first = name == routes[0][0]
+            s.append(text(f"{tx:.1f}", by + 11.5, f"{round(p)} %", 13, INK, MONO, "600" if first else None, halo=True))
+            s.append(text(f"{tx + 46:.1f}", by + 11.5, rl, 11, SOFT, halo=True))
+        y += group + gap
+    if banner:
+        s.append(f'<rect x="24" y="{H - 44}" width="{W - 48}" height="28" rx="6" fill="#eb6f92" fill-opacity="0.15" stroke="#eb6f92"/>')
+        s.append(text(W / 2, H - 25, banner, 13, "#eb6f92", weight="600", anchor="middle"))
+    if placeholder:
+        s.append(f'<text x="{W / 2}" y="{(top + bottom) / 2}" font-family="{FONT}" font-size="64" font-weight="700" fill="#eb6f92" fill-opacity="0.10" text-anchor="middle" transform="rotate(-12 {W / 2} {(top + bottom) / 2})">PLACEHOLDER</text>')
+    if not banner:
+        s.append(text(W / 2, H - 14, data.get("note", "Each route as a share of macOS on the same Mac. Not available: the VM has no Vulkan."), 12, MUTED, anchor="middle"))
     s.append('</svg>')
     open(out, "w").write("\n".join(s) + "\n")
 
