@@ -357,6 +357,12 @@ app)
   if as_user hyprctl monitors -j 2>/dev/null | jq -e '.[0].refreshRate' >/dev/null 2>&1; then
     ok "display" "$(as_user hyprctl monitors -j | jq -r '.[0] | "\(.width)x\(.height) @\(.refreshRate | floor) Hz, scale \(.scale)"')"
   fi
+  # The display sync stops following an output that keeps changing (a loop)
+  # and writes why; nothing written: it never had to.
+  held=$RUN/omacvm/display-sync/held
+  if [[ -s $held ]]; then
+    bad "display sync" "held $(wc -l < "$held") time(s) this session, last: $(tail -1 "$held" | cut -d' ' -f2-)"
+  fi
   r=$(as_user glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p')
   [[ -z $r ]] && r=$(as_user eglinfo -B 2>/dev/null | sed -n 's/^OpenGL core profile renderer: //p;s/^OpenGL renderer: //p' | head -1)
   case $r in

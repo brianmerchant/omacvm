@@ -1,13 +1,22 @@
-/* The guest's memory budget for virgl resources (virgl-resource-memory-budget.patch),
- * through the public renderer API on Apple's software renderer (soft-gl.h; never on
- * the GPU). Each mode runs in its own process because the budget is read once, when
- * the renderer starts:
+/* The guest's memory budget for virgl resources (virgl-resource-memory-budget.patch)
+ * and how it follows the Mac's memory (virgl-darwin-memory-pressure.patch), through
+ * the public renderer API on Apple's software renderer (soft-gl.h; never on the GPU).
+ * Each mode runs in its own process because the settings are read once, when the
+ * renderer starts. The budget modes run with the pressure check off, so a busy build
+ * Mac cannot change their result; the pressure modes set the level themselves:
  *   test-resource-budget            runs every mode below as a child process
  *   test-resource-budget limit      OMACVM_GPU_MEMORY_MB=64: what fits and what is refused,
  *                                   and the context that attaches a refused resource is lost
  *                                   (virgl-resource-budget-context-loss.patch)
  *   test-resource-budget off        OMACVM_GPU_MEMORY_MB=0: no budget
- *   test-resource-budget default    unset: a quarter of the Mac's memory */
+ *   test-resource-budget default    unset: three quarters of the Mac's memory
+ *   test-resource-budget critical   pressure critical: big resources refused after
+ *                                   trying again (the next one at once), small ones,
+ *                                   screens and cursors not
+ *   test-resource-budget warn       pressure warn, 100 MB left: what fits
+ *   test-resource-budget status     the status file: in use, peak, a lost context
+ *   test-resource-budget levelfile  the level read from a file at each look (the
+ *                                   test hook that raises it while a VM runs) */
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
 #include <spawn.h>
@@ -18,6 +27,8 @@
 #include <sys/sysctl.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 #include "soft-gl.h"
 #include "virglrenderer.h"
 #include "virgl_hw.h"
@@ -27,6 +38,8 @@ extern char **environ;
 
 enum { T_BUFFER = 0, T_2D = 2, T_3D = 3, T_CUBE = 4, T_2D_ARRAY = 7 };
 #define MB (1u << 20)
+
+static uint64_t mac_memory(void);
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -327,24 +340,182 @@ static int run_off(void)
 
 static int run_default(void)
 {
-   uint64_t mem = 0;
-   size_t len = sizeof mem;
-   sysctlbyname("hw.memsize", &mem, &len, NULL, 0);
-   uint32_t quarter_mb = (uint32_t)(mem / 4 / MB);
+   uint64_t mem = mac_memory();
+   uint32_t default_mb = (uint32_t)(mem / 4 * 3 / MB);
    char line[160];
    uint32_t a = make(T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_STAGING, 4096, 1, 1, 1, 0, 0);
    check(a != 0, "default budget: a small resource fits");
-   /* 16384x16384 RGBA32F, 64 layers = 256 GB: refused unless a quarter of the memory
-    * is more than 64 GB */
+   /* 16384x16384 RGBA32F, 64 layers = 256 GB: refused unless three quarters of the
+    * memory are 256 GB or more */
    uint32_t b = make(T_2D_ARRAY, VIRGL_FORMAT_R32G32B32A32_FLOAT, VIRGL_BIND_SAMPLER_VIEW,
                      16384, 16384, 1, 64, 0, 0);
-   snprintf(line, sizeof line, "default budget (%u MB = a quarter of %llu MB): a 256 GB texture "
-            "array is refused", quarter_mb, (unsigned long long)(mem / MB));
-   check(quarter_mb >= 262144 ? 1 : b == 0, line);
+   snprintf(line, sizeof line, "default budget (%u MB = three quarters of %llu MB): a 256 GB "
+            "texture array is refused", default_mb, (unsigned long long)(mem / MB));
+   check(default_mb >= 262144 ? 1 : b == 0, line);
    if (a)
       virgl_renderer_resource_unref(a);
    if (b)
       virgl_renderer_resource_unref(b);
+   return 0;
+}
+
+static uint64_t mac_memory(void)
+{
+   uint64_t mem = 0;
+   size_t len = sizeof mem;
+   sysctlbyname("hw.memsize", &mem, &len, NULL, 0);
+   return mem;
+}
+
+static double now_s(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+/* "KEY=" value from the status file, or -1 (text values: 0 and copied to out). */
+static long status_value(const char *key, char *out, size_t out_len)
+{
+   char line[256];
+   long v = -1;
+   FILE *f = fopen(getenv("OMACVM_GPU_MEMORY_STATUS"), "r");
+   if (!f)
+      return -1;
+   while (fgets(line, sizeof line, f)) {
+      size_t k = strlen(key);
+      if (!strncmp(line, key, k) && line[k] == '=') {
+         line[strcspn(line, "\n")] = 0;
+         if (out) {
+            snprintf(out, out_len, "%s", line + k + 1);
+            v = 0;
+         } else {
+            v = strtol(line + k + 1, NULL, 10);
+         }
+      }
+   }
+   fclose(f);
+   return v;
+}
+
+/* The renderer writes the status file at most four times a second, from its poll. */
+static void settle(void)
+{
+   usleep(300000);
+   virgl_renderer_poll();
+}
+
+static int run_critical(void)
+{
+   char line[200], text[64] = "";
+   double t = now_s();
+   uint32_t big = tex2d(4096, 4096, 1);   /* 64 MB */
+   double waited = now_s() - t;
+   check(big == 0, "pressure critical: a 64 MB texture is refused");
+   snprintf(line, sizeof line, "after trimming and looking again (%.0f ms)", waited * 1000);
+   check(waited >= 0.09, line);
+   uint32_t small = tex2d(1024, 2048, 1); /* 8 MB */
+   check(small != 0, "an 8 MB texture still fits (small ones are never refused for pressure)");
+   uint32_t scan = make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT | VIRGL_BIND_RENDER_TARGET,
+                        5120, 2880, 1, 1, 0, 0);
+   check(scan != 0, "a 5K screen (56 MB) still fits (screens are never refused for pressure)");
+   check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
+         "the status file says pressure=critical at once");
+   check(status_value("refused", NULL, 0) == 1, "and refused=1");
+   /* the next big one within a second: refused after one look, no 100 ms hold */
+   t = now_s();
+   uint32_t big2 = tex2d(4096, 4096, 1);
+   waited = now_s() - t;
+   check(big2 == 0, "a second 64 MB texture right after is refused too");
+   snprintf(line, sizeof line, "at once, without holding the VM (%.0f ms)", waited * 1000);
+   check(waited < 0.05, line);
+   check(status_value("refused", NULL, 0) == 2, "refused=2");
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 64, "in_use_mb=64 (8 MB texture + 5K screen)");
+   if (small)
+      virgl_renderer_resource_unref(small);
+   if (scan)
+      virgl_renderer_resource_unref(scan);
+   return 0;
+}
+
+static int run_warn(void)
+{
+   /* the parent set macOS's free, inactive and purgeable memory to 100 MB */
+   uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB */
+   check(a != 0, "pressure warn: a 64 MB texture fits into the 100 MB macOS has left");
+   uint32_t b = tex2d(8192, 4096, 1);     /* 128 MB */
+   check(b == 0, "a 128 MB texture, more than macOS has left, is refused");
+   if (a)
+      virgl_renderer_resource_unref(a);
+   if (b)
+      virgl_renderer_resource_unref(b);
+   return 0;
+}
+
+static int run_status(void)
+{
+   uint32_t h[10] = {0};
+   char text[64] = "";
+   for (int i = 0; i < 10; i++)
+      h[i] = tex2d(1024, 1024, 1);
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 40 && status_value("peak_mb", NULL, 0) == 40,
+         "10 textures of 4 MB: in_use_mb=40, peak_mb=40");
+   check(status_value("budget_mb", NULL, 0) == 0, "budget_mb=0 (OMACVM_GPU_MEMORY_MB=0)");
+   check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "normal"), "pressure=normal");
+   unref(h, 10);
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 0 && status_value("peak_mb", NULL, 0) == 40,
+         "all freed: in_use_mb=0, the peak stays 40");
+   /* a lost context: the name is the guest's, only letters, digits and . _ - pass */
+   check(virgl_renderer_context_create(1, (uint32_t)strlen("Hypr\nland=1"), "Hypr\nland=1") == 0, "a context");
+   uint32_t cmd[] = { VIRGL_CMD0(VIRGL_CCMD_SET_FRAMEBUFFER_STATE, 0, VIRGL_SET_FRAMEBUFFER_STATE_SIZE(1)),
+                      1, 0, 77 };      /* a surface that was never made */
+   virgl_renderer_submit_cmd(cmd, 1, 4);
+   check(status_value("lost", NULL, 0) == 1, "its loss is in the status file at once: lost=1");
+   check(status_value("lost_last", text, sizeof text) == 0 && !strcmp(text, "Hypr_land_1"),
+         "lost_last=Hypr_land_1");
+   /* a second loss right after: the app must still see that the first one was lost */
+   check(virgl_renderer_context_create(2, 8, "chromium") == 0, "a second context");
+   virgl_renderer_submit_cmd(cmd, 2, 4);
+   check(status_value("lost", NULL, 0) == 2 &&
+         status_value("lost_recent", text, sizeof text) == 0 && !strcmp(text, "Hypr_land_1,chromium"),
+         "lost=2, lost_recent=Hypr_land_1,chromium");
+   virgl_renderer_context_destroy(2);
+   virgl_renderer_context_destroy(1);
+   return 0;
+}
+
+/* OMACVM_GPU_MEMORY_PRESSURE=file:PATH: the level changes while the renderer runs */
+static void level_to(const char *level)
+{
+   FILE *f = fopen(getenv("OMACVM_TEST_LEVEL_FILE"), "w");
+   if (f) {
+      fprintf(f, "%s\n", level);
+      fclose(f);
+   }
+}
+
+static int run_levelfile(void)
+{
+   char text[64] = "";
+   uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB */
+   check(a != 0, "level file says normal: a 64 MB texture fits");
+   level_to("critical");
+   uint32_t b = tex2d(4096, 4096, 1);
+   check(b == 0, "level file says critical: the next 64 MB texture is refused");
+   usleep(1100000);                       /* the once-a-second look */
+   settle();
+   check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
+         "the status file follows: pressure=critical");
+   level_to("normal");
+   uint32_t c = tex2d(4096, 4096, 1);
+   check(c != 0, "back to normal: a 64 MB texture fits again");
+   if (a)
+      virgl_renderer_resource_unref(a);
+   if (c)
+      virgl_renderer_resource_unref(c);
    return 0;
 }
 
@@ -366,22 +537,32 @@ static int child(const char *mode)
       run_limit();
    else if (!strcmp(mode, "off"))
       run_off();
+   else if (!strcmp(mode, "critical"))
+      run_critical();
+   else if (!strcmp(mode, "warn"))
+      run_warn();
+   else if (!strcmp(mode, "status"))
+      run_status();
+   else if (!strcmp(mode, "levelfile"))
+      run_levelfile();
    else
       run_default();
    virgl_renderer_cleanup(&cookie);
    return failures != 0;
 }
 
-static int spawn(const char *self, const char *mode, const char *budget)
+static int spawn(const char *self, const char *mode, const char *budget, const char *pressure)
 {
    if (budget)
       setenv("OMACVM_GPU_MEMORY_MB", budget, 1);
    else
       unsetenv("OMACVM_GPU_MEMORY_MB");
+   setenv("OMACVM_GPU_MEMORY_PRESSURE", pressure, 1);
    char *argv[] = { (char *)self, (char *)mode, NULL };
    pid_t pid;
    int status = 0;
-   printf("-- %s (OMACVM_GPU_MEMORY_MB=%s)\n", mode, budget ? budget : "unset");
+   printf("-- %s (OMACVM_GPU_MEMORY_MB=%s, OMACVM_GPU_MEMORY_PRESSURE=%s)\n", mode,
+          budget ? budget : "unset", pressure);
    if (posix_spawn(&pid, self, NULL, NULL, argv, environ) || waitpid(pid, &status, 0) < 0) {
       printf("FAIL: could not run %s\n", mode);
       return 1;
@@ -398,8 +579,25 @@ int main(int argc, char **argv)
    if (argc > 1)
       return child(argv[1]);
    setvbuf(stdout, NULL, _IONBF, 0);
-   int bad = spawn(argv[0], "limit", "64") + spawn(argv[0], "off", "0") +
-             spawn(argv[0], "default", NULL);
+   char status_file[256];
+   snprintf(status_file, sizeof status_file, "%s/omacvm-gpu-memory-test-%d",
+            getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp", (int)getpid());
+   setenv("OMACVM_GPU_MEMORY_STATUS", status_file, 1);
+   char level_file[300], level_env[310];
+   snprintf(level_file, sizeof level_file, "%s.level", status_file);
+   snprintf(level_env, sizeof level_env, "file:%s", level_file);
+   setenv("OMACVM_TEST_LEVEL_FILE", level_file, 1);
+   FILE *lf = fopen(level_file, "w");
+   if (lf) {
+      fputs("normal\n", lf);
+      fclose(lf);
+   }
+   int bad = spawn(argv[0], "limit", "64", "off") + spawn(argv[0], "off", "0", "off") +
+             spawn(argv[0], "default", NULL, "off") + spawn(argv[0], "critical", "0", "critical") +
+             spawn(argv[0], "warn", "0", "warn:100") + spawn(argv[0], "status", "0", "normal") +
+             spawn(argv[0], "levelfile", "0", level_env);
+   unlink(status_file);
+   unlink(level_file);
    printf("%s\n", bad ? "resource budget: FAILED" : "resource budget: all checks passed");
    return bad != 0;
 }

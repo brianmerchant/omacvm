@@ -317,11 +317,27 @@ struct ReadyView: View {
         }
     }
 
+    /// VM memory and graphics memory side by side: the VM's RAM is fixed,
+    /// its graphics come from the Mac on top, as needed (GPUMemory).
+    private var graphicsMemory: some View {
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let vm = "VM memory: \(state.config.memoryMB / 1024) GB"
+            let gpu = GPUMemory.read(for: state.config).map {
+                "graphics memory last run: peak \(GPUMemory.gb($0.peakMB)), from the Mac on top"
+            } ?? "graphics memory: from the Mac on top, as the VM needs it"
+            Text("\(vm); \(gpu)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(GPUMemory.explanation)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(state.config.name).font(.title2.bold())
             Text("\(state.config.cpus) CPUs, \(state.config.memoryMB / 1024) GB memory, \(state.config.diskGB) GB disk, user \(state.config.user)")
                 .foregroundStyle(.secondary)
+            graphicsMemory
             Picker("Resources", selection: tier) {
                 ForEach(0..<4) { t in
                     let v = Mac.tier(t)
