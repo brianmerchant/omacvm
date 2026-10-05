@@ -23,10 +23,11 @@
 # budget is short); when the round runs late, idle rows are dropped (noted),
 # never shortened. RC2's OpenGL rows run only when there is time to spare.
 #
-# --prepare-rc2 (RC2_APP and RC2_CLI, the RC2 tree's omacvm, set): an APFS clone
+# --prepare-rc2 (RC2_APP and RC2_SRC, the RC2's source tree, set): an APFS clone
 # of "Bench OmacVM" as RC2_VM next to it, its Graphics setting on Vulkan, started
-# hidden with the RC2 app, `omacvm apply` (OmacVM's Venus driver in the guest),
-# restarted, Vulkan checked, the new versions recorded (vm.sh --record), stopped.
+# hidden with the RC2 app, the RC2's Venus driver built in the guest (as
+# `omacvm graphics vulkan` does), restarted, Vulkan checked, the new versions
+# recorded (vm.sh --record), stopped. About 10 minutes.
 #
 # Env: APP_291 (the 2.9.1 app, default ~/Applications/OmacVM Bench 2.9.1.app),
 # APP_VM ("Bench OmacVM"), APP_PORT (52224); RC2_APP (the 3.0.0 RC2 build;
@@ -108,9 +109,8 @@ wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 a
   return 0
 }
 
-mkdir -p "$DIR/failed"
 STATE=$DIR/steps.state LOG=$DIR/round.log
-touch "$STATE"
+[ "$MODE" = plan ] || { mkdir -p "$DIR/failed" && touch "$STATE"; } || die "cannot write $DIR"
 log() { echo "$(date +%T) $*" | tee -a "$LOG" >&2; }
 status() { awk -v s="$1" '$1 == s { v = $2 } END { print v }' "$STATE"; }
 mark() { echo "$1 $2 $(date +%FT%T) ${3:-}" >> "$STATE"; }   # step status [why]
@@ -152,8 +152,7 @@ displays() { system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Resolutio
 builtin_only() { [ "$(displays)" = 1 ] && system_profiler SPDisplaysDataType 2>/dev/null | grep -q 'Built-in'; }
 picture() {   # the Mac's desktop picture (the round's wallpaper everywhere)
   [ -n "${WALLPAPER:-}" ] && { echo "$WALLPAPER"; return; }
-  osascript -e 'tell application "System Events" to get POSIX path of (picture of current desktop as alias)' 2>/dev/null ||
-    osascript -e 'tell application "System Events" to get picture of current desktop' 2>/dev/null
+  osascript -e 'tell application "System Events" to get picture of current desktop' 2>/dev/null
 }
 hide_apps() {   # the Mac's desktop for its idle row: every app hidden (not quit)
   osascript -e 'tell application "System Events" to set visible of every process whose visible is true and name is not "Finder" to false' >/dev/null 2>&1
@@ -231,7 +230,10 @@ vm_up() {   # target: start it in full screen, wait for its desktop, check the w
   wide "$HOST" || { log "$t: not full screen on the built-in display ($(widths "$HOST") px)"; return 1; }
   # The quiet desktop: the Mac's wallpaper (same image), no notifications, no Chrome.
   bash "$FR/vm.sh" "$t" --vm "$name" "root@$HOST" --desktop "$PIC" >> "$LOG" 2>&1 || log "$t: desktop not prepared (see $LOG)"
-  log "$t: up at $HOST, guest $(widths "$HOST") px wide"
+  # What the guest shows, small, as the record of full screen and wallpaper.
+  gs "$HOST" 'U=$(id -nu 1000); sig=$(ls -t /run/user/1000/hypr | head -1); sleep 2
+    sudo -u $U env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE=$sig grim -s 0.2 -' > "$DIR/screen-$t.png" 2>/dev/null
+  log "$t: up at $HOST, guest $(widths "$HOST") px wide (screen-$t.png)"
 }
 vm_down() {   # target: shut the VM down, quit its app and services
   local t=$1 name i app
@@ -358,7 +360,7 @@ trap 'log "interrupted"; exit 130' INT TERM
 
 if [ "$MODE" = prepare-rc2 ]; then
   [ -d "$RC2_APP" ] || die "RC2_APP: the 3.0.0 RC2 app"
-  [ -x "${RC2_CLI:-}" ] || die "RC2_CLI: the RC2 tree's omacvm"
+  RC2_SRC=${RC2_SRC:-}; [ -f "$RC2_SRC/src/app/guest/venus/vulkan-virtio.sh" ] || die "RC2_SRC: the RC2's source tree (with src/app/guest/venus)"
   [ -e "$HOME/.omacvm-user-testing" ] && die "the user is testing (~/.omacvm-user-testing): no VM starts"
   root="$HOME/Library/Application Support/OmacVM/VMs"; dst="$root/$RC2_VM" h=127.0.0.1:$RC2_PORT
   pgrep -f -- "-name $APP_VM -" >/dev/null && die "\"$APP_VM\" runs: stop it first (its disk is cloned)"
@@ -370,15 +372,30 @@ if [ "$MODE" = prepare-rc2 ]; then
     sed -i '' -e "s/^NAME=.*/NAME='$RC2_VM'/" -e "s/^SSH_PORT=.*/SSH_PORT='$RC2_PORT'/" -e "s/^VM_HOSTNAME=.*/VM_HOSTNAME='bench-omacvm-rc2'/" "$dst/vm.env"
   fi
   echo vulkan > "$dst/graphics"
+  # The driver build is load: under the bench lock (waits up to 20 min for another holder).
+  for ((i = 0; i < 40; i++)); do mkdir "$LOCK" 2>/dev/null && break; sleep 30; done
+  [ $i -lt 40 ] || die "the bench lock is held: $(cat "$LOCK/owner" 2>/dev/null)"
+  echo "gpu-bench prepare-rc2 $$ $(date +%T)" > "$LOCK/owner"; LOCKED=1
   rc2_start() {
     local e envs=(); for e in $RC2_APP_ENV; do envs+=(--env "$e"); done
     open -n --env OMACVM_COCOA_HIDDEN=1 --env OMACVM_TEST_PASTEBOARD=org.omacvm.bench-test ${envs[@]+"${envs[@]}"} \
       "$RC2_APP" --args --start --vm "$RC2_VM" && wait_desktop "$h" 300
   }
   rc2_stop() { gs "$h" 'systemctl poweroff' >/dev/null 2>&1; for ((i = 0; i < 24; i++)); do pgrep -f -- "-name $RC2_VM -" >/dev/null || break; sleep 5; done; pkill -f "$RC2_APP/Contents/MacOS/" 2>/dev/null; }
-  say "\"$RC2_VM\": start (hidden), OmacVM's Venus driver (omacvm apply)"
+  say "\"$RC2_VM\": start (hidden), OmacVM's Venus driver from $RC2_SRC"
   rc2_start || die "\"$RC2_VM\" did not start"
-  "$RC2_CLI" apply --vm "$RC2_VM" --no-mac --no-token </dev/null || { rc2_stop; die "omacvm apply failed"; }
+  # What `omacvm graphics --vm NAME vulkan` does on a running VM, with the RC2 tree's guest files (the
+  # Bench VM keeps its 2.9.1 guest otherwise). Not through the CLI: it looks for the VM's QEMU by the
+  # folder name it expects, and the app may start QEMU with the folder's on-disk case
+  # ("Application Support/omacvm/VMs"): the CLI then sees the VM stopped and starts it again.
+  COPYFILE_DISABLE=1 tar -C "$RC2_SRC/src/app/guest" --no-xattrs -cf - venus 90-omacvm-vulkan.conf |
+    gs "$h" 'rm -rf /opt/omacvm-final-round/venus && mkdir -p /opt/omacvm-final-round && tar --no-same-owner -C /opt/omacvm-final-round -xf - &&
+      install -m644 /opt/omacvm-final-round/90-omacvm-vulkan.conf /etc/environment.d/90-omacvm-vulkan.conf' ||
+    { rc2_stop; die "copying the Venus driver files failed"; }
+  gs "$h" 'sed -i "/^OMACVM_GRAPHICS=/d" /etc/omacvm/env && echo OMACVM_GRAPHICS=vulkan >> /etc/omacvm/env &&
+    OMARCHY_ALLOW_DIRECT_PACMAN=1 /opt/omacvm-final-round/venus/vulkan-virtio.sh --want' ||
+    { rc2_stop; die "the Venus driver did not build (see /var/log/omacvm-vulkan-virtio.log in the VM)"; }
+  : > "$dst/venus-ready"
   rc2_stop; sleep 5
   say "\"$RC2_VM\": restart with Venus"
   rc2_start || die "\"$RC2_VM\" did not start again"
