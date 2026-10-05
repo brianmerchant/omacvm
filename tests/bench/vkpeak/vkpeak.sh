@@ -2,6 +2,9 @@
 # Vulkan compute peak with vkpeak (github.com/nihui/vkpeak, MIT), the same
 # version on the Mac and in a VM. One JSON line per run.
 #   vkpeak.sh [--runs N] [--scenarios LIST] [--device N] [OUT.jsonl]
+# --device: Vulkan device index. Default on Linux: the first device that is
+# not a CPU one (lavapipe can come first when it is installed next to Venus);
+# on the Mac 0.
 # The Mac: the release's macOS binary (MoltenVK built in), checked against its
 # sha256. Linux (arm64 VMs): built from the same tag's source into
 # ~/.cache/omacvm-bench (needs git, cmake and a C++ compiler; on Arch:
@@ -12,7 +15,7 @@ set -uo pipefail
 VER=20260527
 COMMIT=f108eb11d467eb3d5cdd472f8e080818a117a752   # tag 20260527
 MAC_ZIP_SHA256=3bd6ffe4117628c911b76a4e64849b42932823e85e34d6071aa76d8cf674817c
-RUNS=3; DEV=0
+RUNS=3; DEV=
 SCEN="fp32-scalar,fp32-vec4,fp16-scalar,fp16-vec4,int32-scalar,int32-vec4"
 while [[ ${1:-} == --* ]]; do
   case $1 in
@@ -63,9 +66,15 @@ case $(uname -s) in
       types=$(vulkaninfo --summary 2>/dev/null | sed -n 's/.*deviceType *= *//p' | sort -u | tr '\n' ' ')
       [[ -z $types ]] && na "no Vulkan device"
       [[ $types == "PHYSICAL_DEVICE_TYPE_CPU " ]] && na "CPU Vulkan only (no GPU device)"
+      # vulkaninfo's GPU<n> is the order vkpeak counts in.
+      [[ -n $DEV ]] || DEV=$(vulkaninfo --summary 2>/dev/null | awk '
+        /^GPU[0-9]+:/ { i = substr($1, 4) + 0 }
+        /deviceType *=/ && $NF != "PHYSICAL_DEVICE_TYPE_CPU" && pick == "" { pick = i }
+        END { print pick }')
     fi ;;
   *) na "unsupported OS $(uname -s)" ;;
 esac
+DEV=${DEV:-0}
 
 for ((i = 1; i <= RUNS; i++)); do
   say "vkpeak $SCEN, run $i/$RUNS"
