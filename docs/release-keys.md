@@ -111,7 +111,15 @@ only (`<16 hex>.json` and `.json.sig`). A bare key file, a changed document
 or any other junk there adds nothing: only documents whose signature checks
 out (against a shipped key, or a key a checked document named) count, and
 at most 8 of them. Junk does not count toward the 8, so it cannot crowd
-out the real ones. At most 256 files there are looked at.
+out the real ones.
+
+Every file there is looked at, one at a time, the cheap checks first: the
+name, a regular file (no link, pipe or device), the sizes (256 KB, 1 KB for
+the signature), the signature's format, the name being the first 16 hex
+digits of SHA-256(document + signature) (as they are written), then JSON.
+Only then is the signature checked, and a document is held in memory only
+when it checks out and adds a key or a revocation (at most 16). So many
+junk files make reading slower, never wrong, and never take much memory.
 
 ## Which Developer ID the fast network trusts
 

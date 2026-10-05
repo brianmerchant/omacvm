@@ -167,6 +167,28 @@ verdict app-feed "$T/naming.json" >/dev/null
 doc "$D" control-manifest "" next-key
 expect "10 junk documents first: a real one is still kept and trusted" good "$(verdict control-manifest "$D")"
 rm -rf "$STORE"
+# More junk than the old 256-file cap, on both sides of the real names: copies
+# (skipped by name), a few named by their hash (checked and dropped), a pipe.
+mkdir -p "$STORE"
+printf '{"kind": "app-feed", "next_spare_key": "%s"}' "$(cat "$T/other-key.pub")" > "$T/junk.json"
+for i in $(seq 0 299); do
+  for n in $(printf '%016x ffffffff%08x' "$i" "$i"); do
+    cp "$T/junk.json" "$STORE/$n.json"; cp "$T/doc.json.sig" "$STORE/$n.json.sig"
+  done
+done
+for i in 1 2 3; do
+  printf '{"kind": "app-feed", "version": "%s", "next_spare_key": "%s"}' "$i" "$(cat "$T/other-key.pub")" > "$T/junk.json"
+  n=$(cat "$T/junk.json" "$T/doc.json.sig" | shasum -a 256 | cut -c1-16)
+  cp "$T/junk.json" "$STORE/$n.json"; cp "$T/doc.json.sig" "$STORE/$n.json.sig"
+done
+mkfifo "$STORE/00000000000b0000.json" "$STORE/00000000000b0000.json.sig"
+verdict app-feed "$T/naming.json" >/dev/null
+verdict control-manifest "$T/naming2.json" >/dev/null
+doc "$D" control-manifest "" third-key
+expect "603 junk documents and a pipe around them: a chain of two named keys is kept and trusted" good "$(verdict control-manifest "$D")"
+doc "$D" control-manifest "" other-key
+expect "... and the junk's key is not" refused "$(verdict control-manifest "$D")"
+rm -rf "$STORE"
 
 # ---- test keys count nowhere inside a release app ----
 fake() {   # BUNDLE-ID: a copy of keys.py and the shipped keys in an app bundle

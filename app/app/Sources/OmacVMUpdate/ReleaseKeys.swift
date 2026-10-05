@@ -27,9 +27,9 @@ public struct ReleaseKeys: Sendable {
     public let store: URL?
 
     public static let kinds: Set<String> = ["app-feed", "control-manifest", "prebuilt-manifest"]
-    /// Documents used from the folder, and files looked at there.
+    /// Documents used from the folder, and documents held while reading it.
     public static let maxKept = 8
-    static let maxScan = 256
+    static let maxHeld = 2 * maxKept
     public static let maxRevoked = 8
     static let maxDocumentBytes = 256 * 1024
 
@@ -154,7 +154,7 @@ public struct ReleaseKeys: Sendable {
         let named = after.keys.map(\.rawRepresentation).filter { !old.contains($0) }
         let revoked = after.revoked.subtracting(before.revoked)
         guard after.used.contains(docs.count), !named.isEmpty || !revoked.isEmpty || !doc.revokes.isEmpty else { return nil }
-        let name = SHA256.hash(data: data + signature).prefix(8).map { String(format: "%02x", $0) }.joined()
+        let name = Self.fileName(data, signature)
         do {
             try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
             try signature.write(to: store.appendingPathComponent("\(name).json.sig"), options: .atomic)
@@ -163,20 +163,81 @@ public struct ReleaseKeys: Sendable {
         return Remembered(named: named.map { $0.base64EncodedString() }, revoked: revoked.map { $0.base64EncodedString() }.sorted())
     }
 
-    /// The documents in the folder that could matter: at most maxScan files
-    /// are looked at; unreadable ones and junk are skipped.
+    /// The documents in the folder that could matter. Every file is looked
+    /// at, one at a time and the cheap checks first (name, regular file,
+    /// sizes, signature format, the name is the content's hash, JSON); a document is held only once a key
+    /// signed it and it adds a key or a revocation, at most maxHeld of them.
+    /// So junk, however many files, neither pushes real documents out nor
+    /// fills memory. A named key may sign the next one: the folder is read
+    /// again for each round of new keys (at most maxKept + 1 reads).
     func kept() -> [Doc] {
-        guard let store, let names = try? FileManager.default.contentsOfDirectory(atPath: store.path) else { return [] }
-        return names.filter { $0.range(of: "^[0-9a-f]{16}\\.json$", options: .regularExpression) != nil }.sorted()
-            .prefix(Self.maxScan).compactMap { n in
-                let f = store.appendingPathComponent(n), g = f.appendingPathExtension("sig")
-                guard Self.size(f) <= Self.maxDocumentBytes, Self.size(g) <= 1024,
-                      let d = try? Data(contentsOf: f), let s = try? Data(contentsOf: g) else { return nil }
-                return Doc(d, s)
+        guard let store else { return [] }
+        let base = shipped.compactMap(Self.key), baseRaw = Set(base.map(\.rawRepresentation))
+        var held: [String: Doc] = [:], known = baseRaw, revoked = Set<Data>(), by: [Data: Set<Data>] = [:]
+        var fresh = base, first = true
+        while !fresh.isEmpty && held.count < Self.maxHeld {
+            var added: [Curve25519.Signing.PublicKey] = []
+            Self.eachDocument(in: store.path) { name, doc in
+                guard held[name] == nil else { return true }
+                if first, !doc.revokes.isEmpty,
+                   let signer = base.first(where: { Self.signed(doc.data, doc.sig, by: [$0]) })?.rawRepresentation {
+                    let new = Set(doc.revokes.map(\.rawRepresentation)).subtracting(baseRaw).subtracting(by[signer, default: []])
+                    if !new.isEmpty { by[signer, default: []].formUnion(new); revoked.formUnion(new); held[name] = doc }
+                }
+                if let k = doc.named, !known.contains(k.rawRepresentation), !revoked.contains(k.rawRepresentation),
+                   Self.signed(doc.data, doc.sig, by: fresh) {
+                    known.insert(k.rawRepresentation)
+                    added.append(k)
+                    held[name] = doc
+                }
+                return held.count < Self.maxHeld
             }
+            first = false
+            fresh = added.filter { !revoked.contains($0.rawRepresentation) }
+        }
+        return held.keys.sorted().map { held[$0]! }
     }
 
-    private static func size(_ f: URL) -> Int {
-        (try? FileManager.default.attributesOfItem(atPath: f.path)[.size] as? Int) ?? Int.max
+    /// Calls body with each document in dir (name, unverified), until it
+    /// returns false. Names other than <16 hex>.json, files that are not
+    /// regular files or too large, and junk are skipped unread or as soon
+    /// as a check fails; one document is in memory at a time.
+    static func eachDocument(in dir: String, _ body: (String, Doc) -> Bool) {
+        guard let d = opendir(dir) else { return }
+        defer { closedir(d) }
+        while let e = readdir(d) {
+            let name = withUnsafeBytes(of: e.pointee.d_name) { String(decoding: $0.prefix(Int(e.pointee.d_namlen)), as: UTF8.self) }
+            guard name.utf8.count == 21, name.hasSuffix(".json"),
+                  name.utf8.prefix(16).allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  let sig = readSmall(dir + "/" + name + ".sig", limit: 1024), signatureBytes(sig) != nil,
+                  let data = readSmall(dir + "/" + name, limit: maxDocumentBytes),
+                  fileName(data, sig) == name.prefix(16), let doc = Doc(data, sig) else { continue }
+            if !body(name, doc) { return }
+        }
+    }
+
+    /// A kept document's file name (without .json): the first 16 hex digits of
+    /// SHA-256(document + signature). A cheap first check: copies and other
+    /// junk under a wrong name are skipped before any signature check.
+    static func fileName(_ data: Data, _ sig: Data) -> String {
+        SHA256.hash(data: data + sig).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A regular file's bytes (not a link, pipe or device), nil when it is
+    /// larger than limit.
+    static func readSmall(_ path: String, limit: Int) -> Data? {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var st = stat()
+        guard fstat(fd, &st) == 0, st.st_mode & S_IFMT == S_IFREG, st.st_size <= limit else { return nil }
+        var out = Data(), buf = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let n = read(fd, &buf, buf.count)
+            if n < 0 { return nil }
+            if n == 0 { return out }
+            out.append(contentsOf: buf[0..<n])
+            if out.count > limit { return nil }
+        }
     }
 }
