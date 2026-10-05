@@ -171,7 +171,7 @@ static const char *sharedNat = "nat on en0 inet from 192.168.77.0/24 to any -> (
 
 // pfctl stand-in: what it was asked, in order; answers like pfctl.
 static char pfLog[16384], pfAnchor[4096];
-static int pfFailE, pfFailRead, pfFlushed;
+static int pfFailE, pfFailRead, pfFlushed, pfXNamed;
 static int fakePf(const char *const *a, const char *in, char *out, size_t len) {
     char cmd[256] = "";
     for (int i = 1; a[i]; i++) { strlcat(cmd, a[i], sizeof cmd); if (a[i + 1]) strlcat(cmd, " ", sizeof cmd); }
@@ -182,7 +182,12 @@ static int fakePf(const char *const *a, const char *in, char *out, size_t len) {
         if (pfFailE) { snprintf(out, len, "pfctl: /dev/pf: Permission denied"); return -1; }
         snprintf(out, len, "No ALTQ support in kernel\npf enabled\nToken : 4242\n"); return 0;
     }
-    if (!strncmp(cmd, "-X ", 3)) return 0;
+    if (!strncmp(cmd, "-X ", 3)) {   // NAT_FILE must not name the reference any more
+        char b[512] = ""; FILE *f = fopen(natPath, "r");
+        if (f) { size_t n = fread(b, 1, sizeof b - 1, f); b[n] = 0; fclose(f); }
+        if (strstr(b, cmd + 3)) pfXNamed = 1;
+        return 0;
+    }
     if (!strcmp(cmd, "-a " NAT_ANCHOR " -f -")) { snprintf(pfAnchor, sizeof pfAnchor, "%s", in ? in : ""); pfFlushed = 0; return 0; }
     if (!strcmp(cmd, "-a " NAT_ANCHOR " -s nat")) { if (!pfFlushed) { char *n = strstr(pfAnchor, "nat on"); snprintf(out, len, "%s", n ? n : ""); } return 0; }
     if (pfFailRead) { snprintf(out, len, "pfctl: DIOCGETRULES: Invalid argument"); return -1; }
@@ -256,7 +261,7 @@ static void natTests(void) {
            "VPN NAT: only the VPN that came later (IPv4 + IPv6), not covered, link-local, bridges, down or odd ones");
     char rules[NAT_MAX * 256];
     expect(!natRules(&want, "fdb3:1:2:3::/64", rules, sizeof rules) && !strcmp(rules,
-           "scrub in on utun5 all fragment reassemble\n"
+           "scrub in on utun5 all no-df fragment reassemble\n"
            "nat on utun5 inet from 192.168.77.0/24 to any -> (utun5:0) extfilter ei\n"
            "nat on utun5 inet6 from fdb3:1:2:3::/64 to any -> (utun5:0) extfilter ei\n"),
            "VPN NAT: the anchor's rules: scrub first, then NAT for the fast network's addresses only (as macOS's own)");
@@ -342,6 +347,7 @@ static void natTests(void) {
     pfLog[0] = 0;
     natStart();
     expect(!pfLog[0] && !slurp(np), "VPN NAT: ... but not a reference of an earlier boot (pf started over)");
+    expect(!pfXNamed, "VPN NAT: NAT_FILE stops naming the pf reference before it is given back (no stale -X after a crash)");
     live[0] = NULL; natDone = 0; fakeList = NULL; pfRun = pfctlRun;
 
     // pfctl itself (test.sh's stand-in prints its arguments, its stdin and

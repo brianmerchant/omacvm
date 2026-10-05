@@ -470,7 +470,8 @@ static void *watchSharing(void *arg) {
 //   only match the fast network's addresses as source (NAT, written as the
 //   service writes its own: "-> (if:0) extfilter ei") and reassemble
 //   fragments arriving on those interfaces (the service does that on its own
-//   ones too), so the NAT works for fragmented replies. pf keeps an emptied
+//   ones too, also with no-df: pf would drop fragments that have DF set), so
+//   the NAT works for fragmented replies. pf keeps an emptied
 //   anchor listed (without rules) until the Mac restarts.
 // - pf is enabled with a reference of our own (pfctl -E, given back with
 //   pfctl -X): pf stays on as long as anyone else wants it.
@@ -609,7 +610,7 @@ static int natRules(const struct natSet *want, const char *prefix6, char *buf, s
             const struct natIf *w = &want->i[i];
             int n = 0;
             if (pass == 0)
-                n = snprintf(buf + o, len - o, "scrub in on %s all fragment reassemble\n", w->name);
+                n = snprintf(buf + o, len - o, "scrub in on %s all no-df fragment reassemble\n", w->name);
             else {
                 // As macOS's sharing writes its own: the interface's first
                 // address, followed when it changes; endpoint-independent.
@@ -746,13 +747,18 @@ static int natLoad(const char *rules) {
     return -1;
 }
 
+// Gives our pf reference back. NAT_FILE stops naming it first: pf's
+// reference values can come back for another program, so a crash in between
+// must leave one nobody gives back (pf stays on), never one a later -X (the
+// next daemon, install.sh) would take from someone else.
 static void natRelease(void) {
     if (!natToken) return;
     char t[24]; snprintf(t, sizeof t, "%llu", natToken);
+    natToken = 0;
+    natSave();
     const char *a[] = { "pfctl", "-X", t, NULL };
     char out[512];
     if (pfRun(a, NULL, out, sizeof out)) logf_("VPN NAT: pfctl -X %s failed: %s", t, natOut(out));
-    natToken = 0;
 }
 
 static int natEnable(void) {
