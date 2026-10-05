@@ -7,8 +7,11 @@
 # - chart.py --panel gpu: the method in the headline row, glmark2 as scores,
 #   Aquarium only when asked
 # - common.sh: the preflight (charger, charging, Low Power Mode, thermal
-#   state, energy mode, hypervisor services), the benchmark-VM names, which
-#   VM runs
+#   state, energy mode, hypervisor services, the bench lock), the
+#   benchmark-VM names, which VM runs
+# - round.sh: the plan within the budget, the order, RC2 only with its app,
+#   resuming (dry runs: nothing starts)
+# - summarize.py and chart.py: a second app build (app-rc2) and its name
 # - bench.sh: Geekbench GPU only on a GPU device, never PoCL or llvmpipe
 # - the throughput page's script parses (node, where there is one)
 set -uo pipefail
@@ -151,6 +154,23 @@ expect("chart: Geekbench Vulkan against Metal", "Vulkan (macOS: Metal)" in svg, 
 expect("chart: reason on a hatched bar", "UTM: no Vulkan device" in svg, "")
 expect("chart: no Aquarium row unless asked", "Aquarium" not in svg, "")
 expect("chart: Aquarium row with --aquarium", "Aquarium" in chart("--aquarium"), "")
+
+# 9. A second app build (app-rc2): named by its version or --label, its bars only in its own rows.
+def hv(r, h):
+    r = vm(r); r["hypervisor"] = h; return r
+rc = [line("app", "vkpeak", hv({"not_available": "no Vulkan device"}, "OmacVM.app 2.9.1")),
+      line("app-rc2", "vkpeak", hv({"fp32_gflops": 15700, "fp16_gflops": 15500}, "OmacVM.app 3.0.0")),
+      line("mac", "vkpeak", {"fp32_gflops": 15768, "fp16_gflops": 15633}),
+      line("utm", "vkpeak", vm({"not_available": "no Vulkan device"}))]
+d, out = run(base + rc)
+expect("app-rc2: its own medians", d["medians"]["app-rc2"]["vkpeak-fp32"] == 15700, d["medians"])
+expect("app-rc2: named from the build's version", d["labels"].get("app-rc2") == "OmacVM 3.0.0 · Vulkan" and d["labels"].get("app") == "OmacVM 2.9.1", d.get("labels"))
+d, out = run(base + rc, "--label", "app-rc2=OmacVM 3.0.0 RC2 · Vulkan")
+expect("app-rc2: --label names it", "OmacVM 3.0.0 RC2 · Vulkan" in out and d["labels"]["app-rc2"] == "OmacVM 3.0.0 RC2 · Vulkan", out)
+svg = chart()
+expect("chart: the second build has a bar in its row", "OmacVM 3.0.0 RC2 · Vulkan" in svg and "100 %" in svg, "")
+expect("chart: no empty bar for the second build where it was not run",
+       svg.count("OmacVM 3.0.0 RC2 · Vulkan") == 3, svg.count("OmacVM 3.0.0 RC2 · Vulkan"))
 sys.exit(1 if fail else 0)
 EOF
 
@@ -221,6 +241,37 @@ check "app: the release app's QEMU (runtime/bin/OmacVM) is found" \
   'STUB_ARGS="$REL -name Bench OmacVM -machine virt -netdev user,id=n,hostfwd=tcp:127.0.0.1:52222-:22" C "vm_running app \"Bench OmacVM\" 52222"'
 check "busy: two VMs of the release app count as two" \
   '[[ $(STUB_PS="$REL"$'"'"'\n'"'"'"$REL" C "busy_check \"OmacVM[^/]*\\.app/\"") == *"\"target_vms\":2"* ]]'
+
+mkdir -p "$T/home/.omacvm-bench.lock"
+echo "final-round 123 01:30, until 04:30" > "$T/home/.omacvm-bench.lock/owner"
+check "busy: round.sh's own bench lock is not busy" '[[ $(C busy_check) == *"\"busy\":false"* ]]'
+echo "audio-crackle 01:00" > "$T/home/.omacvm-bench.lock/owner"
+check "busy: anyone else's bench lock is busy" '[[ $(C busy_check) == *"\"busy\":true"* ]]'
+rm -rf "$T/home/.omacvm-bench.lock"
+
+# ---------- round.sh: plan, budget, order, resume (dry runs, nothing started) ----------
+RD=$T/rd; W=$T/wall.png; : > "$W"
+RS() { WALLPAPER=$W HOME=$T/home bash "$FR/round.sh" "$@" 2>&1; }
+check "round: 180 min leaves 5-minute idle windows" '[[ $(RS --plan) == *"idle windows 300s"* ]]'
+check "round: 240 min gives 10-minute idle windows" '[[ $(RS --plan --budget 240) == *"idle windows 600s"* ]]'
+check "round: RC2 steps only with RC2_APP" '[[ $(RS --plan) == *"rc2-vulkan      app-rc2    gpu    10 min  not run"* ]] && [[ $(RC2_APP=/x RS --plan) == *"rc2-vulkan      app-rc2    gpu    10 min  run"* ]]'
+check "round: --skip leaves a system out" '[[ $(RS --plan --skip fusion) == *"fusion-gpu      fusion     gpu    27 min  not run"* ]]'
+RS --dir "$RD" --dry-run --budget 400 >/dev/null
+order=$(sed -n 's/.*dry run: \([a-z0-9-]*\) (.*/\1/p; s/.*dry run: start \([a-z0-9-]*\) .*/start-\1/p' "$RD/round.log" | paste -sd' ' -)
+check "round: the agreed order, a start before each VM" \
+  '[ "$order" = "mac-gpu mac-idle start-app app-gpu app-idle start-utm utm-gpu utm-idle start-fusion fusion-gpu fusion-idle start-parallels parallels-gpu parallels-idle" ]'
+check "round: no RC2 app -> its steps noted as skipped" 'grep -q "^rc2-vulkan skipped .* RC2_APP not set" "$RD/steps.state"'
+RD2=$T/rd2; mkdir -p "$RD2"; printf 'mac-gpu done x\napp-gpu done x\nutm-gpu failed x exit 1\n' > "$RD2/steps.state"
+RS --dir "$RD2" --dry-run --budget 400 >/dev/null
+check "round: resumes, done steps are skipped" '! grep -qE "dry run: (mac-gpu|app-gpu) " "$RD2/round.log" && grep -q "dry run: mac-idle " "$RD2/round.log"'
+check "round: a failed step runs again" 'grep -q "dry run: utm-gpu " "$RD2/round.log"'
+check "round: over the budget, the last idle rows go first, never a GPU step" \
+  'RC2_APP=/x RS --dir "$T/rd4" --dry-run >/dev/null; grep -q "^parallels-idle skipped" "$T/rd4/steps.state" && ! grep -q "gpu skipped" "$T/rd4/steps.state"'
+check "round: no time to spare -> no RC2 OpenGL extra" 'grep -q "^rc2-gl skipped .*no time to spare" "$T/rd4/steps.state"'
+check "round: a failing step is noted and the round goes on" \
+  'DRY_FAIL=app-gpu RS --dir "$T/rd5" --dry-run >/dev/null; grep -q "^app-gpu failed" "$T/rd5/steps.state" && grep -q "dry run: parallels-gpu " "$T/rd5/round.log"'
+check "round: RC2 runs after the app with RC2_APP" \
+  'RC2_APP=/x RS --dir "$T/rd3" --dry-run --budget 400 >/dev/null; grep -A4 "dry run: app-idle" "$T/rd3/round.log" | grep -q "start app-rc2"'
 
 # ---------- bench.sh: Geekbench GPU only on a GPU device ----------
 cat > "$S/clinfo" <<'EOF'
