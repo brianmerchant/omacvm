@@ -55,8 +55,11 @@ printf 'OMA_USER=%q\nOMA_FULLNAME=%q\nOMA_HASH=%q\nOMA_TZ=%q\nOMA_LANG=%q\nOMA_H
   "$VM_USER" "$VM_FULLNAME" "$HASH" "$VM_TZ" "$VM_LANG" "$VM_HOSTNAME" "$kb_layout" "${kb_variant:-}" |
   vssh "umask 077; cat > /root/omacvm.env"
 vssh "cat > /root/omacvm.pub" < "$KEY.pub"
-run_logged "$LOG/base-install.log" vssh "bash -s" < "$OMACVM_SRC/vm/base-install.sh" ||
+if ! run_logged "$LOG/base-install.log" vssh "bash -s" < "$OMACVM_SRC/vm/base-install.sh"; then
+  # pacstrap's full output is only in the live system: keep it with the log.
+  { echo "---- /root/pacstrap.log ----"; vssh "cat /root/pacstrap.log" < /dev/null; } >> "$LOG/base-install.log" 2>&1 || true
   die "the Arch Linux ARM install failed (log: $LOG/base-install.log)"
+fi
 vssh "systemctl poweroff" 2>/dev/null || true
 qemu_wait_exit 120 || die "the live system did not shut down"
 rm -f "$LIVE_IMG"
