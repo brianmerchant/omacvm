@@ -1,0 +1,223 @@
+From: OmacVM
+Subject: [PATCH] main-loop: log where the main loop is when it stalls > 2 s
+
+What: when the main loop thread stays out of its poll for more than 2 s
+(it then holds the BQL, or waits for it, and the VM waits with it), a small
+watchdog thread logs once:
+  warning: main loop stalled for 2.1 s with the BQL held (the VM waits);
+  where: __sendto+8 < sosendto+200 < udp_input+1192 < net_slirp_receive+24 ...
+and when the loop comes back: "main loop stall over after N s". On macOS
+the stack is read from the main loop thread's frame pointers while it is
+suspended for a moment (registers and its own stack only, no locks), then
+symbolised with dladdr(). Elsewhere it logs the time without a stack.
+Nothing is changed or aborted. OMACVM_STALL_WATCHDOG=0 turns it off (no
+thread, no clock reads). Cost when on: two clock reads and a few atomic
+stores per main loop iteration, one thread waking every 250 ms.
+
+Why: on 2026-10-05 an OmacVM VM froze three times (13:59, ~14:05, 14:21) on
+a Mac mini; only the third left a trace, a sample(1) taken by hand (main
+loop in sendto() inside libslirp, see
+libslirp-nonblocking-datagram-sockets.patch). With this, the next freeze of
+any cause names its place in qemu.log by itself.
+
+Upstream: OmacVM only for now (the env switch is ours).
+Test: app/runtime/Tests/net/test-slirp-udp-stall.sh, "watchdog" case: a
+stall forced past the libslirp fix; qemu.log must name sosendto.
+
+--- a/util/main-loop.c
++++ b/util/main-loop.c
+@@ -294,7 +294,171 @@
+ }
+ 
+ #define MAX_MAIN_LOOP_SPIN (1000)
++
++/*
++ * Stall watchdog. Between two polls the main loop holds the BQL (or waits
++ * for it), and the whole VM waits with it. When one such stretch lasts more
++ * than 2 s, a watchdog thread logs once where the main loop thread is (on
++ * macOS its stack, read while it is suspended for a moment), and the main
++ * loop logs how long it was gone when it comes back. Nothing is changed or
++ * aborted: it only leaves a trace for frozen-VM reports.
++ * OMACVM_STALL_WATCHDOG=0 turns it off.
++ *
++ * Threading: main_loop_busy_since and main_loop_has_bql are written only by
++ * the main loop thread, stall_reported only by the watchdog; all atomic.
++ */
++#define MAIN_LOOP_STALL_NS (2 * NANOSECONDS_PER_SECOND)
++#define MAIN_LOOP_STALL_FRAMES 24
++
++static int64_t main_loop_busy_since; /* 0 while polling */
++static bool main_loop_has_bql;
++static int64_t stall_reported;       /* main_loop_busy_since already logged */
++static int stall_watchdog_state;     /* 0 not started, 1 on, -1 off */
++
++#ifdef __APPLE__
++#include <dlfcn.h>
++#include <mach/mach.h>
++#include <pthread.h>
++
++static mach_port_t main_loop_thread;
++static uintptr_t main_loop_stack_lo, main_loop_stack_hi;
++
++/*
++ * The main loop thread's return addresses, from its frame pointers (always
++ * kept on arm64 macOS). Between thread_suspend() and thread_resume() this
++ * only reads registers and the thread's own stack: no lock, no allocation.
++ */
++static int stall_stack(void **pcs, int max)
++{
++    const uintptr_t mask = 0x00007fffffffffffULL; /* strips pointer auth bits */
++    arm_thread_state64_t st;
++    mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
++    uintptr_t fp;
++    int n = 0;
++
++    if (thread_suspend(main_loop_thread) != KERN_SUCCESS) {
++        return 0;
++    }
++    if (thread_get_state(main_loop_thread, ARM_THREAD_STATE64,
++                         (thread_state_t)&st, &count) == KERN_SUCCESS) {
++        pcs[n++] = (void *)(arm_thread_state64_get_pc(st) & mask);
++        pcs[n++] = (void *)(arm_thread_state64_get_lr(st) & mask);
++        fp = arm_thread_state64_get_fp(st);
++        while (n < max && !(fp & 7) && fp >= main_loop_stack_lo &&
++               fp + 2 * sizeof(uintptr_t) <= main_loop_stack_hi) {
++            uintptr_t next = ((uintptr_t *)fp)[0];
++            uintptr_t ret = ((uintptr_t *)fp)[1] & mask;
++            if (!ret) {
++                break;
++            }
++            if (ret != (uintptr_t)pcs[n - 1]) {
++                pcs[n++] = (void *)ret;
++            }
++            if (next <= fp) {
++                break;
++            }
++            fp = next;
++        }
++    }
++    thread_resume(main_loop_thread);
++    return n;
++}
+ 
++static void stall_where(GString *out)
++{
++    void *pcs[MAIN_LOOP_STALL_FRAMES];
++    int n = stall_stack(pcs, MAIN_LOOP_STALL_FRAMES);
++
++    for (int i = 0; i < n; i++) {
++        Dl_info info;
++        /* a return address points after the call: look up the call */
++        void *at = i ? (char *)pcs[i] - 1 : pcs[i];
++        if (i) {
++            g_string_append(out, " < ");
++        }
++        if (dladdr(at, &info) && info.dli_sname) {
++            g_string_append_printf(out, "%s+%td", info.dli_sname,
++                                   (char *)pcs[i] - (char *)info.dli_saddr);
++        } else {
++            g_string_append_printf(out, "%p", pcs[i]);
++        }
++    }
++    if (!n) {
++        g_string_append(out, "(stack not readable)");
++    }
++}
++#else
++static void stall_where(GString *out)
++{
++    g_string_append(out, "(no stack on this host)");
++}
++#endif
++
++static void *stall_watchdog(void *opaque)
++{
++    for (;;) {
++        g_autoptr(GString) where = NULL;
++        int64_t since;
++        bool has_bql;
++
++        g_usleep(250 * 1000);
++        since = qatomic_read(&main_loop_busy_since);
++        if (!since || since == qatomic_read(&stall_reported) ||
++            get_clock() - since < MAIN_LOOP_STALL_NS) {
++            continue;
++        }
++        has_bql = qatomic_read(&main_loop_has_bql);
++        where = g_string_new(NULL);
++        stall_where(where);
++        if (qatomic_read(&main_loop_busy_since) != since) {
++            continue; /* it moved on while we looked */
++        }
++        qatomic_set(&stall_reported, since);
++        warn_report("main loop stalled for %.1f s %s; where: %s",
++                    (get_clock() - since) / 1e9,
++                    has_bql ? "with the BQL held (the VM waits)"
++                            : "waiting for the BQL (another thread holds it)",
++                    where->str);
++    }
++    return NULL;
++}
++
++static void stall_watchdog_start(void)
++{
++    QemuThread thread;
++    const char *env = g_getenv("OMACVM_STALL_WATCHDOG");
++
++    if (env && !strcmp(env, "0")) {
++        stall_watchdog_state = -1;
++        return;
++    }
++#ifdef __APPLE__
++    pthread_t self = pthread_self();
++    main_loop_thread = pthread_mach_thread_np(self);
++    main_loop_stack_hi = (uintptr_t)pthread_get_stackaddr_np(self);
++    main_loop_stack_lo = main_loop_stack_hi - pthread_get_stacksize_np(self);
++#endif
++    qemu_thread_create(&thread, "main-loop-watchdog", stall_watchdog, NULL,
++                       QEMU_THREAD_DETACHED);
++    stall_watchdog_state = 1;
++}
++
++/* Called by the main loop thread just before it polls again. */
++static void stall_watchdog_poll(void)
++{
++    int64_t since = main_loop_busy_since;
++
++    if (stall_watchdog_state == 0) {
++        stall_watchdog_start();
++    }
++    if (since && qatomic_read(&stall_reported) == since) {
++        warn_report("main loop stall over after %.1f s",
++                    (get_clock() - since) / 1e9);
++    }
++    qatomic_set(&main_loop_has_bql, false);
++    qatomic_set(&main_loop_busy_since, 0);
++}
++
+ static int os_host_main_loop_wait(int64_t timeout)
+ {
+     GMainContext *context = g_main_context_default();
+@@ -304,13 +468,22 @@
+ 
+     glib_pollfds_fill(&timeout);
+ 
++    if (stall_watchdog_state >= 0) {
++        stall_watchdog_poll();
++    }
+     bql_unlock();
+     replay_mutex_unlock();
+ 
+     ret = qemu_poll_ns((GPollFD *)gpollfds->data, gpollfds->len, timeout);
+ 
++    if (stall_watchdog_state > 0) {
++        qatomic_set(&main_loop_busy_since, get_clock());
++    }
+     replay_mutex_lock();
+     bql_lock();
++    if (stall_watchdog_state > 0) {
++        qatomic_set(&main_loop_has_bql, true);
++    }
+ 
+     glib_pollfds_poll();
+ 
