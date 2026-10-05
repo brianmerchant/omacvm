@@ -414,6 +414,11 @@ enum Settings {
     /// working in macOS), so it waits for a fix.
     /// Hidden: defaults write org.omacvm.app macShortcuts -bool false
     static var macShortcuts: Bool { UserDefaults.standard.object(forKey: "macShortcuts") as? Bool ?? true }
+    /// The VM's window takes the pointer without a click (after a start, a
+    /// guest reboot, or the window becoming key with the pointer on it).
+    /// Off: QEMU's own way, on entering the window or a click.
+    /// Hidden: defaults write org.omacvm.app pointerStart -bool false
+    static var pointerStart: Bool { UserDefaults.standard.object(forKey: "pointerStart") as? Bool ?? true }
     /// HDR as the VM gets it: only while a display can show it.
     static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {

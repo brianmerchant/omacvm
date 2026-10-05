@@ -477,6 +477,8 @@ falls back and logs once.
 | `OMACVM_DISPLAYS_DEBUG=1` | off | log the display port | built |
 | `OMACVM_BACKGROUND=1`, `OMACVM_COCOA_HIDDEN=1` | off | test only: window behind / no window | built |
 | `OMACVM_TEST_SKIP_DISPLAYS`, `OMACVM_TEST_MAIN_DISPLAY` | off | test only: virtual displays | built |
+| `OMACVM_POINTER_START=0` (app: `pointerStart` false) | on | pointer taken only on enter or a click (QEMU's way) | built |
+| `OMACVM_POINTER_DEBUG=1`, `OMACVM_TEST_POINTER=<s>` | off | log pointer takes / test only: made-up motion | built |
 
 What the app records: QEMU's log (`qemu.log` in the VM folder) has the
 paths taken (fence mode, present mode, Venus ICD, video caps). `omacvm check`

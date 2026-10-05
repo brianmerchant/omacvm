@@ -275,6 +275,19 @@ the VM's SSH on `127.0.0.1:<port>`.
 - `omacvm apply` writes `guest-pointer` into the VM's folder once the VM
   draws Omarchy's own pointer; VMs set up before that still need the Mac's
   pointer (QEMU's `show-cursor=on`).
+- The VM's window takes the pointer without a click: on the first motion
+  over the VM, and when the window becomes key, the app comes to the front
+  or the window goes full screen with the pointer on it (after a start, a
+  reboot in the VM, Command-Tab or the escape combo). Not after
+  Ctrl+Option+G until the pointer left the window. The Mac's pointer over
+  the VM hides only once Omarchy draws its own (its display agent said
+  hello on `org.omacvm.display` since the VM's last reset), so one pointer
+  is always there while the VM boots (`omacvm-cocoa-pointer-start.patch`,
+  rules in `omacvm-cocoa-pointer-start-logic.patch`, unit test
+  `app/runtime/Tests/display/test-pointer-start.sh`; in a VM:
+  `src/tests/pointer-start-vm.sh`). QEMU's log says which way it takes
+  ("cocoa: pointer: ..."). Off (QEMU's own way, on entering the window or a
+  click): `defaults write org.omacvm.app pointerStart -bool false`.
 
 ## Fast network (experimental, off by default)
 
