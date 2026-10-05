@@ -74,10 +74,6 @@ in more words.
   VMs in `~/OmacVM` (or in the folder picked in the app). VMs still in the
   old hidden folder or another folder are hidden from it, not deleted; 3.0
   finds them again.
-- Fast network (OmacVM.app, experimental): a button in the app turns it on
-  and off (Fast network › Turn On…, one password dialog), and Omanotch
-  works over it. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
-  changes.
 - Omarchy's Chromium decodes H.264 and VP9 on the Mac's media engine in
   OmacVM.app VMs, YouTube included, with no flags to set: feature
   `chromium-video`, on by default for app VMs (`omacvm disable
