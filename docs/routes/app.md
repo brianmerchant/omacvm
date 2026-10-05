@@ -276,7 +276,14 @@ longer goes through one QEMU thread. Measured: see
   down (service gone, vmnet refusing), it plugs a second network card on
   QEMU's user network into the VM and takes the first one's link down (the
   VM's NetworkManager moves over within seconds); when vmnet is back for 15 s,
-  it swaps back. A switch that fails (QEMU's monitor busy) is tried again
+  it swaps back, make before break: the user network's card stays up until
+  vmnet has worked for 12 s more, so the VM is never without a network on the
+  way back. App VMs skip the routes of a card without a link at once
+  (`/etc/sysctl.d/90-omacvm-net.conf`, `ignore_routes_with_linkdown`): before,
+  the VM kept sending on the card that just went down until NetworkManager
+  dropped its route, about 6 s. Measured on the Mac mini with two VMs (ping
+  every 0.5 s in the VM): service away -> internet back after 6.6 s (was 14.5
+  s; the rest is the app noticing), service back -> no gap (was 6.6-8 s). A switch that fails (QEMU's monitor busy) is tried again
   every 3 s, adding only what is not there yet. `logs/network` and
   `qemu.log` say which network the VM has and why; `omacvm check` shows it,
   with the service's last refusal.
@@ -326,8 +333,27 @@ What is missing before it can become the default: [below](#fast-network-not-done
 - Two app VMs at once need two launchers: the app runs one at a time (a
   second start hands over to the first), so today that takes a copy of the
   app with its own bundle identifier.
-- Not tested yet: VPN clients on the Mac, a real sleep and wake, Wi-Fi
-  changes while the VM runs, real trackpad gestures over the fast network
+- Field tests on the Mac mini (macOS 27, 3.0.0 test build, two app VMs on
+  the fast network at once, 2026-10-05):
+  - A real sleep and wake (`pmset sleepnow`, woken by `pmset schedule wake`
+    2 minutes later): both VMs stay on vmnet; the Mac pings them 2 s after
+    the wake, SSH works by the first try (+5 s), Omanotch's link is back in
+    2 s, internet in the VMs at once. No reconnect to the service was needed.
+  - Network changes on the Mac while the VMs run (Wi-Fi moved before
+    Ethernet and back; Ethernet off for 45 s and on): no ping gap over 1.5 s
+    in either VM, to the internet or to the Mac, and nothing in the service's
+    log. macOS's NAT for vmnet covers every network service the Mac has.
+  - VPNs: traffic follows the Mac's routes (a route into a VPN-like tunnel,
+    Tailscale to another Mac). But macOS's NAT for vmnet covers only the
+    interfaces it saw when it started: a tunnel that comes up later (a VPN
+    you connect after the VM started) gets the VM's packets with their
+    `192.168.77.x` source untranslated, which a real VPN server drops. Seen
+    with a test tunnel and a split route; Tailscale (up before) works. On
+    QEMU's user network the packets always leave from the Mac's own address.
+    Until this is handled: with a VPN that you connect while the VM runs,
+    turn the fast network off (the VM moves to the user network at once).
+- Not tested yet: a real VPN client connecting while the VM runs (see
+  above), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by

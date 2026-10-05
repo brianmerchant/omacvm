@@ -10,6 +10,17 @@ in more words.
   link works over it (the strip itself not checked on a notch Mac yet).
   Two VMs at once work (each from an app copy with its own bundle id: the
   app runs one VM at a time).
+- Fast network: moving a running VM between the fast network and QEMU's
+  user network no longer leaves it without internet for seconds. Back to
+  the fast network had a gap of 7-8 s, now none (the user network stays
+  until the fast one has worked for 12 s); to the user network 6.6 s
+  instead of 14.5 s (app VMs skip a card's routes the moment its link goes
+  down). Measured on a Mac mini with two VMs.
+- Fast network field tests on the Mac mini: a real sleep and wake (SSH and
+  Omanotch back within 2-5 s, no reconnect), Wi-Fi/Ethernet changes (no
+  gap), two VMs at once. Known limit: a VPN connected after the VM started
+  does not get the VM's traffic translated by macOS; turn the fast network
+  off while on such a VPN (docs/routes/app.md).
 
 ## 2.9.1
 

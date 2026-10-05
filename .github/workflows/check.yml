@@ -93,6 +93,9 @@ jobs:
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
 
+      - name: App VMs skip routes of a card without a link (network moves without a gap)
+        run: src/tests/net-linkdown.sh
+
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
