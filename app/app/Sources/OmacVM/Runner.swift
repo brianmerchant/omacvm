@@ -162,6 +162,7 @@ final class Runner {
         env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
         env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
+        if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
