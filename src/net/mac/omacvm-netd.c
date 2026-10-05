@@ -52,8 +52,12 @@
 // - vmnet answers a start or stop within VMNET_WAIT seconds, or the
 //   connection is given up (logged) and its slot freed, so a vmnet that never
 //   answers cannot use up a user's slots.
-// It runs no commands, opens no files but STATE_FILE (root's, in /var/run,
-// gone at restart), takes no other requests, and frames
+// - While VMs are on the fast network: the NAT for networks macOS's vmnet
+//   service does not cover (a VPN connected after it started), in the
+//   daemon's own pf anchor; see "VPN NAT" below.
+// It runs one program, /sbin/pfctl (fixed path and arguments, no shell, for
+// the VPN NAT only), opens no files but STATE_FILE and NAT_FILE (root's, in
+// /var/run, gone at restart), takes no other requests, and frames
 // are only passed on (their length checked), never parsed.
 //
 // launchd starts it on the first connection (socket activation, see
@@ -80,6 +84,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -91,10 +96,13 @@
 #include <sys/sysctl.h>
 #include <sys/uio.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
 #include <arpa/inet.h>
+#include <net/route.h>
+#include <netinet/in.h>
 #include <vmnet/vmnet.h>
 #include <xpc/xpc.h>
 
@@ -292,6 +300,7 @@ static void vmnetResult(int ok) {
     else if (!ok) logf_("vmnet failed %d time(s) in a row: no new interfaces for %ld s", n, secs);
 }
 
+static void natPoke(void);
 // c's interface is up (add), or gone (stopped: up 0) or given up (a stop
 // that was not answered: up 1, it still counts as ours).
 static void liveChange(struct conn *c, int add, int up) {
@@ -302,6 +311,7 @@ static void liveChange(struct conn *c, int add, int up) {
     if (add) inherited = 0;
     saveState();
     pthread_mutex_unlock(&lock);
+    natPoke();   // the VPN NAT follows the VMs
 }
 
 static pid_t (*findSharing)(void);   // macOS's vmnet service's pid, 0 when not running
@@ -400,6 +410,7 @@ static void sharingGone(void) {
     if (n) { inherited = 1; saveState(); }
     pthread_mutex_unlock(&lock);
     if (n) logf_("macOS's vmnet service (%s) stopped: closing %d connection(s) (QEMU connects again)", SHARING, n);
+    natPoke();
 }
 
 // Watches the service's process while we have interfaces. Only an exit it
@@ -440,6 +451,478 @@ static void *watchSharing(void *arg) {
             watched = 0;
             sharingGone();
         }
+    }
+    return NULL;
+}
+
+// ---- VPN NAT ----
+//
+// macOS's vmnet service translates the fast network's addresses (NAT) only on
+// the interfaces that were up when it started. A VPN connected later (a new
+// utun) gets the VMs' packets with their own source, 192.168.77.x, and the
+// VPN's server drops them (a full tunnel: the VMs lose the internet). So
+// while a VM is on the fast network, the daemon adds that NAT itself for each
+// up interface the service does not cover, and takes it away when the
+// interface goes, when the last VM leaves and when the daemon stops.
+// - Only in its own pf anchor, NAT_ANCHOR: a child of "com.apple", which
+//   macOS's main ruleset already evaluates (nat-anchor "com.apple/*"). No
+//   other anchor and not the main ruleset is changed or flushed. Its rules
+//   only match the fast network's addresses as source (NAT, written as the
+//   service writes its own: "-> (if:0) extfilter ei") and reassemble
+//   fragments arriving on those interfaces (the service does that on its own
+//   ones too), so the NAT works for fragmented replies. pf keeps an emptied
+//   anchor listed (without rules) until the Mac restarts.
+// - pf is enabled with a reference of our own (pfctl -E, given back with
+//   pfctl -X): pf stays on as long as anyone else wants it.
+// - Which interfaces the service covers: the "on <interface>" of its own
+//   anchors (SHARED_V4, SHARED_V6). Which are up: getifaddrs. Names must be
+//   of a kind that can carry the VMs' traffic away (NAT_KINDS: Ethernet and
+//   Wi-Fi, VPN tunnels; never a bridge, so Parallels' and other VM networks
+//   are not touched), letters then digits; addresses come from the kernel and
+//   are printed with inet_ntop. Nothing in the rules comes from a VM or a user.
+// - pfctl runs by its fixed path, with a fixed environment and no shell; the
+//   rules go in on its stdin.
+// - A routing socket says when interfaces or addresses change (no polling);
+//   changes are gathered for NAT_SETTLE ms, then the anchor is set to what is
+//   needed, only when that changed (or the anchor lost it).
+// - NAT_FILE (readable by all: install.sh --status and omacvm check show it)
+//   says what is translated and keeps the pf reference, so the next daemon
+//   removes what one that crashed left.
+#define NAT_ANCHOR "com.apple/org.omacvm.netd"
+#ifndef NAT_FILE
+#define NAT_FILE "/var/run/org.omacvm.netd.nat"
+#endif
+#define NAT_NET NET_PREFIX "0/24"
+#define SHARED_V4 "com.apple.internet-sharing/shared_v4"
+#define SHARED_V6 "com.apple.internet-sharing/shared_v6"
+#ifndef PFCTL
+#define PFCTL "/sbin/pfctl"
+#endif
+#ifndef PFCTL_WAIT
+#define PFCTL_WAIT 10          // seconds pfctl may take, then it is killed
+#endif
+#define NAT_MAX 32             // interfaces
+#define NAT_SETTLE 1000        // ms without changes before the NAT follows them ...
+#define NAT_SETTLE_MAX 5000    // ... but no longer than this after the first
+
+struct natIf { char name[IFNAMSIZ]; int v4, v6; char a6[INET6_ADDRSTRLEN]; };
+struct natSet { int n; struct natIf i[NAT_MAX]; };
+
+// A name for our rules: letters of a kind in NAT_KINDS, then 1-4 digits.
+static int natName(const char *s) {
+    static const char *kinds[] = { "en", "utun", "ipsec", "ppp", "tun", "tap" };   // NAT_KINDS
+    size_t l = 0, d = 0;
+    while (s[l] >= 'a' && s[l] <= 'z') l++;
+    while (s[l + d] >= '0' && s[l + d] <= '9') d++;
+    if (!l || !d || d > 4 || s[l + d] || l + d >= IFNAMSIZ) return 0;
+    for (size_t k = 0; k < sizeof kinds / sizeof *kinds; k++)
+        if (strlen(kinds[k]) == l && !strncmp(s, kinds[k], l)) return 1;
+    return 0;
+}
+
+static struct natIf *natFind(const struct natSet *s, const char *name) {
+    for (int i = 0; i < s->n; i++) if (!strcmp(s->i[i].name, name)) return (struct natIf *)&s->i[i];
+    return NULL;
+}
+
+static struct natIf *natAdd(struct natSet *s, const char *name) {
+    struct natIf *f = natFind(s, name);
+    if (f || s->n >= NAT_MAX) return f;
+    f = &s->i[s->n++];
+    memset(f, 0, sizeof *f);
+    snprintf(f->name, sizeof f->name, "%s", name);
+    return f;
+}
+
+// The interfaces pfctl's listing of an anchor names ("... on en0 ...",
+// "on { en0 en1 }"; "on ! en0" covers no en0), marked as covered for IPv4
+// or IPv6.
+static void natCovered(const char *text, struct natSet *cov, int v6) {
+    char *copy = strdup(text), *save = NULL, *t;
+    if (!copy) return;
+    int on = 0, list = 0;
+    for (t = strtok_r(copy, " \t\r\n", &save); t; t = strtok_r(NULL, " \t\r\n", &save)) {
+        if (!on && !list) { on = !strcmp(t, "on"); continue; }
+        if (!list && !strcmp(t, "{")) { list = 1; on = 0; continue; }
+        if (list && !strcmp(t, "}")) { list = 0; continue; }
+        if (!list && !strcmp(t, "!")) { on = 0; continue; }
+        size_t l = strlen(t);
+        if (l && t[l - 1] == ',') t[--l] = 0;
+        size_t k = 0;
+        while (k < l && ((t[k] >= 'a' && t[k] <= 'z') || (t[k] >= '0' && t[k] <= '9'))) k++;
+        if (l && k == l && l < IFNAMSIZ) {
+            struct natIf *f = natAdd(cov, t);
+            if (f) { if (v6) f->v6 = 1; else f->v4 = 1; }
+        }
+        on = 0;
+    }
+    free(copy);
+}
+
+static int natCmp(const void *a, const void *b) { return strcmp(((const struct natIf *)a)->name, ((const struct natIf *)b)->name); }
+
+// What needs our NAT: each up interface of a NAT_KINDS kind with an address
+// of a family the service does not cover on it: IPv4 (not link-local, not
+// the fast network's), IPv6 (not link-local; only while the fast network has
+// an IPv6 prefix, prefix6, as vmnet told us). Sorted by name.
+static void natWanted(struct ifaddrs *list, const struct natSet *cov, const char *prefix6, struct natSet *want) {
+    struct in_addr first; inet_pton(AF_INET, NET_FIRST, &first);
+    want->n = 0;
+    for (struct ifaddrs *p = list; p; p = p->ifa_next) {
+        unsigned f = p->ifa_flags;
+        if (!p->ifa_addr || !(f & IFF_UP) || !(f & IFF_RUNNING) || (f & IFF_LOOPBACK) || !natName(p->ifa_name)) continue;
+        const struct natIf *c = natFind(cov, p->ifa_name);
+        if (p->ifa_addr->sa_family == AF_INET) {
+            uint32_t a = ntohl(((struct sockaddr_in *)(void *)p->ifa_addr)->sin_addr.s_addr);
+            if ((a >> 16) == 0xa9fe || (a >> 8) == ((ntohl(first.s_addr)) >> 8) || (a >> 24) == 127 || !a) continue;
+            if (c && c->v4) continue;
+            struct natIf *w = natAdd(want, p->ifa_name);
+            if (w) w->v4 = 1;
+        } else if (p->ifa_addr->sa_family == AF_INET6 && prefix6[0]) {
+            const struct in6_addr *a = &((struct sockaddr_in6 *)(void *)p->ifa_addr)->sin6_addr;
+            if (IN6_IS_ADDR_LINKLOCAL(a) || IN6_IS_ADDR_LOOPBACK(a) || IN6_IS_ADDR_UNSPECIFIED(a) || IN6_IS_ADDR_MULTICAST(a)) continue;
+            if (c && c->v6) continue;
+            struct natIf *w = natAdd(want, p->ifa_name);
+            if (w && !w->v6 && inet_ntop(AF_INET6, a, w->a6, sizeof w->a6)) w->v6 = 1;
+        }
+    }
+    qsort(want->i, (size_t)want->n, sizeof *want->i, natCmp);
+}
+
+// vmnet's IPv6 prefix for the fast network ("fd9f:b9:aae8:1ff::", a /64) as
+// "fd9f:b9:aae8:1ff::/64" in out; "" if it is not one.
+static void natPrefix(const char *vmnet, char *out, size_t len) {
+    struct in6_addr a;
+    char s[INET6_ADDRSTRLEN];
+    out[0] = 0;
+    if (!vmnet || inet_pton(AF_INET6, vmnet, &a) != 1 || IN6_IS_ADDR_LINKLOCAL(&a) || IN6_IS_ADDR_MULTICAST(&a)) return;
+    for (int i = 8; i < 16; i++) a.s6_addr[i] = 0;
+    if (inet_ntop(AF_INET6, &a, s, sizeof s)) snprintf(out, len, "%s/64", s);
+}
+
+// The anchor's rules for want (pf wants scrub before nat); -1 if they do not fit.
+static int natRules(const struct natSet *want, const char *prefix6, char *buf, size_t len) {
+    size_t o = 0;
+    buf[0] = 0;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < want->n; i++) {
+            const struct natIf *w = &want->i[i];
+            int n = 0;
+            if (pass == 0)
+                n = snprintf(buf + o, len - o, "scrub in on %s all fragment reassemble\n", w->name);
+            else {
+                // As macOS's sharing writes its own: the interface's first
+                // address, followed when it changes; endpoint-independent.
+                if (w->v4) n = snprintf(buf + o, len - o, "nat on %s inet from " NAT_NET " to any -> (%s:0) extfilter ei\n", w->name, w->name);
+                if (n >= 0 && (size_t)n < len - o && w->v6 && prefix6[0]) {
+                    o += (size_t)n;
+                    n = snprintf(buf + o, len - o, "nat on %s inet6 from %s to any -> (%s:0) extfilter ei\n", w->name, prefix6, w->name);
+                }
+            }
+            if (n < 0 || (size_t)n >= len - o) return -1;
+            o += (size_t)n;
+        }
+    return 0;
+}
+
+static int natSame(const struct natSet *a, const struct natSet *b) {
+    if (a->n != b->n) return 0;
+    for (int i = 0; i < a->n; i++)
+        if (strcmp(a->i[i].name, b->i[i].name) || a->i[i].v4 != b->i[i].v4 || a->i[i].v6 != b->i[i].v6 ||
+            strcmp(a->i[i].a6, b->i[i].a6)) return 0;
+    return 1;
+}
+
+// "utun5 (IPv4, IPv6)" for the log.
+static const char *natSays(const struct natIf *f, char *buf, size_t len) {
+    snprintf(buf, len, "%s (%s%s%s)", f->name, f->v4 ? "IPv4" : "", f->v4 && f->v6 ? ", " : "", f->v6 ? "IPv6" : "");
+    return buf;
+}
+
+// Runs pfctl with args (args[0] "pfctl"), in on its stdin; its output (and
+// errors) in out. 0 when it exited 0.
+static int pfctlRun(const char *const *args, const char *in, char *out, size_t outlen) {
+    int ip[2], op[2];
+    out[0] = 0;
+    if (pipe(ip)) { snprintf(out, outlen, "pipe: %s", strerror(errno)); return -1; }
+    if (pipe(op)) { snprintf(out, outlen, "pipe: %s", strerror(errno)); close(ip[0]); close(ip[1]); return -1; }
+    fcntl(ip[1], F_SETFD, FD_CLOEXEC); fcntl(op[0], F_SETFD, FD_CLOEXEC);
+    posix_spawn_file_actions_t fa; posix_spawnattr_t at;
+    posix_spawn_file_actions_init(&fa); posix_spawnattr_init(&at);
+    posix_spawn_file_actions_adddup2(&fa, ip[0], 0);
+    posix_spawn_file_actions_adddup2(&fa, op[1], 1);
+    posix_spawn_file_actions_adddup2(&fa, op[1], 2);
+    sigset_t none, all; sigemptyset(&none); sigfillset(&all);
+    posix_spawnattr_setsigmask(&at, &none);
+    posix_spawnattr_setsigdefault(&at, &all);   // SIGPIPE is ignored here, not in pfctl
+    // Only 0, 1, 2 reach pfctl (no VM's socket, no listening socket).
+    posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
+    char *const env[] = { "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL=C", NULL };
+    pid_t pid = 0;
+    int e = posix_spawn(&pid, PFCTL, &fa, &at, (char *const *)args, env);
+    posix_spawn_file_actions_destroy(&fa); posix_spawnattr_destroy(&at);
+    close(ip[0]); close(op[1]);
+    if (e) { snprintf(out, outlen, "%s: %s", PFCTL, strerror(e)); close(ip[1]); close(op[0]); return -1; }
+    if (in) {   // a few lines: they fit the pipe, and pfctl reads them all before it says anything
+        size_t l = strlen(in), o = 0;
+        while (o < l) {
+            ssize_t w = write(ip[1], in + o, l - o);
+            if (w < 0 && errno == EINTR) continue;
+            if (w <= 0) break;
+            o += (size_t)w;
+        }
+    }
+    close(ip[1]);
+    size_t have = 0;
+    int late = 0;
+    time_t end = time(NULL) + PFCTL_WAIT;
+    for (;;) {
+        int left = (int)(end - time(NULL));
+        struct pollfd pf = { .fd = op[0], .events = POLLIN };
+        if (left <= 0 || poll(&pf, 1, left * 1000) == 0) {
+            kill(pid, SIGKILL);
+            snprintf(out, outlen, "pfctl took over %d s: stopped", PFCTL_WAIT);
+            late = 1;
+            break;
+        }
+        char b[1024];
+        ssize_t n = read(op[0], b, sizeof b);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        size_t k = (size_t)n < outlen - 1 - have ? (size_t)n : outlen - 1 - have;
+        memcpy(out + have, b, k); have += k; out[have] = 0;
+    }
+    close(op[0]);
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    return !late && WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : -1;
+}
+static int (*pfRun)(const char *const *args, const char *in, char *out, size_t outlen) = pfctlRun;   // the offline test puts its own in
+
+static pthread_mutex_t natLock = PTHREAD_MUTEX_INITIALIZER;   // taken before lock, never after
+static struct natSet natNow;        // what NAT_ANCHOR has
+static char natNow6[64];            // ... with this IPv6 prefix of the fast network
+static unsigned long long natToken; // our pf enable reference; 0: none
+static int natDone;                 // the daemon stops: no more changes
+static int natSaid;                 // "cannot read the service's rules" logged
+static int natWake[2] = { -1, -1 };
+static const char *natPath = NAT_FILE;
+static char natVmnet6[64];          // the fast network's IPv6 prefix, from vmnet's start (under lock)
+
+// pfctl's output for the log: one line, printable, short, without the
+// notes it always prints (ALTQ, "Use of -f option ...").
+static const char *natOut(char *out) {
+    char *s = out;
+    static const char *notes[] = { "No ALTQ", "ALTQ related", "pfctl: Use of -f option", "present in the main ruleset", "See /etc/pf.conf", "\n" };
+    for (int more = 1; more;) {
+        more = 0;
+        for (size_t i = 0; i < sizeof notes / sizeof *notes; i++)
+            if (!strncmp(s, notes[i], strlen(notes[i]))) { char *nl = strchr(s, '\n'); if (nl) { s = nl + 1; more = 1; } break; }
+    }
+    for (char *p = s; *p; p++) if (*p == '\n') *p = ' '; else if ((unsigned char)*p < 32 || (unsigned char)*p > 126) *p = '?';
+    if (strlen(s) > 200) s[200] = 0;
+    return s;
+}
+
+// NAT_FILE: "boot token interface...", readable by all; gone when nothing is ours.
+static void natSave(void) {
+    if (!natNow.n && !natToken) { unlink(natPath); return; }
+    char b[64 + NAT_MAX * (IFNAMSIZ + 1)];
+    int o = snprintf(b, sizeof b, "%ld %llu", bootTime(), natToken);
+    for (int i = 0; i < natNow.n && o > 0 && (size_t)o < sizeof b; i++) o += snprintf(b + o, sizeof b - (size_t)o, " %s", natNow.i[i].name);
+    if (o < 0 || (size_t)o >= sizeof b - 1) return;
+    b[o++] = '\n';
+    int fd = open(natPath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    if (write(fd, b, (size_t)o) != o) { /* the next save tries again */ }
+    close(fd);
+}
+
+static int natLoad(const char *rules) {
+    const char *a[] = { "pfctl", "-a", NAT_ANCHOR, "-f", "-", NULL };
+    char out[1024];
+    if (!pfRun(a, rules, out, sizeof out)) return 0;
+    logf_("VPN NAT: pfctl could not set %s: %s", NAT_ANCHOR, natOut(out));
+    return -1;
+}
+
+static void natRelease(void) {
+    if (!natToken) return;
+    char t[24]; snprintf(t, sizeof t, "%llu", natToken);
+    const char *a[] = { "pfctl", "-X", t, NULL };
+    char out[512];
+    if (pfRun(a, NULL, out, sizeof out)) logf_("VPN NAT: pfctl -X %s failed: %s", t, natOut(out));
+    natToken = 0;
+}
+
+static int natEnable(void) {
+    const char *a[] = { "pfctl", "-E", NULL };
+    char out[1024];
+    const char *t = NULL;
+    if (!pfRun(a, NULL, out, sizeof out) && (t = strstr(out, "Token : "))) {
+        char *end; unsigned long long v = strtoull(t + 8, &end, 10);
+        if (end != t + 8 && v) { natToken = v; return 0; }
+    }
+    logf_("VPN NAT: pfctl -E failed: %s", natOut(out));
+    return -1;
+}
+
+// Everything ours out of pf (under natLock).
+static void natOff(const char *why) {
+    if (!natNow.n && !natToken) return;
+    int had = natNow.n;
+    // Not taken out: all kept (and NAT_FILE says so), tried again on the next
+    // change, or by the next daemon (natStart).
+    if (had && natLoad("")) return;
+    natNow.n = 0; natNow6[0] = 0;
+    natRelease();
+    natSave();
+    if (had) logf_("VPN NAT off: %s", why);
+}
+
+static int natLive(void) {
+    int any = 0;
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < MAX_CONNS; i++) any |= live[i] != NULL;
+    pthread_mutex_unlock(&lock);
+    return any;
+}
+
+// The anchor still has a nat rule for each interface of natNow (nobody flushed it).
+static int natStillThere(void) {
+    const char *a[] = { "pfctl", "-a", NAT_ANCHOR, "-s", "nat", NULL };
+    char out[8192];
+    if (pfRun(a, NULL, out, sizeof out)) return 0;
+    struct natSet have = { 0 };
+    natCovered(out, &have, 0);
+    for (int i = 0; i < natNow.n; i++) if (!natFind(&have, natNow.i[i].name)) return 0;
+    return 1;
+}
+
+// Sets NAT_ANCHOR to what is needed now.
+static void natSync(void) {
+    pthread_mutex_lock(&natLock);
+    struct natSet want = { 0 };
+    char p6[64] = "";
+    if (natDone) goto out;
+    if (natLive()) {
+        if (!findSharing()) goto out;   // the service restarts: the VMs connect again, then this runs again
+        static const char *anchors[] = { SHARED_V4, SHARED_V4, SHARED_V6, SHARED_V6 }, *kinds[] = { "rules", "nat", "rules", "nat" };
+        struct natSet cov = { 0 };
+        char out[16384];
+        for (int i = 0; i < 4; i++) {
+            const char *a[] = { "pfctl", "-a", anchors[i], "-s", kinds[i], NULL };
+            if (pfRun(a, NULL, out, sizeof out)) {
+                if (!natSaid++) logf_("VPN NAT: macOS's sharing rules cannot be read (%s): VPN NAT not changed", natOut(out));
+                goto out;
+            }
+            natCovered(out, &cov, i >= 2);
+        }
+        natSaid = 0;
+        pthread_mutex_lock(&lock);
+        snprintf(p6, sizeof p6, "%s", natVmnet6);
+        pthread_mutex_unlock(&lock);
+        struct ifaddrs *l;
+        if (getifaddrs(&l)) goto out;
+        natWanted(l, &cov, p6, &want);
+        freeifaddrs(l);
+    }
+    if (natSame(&want, &natNow) && !strcmp(p6, natNow6) && (!want.n || natStillThere())) goto out;
+    if (!want.n) { natOff(natLive() ? "macOS's sharing covers every network now" : "no VM on the fast network"); goto out; }
+    char rules[NAT_MAX * 256];
+    if (natRules(&want, p6, rules, sizeof rules)) goto out;
+    if (!natToken) {
+        if (natEnable()) goto out;
+        natSave();   // the reference is kept before any rule: a crash leaves nothing unknown
+    }
+    if (natLoad(rules)) { if (!natNow.n) { natRelease(); natSave(); } goto out; }
+    char s1[64];
+    for (int i = 0; i < want.n; i++) {
+        const struct natIf *o = natFind(&natNow, want.i[i].name);
+        if (!o || o->v4 != want.i[i].v4 || o->v6 != want.i[i].v6)
+            logf_("VPN NAT on %s: macOS's sharing does not cover it (a network that came up after it started, such as a VPN)",
+                  natSays(&want.i[i], s1, sizeof s1));
+    }
+    for (int i = 0; i < natNow.n; i++)
+        if (!natFind(&want, natNow.i[i].name)) logf_("VPN NAT off %s: gone, or covered by macOS's sharing now", natNow.i[i].name);
+    natNow = want;
+    snprintf(natNow6, sizeof natNow6, "%s", p6);
+    natSave();
+out:
+    pthread_mutex_unlock(&natLock);
+}
+
+// Something changed for the NAT (a VM came or left, the service stopped).
+static void natPoke(void) {
+    if (natWake[1] >= 0 && write(natWake[1], "x", 1) < 0) { /* full: a wake is pending anyway */ }
+}
+
+// The daemon stops: nothing of ours stays in pf.
+static void natStop(const char *why) {
+    pthread_mutex_lock(&natLock);
+    natDone = 1;
+    natOff(why);
+    pthread_mutex_unlock(&natLock);
+}
+
+// What a daemon before us left (it crashed or was killed): removed.
+static void natStart(void) {
+    char b[64 + NAT_MAX * (IFNAMSIZ + 1)] = "";
+    int fd = open(natPath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return;
+    ssize_t r = read(fd, b, sizeof b - 1);
+    close(fd);
+    long boot = 0; unsigned long long tok = 0;
+    if (r > 0 && sscanf(b, "%ld %llu", &boot, &tok) == 2 && boot == bootTime()) {
+        pthread_mutex_lock(&natLock);
+        natLoad("");
+        natToken = tok;
+        natRelease();
+        pthread_mutex_unlock(&natLock);
+        logf_("VPN NAT: removed what the daemon before left");
+    }
+    unlink(natPath);
+}
+
+static long msSince(const struct timespec *t) {
+    struct timespec n; clock_gettime(CLOCK_MONOTONIC, &n);
+    return (n.tv_sec - t->tv_sec) * 1000 + (n.tv_nsec - t->tv_nsec) / 1000000;
+}
+
+// Waits for changes of interfaces and addresses (routing socket) and for
+// natPoke, then lets the NAT follow.
+static void *natWatch(void *arg) {
+    (void)arg;
+    int rs = socket(PF_ROUTE, SOCK_RAW, AF_UNSPEC);
+    if (rs < 0) { logf_("VPN NAT: no routing socket (%s): the NAT follows only VMs coming and going", strerror(errno)); }
+    struct timespec first = { 0, 0 };
+    long due = -1;   // ms after first; -1: nothing pending
+    for (;;) {
+        struct pollfd pf[2] = { { .fd = natWake[0], .events = POLLIN }, { .fd = rs, .events = POLLIN } };
+        int wait = -1;
+        if (due >= 0) { long left = due - msSince(&first); wait = left > 0 ? (int)left : 0; }
+        int n = poll(pf, rs >= 0 ? 2 : 1, wait);
+        if (n < 0 && errno != EINTR) { sleep(1); continue; }
+        long settle = -1;
+        if (n > 0 && (pf[0].revents & POLLIN)) {
+            char b[64];
+            while (read(natWake[0], b, sizeof b) > 0) {}
+            settle = 0;
+        }
+        if (n > 0 && rs >= 0 && (pf[1].revents & POLLIN)) {
+            char b[2048];
+            ssize_t r = read(rs, b, sizeof b);
+            if (r < 0 && errno == ENOBUFS) settle = NAT_SETTLE;   // messages lost: something changed
+            else if (r >= (ssize_t)sizeof(struct rt_msghdr)) {
+                int t = ((struct rt_msghdr *)(void *)b)->rtm_type;
+                if (t == RTM_IFINFO || t == RTM_NEWADDR || t == RTM_DELADDR || t == RTM_IFINFO2) settle = NAT_SETTLE;
+            }
+        }
+        if (settle >= 0) {
+            if (due < 0) { clock_gettime(CLOCK_MONOTONIC, &first); due = settle; }
+            else { long d = msSince(&first) + settle; due = d < NAT_SETTLE_MAX ? d : NAT_SETTLE_MAX; if (!settle) due = msSince(&first); }
+        }
+        if (due >= 0 && msSince(&first) >= due) { due = -1; natSync(); }
     }
     return NULL;
 }
@@ -543,7 +1026,10 @@ static int startInterface(struct conn *c) {
         if (!gaveUp) {
             answered = 1;
             status = st;
-            if (st == VMNET_SUCCESS && param) maxPacket = (size_t)xpc_dictionary_get_uint64(param, vmnet_max_packet_size_key);
+            if (st == VMNET_SUCCESS && param) {
+                maxPacket = (size_t)xpc_dictionary_get_uint64(param, vmnet_max_packet_size_key);
+                natPrefix(xpc_dictionary_get_string(param, vmnet_nat66_prefix_key), natVmnet6, sizeof natVmnet6);
+            }
         }
         pthread_mutex_unlock(&lock);
         if (!gaveUp) dispatch_semaphore_signal(done);
@@ -717,6 +1203,16 @@ static void accepted(int fd) {
     pthread_attr_destroy(&a);
 }
 
+// SIGTERM (launchd stops the service: install.sh, uninstall) or SIGINT (a
+// test run): the main loop takes the VPN NAT out of pf, then exits.
+static int stopPipe[2] = { -1, -1 };
+static void onStop(int sig) {
+    (void)sig;
+    int e = errno;
+    if (write(stopPipe[1], "s", 1) < 0) { /* one is enough */ }
+    errno = e;
+}
+
 static int listenOn(const char *path) {
     int s = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un a = { .sun_family = AF_UNIX };
@@ -757,8 +1253,20 @@ int main(int argc, char **argv) {
     CFRelease(rs);
     signal(SIGPIPE, SIG_IGN);
     loadState();
+    natStart();
     pthread_t w;
     if (pthread_create(&w, NULL, watchSharing, NULL) == 0) pthread_detach(w);
+    if (pipe(natWake) == 0) {
+        for (int i = 0; i < 2; i++) { fcntl(natWake[i], F_SETFL, O_NONBLOCK); fcntl(natWake[i], F_SETFD, FD_CLOEXEC); }
+        if (pthread_create(&w, NULL, natWatch, NULL) == 0) pthread_detach(w);
+    } else logf_("VPN NAT: no pipe (%s): off", strerror(errno));
+    if (pipe(stopPipe) == 0) {
+        for (int i = 0; i < 2; i++) { fcntl(stopPipe[i], F_SETFL, O_NONBLOCK); fcntl(stopPipe[i], F_SETFD, FD_CLOEXEC); }
+        struct sigaction sa = { .sa_handler = onStop };
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGTERM, &sa, NULL);
+        sigaction(SIGINT, &sa, NULL);
+    }
 
     int ls = -1;
     if (path) {
@@ -775,16 +1283,18 @@ int main(int argc, char **argv) {
     // here, between accepts, so a connection that just came in is never dropped.
     lastActive = time(NULL);
     for (;;) {
-        struct pollfd pf = { .fd = ls, .events = POLLIN };
-        int r = poll(&pf, 1, 10 * 1000);
+        struct pollfd pf[2] = { { .fd = ls, .events = POLLIN }, { .fd = stopPipe[0], .events = POLLIN } };
+        int r = poll(pf, stopPipe[0] >= 0 ? 2 : 1, 10 * 1000);
         if (r == 0) {
             pthread_mutex_lock(&lock);
             int quit = !path && nconns == 0 && time(NULL) - lastActive >= IDLE_EXIT;
             pthread_mutex_unlock(&lock);
-            if (quit) return 0;
+            if (quit) { natStop("no VM on the fast network"); return 0; }
             continue;
         }
         if (r < 0) { if (errno != EINTR) { logf_("poll: %s", strerror(errno)); sleep(1); } continue; }
+        if (pf[1].revents & POLLIN) { natStop("the service stops"); logf_("stopped"); return 0; }
+        if (!(pf[0].revents & POLLIN)) continue;
         int fd = accept(ls, NULL, NULL);
         if (fd < 0) { if (errno == EINTR || errno == ECONNABORTED || errno == EAGAIN) continue; logf_("accept: %s", strerror(errno)); sleep(1); continue; }
         accepted(fd);
