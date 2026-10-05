@@ -237,6 +237,30 @@ check(once2.take(.keyboard, .brightnessUp, at: 14) && once2.take(.tap, .brightne
 check(BrightnessOnce.macOSDidIt(before: 0.5, after: 0.5625) && !BrightnessOnce.macOSDidIt(before: 0.5, after: 0.5)
       && !BrightnessOnce.macOSDidIt(before: nil, after: 0.6) && !BrightnessOnce.macOSDidIt(before: 0.5, after: nil),
       "hid: macOS stepped it already (1/16): not again; unchanged or unreadable (DDC): the Bridge steps")
+// RC11 check finding 1: quick presses lost every other step. Press 2 read "before" while press 1's step was
+// still waiting; its check saw press 1's change as macOS's. The Bridge's own steps do not count as macOS's.
+var own = OwnSteps()
+check(own.macOSDidIt(1, pressAt: 20, before: 0.5, after: 0.5625), "hid: no step of the Bridge's: a change is macOS's (not stepped again)")
+own.stepped(1, at: 20.25)   // press 1 (20.0) acts
+check(!own.macOSDidIt(1, pressAt: 20.1, before: 0.5, after: 0.5625), "hid: quick press 2 (0.1 s later): press 1's step is not macOS's: it steps")
+own.stepped(1, at: 20.35)
+check(!own.macOSDidIt(1, pressAt: 20.2, before: 0.5625, after: 0.625) && !own.macOSDidIt(1, pressAt: 20.4, before: 0.625, after: 0.6875),
+      "hid: 5 quick presses: each steps")
+var held = OwnSteps(); var stepsDone = 0; var level: Float = 0.5
+// A held key at 30 ms repeats (KeyRepeat 2): each act 0.25 s after its press, every one steps.
+var pending: [(at: Double, before: Float)] = []
+for i in 0..<20 {
+  let t = 30 + Double(i) * 0.03
+  while let p = pending.first, p.at + 0.25 <= t {
+    pending.removeFirst()
+    if !held.macOSDidIt(1, pressAt: p.at, before: p.before, after: level) { held.stepped(1, at: p.at + 0.25); level += 1 / 16; stepsDone += 1 }
+  }
+  pending.append((t, level))
+}
+for p in pending where !held.macOSDidIt(1, pressAt: p.at, before: p.before, after: level) { held.stepped(1, at: p.at + 0.25); level += 1 / 16; stepsDone += 1 }
+check(stepsDone == 20, "hid: a held key's 20 repeats: 20 steps (\(stepsDone))")
+check(own.macOSDidIt(2, pressAt: 20.2, before: 0.5, after: 0.5625), "hid: another display: its own check (macOS's change counts)")
+check(own.macOSDidIt(1, pressAt: 25, before: 0.5, after: 0.5625), "hid: a press 4 s after the last step: the check is back")
 
 // ---- QEMU's control socket ----
 check(QMPKeys.socketPath(["-name", "Omarchy", "-qmp", "unix:/Users/a/Library/Caches/OmacVM/run/x.qmp,server=on,wait=off"])

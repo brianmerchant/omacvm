@@ -262,6 +262,7 @@ final class MediaKeys {
   private var permissions: String?      // main thread: the last "permissions:" line
   private let brightnessKeys = BrightnessKeys()
   private var brightnessOnce = BrightnessOnce()   // main thread
+  private var ownSteps = OwnSteps()               // main thread
 
   var status: String {
     if !config.captureKeys { return "Media keys: off (macOS handles them)" }
@@ -399,8 +400,9 @@ final class MediaKeys {
       let brightness = pressed == .brightnessUp || pressed == .brightnessDown
       if down, brightness, !brightnessOnce.take(.tap, pressed, at: ProcessInfo.processInfo.systemUptime) { return true }
       if case .external(let id) = route {
-        if down { externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
+        if down { ownSteps.stepped(id, at: ProcessInfo.processInfo.systemUptime); externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
       } else if down {
+        if brightness, let id = Brightness.displayID { ownSteps.stepped(id, at: ProcessInfo.processInfo.systemUptime) }
         work.async { self.apply(key, fine: option) }   // key-up is swallowed too
       }
     case .vm(let qcode):
@@ -438,13 +440,16 @@ final class MediaKeys {
     }
     // macOS may still handle the key itself (it reaches no tap, so it cannot be
     // swallowed): a moment later, a display macOS dims that already changed is
-    // not stepped again.
+    // not stepped again, unless the Bridge stepped it itself meanwhile (quick
+    // presses, a held key: OwnSteps), so every press steps once.
     guard let display, let before = Brightness.level(display) else { act(); return }
+    let at = ProcessInfo.processInfo.systemUptime
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
-      if BrightnessOnce.macOSDidIt(before: before, after: Brightness.level(display)) {
+      if ownSteps.macOSDidIt(display, pressAt: at, before: before, after: Brightness.level(display)) {
         if once.first("macOS brightness \(display)") { log("brightness key \(key): macOS changed display \(display) itself: not stepped again") }
         return
       }
+      ownSteps.stepped(display, at: ProcessInfo.processInfo.systemUptime)
       act()
     }
   }

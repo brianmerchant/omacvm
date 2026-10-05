@@ -228,6 +228,29 @@ struct BrightnessOnce {
   }
 }
 
+/// The Bridge's own brightness steps per display. A key read from the keyboard
+/// checks a moment later whether macOS changed the display itself; a step of
+/// the Bridge's in that time (an earlier quick press, a held key's repeat)
+/// would look like macOS's, so then the check is skipped and the key steps.
+struct OwnSteps {
+  /// How long before the press a step of the Bridge's may still show up.
+  static let settle = 0.3
+  private var last: [UInt32: Double] = [:]
+
+  mutating func stepped(_ display: UInt32, at now: Double) { last[display] = now }
+
+  /// The Bridge stepped `display` since shortly before the press at `pressAt`.
+  func since(_ display: UInt32, pressAt: Double) -> Bool {
+    guard let l = last[display] else { return false }
+    return l >= pressAt - OwnSteps.settle
+  }
+
+  /// The press's check: true = macOS changed it itself, the Bridge does not step.
+  func macOSDidIt(_ display: UInt32, pressAt: Double, before: Float?, after: Float?) -> Bool {
+    !since(display, pressAt: pressAt) && BrightnessOnce.macOSDidIt(before: before, after: after)
+  }
+}
+
 /// Says each reason once (per display), so a held key is not a log line per press.
 struct OnceLog {
   private var said: Set<String> = []
