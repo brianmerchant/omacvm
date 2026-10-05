@@ -89,6 +89,9 @@ jobs:
       - name: A Mac helper that does not build
         run: src/tests/mac-install.sh
 
+      - name: Release keys on the command line (either key, Developer ID teams, a named spare)
+        run: src/tests/release-keys.sh
+
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 
