@@ -5,6 +5,21 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+In short: OmacVM.app updates itself, the control centre in Omarchy, a
+prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
+26 and newer), Chromium video on the Mac's media engine, VMs on any drive,
+a boot splash, less power when idle. From 2.9.x: `omacvm update` once; after
+that the app updates itself. Details below.
+
+Still being finished; each line is decided at release (kept, or moved to
+3.0.1):
+- (pending #91) Any Omarchy scale on 5K and larger: graphics memory without
+  a fixed limit.
+- (pending #93) Sound on a busy Mac without crackles; a VM start no longer
+  hangs on an audio device that went away.
+- (pending #58) Fast network with a VPN connected.
+- (pending #81) `base-install.sh` keeps pacstrap's whole output in its log.
+
 - OmacVM.app: the pointer moves in Omarchy right after the VM starts, and
   after a reboot in the VM, without a click into the window first, in a
   window and in full screen, on any display. Coming back to the VM's window
@@ -50,10 +65,10 @@ in more words.
 - OmacVM.app can make its VM from a prebuilt image, like the other apps:
   "Download a prebuilt VM" in the app's setup, or
   `omacvm build --vm-type app --prebuilt`. The parts are checked against
-  the release's SHA-256 sums; the first boot (without a window) sets up your
+  the image's signed manifest; the first boot (without a window) sets up your
   user, password, keyboard and timezone from a seed that is deleted after.
-  The images come with a release after 2.9.0; until then the app builds its
-  VM as before. See [docs/prebuilt.md](docs/prebuilt.md).
+  The first image comes with 3.0.0 (release `prebuilt-3.0.0`). See
+  [docs/prebuilt.md](docs/prebuilt.md).
 - OmacVM.app: the setup shows the VMs folder and its free space. Storage in
   the app's window changes it (an external drive too) and moves the VMs: a
   rename on the same drive, else copied, read back, compared and only then
@@ -96,15 +111,15 @@ in more words.
   `omacvm report` on the Mac) collects the check, versions and logs without
   names, addresses, keys or Wi-Fi names, shows you the text, and opens a
   GitHub issue with it. Requests go to the Mac through OmacVM Bridge, signed
-  with a key each VM gets from `omacvm apply`. Updates through it are not
-  live yet (no release key); `omacvm update` on the Mac stays the way to
-  update. Feature `control-centre`, on by default; an older VM is asked once
-  at its next apply.
+  with a key each VM gets from `omacvm apply`. It shows when a release has
+  updates for your features (from the release's signed manifest) and
+  installs them when you ask (as `omacvm update` does). Feature `control-centre`, on by
+  default; an older VM is asked once at its next apply.
 - OmacVM.app can update itself (weekly check, waits until the VM is shut
   down, goes back to the old version if the new one does not start; "Go
-  Back" in the app menu). Not live yet: the update feed needs a release
-  key, and until a release has one the app checks nothing and says so under
-  Check for Updates.
+  Back" in the app menu). The feed is signed with OmacVM's release key;
+  3.0.0 is the first release with one. From 2.9.x, update once with
+  `omacvm update` (or the zip); 2.9.x apps do not check by themselves.
 - Prebuilt VMs for Parallels, UTM and VMware Fusion: only the VM bundle comes
   out of the image, and its settings and disks are checked before use (no
   paths outside the bundle, no shared folders, no extra QEMU arguments,
