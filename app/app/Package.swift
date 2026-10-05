@@ -10,6 +10,9 @@ let package = Package(
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
         .executableTarget(name: "update-tests", dependencies: ["OmacVMUpdate"]),
+        // A release's feed and zip, checked as an installed app checks them
+        // (src/release/release.sh verify).
+        .executableTarget(name: "feed-check", dependencies: ["OmacVMUpdate"]),
     ],
     swiftLanguageModes: [.v5]
 )
