@@ -83,6 +83,10 @@ ask() {   # the steps that change GitHub, unless --yes
   local a; read -r -p "release.sh: $1 [y/N] " a; [[ $a == y || $a == Y ]] || die "stopped"
 }
 gitr() { git -C "$R" "$@"; }
+runs_in() {   # PATH: a process runs from there (not grep: it would find itself)
+  local procs; procs=$(ps -ax -o args=)
+  [[ $procs == *"$1"* ]]
+}
 
 # ---------- steps ----------
 
@@ -198,7 +202,7 @@ step_build() {
   local m; m=$(get M); [[ -n $m && -d $WT ]] || die "no M or no $WT: run bump/merge first"
   [[ $(git -C "$WT" rev-parse HEAD) == "$m" ]] || die "$WT is not at M"
   # Never over a bundle that runs (STANDARDS 20).
-  ps -ax -o args= | grep -qF "$APP/Contents/" && die "something runs from $APP"
+  runs_in "$APP/Contents/" && die "something runs from $APP"
   if [[ -n ${OMACVM_RELEASE_RUNTIME_FROM:-} && ! -d $WT/app/runtime/.build ]]; then
     cp -cR "$OMACVM_RELEASE_RUNTIME_FROM" "$WT/app/runtime/.build" && rm -rf "$WT/app/runtime/.build/tmp"
     note "runtime from $OMACVM_RELEASE_RUNTIME_FROM (build-app.sh rebuilds it unless its inputs match)"
@@ -420,7 +424,7 @@ clean() {
   local w
   for w in "$WT" "$BUMP"; do
     [[ -d $w ]] || continue
-    ps -ax -o args= | grep -qF "$w/" && die "something runs from $w"
+    runs_in "$w/" && die "something runs from $w"
     gitr worktree remove --force "$w" && note "removed $w"
   done
 }
