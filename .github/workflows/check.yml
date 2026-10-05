@@ -97,3 +97,6 @@ jobs:
 
       - name: Benchmark chart and the pages that quote it agree
         run: src/tests/bench-docs.sh
+
+      - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
+        run: tests/bench/final-round/test.sh
