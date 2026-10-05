@@ -21,12 +21,14 @@ expect "vulkan is experimental and app-only" yes "$([[ ,$tags, == *,experimental
 # apply.sh, Mac side: from the comment to the closing fi of the vulkan block.
 block=$(awk '/^  # Vulkan \(Venus\) from the VM.s next start/ {on = 1} on {print} on && /^  fi$/ {exit}' "$R/src/cmd/apply.sh")
 [[ $block == *'on vulkan'* ]] || { echo "FAIL vulkan block not found in src/cmd/apply.sh"; exit 1; }
-mac() {   # ON(on|off) RUNNING(yes|no) -> files in the VM folder, then what apply said
+mac() {   # ON(on|off) RUNNING(yes|no) [had] -> files in the VM folder, then what apply said
+  # ICD=no: the VM has no OmacVM Mesa (its build failed).
   ( d=$T/vm; rm -rf "$d"; mkdir -p "$d"; [[ ${3:-} == had ]] && : > "$d/vulkan"
-    WANT=$1 RUN=$2 SAID=""
+    WANT=$1 RUN=$2 SAID="" IP=vm
     on() { [[ $1 == vulkan && $WANT == on ]]; }
     app_pid_dir() { [[ $RUN == yes ]] && echo 123; }
     info() { SAID="said"; }
+    gssh() { [[ $2 == "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" && ${ICD:-yes} == yes ]]; }
     eval "$block"
     echo "$(ls "$d" | tr '\n' ' ')$SAID" )
 }
@@ -36,6 +38,9 @@ expect "on again: file kept, no message" "vulkan " "$(mac on yes had)"
 expect "off: file removed" "" "$(mac off no had)"
 expect "off, VM running: file removed, message" "said" "$(mac off yes had)"
 expect "off, never on: nothing" "" "$(mac off yes)"
+expect "on, Mesa build failed: no vulkan file, message" "said" "$(ICD=no mac on no)"
+expect "on, Mesa build failed, file from before: removed, message" "said" "$(ICD=no mac on yes had)"
+expect "off, no Mesa: file removed" "" "$(ICD=no mac off no had)"
 
 # guest/install.sh: the vulkan step of OmacVM.app's VMs.
 gblock=$(awk '/^    # Vulkan \(Venus\): OmacVM.s Mesa for it/ {on = 1} on {print} on && /^    fi ;;$/ {exit}' "$R/src/guest/install.sh")
