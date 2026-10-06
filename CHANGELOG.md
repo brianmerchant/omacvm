@@ -22,6 +22,12 @@ in more words.
 - Error texts say the next step: "update OmacVM.app first: u in the control
   centre does it, or Check Now in OmacVM on the Mac" instead of
   "OmacVM.app is older than this release".
+- `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
+  VM goes back to what it had and the command fails (exit 4), as in the
+  control centre. Before, it ended with 0 and the record said Vulkan was on,
+  so a second `omacvm enable vulkan` said "Nothing to change". `omacvm
+  enable` and `disable` now always work this way. An apply that finds no
+  OmacVM Mesa also keeps the record at off.
 - The memory-optimized kernel says how long it really takes: a kernel build
   in the VM, about 10 minutes with 16 CPUs, over an hour with 4 (it said
   about 10 minutes). The control centre and `omacvm features` say it only

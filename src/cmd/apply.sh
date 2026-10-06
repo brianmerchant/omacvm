@@ -418,6 +418,17 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   echo omarchy > "$d/guest-pointer"
   # The app reads them at each start of the VM: a feature that is off gets
   # no port to the Mac's helpers and nothing on its virtio port (MacLinks.swift).
+  # Vulkan without OmacVM's Mesa in the VM is off, in the record too: else it
+  # says on, and `omacvm enable vulkan` finds nothing to change. Without it
+  # the distro's venus (Mesa 26.2.3) gets the device, and every Vulkan app
+  # fails with ERROR_OUT_OF_HOST_MEMORY.
+  # (Only when the VM says it is missing: a failed SSH call changes nothing.)
+  vk=0; on vulkan && { gssh "$IP" "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" < /dev/null 2>/dev/null || vk=$?; }
+  if (( vk == 1 )); then
+    info "Vulkan: not turned on, OmacVM's Mesa did not build in the VM (see above; the VM keeps OpenGL)"
+    FV[$(feature_index vulkan)]=off
+    gssh "$IP" "f=/etc/omacvm/env; [ ! -f \$f ] || sed -i 's/^OMACVM_FEATURE_vulkan=.*/OMACVM_FEATURE_vulkan=off/' \$f" < /dev/null 2>/dev/null || true
+  fi
   feats=$(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)
   # The app reads them only when the VM starts: say which ones wait for that.
   app_features_write "$d" "${feats% }" || true   # 1 = unchanged (set -e)
@@ -449,14 +460,9 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
       info "fast network: off from the VM's next start"
     fi
   fi
-  # Vulkan (Venus) from the VM's next start: the app reads the vulkan file.
-  # Only with OmacVM's Mesa in the VM: without it the distro's venus (Mesa
-  # 26.2.3) gets the device, and every Vulkan app fails with
-  # ERROR_OUT_OF_HOST_MEMORY.
-  if on vulkan && ! gssh "$IP" "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" < /dev/null 2>/dev/null; then
-    info "Vulkan: not turned on, OmacVM's Mesa did not build in the VM (see above; the VM keeps OpenGL)"
-    rm -f "$d/vulkan"
-  elif on vulkan; then
+  # Vulkan (Venus) from the VM's next start: the app reads the vulkan file
+  # (on only with OmacVM's Mesa in the VM, see above).
+  if on vulkan; then
     [[ -e $d/vulkan ]] || { : > "$d/vulkan"; [[ -z $(app_pid_dir "$d" 2>/dev/null) ]] ||
       info "WebGPU and GPU compute (Vulkan): from the VM's next start (shut it down, then start it again)"; }
   elif [[ -e $d/vulkan ]]; then
