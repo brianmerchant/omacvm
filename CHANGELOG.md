@@ -5,6 +5,11 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- Mission Control from the escape combo (pressed twice): Esc often did not
+  close it, because the VM took the key, and ⌃⌥ Esc in it did nothing or
+  gave the keyboard to Finder. It took up to three presses to get back into
+  the VM. Now Esc closes Mission Control and the VM gets no Esc, and one
+  ⌃⌥ Esc closes it and goes back into the VM.
 - OmacVM.app VMs on an external drive: the control centre in the VM said
   "no such OmacVM.app VM" and could not switch features, update, change
   Graphics or show the Mac's checks. OmacVM Bridge ran omacvm as a program

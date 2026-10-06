@@ -75,7 +75,9 @@ its Space. Only that monitor changes; the keyboard goes to what it shows.
 No trackpad needed, so it works with a mouse too. Press **⌃⌥ Esc** there
 again to go back into the VM, with the trackpad and keys. Coming back with
 a swipe or Mission Control works as well. Press **⌃⌥ Esc twice** quickly
-(within 0.4 s) for Mission Control; a single press never opens it.
+(within 0.4 s) for Mission Control; a single press never opens it. In
+Mission Control, Esc closes it, and one **⌃⌥ Esc** closes it and takes you
+back into the VM.
 
 OmacVM.app's **Escape combo** setting: *This monitor* (the one under the
 pointer, the default) or *All monitors*, every monitor that shows the VM. For

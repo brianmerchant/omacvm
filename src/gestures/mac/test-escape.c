@@ -44,6 +44,10 @@ static pid_t wentTo; static CGWindowID wentWin;
 static Hotkey lastKey;
 static CFMutableDictionaryRef binding;   // the user's com.apple.symbolichotkeys (NULL: never changed)
 static int mcWhileHeld;                  // Mission Control's key posted while the combo's keys were down
+// mcSim: "macOS" shows Mission Control on its key: Desktop 1 listed as shown,
+// the app in front kept; the key again closes it, back to the Space it came from.
+static int mcSim, mcShown; static double mcLate; static uint64_t mcFrom;   // mcLate: closing lands this many verify periods late
+static int fakeMCOpen(void) { return mcShown; }
 static int heldPolls, heldAsked;         // the combo's keys still down for this many looks
 
 static World *worldOf(CGDirectDisplayID id) {
@@ -102,7 +106,16 @@ static int fakeKey(Hotkey k) {
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(lateKeys * verifyAfter * NSEC_PER_SEC) + 3 * NSEC_PER_MSEC),
                      dispatch_get_main_queue(), ^{ pendingSteps--; moveSpace(w, dir); });
     } else if (!keysIgnored) moveSpace(w, dir);
-  } else if (same(k, mc)) { mcKeys++; if (heldPolls > 0) mcWhileHeld++; }
+  } else if (same(k, mc)) {
+    mcKeys++; if (heldPolls > 0) mcWhileHeld++;
+    if (mcSim && w && !mcShown) { mcShown = 1; mcFrom = w->cur; w->cur = w->sp[0]; }
+    else if (mcSim && w && mcShown && mcLate) {
+      mcShown = 0; pendingSteps++;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(mcLate * verifyAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        pendingSteps--; w->cur = mcFrom; if (owner[w->cur] && owner[w->cur] != finder) front = owner[w->cur]; });
+    }
+    else if (mcSim && w && mcShown) { mcShown = 0; w->cur = mcFrom; if (owner[w->cur] && owner[w->cur] != finder) front = owner[w->cur]; }
+  }
   return 1;
 }
 // "macOS": a Dock swipe moves the display only when swipeMoves is set (the
@@ -114,7 +127,12 @@ static int fakeSwipe(CGDirectDisplayID id, CGRect b, int dir) {
 }
 static void fakeSaveSign(void) { signSaves++; }   // never the real settings
 static int mcApps;
-static int fakeMissionApp(void) { mcApps++; return 1; }   // never the real Mission Control
+static int fakeMissionApp(void) {   // never the real Mission Control
+  mcApps++;
+  World *w = underPointer();
+  if (mcSim && w && mcShown) { mcShown = 0; w->cur = mcFrom; if (owner[w->cur] && owner[w->cur] != finder) front = owner[w->cur]; }
+  return 1;
+}
 static CFDictionaryRef fakeHotkeys(void) { return binding ? CFRetain(binding) : NULL; }
 static CGEventFlags fakeHeld(void) {
   heldAsked++;
@@ -244,7 +262,7 @@ int main(void) {
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
   swipeFn = fakeSwipe; saveSignFn = fakeSaveSign;
-  verifyAfter = 0.01; cameFromEvery = 0; doublePress = 0; missionAppFn = fakeMissionApp;
+  verifyAfter = 0.01; cameFromEvery = 0; doublePress = 0; missionAppFn = fakeMissionApp; missionControlOpenFn = fakeMCOpen;
   initKeymap();
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   int sv[2]; socketpair(AF_UNIX, SOCK_STREAM, 0, sv); peer = sv[1]; fcntl(peer, F_SETFL, O_NONBLOCK);
@@ -600,7 +618,7 @@ int main(void) {
   press(K, HID, 0); frontChanged(parallels, 0, 1, "Omarchy", 55, 0); sent();
 
   // The same VM app in front in a window (it left full screen): the combo is the VM's, as before.
-  frontChanged(parallels, 0, 0, "", 0, 0);
+  frontChanged(parallels, 0, 0, "", 55, 0);
   check(press(K, HID, 0) == 0 && !went && !keys, "the VM's app in front in a window: the combo passes to it");
 
   // Parallels outlives its VM: its window gone, the combo in macOS is macOS's again.
@@ -787,6 +805,138 @@ int main(void) {
     r3 = press(K, HID, 0);
     check(r3 == 1 && !mcKeys && world[0].cur == 473, "two presses 0.45 s apart: out, then back in, no Mission Control");
     doublePress = 0; sent(); settle(vm, NET_APP); sent();
+  }
+
+  // ---- After Mission Control + Esc on Desktop 1, the VM's app still in
+  // front (it shows no window there): one press back into the VM, not "out
+  // of a window" to Finder (air-matrix O4: it took three presses) ----
+  {
+    layout(1, mini, 2, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22;
+    pointer = CGPointMake(1000, 700);
+    front = terminal; world[0].cur = 101; settle(vm, NET_APP); inVM(vm, 102);
+    doublePress = 0.4; lastComboAt = -1; heldPolls = 5;
+    for (int t = 0; t < 2; t++) {
+      CGEventRef d = key(1, K, HID, 0), u = key(0, K, HID, 0);
+      tapCb(NULL, kCGEventKeyDown, d, NULL); tapCb(NULL, kCGEventKeyUp, u, NULL);
+      CFRelease(d); CFRelease(u);
+    }
+    settleSteps();
+    check(mcKeys == 1 && !capturing && escaped, "O4: double press in the VM: Mission Control, capture off");
+    sent(); doublePress = 0; heldPolls = 0;
+    // Esc in Mission Control: Desktop 1 shows, macOS keeps the VM's app in front.
+    world[0].cur = 101; front = vm;
+    frontChanged(vm, NET_APP, 0, "", 0, 0);
+    check(!winVMPid && vmOffSpace && !capturing && !escaped, "O4: the VM's app in front, no window on Desktop 1: no VM in a window");
+    wentTo = 0;
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 102 && front == vm,
+          "O4: one press: back into the VM's Space (Move right a space)");
+    check(wentTo != finder && wentTo != terminal && !leftWinPid, "O4: ... the keyboard not given to Finder or Terminal");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0);
+    check(capturing && !vmOffSpace && !strcmp(sent(), "S on|"), "O4: ... captured again");
+    // The same, the Space not beside it: its window to the front.
+    const uint64_t far2[] = { 101, 103, 102 };
+    layout(1, far2, 3, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[103] = safari; winOn[103] = 33; owner[102] = vm; winOn[102] = 22;
+    world[0].cur = 101; front = vm; frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    check(press(K, HID, 0) == 1 && !keys && wentTo == vm && world[0].cur == 102, "O4: the VM's Space two away: its window to the front");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // A real window of the VM's app on this Space (it left full screen): still a VM in a window.
+    world[0].cur = 101; front = vm; frontChanged(vm, NET_APP, 0, "", 22, 0); sent();
+    check(winVMPid == vm && !vmOffSpace, "O4: the VM's app with a window on this Space: a VM in a window, as before");
+    wentTo = 0;
+    check(press(K, HID, 0) == 1 && wentTo == terminal && !keys, "O4: ... the combo gives the keyboard to the app from before");
+    sent(); leftWinPid = 0; front = terminal; world[0].cur = 101; frontChanged(terminal, -1, 0, "", 11, 1); sent(); escaped = 0;
+    layout(1, mini, 2, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22;
+  }
+
+  // ---- The combo once more while Mission Control (from the double press) is
+  // still open: Mission Control closes, back in the VM (Mission Control
+  // ignores the Space shortcut and app switches) ----
+  {
+    layout(1, mini, 2, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22;
+    pointer = CGPointMake(1000, 700);
+    front = terminal; world[0].cur = 101; settle(vm, NET_APP); inVM(vm, 102);
+    mcSim = 1; mcShown = 0; doublePress = 0.4; lastComboAt = -1; heldPolls = 5;
+    for (int t = 0; t < 2; t++) {
+      CGEventRef d = key(1, K, HID, 0), u = key(0, K, HID, 0);
+      tapCb(NULL, kCGEventKeyDown, d, NULL); tapCb(NULL, kCGEventKeyUp, u, NULL);
+      CFRelease(d); CFRelease(u);
+    }
+    settleSteps();
+    check(mcShown && world[0].cur == 101 && front == vm, "MC open: Desktop 1 listed as shown, the VM's app still in front");
+    sent(); doublePress = 0; heldPolls = 0;
+    frontChanged(vm, NET_APP, 0, "", 0, 0);
+    wentTo = 0;
+    check(press(K, HID, 0) == 1 && mcKeys == 1 && !mcShown && !spaceKeys && world[0].cur == 102 && front == vm,
+          "MC open, the combo: Mission Control closed with its shortcut, back on the VM's Space (no Space key)");
+    check(wentTo != finder && wentTo != terminal && !leftWinPid, "... the keyboard not given to Finder or Terminal");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0);
+    check(capturing && !strcmp(sent(), "S on|"), "... captured again");
+    // MC open, macOS says the VM's window shows there (a thumbnail): not "a VM in a window".
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; escaped = 0; capturing = 0;
+    frontChanged(vm, NET_APP, 0, "", 22, 0); sent();
+    check(winVMPid == vm, "MC open, the VM's window listed on screen: taken for a VM in a window (as macOS says)");
+    wentTo = 0;
+    check(press(K, HID, 0) == 1 && mcKeys == 1 && !mcShown && world[0].cur == 102 && wentTo != terminal && !leftWinPid,
+          "... the combo still closes Mission Control, back in the VM (not out of a window)");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // Mission Control opened from Desktop 1 (Terminal in front): closed, then the Space move in.
+    mcShown = 1; mcFrom = 101; world[0].cur = 101; front = terminal; escaped = 0;
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    check(press(K, HID, 0) == 1 && mcKeys == 1 && !mcShown && spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 102,
+          "MC opened from Desktop 1: closed, then Move right a space into the VM");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // Closing lands late (1.6 verify periods): waited for, no Space move after it.
+    const uint64_t mid[] = { 101, 102, 103 };   // Desktop 1, the VM, Desktop 2
+    layout(1, mid, 3, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22; owner[103] = safari; winOn[103] = 33;
+    mcShown = 1; mcFrom = 102; mcLate = 1.6; world[0].cur = 101; front = vm; escaped = 0;
+    frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    check(press(K, HID, 0) == 1 && mcKeys == 1 && !spaceKeys && world[0].cur == 102,
+          "MC closing lands late: waited for, no Space move after it (not one Space too far)");
+    mcLate = 0;
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    layout(1, mini, 2, NULL, 0);
+    owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22;
+    // Mission Control's shortcut off: the app closes it.
+    setKey(HOTKEY_MISSION_CONTROL, kCFBooleanFalse, 126, 8650752);
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; front = vm; escaped = 0; mcApps = 0;
+    frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    check(press(K, HID, 0) == 1 && mcApps == 1 && !mcKeys && !mcShown && world[0].cur == 102, "MC open, its shortcut off: the app closes it");
+    unsetKeys();
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // A plain Esc in Mission Control with the VM's app (QEMU) in front: QEMU
+    // would take it for the VM; Mission Control's shortcut closes it instead.
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; front = vm; escaped = 0;
+    frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    check(press(0, HID, 0) == 1 && mcKeys == 1 && !mcShown && world[0].cur == 102 && !spaceKeys && !strcmp(sent(), ""),
+          "MC open, VM's app in front, Esc: eaten (down and up), Mission Control closed, back on the VM's Space");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // ... with another app in front, Mission Control gets the Esc itself.
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; front = terminal; escaped = 0;
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    check(press(0, HID, 0) == 0 && !mcKeys && mcShown, "MC open, Terminal in front, Esc: passes (macOS's)");
+    mcShown = 0;
+    // No Mission Control: an Esc in the VM's window, or with the VM's app in front, is the VM's.
+    world[0].cur = 101; front = vm; frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    check(press(0, HID, 0) == 0 && !mcKeys, "no MC, the VM's app in front, Esc: passes (the VM's)");
+    check(press(S, HID, 0) == 0 && !mcKeys, "... Shift+Esc too");
+    mcShown = 1;
+    check(press(S, HID, 0) == 0 && !mcKeys && mcShown, "MC open, Shift+Esc: passes, Mission Control stays");
+    check(press(0, POSTED, 0) == 0 && !mcKeys && mcShown, "MC open, a posted Esc: passes");
+    mcShown = 0;
+    // A posted combo in Mission Control: passes, nothing closed.
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; front = terminal; escaped = 0;
+    frontChanged(terminal, -1, 0, "", 11, 1); sent();
+    check(press(K, POSTED, 0) == 0 && !mcKeys && mcShown, "MC open, a posted combo: passes, Mission Control stays");
+    // No VM to go back to (its window gone): the combo in Mission Control is macOS's.
+    vmAlive = 0;
+    check(press(K, HID, 0) == 0 && !mcKeys && mcShown, "MC open, no VM to go back to: the combo passes");
+    vmAlive = 1; mcShown = 0; mcSim = 0;
+    world[0].cur = 101; front = terminal; frontChanged(terminal, -1, 0, "", 11, 1); sent(); escaped = 0;
   }
 
   // Which apps the combo goes back to.
