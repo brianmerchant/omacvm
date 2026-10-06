@@ -104,7 +104,9 @@ do {
 
     GuestAgent.release(socketPath: path)
     expect("agent: after release, a connection of its own", GuestAgent.setTime(socketPath: path))
-    close(server)
+    // The listening socket stays open: closed, its number goes to the next
+    // section's socket and this thread, still in accept(), would take that
+    // section's connections (macOS does not wake accept() on close).
 }
 
 // MARK: runAndWait (Features…)
@@ -224,7 +226,7 @@ do {
     expect("exec: no agent says so (got \(problem(o)))", problem(o).hasPrefix("The VM does not answer yet"))
     lock.lock(); seen.silent = false; lock.unlock()
     GuestAgent.release(socketPath: path)
-    close(server)
+    // The socket stays open, as above.
 }
 
 // MARK: clipboard poll
