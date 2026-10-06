@@ -6,7 +6,8 @@
 # (/etc/omacvm/touchid-key, touchid-token) come from omacvm apply.
 # off: all of it gone again, the keys too. The password works either way.
 # A service with only the vendor's file (/usr/lib/pam.d/polkit-1 since
-# polkit 127) gets a copy in /etc/pam.d with our line; off removes the copy.
+# polkit 127) gets a copy in /etc/pam.d with our line, made again on each
+# on; off removes the copy.
 # polkit 127 starts its helper in a sandbox without network: a drop-in lets
 # it (and so the PAM client) reach the Mac's Bridge address, nothing else.
 # OMACVM_TOUCHID_ROOT: another root folder (tests).
@@ -27,15 +28,19 @@ LINE='auth       sufficient   pam_exec.so quiet seteuid stdout /usr/lib/omacvm/o
 
 COPY='# omacvm touch-id: a copy of'
 pam_add() {   # <service>: our two lines before its first auth line
-  local f=$PAMD/$1
-  if [[ ! -f $f ]]; then
+  local f=$PAMD/$1 src=$PAMD/$1
+  if [[ ! -f $f ]] || grep -q "^$COPY /usr/lib/pam.d/$1 " "$f"; then
+    # None, or our copy: made again from the vendor's file each time, so an
+    # update of it (polkit's) is not hidden behind an old copy.
     [[ -f $VENDOR/$1 ]] || return 0   # no such service here: nothing to unlock
     { echo "$COPY /usr/lib/pam.d/$1 (omacvm disable touch-id removes it)"; cat "$VENDOR/$1"; } > "$f.omacvm-copy"
-    chmod 644 "$f.omacvm-copy" && mv -f "$f.omacvm-copy" "$f"
+    src=$f.omacvm-copy
+  elif grep -qxF "$LINE" "$f"; then
+    return 0
   fi
-  grep -qxF "$LINE" "$f" && return 0
   awk -v m="$MARK" -v l="$LINE" '!d && /^[[:space:]]*-?auth[[:space:]]/ { print m; print l; d = 1 } { print } END { if (!d) { print m; print l } }' \
-    "$f" > "$f.omacvm-new"
+    "$src" > "$f.omacvm-new"
+  rm -f "$f.omacvm-copy"
   chmod 644 "$f.omacvm-new" && mv -f "$f.omacvm-new" "$f"
 }
 pam_remove() {

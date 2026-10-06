@@ -187,6 +187,11 @@ expect "on twice: one line" 1 "$(grep -c pam_exec "$P/sudo")"
 expect "no sudo-i here: none made" no "$([[ -e $P/sudo-i ]] && echo yes || echo no)"
 expect "login untouched" "" "$(diff "$T/pam.orig/login" "$P/login")"
 expect "vendor files untouched" "" "$(diff -r "$T/vendor.orig" "$V")"
+printf 'session    optional     pam_example.so\n' >> "$V/polkit-1"   # polkit's update changes the vendor's file
+OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" on
+expect "on again: our copy follows the vendor's newer file" "$(grep -v '^#' "$V/polkit-1")" "$(grep -v '^#' "$P/polkit-1" | grep -vxF "$L")"
+expect "... still with one line of ours" 1 "$(grep -c pam_exec "$P/polkit-1")"
+cp "$V/polkit-1" "$T/vendor.orig/polkit-1"
 expect "the client, the note writer and the rule installed" yes \
   "$([[ -x $T/root/usr/lib/omacvm/omacvm-touchid && -x $T/root/usr/lib/omacvm/omacvm-touchid-note && -f $T/root/etc/polkit-1/rules.d/00-omacvm-touchid.rules ]] && echo yes)"
 D=$T/root/etc/systemd/system/polkit-agent-helper@.service.d/omacvm-touchid.conf

@@ -75,8 +75,9 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
 - PAM: one line at the top of `auth` in `/etc/pam.d/sudo`, `sudo-i` (where
   it exists) and `polkit-1` only, before `auth include system-auth`. A
   service with only the vendor's file (`/usr/lib/pam.d/polkit-1`) gets a
-  copy in `/etc/pam.d` with the line; off removes the copy, so the vendor's
-  file counts again:
+  copy in `/etc/pam.d` with the line, made again on each apply (so a
+  polkit update of the vendor's file is not hidden); off removes the copy,
+  so the vendor's file counts again:
 
   ```
   auth sufficient pam_exec.so quiet seteuid stdout /usr/lib/omacvm/omacvm-touchid
