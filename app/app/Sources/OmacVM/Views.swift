@@ -370,6 +370,7 @@ struct ReadyView: View {
                 Text(n).font(.caption).foregroundStyle(n.hasPrefix("Could not") ? .red : .secondary)
             }
             fastNetwork
+            USBSection(folder: state.config.folder)
             Divider()
             StorageSection(storage: state.storage)
             Divider()

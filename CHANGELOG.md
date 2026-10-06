@@ -5,6 +5,10 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
+  desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
+  key before it boots (the wait was hidden under the boot logo).
+  `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
 - Fast network: a VPN whose interface is up before it gets its address (an
   IKEv2 connection's `ipsec0`, a tunnel brought up first) now gets the VPN
   NAT within a second. macOS announces such an address only as a new

@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -17,6 +17,10 @@ let package = Package(
         // apart from QMP so it can be tested without a VM: `swift run net-tests`.
         .target(name: "OmacVMNet"),
         .executableTarget(name: "net-tests", dependencies: ["OmacVMNet"]),
+        // The VM's USB devices: which ones the Mac lets a VM have, the VM's
+        // choice and QEMU's arguments, without a VM: `swift run usb-tests`.
+        .target(name: "OmacVMUSB"),
+        .executableTarget(name: "usb-tests", dependencies: ["OmacVMUSB"]),
     ],
     swiftLanguageModes: [.v5]
 )
