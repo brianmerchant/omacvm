@@ -98,6 +98,25 @@ func readAll(_ fd: Int32, timeout: Double, untilNewline: Bool = false, untilHead
     return (out, false)
 }
 
+/// The next line for the VM that is not an ack (acks are counted), or empty.
+var acks = 0
+func readAnswer(_ fd: Int32, timeout: Double) -> (Data, Bool) {
+    var buf = Data()
+    let end = Date().addingTimeInterval(timeout)
+    while Date() < end {
+        while let nl = buf.firstIndex(of: 0x0A) {
+            let line = buf[buf.startIndex...nl]
+            buf = Data(buf[(nl + 1)...])
+            if let o = try? JSONSerialization.jsonObject(with: line.dropLast()) as? [String: Any], o["ack"] as? Bool == true { acks += 1; continue }
+            return (Data(line), false)
+        }
+        let (d, closed) = readAll(fd, timeout: max(0.01, end.timeIntervalSinceNow), untilNewline: true)
+        if d.isEmpty { return (Data(), closed) }
+        buf.append(d)
+    }
+    return (Data(), false)
+}
+
 final class FakeBridge: @unchecked Sendable {
     let lock = NSLock()
     var requests: [Data] = []
@@ -134,7 +153,9 @@ func relay(_ fb: FakeBridge, headers h: @escaping () -> [(String, String)]? = he
     let (vm, app) = pair()
     let r = AuthRelay(guest: app, connectBridge: connect ?? { fb.connect() }, headers: h)
     r.pingTimeout = 0.6
+    r.minimumGap = 0
     Thread.detachNewThread { try? r.run() }
+    usleep(50_000)   // run() first drops what was already waiting
     return (vm, r)
 }
 
@@ -144,7 +165,7 @@ do {
     let (vm, r) = relay(fb)
     send(vm, ["op": "ping", "id": nonce])   // a ping for nothing: ignored
     send(vm, requestLine())
-    let (got, _) = readAll(vm, timeout: 5, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 5)
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     expect(o["id"] as? String == nonce && o["status"] as? Int == 200 && o["answer"] as? String == sig
            && Data(base64Encoded: o["body"] as? String ?? "") == answerBody, "relay: the Bridge's signed answer to the VM, byte for byte")
@@ -162,7 +183,7 @@ do {
     expect(fb.wait({ fb.closedEarly.count == 1 }), "relay: no pings -> Bridge connection dropped")
     let dt = Date().timeIntervalSince(t0)
     expect(fb.closedEarly.first == true && dt < 2.5, "relay: dropped within the ping timeout (\(String(format: "%.2f", dt)) s)")
-    let (got, _) = readAll(vm, timeout: 0.3, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 0.3)
     expect(got.isEmpty, "relay: nothing written for a client that is gone")
     r.stop(); close(vm)
 }
@@ -190,7 +211,7 @@ do {
     fb.lock.lock(); fb.answer = resp; fb.lock.unlock()
     send(vm, requestLine(id: other))
     expect(fb.wait({ fb.closedEarly.count == 1 }), "relay: a new request drops the old one")
-    let (got, _) = readAll(vm, timeout: 5, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 5)
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     expect(o["id"] as? String == other && o["status"] as? Int == 200, "relay: the new one is answered")
     r.stop(); close(vm)
@@ -201,7 +222,7 @@ do {
     let fb = FakeBridge()
     let (vm, r) = relay(fb, headers: { nil })
     send(vm, requestLine())
-    let (got, _) = readAll(vm, timeout: 2, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 2)
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     expect(o["status"] as? Int == 0 && fb.connects == 0, "relay: no Bridge token or relay key -> status 0, no connection")
     r.stop(); close(vm)
@@ -210,7 +231,7 @@ do {
     let fb = FakeBridge()
     let (vm, r) = relay(fb, connect: { nil })
     send(vm, requestLine())
-    let (got, _) = readAll(vm, timeout: 2, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 2)
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     expect(o["status"] as? Int == 0, "relay: Bridge socket not there -> status 0")
     r.stop(); close(vm)
@@ -224,10 +245,61 @@ do {
     _ = junk.withUnsafeBytes { write(vm, $0.baseAddress, $0.count) }
     send(vm, requestLine(auth: "1 1760000000 \(other) \(sig)"))
     send(vm, requestLine())
-    let (got, _) = readAll(vm, timeout: 5, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 5)
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     expect(o["status"] as? Int == 200 && fb.connects == 1, "relay: junk and a bad line dropped, the good one relayed")
     r.stop(); close(vm)
+}
+
+// Lines written before the relay connected (nobody relayed): dropped, never to the Bridge.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    send(vm, requestLine())
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    Thread.detachNewThread { try? r.run() }
+    usleep(300_000)
+    expect(fb.connects == 0, "relay: a request from before the relay connected is dropped")
+    acks = 0
+    send(vm, requestLine(id: other))
+    let (got, _) = readAnswer(vm, timeout: 5)
+    let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
+    expect(o["id"] as? String == other && o["status"] as? Int == 200 && acks == 1, "relay: a new one: ack first, then the answer")
+    r.stop(); close(vm)
+}
+
+// A VM that floods: requests closer than the gap get status 0, no Bridge connection.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    Thread.detachNewThread { try? r.run() }
+    usleep(50_000)
+    send(vm, requestLine())
+    _ = readAnswer(vm, timeout: 5)
+    send(vm, requestLine(id: other))
+    let (got, _) = readAnswer(vm, timeout: 2)
+    let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
+    expect(o["id"] as? String == other && o["status"] as? Int == 0 && fb.connects == 1, "relay: a request right after another: status 0, not to the Bridge")
+    usleep(600_000)
+    send(vm, requestLine())
+    let (got2, _) = readAnswer(vm, timeout: 5)
+    let o2 = (try? JSONSerialization.jsonObject(with: got2.dropLast())) as? [String: Any] ?? [:]
+    expect(o2["status"] as? Int == 200 && fb.connects == 2, "relay: after the gap, relayed again")
+    r.stop(); close(vm)
+}
+
+// stop() from another thread: run() returns and closes the socket itself.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread { try? r.run(); done.signal() }
+    usleep(100_000)
+    r.stop()
+    expect(done.wait(timeout: .now() + 2) == .success && fcntl(app, F_GETFD) == -1, "relay: stop() ends run(), which closes the socket")
+    close(vm)
 }
 
 // The VM side closes (QEMU quits): run() returns, an open request is dropped.
@@ -237,6 +309,7 @@ do {
     let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
     let done = DispatchSemaphore(value: 0)
     Thread.detachNewThread { try? r.run(); done.signal() }
+    usleep(50_000)
     send(vm, requestLine())
     _ = fb.wait({ fb.requests.count == 1 })
     close(vm)
@@ -245,42 +318,43 @@ do {
     r.stop()
 }
 
-// stop() from another thread while run() reads: run() ends and closes the socket.
+// stop() after run() closed the socket (Runner does so) leaves the number
+// alone: by then it may be another socket's.
 do {
     let fb = FakeBridge()
     let (vm, app) = pair()
     let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
     let done = DispatchSemaphore(value: 0)
     Thread.detachNewThread { try? r.run(); done.signal() }
-    usleep(100_000)
-    r.stop()
-    expect(done.wait(timeout: .now() + 2) == .success, "stop: run() returns")
-    expect(fcntl(app, F_GETFD) == -1, "stop: run() closed the port's socket")
-    r.stop()   // again, after the close: no shutdown on a closed (maybe reused) number
+    usleep(50_000)
     close(vm)
+    _ = done.wait(timeout: .now() + 2)
+    var fds: [Int32] = [0, 0]
+    precondition(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
+    let other = fds.contains(app) ? app : -1
+    r.stop()
+    if other >= 0 {
+        let peer = fds[0] == other ? fds[1] : fds[0]
+        var b: UInt8 = 7
+        expect(write(peer, &b, 1) == 1 && read(other, &b, 1) == 1, "relay: stop() after the close does not shut a reused descriptor")
+    } else {
+        print("note: descriptor not reused, the reuse check did not run")
+    }
+    close(fds[0]); close(fds[1])
 }
 
 // A VM that floods requests while the Bridge's dialog is up: one Bridge
-// connection at a time, and at most requestsPerMinute of them.
+// connection at a time (a new request waits for the dropped one to end).
 do {
     let fb = FakeBridge(); fb.answer = nil
     let (vm, r) = relay(fb)
-    r.requestsPerMinute = 5
     for i in 0..<12 {
         send(vm, requestLine(id: String(format: "%032x", i + 1)))
         usleep(30_000)
     }
-    _ = fb.wait({ fb.closedEarly.count >= 4 }, 3)
-    usleep(300_000)
+    _ = fb.wait({ fb.closedEarly.count >= 10 }, 4)
     fb.lock.lock(); let most = fb.mostOpen, connects = fb.connects; fb.lock.unlock()
-    expect(most == 1, "flood: one Bridge connection at a time (\(most))")
-    expect(connects == 5, "flood: at most requestsPerMinute connections (\(connects))")
-    var zeros = 0
-    let (got, _) = readAll(vm, timeout: 1)
-    for l in got.split(separator: 0x0A) {
-        if let o = try? JSONSerialization.jsonObject(with: Data(l)) as? [String: Any], o["status"] as? Int == 0 { zeros += 1 }
-    }
-    expect(zeros >= 7, "flood: the others get status 0 at once (\(zeros))")
+    expect(most == 1 && connects >= 2, "flood: one Bridge connection at a time (\(most), \(connects) in all)")
     r.stop(); close(vm)
 }
 
@@ -294,7 +368,7 @@ do {
     setsockopt(vm, SOL_SOCKET, SO_RCVBUF, &small, socklen_t(MemoryLayout<Int32>.size))
     let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
     r.writeTimeout = 0.3
-    r.requestsPerMinute = 1000
+    r.minimumGap = 0
     let done = DispatchSemaphore(value: 0)
     Thread.detachNewThread { try? r.run(); done.signal() }
     let t0 = Date()
@@ -369,8 +443,9 @@ do {
     var shown: TouchIDPanelPrompt?
     let r = AuthRelay(guest: app, connectBridge: { pb.connect() }, headers: headers, panel: { p, _ in shown = p; return .yes })
     Thread.detachNewThread { try? r.run() }
+    usleep(50_000)
     send(vm, requestLine())
-    let (got, _) = readAll(vm, timeout: 5, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 5)
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     pb.lock.lock(); let line = pb.gotLine, saw = pb.sawPanelHeader; pb.lock.unlock()
     expect(saw, "panel relay: the app says it can show the panel")
@@ -390,9 +465,10 @@ do {
     })
     r.pingTimeout = 0.6
     Thread.detachNewThread { try? r.run() }
+    usleep(50_000)
     send(vm, requestLine())
     expect(closedPanel.wait(timeout: .now() + 3) == .success, "panel relay: no pings -> the panel is closed")
-    let (got, _) = readAll(vm, timeout: 0.5, untilNewline: true)
+    let (got, _) = readAnswer(vm, timeout: 0.5)
     expect(got.isEmpty, "panel relay: nothing written for a client that is gone")
     r.stop(); close(vm)
 }

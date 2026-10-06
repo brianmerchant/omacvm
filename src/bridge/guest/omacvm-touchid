@@ -66,6 +66,7 @@ WHY = {"locked": "Mac locked", "not-front": "VM not in front", "no-touch-id": "n
        "off": "Touch ID off", "clock": "VM clock off",
        "restart": "shut the VM down and start it again once", "app": "OmacVM.app does not answer"}
 PING = 0.5             # OmacVM.app's port: the app drops the request when the pings stop
+ACK_TIMEOUT = 2.0      # ... and says within this that it relays
 
 
 class Deadline(Exception):
@@ -351,15 +352,19 @@ def over_port(key, data):
             say(f"Touch ID not available ({WHY['app']}), use your password")
             return 1
         sent = True
-        say("Touch ID on your Mac, or wait for the password prompt")
         pinger = threading.Thread(target=pings, daemon=True)
         pinger.start()
-        buf, end = b"", time.monotonic() + ANSWER_TIMEOUT + 5
+        # The app says at once that it relays (a virtio port takes writes even
+        # with nobody at the Mac end): no ack within ACK_TIMEOUT, the password.
+        acked, buf = False, b""
+        ack_end, end = time.monotonic() + ACK_TIMEOUT, time.monotonic() + ANSWER_TIMEOUT + 5
         p = select.poll()
         p.register(fd, select.POLLIN)
         while True:
-            left = end - time.monotonic()
+            left = (end if acked else ack_end) - time.monotonic()
             if left <= 0:
+                if not acked:
+                    say(f"Touch ID not available ({WHY['app']}), use your password")
                 return 1
             ev = p.poll(left * 1000)
             if not ev:
@@ -379,6 +384,11 @@ def over_port(key, data):
                     continue
                 if not isinstance(o, dict) or o.get("id") != nonce:
                     continue   # an answer for an earlier client of the port
+                if o.get("ack") is True:
+                    if not acked:
+                        acked = True
+                        say("Touch ID on your Mac, or wait for the password prompt")
+                    continue
                 status = o.get("status")
                 if not isinstance(status, int) or status == 0:
                     return 1   # the Bridge did not answer: the password

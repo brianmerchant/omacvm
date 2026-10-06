@@ -12,7 +12,8 @@ import Foundation
 ///   {"op":"ping","id":N}      every half second while it waits
 ///   {"op":"cancel","id":N}    it gave up (deadline, Ctrl+C on the way out)
 /// N is the request's nonce (32 hex digits), the same as in the signature.
-/// To the VM: {"id":N,"status":S,"answer":"<X-OmacVM-Answer>","body":"<base64>"}
+/// To the VM, at once: {"ack":true,"id":N} (the app relays: a virtio port
+/// takes writes even with nobody at the Mac end); then: {"id":N,"status":S,"answer":"<X-OmacVM-Answer>","body":"<base64>"}
 /// with the Bridge's body byte for byte (the answer's signature covers it);
 /// status 0: the Bridge did not answer.
 ///
@@ -139,10 +140,9 @@ public final class AuthRelay: @unchecked Sendable {
     /// A VM that does not take its answer within this is dropped: its port's
     /// socket is shut down, and the app connects to it again.
     public var writeTimeout: TimeInterval = 2
-    /// Requests to the Bridge per minute; more get status 0 (the password).
-    /// The Bridge has its own growing pauses after misses; this one keeps a
-    /// VM from making threads and connections on the Mac.
-    public var requestsPerMinute = 20
+    /// Requests closer than this get status 0 (the password): no person
+    /// types that fast. The Bridge's own limits come after.
+    public var minimumGap: TimeInterval = 0.2
     /// How long a new request waits for the one before it to end (dropped, it
     /// ends at once).
     public var handoverTimeout: TimeInterval = 1
@@ -150,8 +150,7 @@ public final class AuthRelay: @unchecked Sendable {
     private var current: (id: String, fd: Int32, lastPing: Date, cancelled: Bool)?
     private var stopped = false
     private let slot = DispatchSemaphore(value: 1)
-    private var recent: [Date] = []   // run()'s thread only
-    private var saidLimit = false     // run()'s thread only
+    private var lastRequest: Date?   // run()'s thread only
     private let writeLock = NSLock()
     private var closed = false   // the guest's socket (under writeLock: no write or shutdown after the close)
 
@@ -177,6 +176,12 @@ public final class AuthRelay: @unchecked Sendable {
             drop(nil)
             writeLock.lock(); closed = true; Darwin.close(guest); writeLock.unlock()
         }
+        // Lines already waiting were written while nobody relayed: their
+        // clients gave up (no ack), so they never reach the Bridge.
+        let flags = fcntl(guest, F_GETFL)
+        _ = fcntl(guest, F_SETFL, flags | O_NONBLOCK)
+        while chunk.withUnsafeMutableBytes({ Darwin.read(guest, $0.baseAddress, $0.count) }) > 0 {}
+        _ = fcntl(guest, F_SETFL, flags)
         while true {
             let count = chunk.withUnsafeMutableBytes { Darwin.read(guest, $0.baseAddress, $0.count) }
             if count > 0 {
@@ -229,7 +234,13 @@ public final class AuthRelay: @unchecked Sendable {
         case .cancel(let id):
             drop(id)
         case .request(let r):
+            let now = Date()
+            if let last = lastRequest, now.timeIntervalSince(last) < minimumGap {
+                return answer(r.id, nil, note: "Touch ID: requests too close together, refused")
+            }
+            lastRequest = now
             drop(nil)   // one opener at a time: the client of the old one is gone
+            send(Data("{\"ack\":true,\"id\":\"\(r.id)\"}\n".utf8))   // the client knows at once that the app relays (id: 32 hex digits)
             // A dropped exchange ends at once; one at a time, so a VM that
             // floods requests never piles up threads and connections.
             guard slot.wait(timeout: .now() + handoverTimeout) == .success else {
@@ -237,15 +248,6 @@ public final class AuthRelay: @unchecked Sendable {
             }
             var handed = false
             defer { if !handed { slot.signal() } }
-            let now = Date()
-            recent.removeAll { now.timeIntervalSince($0) >= 60 }
-            guard recent.count < requestsPerMinute else {
-                let note = saidLimit ? nil : "Touch ID: more than \(requestsPerMinute) requests a minute from this VM, the password for now"
-                saidLimit = true
-                return answer(r.id, nil, note: note)
-            }
-            saidLimit = false
-            recent.append(now)
             guard let h = headers() else {
                 return answer(r.id, nil, note: "OmacVM Bridge is not set up on this Mac (or is older)")
             }
@@ -262,13 +264,16 @@ public final class AuthRelay: @unchecked Sendable {
         }
     }
 
-    /// One line to the VM. Never blocks longer than `writeTimeout`: a VM that
-    /// does not read is dropped (its socket shut down, run() ends).
     private func answer(_ id: String, _ a: Answer?, note: String? = nil) {
         if let note { log(note) }
+        send(Self.answerLine(id: id, a))
+    }
+
+    /// One line to the VM. Never blocks longer than `writeTimeout`: a VM that
+    /// does not read is dropped (its socket shut down, run() ends).
+    private func send(_ d: Data) {
         writeLock.lock(); defer { writeLock.unlock() }
         guard !closed else { return }
-        let d = Self.answerLine(id: id, a)
         let deadline = Date().addingTimeInterval(writeTimeout)
         // SO_SNDTIMEO, not MSG_DONTWAIT: macOS blocks a Unix socket's send
         // larger than the free buffer even with MSG_DONTWAIT. Only answer()

@@ -127,36 +127,6 @@ final class NativeControlBridge: @unchecked Sendable {
     private let fallbackLock = NSLock()
     private var saidFallback = false
 
-    private static let authFallbackLock = NSLock()
-    nonisolated(unsafe) private static var saidAuthFallback = false
-
-    /// A connection to the Bridge for Touch ID (AuthRelay): its relay socket,
-    /// or, as for the control centre, 127.0.0.1 when that cannot be used. Nil:
-    /// the Bridge is not there (the VM's client then asks for the password).
-    static func connectForAuth() -> Int32? {
-        if let fd = try? NativeBridgeSocket.connectSecure(path: relaySocketPath, label: "Bridge relay") { return fd }
-        authFallbackLock.lock()
-        if !saidAuthFallback {
-            saidAuthFallback = true
-            fputs("[auth] OmacVM Bridge's relay socket cannot be used (older Bridge, not running, or folder not 0700): 127.0.0.1\n", stderr)
-        }
-        authFallbackLock.unlock()
-        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
-        var one: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = in_port_t(UInt16(bridgePort).bigEndian)
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let connected = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
-        }
-        guard connected == 0 else { Darwin.close(fd); return nil }
-        return fd
-    }
-
     /// The app's own headers for a request it passes on: the Bridge token,
     /// the relay key and the VM's name. Nil: the Bridge is not set up.
     static func relayHeaders(vmName: String) -> [(String, String)]? {

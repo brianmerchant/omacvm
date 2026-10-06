@@ -176,12 +176,22 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   signature with the VM's Touch ID key (`touchIDCaller`, relay path) and
   shows the same system dialog as for the other routes; the app passes the
   signed answer back byte for byte. The app checks no signature and holds
-  no Touch ID key. The VM needs no Bridge token for the port.
+  no Touch ID key. The VM needs no Bridge token for the port (apply keeps
+  none there). No 127.0.0.1 fallback as for the control centre: a Bridge
+  with Touch ID always has the relay socket; without it the app logs
+  "OmacVM Bridge does not answer" and the VM gets the password. Requests
+  closer than 0.2 s get status 0; a VM that stops reading its port is
+  dropped after 2 s.
 - Lines, one JSON object each. VM to app: `{"op":"touchid","id":N,
   "auth":"1 T N SIG","proto":1,"body":"<base64>"}` (N the request's nonce),
   then `{"op":"ping","id":N}` every 0.5 s and `{"op":"cancel","id":N}` on
-  the way out. App to VM: `{"id":N,"status":S,"answer":"<X-OmacVM-Answer>",
-  "body":"<base64>"}`; status 0: the Bridge did not answer (the password).
+  the way out. App to VM: `{"ack":true,"id":N}` at once, then
+  `{"id":N,"status":S,"answer":"<X-OmacVM-Answer>","body":"<base64>"}`;
+  status 0: the Bridge did not answer (the password). The ack matters: a
+  virtio port takes the VM's writes even with nobody at the Mac end
+  (checked in a VM), so without an ack in 2 s the client says "OmacVM.app
+  does not answer" and the password comes. Lines already waiting when the
+  app connects are dropped (their clients gave up).
   Lines over 4 KB, bodies over 1 KB, an `auth` whose nonce is not the id:
   dropped.
 - QEMU's socket does not tell the app when the VM closes the port, so the
@@ -198,12 +208,9 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   ID prompt is open", the password.
 - The guest is untrusted here too: one request to the Bridge at a time per
   VM (a new one waits up to 1 s for the dropped one to end, else the
-  password), at most 20 a minute (more: status 0, the password), and an
-  answer the VM does not take within 2 s drops the port's socket (the app
-  connects again). Only the reading thread closes that socket. When the
-  Bridge's relay socket cannot be used, the app goes to 127.0.0.1, as for
-  the control centre. The HTTP lines to the Bridge are one helper
-  (`BridgeHTTP`) for both.
+  password). Only the reading thread closes the port's socket. The HTTP
+  lines to the Bridge are one helper (`BridgeHTTP`) for the control centre
+  and Touch ID.
 - Who shows the dialog: the Bridge, as for Parallels, UTM and Fusion (the
   system dialog, no click needed). An Omarchy-style panel shown from the
   process that owns the VM window is the panel's own step.

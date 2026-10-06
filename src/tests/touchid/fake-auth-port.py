@@ -6,7 +6,8 @@ it, and sends the answer line back - and logs the client's lines.
   fake-auth-port.py DIR SOCKET BRIDGE_PORT
 DIR/token: the Bridge token; DIR/port-mode: "" (relay), "stale" (an answer
 for another id first), "status0" (the Bridge did not answer), "close" (the
-app hangs up at once); DIR/port-ops: one line per client line (op id)."""
+app hangs up at once), "noack" (an app that never answers: a virtio port
+with nobody at the Mac end takes the writes); DIR/port-ops: one line per client line (op id)."""
 import base64, json, os, socket, sys, threading, time
 
 D, SOCK, BRIDGE = sys.argv[1], sys.argv[2], int(sys.argv[3])
@@ -98,6 +99,9 @@ def serve(c):
                 f.write(f"{o.get('op')} {o.get('id')}\n")
             if o.get("op") == "touchid":
                 state["ping"] = time.time()
+                if m == "noack":
+                    continue   # nobody at the Mac end: no ack, no answer
+                send({"ack": True, "id": o["id"]})
                 threading.Thread(target=job, args=(o,), daemon=True).start()
                 threading.Thread(target=watchdog, daemon=True).start()
             elif o.get("op") == "ping":

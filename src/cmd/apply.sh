@@ -294,7 +294,7 @@ fi
 if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
-  if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token"
+  if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token" < /dev/null
   else gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"; fi
 else
   # The key, and the theme the VM sent for the Bridge's Touch ID panel.
