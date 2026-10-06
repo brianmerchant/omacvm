@@ -11,7 +11,9 @@ in more words.
   camera's last use, maybe an hour back; ffmpeg filled the hour with copies
   of it. The frames now carry a clock that stops while no app reads, so the
   next frame follows right after. Browsers and `v4l2-ctl` worked before and
-  still do.
+  still do. If the camera service restarted while an app read the camera
+  (an update, say), it could get stuck restarting every 2 seconds on the
+  rest of a half-read frame; it now skips that and goes on.
 
 ## 3.0.1 (unreleased)
 
