@@ -867,11 +867,14 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 // EscapeSwipe all) moves every display that shows the VM instead.
 // The VM stays full screen and is never hidden (user, 2026-10-05: "I want to
 // swipe away to macOS, not close its full screen").
-// Every move is checked. Out: the shortcut is off, the Space did not change
-// or macOS gives no Spaces information -> one log line and a short notice in
-// Omarchy ("N <why>"), nothing else: never a Dock swipe, never Mission
-// Control (user, 2026-10-06: "never"). Back in: the shortcut did not land ->
-// the VM's window to the front (macOS shows its Space).
+// Every move is checked. Out: the shortcut is off or the Space did not change
+// -> a Dock swipe (the events a three/four-finger swipe makes; on macOS 15
+// the shortcut does nothing from the notched built-in display's full-screen
+// Space, the swipe does) -> still in the VM's Space, or macOS gives no Spaces
+// information -> one log line and a short notice in Omarchy ("N <why>"),
+// nothing else: never Mission Control (user, 2026-10-06: "never"). Back in:
+// the shortcut did not land -> the VM's window to the front (macOS shows its
+// Space).
 // An OmacVM VM in a window with the keyboard has no Space of its own: the
 // combo gives the keyboard back to macOS (the app from before, else Finder,
 // COMBO_WINDOW_OUT); pressed again in macOS, that window comes back with the
@@ -1164,11 +1167,77 @@ static int postHotkey(Hotkey k) {
 
 static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState); }
 
+// ---- the swipe: a Dock swipe, the events a three/four-finger swipe makes ----
+// Only for the escape combo when macOS's "Move left/right a space" did not
+// move the display: on macOS 15 the shortcut does nothing from the notched
+// built-in display's full-screen Space, the swipe does (user's log,
+// 2026-10-06 10:13-10:18). Never Mission Control.
+#define kCGSEventTypeField 55
+#define kCGEventGestureHIDType 110
+#define kCGEventGestureScrollY 119
+#define kCGEventGestureSwipeMotion 123
+#define kCGEventGestureSwipeProgress 124
+#define kCGEventGestureSwipeVelocityX 129
+#define kCGEventGestureSwipeVelocityY 130
+#define kCGEventGesturePhase 132
+#define kCGEventScrollGestureFlagBits 135
+#define kCGEventGestureZoomDeltaX 139
+#define kIOHIDEventTypeDockSwipe 23
+#define kCGSEventGesture 29
+#define kCGSEventDockControl 30
+#define kSwipeBegan 1
+#define kSwipeEnded 4
+
+// Which sign of the swipe's progress goes to the Space on the right. Not
+// documented: a swipe seen going the other way flips it (learnSign), kept in
+// the settings domain for the next start.
+static int swipeSign = 1;
+
+static int dockSwipe(CGPoint at, int phase, int right) {
+  CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
+  if (!dock || !gesture) {
+    if (dock) CFRelease(dock);
+    if (gesture) CFRelease(gesture);
+    return 0;
+  }
+  double s = right ? -1.0 : 1.0;   // fingers to the left reveal the Space on the right
+  CGEventSetIntegerValueField(gesture, kCGSEventTypeField, kCGSEventGesture);
+  CGEventSetIntegerValueField(dock, kCGSEventTypeField, kCGSEventDockControl);
+  CGEventSetIntegerValueField(dock, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+  CGEventSetIntegerValueField(dock, kCGEventGesturePhase, phase);
+  CGEventSetIntegerValueField(dock, kCGEventScrollGestureFlagBits, right ? 1 : 0);
+  CGEventSetIntegerValueField(dock, kCGEventGestureSwipeMotion, 1);   // horizontal
+  CGEventSetDoubleValueField(dock, kCGEventGestureScrollY, 0);
+  CGEventSetDoubleValueField(dock, kCGEventGestureZoomDeltaX, 1.401298464e-45);   // FLT_TRUE_MIN, as the trackpad sends
+  if (phase == kSwipeEnded) {
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeProgress, s * 2.0);
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityX, s * 400.0);
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityY, 0);
+  }
+  CGEventSetLocation(dock, at);
+  CGEventSetLocation(gesture, at);
+  CGEventPost(kCGSessionEventTap, dock);
+  CGEventPost(kCGSessionEventTap, gesture);
+  CFRelease(dock); CFRelease(gesture);
+  return 1;
+}
+
 static CGPoint pointerNow(void) {
   CGEventRef e = CGEventCreate(NULL);
   CGPoint p = e ? CGEventGetLocation(e) : CGPointZero;
   if (e) CFRelease(e);
   return p;
+}
+
+// One swipe on that display (dir +1: to the Space on the right). The Dock
+// swipes the display the pointer is on (postMove puts it there first); the
+// events also carry it.
+static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
+  (void)d;
+  CGPoint p = pointerNow();
+  CGPoint at = CGRectContainsPoint(b, p) ? p : CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
+  int right = dir * swipeSign > 0;
+  return dockSwipe(at, kSwipeBegan, right) && dockSwipe(at, kSwipeEnded, right);
 }
 
 // The on-screen windows of pid (layer 0), front to back, as rectangles.
@@ -1227,6 +1296,21 @@ static int escapeAll(void) {
   return all;
 }
 
+static void loadSwipeSign(void) {
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("SwipeSign"), GESTURES_DOMAIN);
+  int s = 0;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &s);
+  if (v) CFRelease(v);
+  if (s == -1) swipeSign = -1;
+}
+
+static void saveSwipeSign(void) {
+  CFNumberRef n = CFNumberCreate(NULL, kCFNumberIntType, &swipeSign);
+  CFPreferencesSetAppValue(CFSTR("SwipeSign"), n, GESTURES_DOMAIN);
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  CFRelease(n);
+}
+
 // Seams for the offline test (test-escape.c): the window server is not asked.
 static int (*activateFn)(pid_t, CGWindowID) = bringToFront;
 static pid_t (*finderFn)(void) = ns_finder_pid;
@@ -1234,6 +1318,7 @@ static pid_t (*frontFn)(void) = frontNow;
 static int (*vmWindowFn)(pid_t, CGWindowID) = windowAlive;
 static int (*spacesFn)(DisplaySpaces *, int) = readSpaces;
 static uint64_t (*windowSpaceFn)(CGWindowID) = readWindowSpace;
+static int (*swipeFn)(CGDirectDisplayID, CGRect, int) = postSwipe;
 static CGPoint (*pointerFn)(void) = pointerNow;
 static void warpPointer(CGPoint p) { CGWarpMouseCursorPosition(p); CGAssociateMouseAndMouseCursorPosition(true); }
 static void (*warpFn)(CGPoint) = warpPointer;
@@ -1242,6 +1327,7 @@ static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
 static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
 static int (*hideFn)(pid_t) = ns_hide;   // a VM in a window only
 static int (*escapeAllFn)(void) = escapeAll;
+static void (*saveSignFn)(void) = saveSwipeSign;
 static CFDictionaryRef (*hotkeysFn)(void) = readHotkeys;
 static int (*keyFn)(Hotkey) = postHotkey;
 static CGEventFlags (*heldFn)(void) = heldNow;
@@ -1361,9 +1447,9 @@ static void focusPointerDisplay(void) {
 }
 
 // No way out to macOS (the Space shortcut is off, macOS did not move the
-// Space, or it gives no Spaces information): one log line and a short
-// notice in Omarchy, nothing else. Never Mission Control, never a Dock swipe
-// (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
+// Space, not even with a Dock swipe, or it gives no Spaces information): one
+// log line and a short notice in Omarchy, nothing else. Never Mission
+// Control (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
 // any escape; the combo again takes them back.
 static void noWayOut(const char *why, const char *notice) {
   logf_("escape combo: %s: nothing done", why);
@@ -1373,8 +1459,9 @@ static void noWayOut(const char *why, const char *notice) {
 
 // ---- the moves of the last press: per display, from its Space to the one beside it ----
 typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, done; } Move;
+enum { BY_SHORTCUT, BY_DOCK };
 static Move moves[MAX_DISPLAYS];
-static int nMoves, leaving;
+static int nMoves, leaving, signRetried, learnedNow, shortcutOff;
 
 static int addMove(const DisplaySpaces *d, int dir, uint64_t to) {
   // "Displays have separate Spaces" off: one list for every display, moved once.
@@ -1387,13 +1474,15 @@ static int addMove(const DisplaySpaces *d, int dir, uint64_t to) {
 // One move on its display. macOS moves the display the pointer is on: for
 // another display (the "all" setting) the pointer goes to its centre first,
 // then back. 0: not made (the shortcut is off). *k: the shortcut used.
-static int postMove(const Move *m, Hotkey *k) {
-  *k = hotkey(m->dir < 0 ? HOTKEY_SPACE_LEFT : HOTKEY_SPACE_RIGHT);
-  if (!k->enabled) return 0;
+static int postMove(const Move *m, int by, Hotkey *k) {
+  if (by == BY_SHORTCUT) {
+    *k = hotkey(m->dir < 0 ? HOTKEY_SPACE_LEFT : HOTKEY_SPACE_RIGHT);
+    if (!k->enabled) return 0;
+  }
   CGPoint p = pointerFn();
   int away = !CGRectContainsPoint(m->b, p);
   if (away) warpFn(CGPointMake(CGRectGetMidX(m->b), CGRectGetMidY(m->b)));
-  int ok = keyFn(*k);
+  int ok = by == BY_SHORTCUT ? keyFn(*k) : swipeFn(m->id, m->b, m->dir);
   if (away) {
     if (warpSettle > 0) usleep((useconds_t)(warpSettle * 1e6));
     warpFn(p);
@@ -1401,48 +1490,92 @@ static int postMove(const Move *m, Hotkey *k) {
   return ok;
 }
 
-// Every move not done yet, by macOS's shortcut. Returns how many were made.
-static int runMoves(const char *what) {
+// Every move not done yet, one way. Returns how many were made.
+static int runMoves(int by, const char *what) {
   int made = 0;
   for (int i = 0; i < nMoves; i++) {
     Move *m = &moves[i];
     if (m->done) continue;
     const char *side = m->dir > 0 ? "right" : "left";
     Hotkey k = { 0 };
-    if (!postMove(m, &k)) {
-      logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
+    if (!postMove(m, by, &k)) {
+      if (by == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
       continue;
     }
     made++;
-    logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
-          (unsigned long long)k.flags, what);
+    if (by == BY_SHORTCUT)
+      logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
+            (unsigned long long)k.flags, what);
+    else logf_("escape combo: display %u swiped %s (%s)", m->id, side, what);
   }
   return made;
 }
 
 // Which moves landed: out, any Space but the VM's on that display; back in,
-// the VM's. Returns the moves not done.
-static int movesLeft(void) {
+// the VM's. A Dock swipe seen going the other way teaches its sign (kept).
+// *moved: some display's Space changed at all. Returns the moves not done.
+static int movesLeft(int by, int *moved) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), rest = 0;
+  *moved = 0; learnedNow = 0;
   for (int i = 0; i < nMoves; i++) {
     Move *m = &moves[i];
     if (m->done) continue;
     const DisplaySpaces *d = displayIn(ds, nd, m->id);
     if (!d) { m->done = 1; continue; }   // the display is gone
+    int from = spaceIndex(d, m->from), now = spaceIndex(d, d->current);
+    if (d->current != m->from) *moved = 1;
+    if (by == BY_DOCK && from >= 0 && now == from - m->dir && !learnedNow) {
+      swipeSign = -swipeSign;
+      saveSignFn();
+      learnedNow = 1;
+      logf_("escape combo: the swipe went the other way: direction learned");
+    }
     if (leaving ? d->current != m->from : d->current == m->to) m->done = 1;
     else rest++;
   }
   return rest;
 }
 
-static void checkLeave(void) {
-  if (movesLeft()) { noWayOut("the Space did not change", "space-unchanged"); return; }
-  logf_("escape combo: out of the VM's Space (macOS's shortcut)");
-  focusPointerDisplay();
+// Nothing moved: with only two Spaces (a Mac mini: Desktop 1 and the VM's) a
+// swipe the wrong way just bounces at the edge, so nothing is learned. Try
+// the other direction once; if that lands, it is kept. 1: a retry is on.
+static int retryOtherWay(void (^then)(void)) {
+  if (signRetried) return 0;
+  signRetried = 1;
+  swipeSign = -swipeSign;
+  logf_("escape combo: the swipe bounced: trying the other direction");
+  if (!runMoves(BY_DOCK, "the other direction")) { swipeSign = -swipeSign; return 0; }
+  after(then);
+  return 1;
+}
+
+// Out: macOS's shortcut, then (it did not move: macOS 15 from the notched
+// display's full-screen Space) a Dock swipe, then the other direction once.
+// Nothing landed: noWayOut. Never Mission Control.
+static void checkLeave(int by) {
+  int moved, rest = movesLeft(by, &moved);
+  if (by == BY_DOCK && signRetried && !learnedNow) {
+    if (rest) swipeSign = -swipeSign;   // the retry did not land either: as before
+    else { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
+  }
+  if (!rest) {
+    logf_("escape combo: out of the VM's Space (%s)", by == BY_SHORTCUT ? "macOS's shortcut" : "a Dock swipe");
+    focusPointerDisplay();
+    return;
+  }
+  if (by == BY_SHORTCUT) {
+    logf_("escape combo: still in the VM's Space: trying a Dock swipe");
+    if (runMoves(BY_DOCK, "out of the VM")) { after(^{ checkLeave(BY_DOCK); }); return; }
+  } else if (!moved && retryOtherWay(^{ checkLeave(BY_DOCK); })) {
+    return;
+  }
+  if (shortcutOff) noWayOut("macOS's \"Move left/right a space\" shortcut is off and the swipe did not move", "space-shortcut-off");
+  else noWayOut("the Space did not change", "space-unchanged");
 }
 
 static void checkEnter(void) {
-  if (movesLeft()) {
+  int moved;
+  if (movesLeft(BY_SHORTCUT, &moved)) {
     logf_("escape combo: not in the VM's Space: its window to the front instead");
     goTo(vmPid, vmWin, "back into the VM:", NULL);
     return;
@@ -1475,7 +1608,7 @@ static void leaveVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
-  nMoves = 0; leaving = 1;
+  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0;
   int pointerOnVM = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
@@ -1487,8 +1620,8 @@ static void leaveVM(void) {
   }
   if (nMoves) {
     whenKeysUp(^{
-      if (runMoves("out of the VM")) after(^{ checkLeave(); });
-      else noWayOut("macOS's \"Move left/right a space\" shortcut is off", "space-shortcut-off");
+      if (runMoves(BY_SHORTCUT, "out of the VM")) after(^{ checkLeave(BY_SHORTCUT); });
+      else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }   // the shortcut is off: on to the Dock swipe
     }, 50);
     return;
   }
@@ -1517,7 +1650,7 @@ static void enterVM(void) {
   }
   if (!nMoves) { goTo(vmPid, vmWin, "back into the VM:", NULL); return; }
   whenKeysUp(^{
-    if (runMoves("back into the VM")) after(^{ checkEnter(); });
+    if (runMoves(BY_SHORTCUT, "back into the VM")) after(^{ checkEnter(); });
     else checkEnter();
   }, 50);
 }
@@ -2065,6 +2198,7 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();
+  loadSwipeSign();
   readFusionHost();
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
     if (!listenAddrs[i][0] && i != NET_FUSION) continue;

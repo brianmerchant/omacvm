@@ -2,9 +2,10 @@
 // moves the display under the pointer one Space toward the one it showed
 // before the VM, with macOS's own "Move left/right a space" shortcut (as the
 // user set it in com.apple.symbolichotkeys); in macOS back into the VM. Each
-// move is checked: not moved, the shortcut off or no Spaces information -> a
-// log line and "N <why>" for Omarchy's notice, nothing else (never a Dock
-// swipe, never Mission Control). The VM is never taken out of full screen and
+// move is checked: not moved or the shortcut off -> a Dock swipe (macOS 15
+// ignores the shortcut from the notched display's full-screen Space); still
+// not moved, or no Spaces information -> a log line and "N <why>" for
+// Omarchy's notice, nothing else (never Mission Control). The VM is never taken out of full screen and
 // never hidden. Drives the helper's own
 // tapCb with made-up key events and its capture logic (frontChanged) with
 // made-up front apps, against a made-up world of displays and Spaces whose
@@ -37,7 +38,7 @@ static pid_t front, finder;
 static CGPoint pointer;
 static int keysIgnored;       // the Space shortcut reaches nothing (a VM app took it)
 static int refuse, hidden, all, vmAlive = 1;
-static int went, keys, spaceKeys, mcKeys;
+static int went, keys, spaceKeys, mcKeys, swipes, swipeMoves, signSaves;
 static CGDirectDisplayID movedOn[4];
 static pid_t wentTo; static CGWindowID wentWin;
 static Hotkey lastKey;
@@ -93,6 +94,14 @@ static int fakeKey(Hotkey k) {
   } else if (same(k, mc)) mcKeys++;
   return 1;
 }
+// "macOS": a Dock swipe moves the display only when swipeMoves is set (the
+// user's MacBook on macOS 15); its sign as the helper has it now.
+static int fakeSwipe(CGDirectDisplayID id, CGRect b, int dir) {
+  (void)b; swipes++;
+  if (swipeMoves) moveSpace(worldOf(id), dir * swipeSign > 0 ? 1 : -1);
+  return 1;
+}
+static void fakeSaveSign(void) { signSaves++; }   // never the real settings
 static CFDictionaryRef fakeHotkeys(void) { return binding ? CFRetain(binding) : NULL; }
 static CGEventFlags fakeHeld(void) {
   heldAsked++;
@@ -179,7 +188,7 @@ static void settleSteps(void) {
 // Press and release; 1 if both were eaten, 0 if both passed, -1 mixed. Runs
 // the main queue so the moves, their checks and the fallbacks happen.
 static int press(CGEventFlags f, int64_t state, int repeat) {
-  went = hidden = keys = spaceKeys = mcKeys = 0;
+  went = hidden = keys = spaceKeys = mcKeys = swipes = 0;
   CGEventRef d = key(1, f, state, repeat), u = key(0, f, state, 0);
   CGEventRef rd = tapCb(NULL, kCGEventKeyDown, d, NULL), ru = tapCb(NULL, kCGEventKeyUp, u, NULL);
   CFRelease(d); CFRelease(u);
@@ -221,6 +230,7 @@ int main(void) {
   vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
+  swipeFn = fakeSwipe; saveSignFn = fakeSaveSign;
   verifyAfter = 0.01; cameFromEvery = 0;
   initKeymap();
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
@@ -378,8 +388,8 @@ int main(void) {
   front = terminal; world[0].cur = 101; settle(vm, NET_APP); inVM(vm, 102);
   // The shortcut reaches nothing (an old VM runtime took it, macOS 27 on the mini).
   keysIgnored = 1;
-  check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[0].cur == 102,
-        "shortcut did not move: nothing else is tried, the VM's Space stays");
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 2 && world[0].cur == 102,
+        "shortcut did not move, nor the swipe (both ways): the VM's Space stays");
   check(!strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "... Omarchy is told (N space-unchanged)");
   check(!mcKeys && !hidden && !went && keys == 1, "... no Mission Control, nothing hidden, no app switch, one key only");
   check(!capturing && escaped, "... capture off (the trackpad and keys are macOS's, as after any escape)");
@@ -394,10 +404,26 @@ int main(void) {
         "back in, the shortcut did not move: the VM's window to the front instead");
   keysIgnored = 0;
   settle(vm, NET_APP); sent();
+  // macOS 15 from the notched display's full-screen Space (user's log, 10:13-10:18):
+  // the shortcut does nothing, the Dock swipe moves it. Out, no Mission Control.
+  keysIgnored = 1; swipeMoves = 1;
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 1 && world[0].cur == 101 && !mcKeys && !hidden &&
+        !strcmp(sent(), "S esc ctrl-opt|"), "shortcut ignored, the Dock swipe moves out: one swipe, no notice, no Mission Control");
+  check(!capturing && escaped, "... capture off");
+  keysIgnored = 0; swipeMoves = 0;
+  settle(vm, NET_APP); sent();
+  press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
+  check(world[0].cur == 102 && front == vm, "... and back in with the shortcut");
+  // The swipe goes the other way at first (sign not known): learned, kept, out.
+  keysIgnored = 1; swipeMoves = 1; swipeSign = -1; signSaves = 0;
+  check(press(K, HID, 0) == 1 && world[0].cur == 101 && swipeSign == 1 && signSaves == 1 && !mcKeys,
+        "the swipe bounced at the edge: the other direction lands and is kept");
+  keysIgnored = 0; swipeMoves = 0; sent();
+  settle(vm, NET_APP); sent(); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
   // The shortcut off: nothing posted, Omarchy says which setting.
   setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752);
-  check(press(K, HID, 0) == 1 && !keys && world[0].cur == 102 && !mcKeys && !hidden && !went,
-        "Move left a space off: nothing posted, nothing moves, no Mission Control");
+  check(press(K, HID, 0) == 1 && !keys && swipes == 2 && world[0].cur == 102 && !mcKeys && !hidden && !went,
+        "Move left a space off: no key posted, the swipe does not move either, no Mission Control");
   check(!strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "... Omarchy is told (N space-shortcut-off)");
   press(K, HID, 0); sent(); unsetKeys(); inVM(vm, 102);
   // Every shortcut off, Mission Control's too: still nothing but the notice.
@@ -531,7 +557,7 @@ int main(void) {
   frontChanged(terminal, -1, 0, "", 11, 1);
   inVM(vm, 102);
   {
-    went = hidden = keys = spaceKeys = mcKeys = 0;
+    went = hidden = keys = spaceKeys = mcKeys = swipes = 0;
     CGEventRef d = key(1, K, HID, 0), rd = tapCb(NULL, kCGEventKeyDown, d, NULL);
     CFRelease(d); settleSteps();
     check(!rd && world[0].cur == 101 && !capturing, "combo down, its up taken by QEMU's tap: moved out");
