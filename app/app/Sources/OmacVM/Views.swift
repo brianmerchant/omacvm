@@ -350,6 +350,7 @@ struct ReadyView: View {
             }
             .help("In a full-screen VM, Control-Option-Esc moves the monitor under the pointer (or all monitors) to the Space beside the VM's with macOS's own animation; the VM stays full screen. Pressed in macOS, it goes back into the VM. The keyboard follows the pointer's monitor.")
             .onChange(of: escape) { _, v in EscapeSetting.set(v) }
+            keyAccess
             GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
                 .onChange(of: graphics) { _, v in setGraphics(v) }
             if let n = graphicsNote {
@@ -375,6 +376,24 @@ struct ReadyView: View {
         }
         .onAppear { refreshFastNetwork(); graphics = Graphics.read(folder: state.config.folder) }
         .onChange(of: state.config) { _, c in refreshFastNetwork(); graphics = Graphics.read(folder: c.folder); graphicsNote = nil }
+    }
+
+    /// Shown only when the VM's keyboard tap is refused (KeyAccess); checked
+    /// again every few seconds, so it goes once OmacVM is allowed.
+    private var keyAccess: some View {
+        TimelineView(.periodic(from: .now, by: 3)) { _ in
+            if KeyAccess.needsUser(folder: state.config.folder) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Keyboard: OmacVM is not allowed to read it").foregroundStyle(.red)
+                        Spacer()
+                        Button("Allow…") { KeyAccess.request() }
+                    }
+                    Text(KeyAccess.missingText).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private func setGraphics(_ g: GraphicsChoice) {

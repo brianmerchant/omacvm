@@ -395,6 +395,11 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   elif grep -q 'macOS shortcuts off' "$miclog"; then
     ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥ Esc is macOS's)"
   fi
+  # QEMU's keyboard tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to the VM) needs Input Monitoring
+  # or Accessibility for OmacVM; without it QEMU says so once at the start.
+  if grep -q 'Could not create event tap' "$miclog"; then
+    warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security: OmacVM on under Input Monitoring and Accessibility (on already: remove it with − and add it again), then restart the VM"
+  fi
 fi
 # Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
 # user-interactive QoS, and the sound card paced (no catch-up after a stall);

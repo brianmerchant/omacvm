@@ -12,6 +12,14 @@ a boot splash, any Omarchy scale on 5K and larger displays, less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
+- ⌘ + F10/F11/F12 (⌘ with mute, volume down, volume up) take Omarchy's
+  screenshots again on a Mac whose speakers have a volume (a MacBook): the
+  Bridge set the Mac's volume and Omarchy never got the key. On a Mac mini
+  with an audio interface it already worked.
+- OmacVM.app tells you when macOS does not let it read the keyboard (the
+  VM's ⌘ Tab, ⌘ Space and screenshot keys then went to macOS without a word):
+  a note with an Allow… button in the VM's window, a line in the VM's log,
+  and a warning in `omacvm check`.
 - A Magic Mouse works in the full-screen VM like the trackpad: two
   fingers sideways swipe Omarchy's workspaces (macOS no longer gets that
   swipe while the VM has the input), a one-finger flick sideways goes back
