@@ -76,7 +76,13 @@ if kill -0 "$OLD_PID" 2>/dev/null; then
   result "aborted the app did not quit"
   exit 1
 fi
-[[ -z $(running_from "$APP") ]] || abort "a VM runs from $BASE: the update waits until it is shut down"
+# A VM that was just stopped (forced off) can take a few seconds to go
+# with its helper processes: wait up to 10 s.
+for ((i = 0; i < 20; i++)); do [[ -z $(running_from "$APP") ]] && break; sleep 0.5; done
+if [[ -n $(running_from "$APP") ]]; then
+  log "still running from $BASE: $(ps -o pid=,comm= -p "$(running_from "$APP" | paste -sd, -)" | tr '\n' ' ')"
+  abort "a VM runs from $BASE: the update waits until it is shut down"
+fi
 # Renames only: the work folder (and the new app in it) on APP's volume.
 mkdir -p "$WORK_DIR" || abort "could not make $WORK_DIR"
 [[ -n $(volume "$WORK_DIR") && $(volume "$WORK_DIR") == "$(volume "$(dirname "$APP")")" ]] ||

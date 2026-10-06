@@ -747,7 +747,7 @@ final class Updater: ObservableObject {
         // Test builds: OMACVM_RESTART_TIMEOUT (seconds) for the timeout path.
         let timeout = TestHooks.value("OMACVM_RESTART_TIMEOUT", bundleID: bundleID).flatMap(TimeInterval.init) ?? RestartVM.shutdownTimeout
         restartTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.shutdownTimedOut() }
+            MainActor.assumeIsolated { self?.shutdownTimedOut(after: timeout) }
         }
     }
 
@@ -761,10 +761,10 @@ final class Updater: ObservableObject {
         log("restart-update stopped: \(why)")
     }
 
-    private func shutdownTimedOut() {
+    private func shutdownTimedOut(after timeout: TimeInterval) {
         guard restarting, runningVM() != nil else { return }
         let version = staged?.version
-        cancelRestart("the VM still runs after \(Int(RestartVM.shutdownTimeout)) s")
+        cancelRestart("the VM still runs after \(Int(timeout)) s")
         // The second confirm: forcing it off loses what is not saved in the VM.
         // Test builds answer it with OMACVM_RESTART_FORCE (1: force, else OK).
         let force: Bool

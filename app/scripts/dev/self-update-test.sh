@@ -88,14 +88,16 @@ make_version() {   # VERSION -> $WORK/v/VERSION/NAME.app
   mkdir -p "$d"; ditto "$SRC" "$d/$NAME.app"
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $1" -c "Set :CFBundleVersion $1" "$d/$NAME.app/Contents/Info.plist"
 }
-for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5 2.7.6 2.7.7; do make_version $v; done
+for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5 2.7.6 2.7.7 2.7.8 2.7.9; do make_version $v; done
 # 2.7.2: QEMU misses a library (dyld stops it).
 rm "$WORK/v/2.7.2/$NAME.app/Contents/Resources/runtime/lib/libvirglrenderer.1.dylib"
+# 2.7.8: the same, newer than 2.7.6 (the rollback of an update with a VM restart).
+rm "$WORK/v/2.7.8/$NAME.app/Contents/Resources/runtime/lib/libvirglrenderer.1.dylib"
 # 2.7.3: a launcher that exits at once.
 printf 'int main(void) { return 3; }\n' > "$WORK/v/exit3.c"
 cc -o "$WORK/v/2.7.3/$NAME.app/Contents/MacOS/OmacVM" "$WORK/v/exit3.c"
 codesign --force --sign "$SIGN_ID" --options runtime --timestamp=none "$WORK/v/2.7.3/$NAME.app/Contents/MacOS/OmacVM"
-for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5 2.7.6 2.7.7; do resign "$WORK/v/$v/$NAME.app" || die "signing $v"; done
+for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5 2.7.6 2.7.7 2.7.8 2.7.9; do resign "$WORK/v/$v/$NAME.app" || die "signing $v"; done
 # The team of the identity the test versions are signed with: the feed names it.
 TEAM=$(codesign -dv "$WORK/v/2.7.0/$NAME.app" 2>&1 | sed -n 's/^TeamIdentifier=//p')
 [[ $TEAM =~ ^[A-Z0-9]{10}$ ]] || die "OMACVM_SIGN_ID is not a Developer ID (no team)"
@@ -404,26 +406,26 @@ check "after the shutdown: 2.7.6 in place" 'wait_for 60 "[[ \$(version \"\$APP\"
 check "2.7.6 starts the VM again" 'wait_for 60 "grep -q \"starting the VM again after the update\" \"\$UPD/update.log\"" && wait_for 30 qemu_runs'
 check "restart-vm used once" '[[ ! -e "$UPD/restart-vm" ]]'
 check "the VM runs from 2.7.6" 'wait_for 10 "[[ \$(version \"\$APP\") == 2.7.6 ]] && qemu_runs"'
-# A broken build (QEMU misses a library): 2.7.6 comes back and starts the VM again.
-publish 2.7.2
+# A broken build newer than 2.7.6 (QEMU misses a library): 2.7.6 comes back and starts the VM again.
+publish 2.7.8
 quit_app "$APP"; pkill -f "$APP/Contents/Resources/runtime/bin/OmacVM"; sleep 2
 start_app "$APP" --start --vm SU-test-vm
 check "the test VM runs from 2.7.6" 'wait_for 20 qemu_runs'
 start_app "$APP" --update-restart
-check "restart-update 2.7.2 ready" 'wait_for 60 "grep -q \"restart-update 2.7.2 for SU-test-vm: ready\" \"\$UPD/update.log\""'
+check "restart-update 2.7.8 ready" 'wait_for 60 "grep -q \"restart-update 2.7.8 for SU-test-vm: ready\" \"\$UPD/update.log\""'
 sleep 2; qmp_quit
-check "rolled back to 2.7.6" 'wait_for 90 "grep -q \"result: rolled-back 2.7.2\" \"\$UPD/update.log\""'
+check "rolled back to 2.7.6" 'wait_for 90 "grep -q \"result: rolled-back 2.7.8\" \"\$UPD/update.log\""'
 check "2.7.6 started the VM again after the rollback" 'wait_for 60 "[[ \$(grep -c \"starting the VM again after the update\" \"\$UPD/update.log\") -ge 2 ]]" && wait_for 30 qemu_runs'
 check "still 2.7.6" '[[ $(version "$APP") == 2.7.6 ]]'
-# Forced (the second confirm said Force Off and Update): 2.7.7 goes in, the VM starts again.
+# Forced (the second confirm said Force Off and Update): 2.7.9 goes in (2.7.8 is skipped now), the VM starts again.
 quit_app "$APP"; pkill -f "$APP/Contents/Resources/runtime/bin/OmacVM"; sleep 2
-publish 2.7.7
+publish 2.7.9
 ENV+=(--env OMACVM_RESTART_FORCE=1)
 start_app "$APP" --start --vm SU-test-vm
 check "the test VM runs" 'wait_for 20 qemu_runs'
 start_app "$APP" --update-restart
-check "forced off after the timeout: 2.7.7 in place" 'wait_for 120 "[[ \$(version \"\$APP\") == 2.7.7 ]]"'
-check "2.7.7 starts the VM again" 'wait_for 60 "[[ \$(grep -c \"starting the VM again after the update\" \"\$UPD/update.log\") -ge 3 ]]" && wait_for 30 qemu_runs'
+check "forced off after the timeout: 2.7.9 in place" 'wait_for 120 "[[ \$(version \"\$APP\") == 2.7.9 ]]"'
+check "2.7.9 starts the VM again" 'wait_for 60 "[[ \$(grep -c \"starting the VM again after the update\" \"\$UPD/update.log\") -ge 3 ]]" && wait_for 30 qemu_runs'
 quit_app "$APP"; pkill -f "$APP/Contents/Resources/runtime/bin/OmacVM"; logtail
 
 log "the installed OmacVM and the shared settings untouched"
