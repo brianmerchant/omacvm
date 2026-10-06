@@ -655,10 +655,13 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   Worse with AirPods or other Bluetooth headphones.
 - **Cause:** players hold the picture back by the sound delay the system
   tells them. In the VM, PipeWire only knows the VM's own buffers. After
-  the VM's sound card come QEMU's buffers (about 150 ms: the card's buffer,
-  QEMU's ring, SDL's queue) and the Mac's output device (about 13 ms wired,
-  about 170 ms for AirPods), and nothing told the VM about them. Not new in
-  3.0.0: the sound path and its delay are the same as in 2.x.
+  the VM's sound card come QEMU's buffers (110-150 ms: the card's buffer,
+  QEMU's ring, SDL's queue; the fill moves from run to run) and the Mac's
+  output device (about 13 ms wired, about 170 ms for AirPods), and nothing
+  told the VM about them. Not new in 3.0.0: with `audioClassic` (the old
+  sound timing) the sound was as late. After the VM stalls (heavy GPU
+  load) the sound comes up to the stall's length earlier for a few seconds,
+  then back.
 - **Fix (3.0.1):** the app works out that delay (QEMU's part plus what
   CoreAudio says about the Mac's default output) and sends it to the VM at
   the start and whenever the output changes. In the VM,

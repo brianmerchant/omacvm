@@ -32,8 +32,12 @@ expect(AudioDelay.Device(latency: 100, safetyOffset: 0, streamLatency: 0, buffer
 expect(AudioDelay.Device(latency: UInt32.max, safetyOffset: UInt32.max, streamLatency: 0, bufferFrames: 0, sampleRate: 48000).ms == nil,
        "over 1 s: unknown (no overflow)")
 
-// QEMU's part stays in the range the av-sync measurement allows.
-expect((100...250).contains(AudioDelay.qemuMs), "QEMU's part is plausible")
+// Every measured run in lip-sync tolerance with QEMU's part: the sound at
+// most 15 ms early and 45 ms late.
+for d in AudioDelay.measuredQemuMs {
+    let off = d - Double(AudioDelay.qemuMs)
+    expect(off >= -15 && off <= 45, "measured \(Int(d)) ms: sound \(Int(off)) ms after the picture")
+}
 
 if failures > 0 { print("\(failures) failed"); exit(1) }
 print("all passed")

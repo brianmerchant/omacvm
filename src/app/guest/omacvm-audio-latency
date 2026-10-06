@@ -3,8 +3,8 @@
 
 Chromium, Firefox and mpv hold the picture back by the sound delay PipeWire
 reports. Without this that is the VM's own buffers only; QEMU's buffers and
-the Mac's output device come on top (about 150 ms wired, 320 ms with
-AirPods), so the sound was late in every video. The app sends the whole
+the Mac's output device come on top (110-150 ms wired, about 170 ms
+more with AirPods), so the sound was late in every video. The app sends the whole
 delay at the VM's start and whenever the Mac's output changes; it goes on
 the sound card's output ports as PipeWire's latency offset (the "latency
 offset" pavucontrol shows; WirePlumber keeps it across logins).

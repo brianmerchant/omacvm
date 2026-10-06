@@ -31,11 +31,13 @@ in more words.
 
 - OmacVM.app: the sound is in step with the picture in videos (YouTube in
   Chromium, Firefox, mpv). The VM never knew how late the Mac plays its
-  sound (QEMU's buffers, about 150 ms, plus the Mac's output: about 13 ms
+  sound (QEMU's buffers, 110-150 ms, plus the Mac's output: about 13 ms
   wired, 170 ms with AirPods), so the sound came that much after the
   picture. The app now tells the VM, at the start and whenever the Mac's
-  output changes, and PipeWire passes it on to the players. Not a 3.0.0
-  change: the delay was the same before. Fine-tuning:
+  output changes, and PipeWire passes it on to the players. Measured on
+  the Mac mini: the sound 112-151 ms late before, -25 to +11 ms after
+  (wired). Not a 3.0.0 change: `audioClassic` (the old sound timing) was
+  as late. Fine-tuning:
   `defaults write org.omacvm.app audioDelayExtraMs -int N`
   (troubleshooting 28).
 

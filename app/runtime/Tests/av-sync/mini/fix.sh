@@ -7,7 +7,7 @@
 # this run's def-h264 median (the calibration).
 set -u
 W=/private/tmp/omacvm-avs; cd "$W"; mkdir -p out
-QPART=${QPART:-150}
+QPART=${QPART:-115}
 dev=$(sed -n 's/.* = \([0-9.]*\) ms$/\1/p' out/outlat.txt | head -1); dev=${dev:-0}
 echo "$(date +%T) fix: device ${dev} ms, QEMU part ${QPART} ms"
 ./vm.sh stop; GFX=opengl ./vm.sh start || exit 1
@@ -31,7 +31,8 @@ setrun() {  # setrun MS LABEL...: the delay as root (as qemu-ga runs it), then t
   done
 }
 total=$(python3 -c "print(round($QPART + $dev))")
-setrun "$total" fix-h264 fix-vp9 fix-h264-stall
+T=${TAG:-}   # TAG: a label suffix for repeated runs
+setrun "$total" "fix$T-h264" "fix$T-vp9" "fix$T-h264-stall"
 if [[ ${CAL:-1} == 1 ]]; then
   cal=$(python3 -c "
 import json
