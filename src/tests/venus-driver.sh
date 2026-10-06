@@ -113,6 +113,30 @@ fi
 out=$(PATH="$T:$PATH" OMACVM_VENUS_PROBE="venus=0 blob_alignment=0" HAVE=1:26.2.3-1 "$D/vulkan-virtio.sh" --nonsense 2>&1); rc=$?
 [[ $rc == 2 ]] && pass "unknown option: usage" || fail "unknown option: rc $rc"
 
+# Never a partial upgrade: when installing the build tools would update an
+# installed package (package lists newer than the system), the build stops
+# before pacman installs anything. Root-only part run as a user on a copy.
+P=$T/partial; mkdir -p "$P/venus"; cp -R "$D/." "$P/venus/"
+sed -e 's/^(( EUID == 0 )) ||.*$/:/' -e "s#^LOG=.*#LOG=$P/build.log#" "$D/vulkan-virtio.sh" > "$P/venus/vulkan-virtio.sh"
+cat > "$P/pacman" <<'EOF'
+#!/bin/bash
+echo "pacman $*" >> "$CALLS"
+case "$1 $2" in
+  "-Q vulkan-virtio") echo "vulkan-virtio 1:26.2.4-0.1"; exit 0 ;;
+  "-Q spirv-tools") exit 0 ;;            # installed: the update would be partial
+  "-Q "*) exit 1 ;;
+  "-T "*) echo glslang; exit 0 ;;
+  "-S --print") printf 'glslang\n%s\n' $PULLS; exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "$P/pacman"; cp "$T/vercmp" "$T/ldd" "$P/"
+CALLS=$P/calls PULLS=spirv-tools PATH="$P:$PATH" OMACVM_VENUS_PROBE="$V" OMACVM_MESA_ICD=$T/none.json \
+  bash "$P/venus/vulkan-virtio.sh" > "$P/out" 2>&1; rc=$?
+[[ $rc == 1 ]] && grep -q 'would update spirv-tools' "$P/out" && ! grep -q 'pacman -S --needed --noconfirm' "$P/calls" &&
+  ! grep -q 'pacman -Rns' "$P/calls" && pass "build tools that would update installed packages: stops, installs nothing" ||
+  fail "partial upgrade not refused: rc $rc, said '$(cat "$P/out")'"
+
 # The package: Mesa 26.2.4 (blob alignment) + the semaphore patch; it stays over
 # the distro's builds of the same Mesa, a newer Mesa replaces it.
 eval "$(bash -c "source $D/PKGBUILD"' && declare -p pkgname epoch pkgver pkgrel _mesaver source sha256sums')"

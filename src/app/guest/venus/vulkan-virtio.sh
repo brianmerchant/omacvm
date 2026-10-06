@@ -109,19 +109,29 @@ echo "Vulkan (Venus): building Mesa's vulkan-virtio ${OURS#*:} (a few minutes, l
 deps=(base-devel)
 while IFS= read -r d; do deps+=("$d"); done < <(bash -c 'source ./PKGBUILD; printf "%s\n" "${depends[@]}" "${makedepends[@]}"')
 missing=$(pacman -T "${deps[@]}" || true)
+tools=""                             # what this run installed (removed again at the end)
 B=$(mktemp -d /var/tmp/omacvm-vulkan-virtio.XXXXXX)
 cleanup() {
   rm -rf "$B"
-  if [[ -n $missing ]]; then
+  if [[ -n $tools ]]; then
     # shellcheck disable=SC2086 # one package per word
-    pacman -Rns --noconfirm $missing >>"$LOG" 2>&1 || echo "Vulkan (Venus): build tools left installed (pacman -Rns did not take them all)"
+    pacman -Rns --noconfirm $tools >>"$LOG" 2>&1 || echo "Vulkan (Venus): build tools left installed (pacman -Rns did not take them all)"
   fi
 }
 trap cleanup EXIT
 fail() { echo "Vulkan (Venus): $1 (OpenGL is unaffected; details in $LOG)" >&2; exit 1; }
 : > "$LOG"
 if [[ -n $missing ]]; then
+  # Never a partial upgrade: when the package lists are newer than the system,
+  # installing a build tool can pull newer versions of installed packages (a
+  # newer libdrm or LLVM under the old Mesa ends in a black desktop). Then
+  # nothing is installed and the driver waits for a full pacman -Syu.
   # shellcheck disable=SC2086 # one package per word
+  up=$(pacman -S --print --print-format '%n' --needed $missing 2>>"$LOG" | while read -r n; do
+         if pacman -Q "$n" >/dev/null 2>&1; then echo "$n"; fi; done | tr '\n' ' ' || true)
+  [[ -z $up ]] || fail "the build tools would update ${up% } on their own: update the VM first (pacman -Syu), then omacvm apply"
+  tools=$missing
+  # shellcheck disable=SC2086
   pacman -S --needed --noconfirm --asdeps $missing >>"$LOG" 2>&1 || fail "pacman could not install the build tools"
 fi
 install -m644 PKGBUILD patches/mesa-venus-opaque-fd-semaphores.patch "$B/"
