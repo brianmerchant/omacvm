@@ -9,6 +9,11 @@ in more words.
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
   `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- OmacVM.app's build window says more while it builds: what runs right now
+  ("Installing gum (27 of 190 packages)"), downloads with a bar, MB done,
+  speed and time left, how long the step usually takes on a Mac like yours
+  (or took last time), and "Working. Last output 4 s ago." so a quiet part
+  never looks frozen. *Show details* shows the last 20 lines of the log.
 
 ## 3.0.0 (unreleased)
 
