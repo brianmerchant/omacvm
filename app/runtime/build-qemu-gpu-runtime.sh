@@ -774,6 +774,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-even
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-start.patch"
 "$native_dir/Tests/display/test-fullscreen-start.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
+# Touch ID's panel in the VM window's own process (OmacVM.app's dylib, ADR 0041).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-touchid-panel.patch"
+grep -q 'dlsym(handle, "omacvm_touchid_panel_start")' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not load the Touch ID panel (touchid-panel patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
