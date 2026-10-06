@@ -70,6 +70,10 @@ jobs:
         working-directory: app/app
         run: swift run net-tests
 
+      - name: OmacVM.app new VM features (Omanotch on with a notch)
+        working-directory: app/app
+        run: swift run features-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 

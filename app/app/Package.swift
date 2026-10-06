@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMFeatures"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -17,6 +17,10 @@ let package = Package(
         // apart from QMP so it can be tested without a VM: `swift run net-tests`.
         .target(name: "OmacVMNet"),
         .executableTarget(name: "net-tests", dependencies: ["OmacVMNet"]),
+        // The features a new VM starts with (Omanotch on with a notch):
+        // `swift run features-tests`.
+        .target(name: "OmacVMFeatures"),
+        .executableTarget(name: "features-tests", dependencies: ["OmacVMFeatures"]),
     ],
     swiftLanguageModes: [.v5]
 )
