@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Combine
 import SwiftUI
+import OmacVMBuildProgress
 
 /// What the launcher window shows.
 enum Screen: Equatable {
@@ -227,13 +228,23 @@ struct SetupView: View {
 struct BuildView: View {
     @ObservedObject var state: AppState
     @ObservedObject var creator: Creator
+    @State private var showDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Building \(state.config.name)").font(.title2.bold())
             ProgressView(value: Double(max(creator.step - 1, 0)), total: Double(creator.steps))
             Text(creator.step > 0 ? "Step \(creator.step) of \(creator.steps): \(creator.title)" : creator.title)
-            Text(creator.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            if creator.failed == nil {
+                BuildNowView(creator: creator)
+            } else {
+                Text(creator.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            DisclosureGroup(isExpanded: $showDetails) {
+                BuildLogView(creator: creator)
+            } label: {
+                Text("Show details").font(.caption)
+            }
             if let error = creator.failed {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
                 HStack {
@@ -254,6 +265,81 @@ struct BuildView: View {
                 state.screen = .ready
             }
         }
+    }
+}
+
+/// What the build does right now: the current part, a download's bar with
+/// speed and time left (or the package count), the step's time, and a
+/// heartbeat so a quiet part does not look frozen.
+struct BuildNowView: View {
+    @ObservedObject var creator: Creator
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            VStack(alignment: .leading, spacing: 6) {
+                if let a = creator.activity {
+                    Text(a.text).lineLimit(1).truncationMode(.middle)
+                    if let f = a.fraction { ProgressView(value: f).controlSize(.small) }
+                    if let line = downloadLine(a) {
+                        Text(line).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                } else if !creator.detail.isEmpty {
+                    Text(creator.detail).lineLimit(2)
+                }
+                if creator.step > 0 {
+                    Text(stepTime(at: ctx.date)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text(BuildText.heartbeat(quietFor: ctx.date.timeIntervalSince(creator.lastOutput)))
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// "412 MB of 1.4 GB, 11.2 MB/s, about 2 min left"
+    private func downloadLine(_ a: ProgressUpdate) -> String? {
+        guard a.total > 0 else { return nil }
+        var parts = ["\(BuildText.bytes(a.done)) of \(BuildText.bytes(a.total))"]
+        if a.complete { return parts[0] }
+        if let s = creator.speed { parts.append(BuildText.speed(s)) }
+        parts.append(creator.secondsLeft.map(BuildText.left) ?? "measuring speed")
+        return parts.joined(separator: ", ")
+    }
+
+    /// "This step: 3 min 10 s so far, usually 15-40 min on this Mac (last time 22 min). Build: 9 min."
+    private func stepTime(at now: Date) -> String {
+        var s = "This step: \(BuildText.duration(now.timeIntervalSince(creator.stepStarted))) so far"
+        if let last = StepTimes.last(route: creator.route, step: creator.step) {
+            s += ", last time \(BuildText.duration(last)) on this Mac"
+        } else if let u = StepTimes.usual(route: creator.route, step: creator.step, performanceCores: Mac.performanceCores) {
+            s += ", \(StepTimes.usualText(u)) on a Mac like this"
+        }
+        return s + ". Whole build: \(BuildText.duration(now.timeIntervalSince(creator.buildStarted)))."
+    }
+}
+
+/// The last lines of the build's newest log, as they come.
+struct BuildLogView: View {
+    @ObservedObject var creator: Creator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(creator.logName.isEmpty ? "No log yet." : "logs/\(creator.logName)")
+                .font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                Text(creator.logTail.joined(separator: "\n"))
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(6)
+            }
+            .frame(height: 180)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .padding(.top, 4)
     }
 }
 

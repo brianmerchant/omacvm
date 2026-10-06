@@ -74,6 +74,13 @@ jobs:
         working-directory: app/app
         run: swift run usb-tests
 
+      - name: OmacVM.app build window tests (progress lines from the VM, speed, time left, log tail)
+        working-directory: app/app
+        run: swift run build-progress-tests
+
+      - name: Package progress filter (src/vm/progress.sh on pacman output)
+        run: src/tests/build-progress.sh
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 

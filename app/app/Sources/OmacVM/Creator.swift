@@ -1,8 +1,10 @@
 import Foundation
+import OmacVMBuildProgress
 
 /// Runs scripts/create-vm.sh (or prebuilt-vm.sh: the VM from a prebuilt image)
 /// and turns its output into progress for the UI. Both take the same vm.env
-/// and password and print the same STEP and ==> lines.
+/// and password and print the same STEP, ==> and progress lines
+/// (OmacVMBuildProgress: downloads and packages, checked there).
 @MainActor
 final class Creator: ObservableObject {
     @Published var step = 0
@@ -12,6 +14,24 @@ final class Creator: ObservableObject {
     @Published var failed: String?
     @Published var warning: String?
     @Published var finished = false
+    /// What runs right now (a download or a package), nil between them.
+    @Published private(set) var activity: ProgressUpdate?
+    /// The download's speed (bytes/s, smoothed) and seconds left, when known.
+    @Published private(set) var speed: Double?
+    @Published private(set) var secondsLeft: Double?
+    @Published private(set) var stepStarted = Date()
+    @Published private(set) var buildStarted = Date()
+    /// The last output from the build: a line, or a write to one of its logs.
+    @Published private(set) var lastOutput = Date()
+    /// The newest log's last lines and its name (logs/ of the VM), for Show details.
+    @Published private(set) var logTail: [String] = []
+    @Published private(set) var logName = ""
+    private(set) var route = StepTimes.Route.build
+    private var rate = ByteRate()
+    private var activityAt = Date()
+    private var ticker: Timer?
+    private var logsDir: URL?
+    private var stepSeconds: [Int: Double] = [:]
     private var process: Process?
     private var buffer = ""
     private var run = 0
@@ -21,6 +41,11 @@ final class Creator: ObservableObject {
 
     func start(config: VMConfig, password: String, prebuilt: Bool = false, graphics: GraphicsChoice = .auto) {
         failed = nil; finished = false; step = 0
+        activity = nil; speed = nil; secondsLeft = nil; logTail = []; logName = ""
+        rate.reset(); stepSeconds = [:]
+        route = prebuilt ? .prebuilt : .build
+        buildStarted = Date(); stepStarted = buildStarted; lastOutput = buildStarted
+        logsDir = config.folder.appendingPathComponent("logs")
         reader?.readabilityHandler = nil
         reader = nil; run += 1; buffer = ""; exitStatus = nil
         let id = run
@@ -72,6 +97,7 @@ final class Creator: ObservableObject {
             input.fileHandleForWriting.write((password + "\n").data(using: .utf8)!)
             try? input.fileHandleForWriting.close()
             process = p
+            startTicker()
         } catch {
             reader?.readabilityHandler = nil
             reader = nil
@@ -99,7 +125,10 @@ final class Creator: ObservableObject {
     private func settle() {
         guard reader == nil, let status = exitStatus else { return }
         exitStatus = nil
+        ticker?.invalidate(); ticker = nil
         if status == 0 {
+            endStep()
+            StepTimes.remember(stepSeconds, route: route)
             finished = true
         } else if failed == nil {
             failed = "The build stopped (exit \(status)). Log: \(logURL?.path ?? "")"
@@ -118,8 +147,12 @@ final class Creator: ObservableObject {
     }
 
     private func handle(_ line: String) {
-        if line.hasPrefix("STEP ") {
+        if !line.isEmpty { lastOutput = Date() }
+        if let u = ProgressUpdate.parse(line) {
+            progress(u)
+        } else if line.hasPrefix("STEP ") {
             // STEP n/N title
+            endStep()
             let parts = line.dropFirst(5).split(separator: " ", maxSplits: 1)
             if let nums = parts.first?.split(separator: "/"), nums.count == 2 {
                 step = Int(nums[0]) ?? step
@@ -127,19 +160,82 @@ final class Creator: ObservableObject {
             }
             title = parts.count > 1 ? String(parts[1]) : ""
             detail = ""
+            stepStarted = Date()
+            clearActivity()
         } else if line.hasPrefix("==>") {
             detail = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 .replacingOccurrences(of: "\u{1B}[1;32m", with: "")
                 .replacingOccurrences(of: "\u{1B}[0m", with: "")
+            // A new part begins: a finished download or package run goes.
+            if activity?.complete == true { clearActivity() }
         } else if line.hasPrefix("WARN:") {
             warning = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             detail = warning ?? ""
         } else if line.hasPrefix("ERROR:") {
             failed = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-        } else if let pct = line.split(separator: " ").last, pct.hasSuffix("%"),
+        } else if activity == nil, let pct = line.split(separator: " ").last, pct.hasSuffix("%"),
                   line.contains("#") {
             detail = "Downloading \(pct)"
         }
+    }
+
+    private func progress(_ u: ProgressUpdate) {
+        let t = Date().timeIntervalSince1970
+        // Another file or another package run: its own speed.
+        if let a = activity, a.phase != u.phase || a.total != u.total || u.done < a.done { rate.reset() }
+        if u.phase == .download && u.total > 0 {
+            rate.add(u.done, at: t)
+            speed = rate.bytesPerSecond
+            secondsLeft = rate.secondsLeft(total: u.total)
+        } else {
+            speed = nil; secondsLeft = nil
+        }
+        activity = u
+        activityAt = Date()
+    }
+
+    private func clearActivity() {
+        activity = nil; speed = nil; secondsLeft = nil
+        rate.reset()
+    }
+
+    private func endStep() {
+        guard step > 0 else { return }
+        stepSeconds[step] = Date().timeIntervalSince(stepStarted)
+    }
+
+    /// Once a second: the log's tail, the last output, a stale activity.
+    private func startTicker() {
+        ticker?.invalidate()
+        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+    }
+
+    private func tick() {
+        // A package that has said nothing for a minute: the run is past it
+        // (hooks, the next part); the heartbeat and the details say the rest.
+        if let a = activity, a.phase == .install || a.complete, Date().timeIntervalSince(activityAt) > 60 { clearActivity() }
+        guard let dir = logsDir else { return }
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]))?
+            .filter { $0.pathExtension == "log" } ?? []
+        let dated = files.compactMap { u -> (URL, Date, Int)? in
+            guard let v = try? u.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                  let d = v.contentModificationDate, (v.fileSize ?? 0) > 0 else { return nil }
+            return (u, d, v.fileSize ?? 0)
+        }
+        // Only this build's logs (a failed earlier build may have left some).
+        guard let newest = dated.filter({ $0.1 >= buildStarted.addingTimeInterval(-2) }).max(by: { $0.1 < $1.1 }) else { return }
+        if newest.1 > lastOutput { lastOutput = min(newest.1, Date()) }
+        guard let h = try? FileHandle(forReadingFrom: newest.0) else { return }
+        defer { try? h.close() }
+        let size = UInt64(newest.2)
+        try? h.seek(toOffset: size > 16384 ? size - 16384 : 0)
+        let tail = BuildText.tail(h.readData(ofLength: 16384))
+        if tail != logTail { logTail = tail }
+        let name = newest.0.lastPathComponent
+        if name != logName { logName = name }
     }
 }
 
