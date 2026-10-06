@@ -296,9 +296,10 @@ GRAPHICS_FEATURE = Feature(
 
 
 def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,
-                 checks: list[Check] | None = None) -> Row | None:
+                 checks: list[Check] | None = None, offline: bool = False) -> Row | None:
     """The Graphics row of an OmacVM.app VM, from the Mac's status (its
-    `graphics`: omacvm graphics --json); None on the other routes."""
+    `graphics`: omacvm graphics --json); None on the other routes. offline:
+    the Mac does not answer or refused this VM (no status: not its age)."""
     if vm_type != "app":
         return None
     # "graphics memory" has its own row (older 3.0.0 RCs sent it with FEATURE=graphics).
@@ -308,6 +309,8 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     if job is not None:
         return Row(GRAPHICS_FEATURE, True, Status.BUSY, f"to {GRAPHICS_TITLES.get(job.features[0] if job.features else '', '?')}…",
                    checks=mine)
+    if not isinstance(status, dict):
+        return Row(GRAPHICS_FEATURE, True, Status.UNKNOWN, "needs the Mac" if offline else "asking the Mac", checks=mine)
     if not isinstance(g, dict) or g.get("graphics") not in GRAPHICS_CHOICES:
         return Row(GRAPHICS_FEATURE, True, Status.UNKNOWN, "the Mac's OmacVM does not say (older than 3.0.0?)", checks=mine)
     title = GRAPHICS_TITLES[g["graphics"]]

@@ -549,7 +549,7 @@ FEATURE=control-centre
 if [[ $CONTROL == on ]]; then
   check "omacvm" "/usr/local/bin/omacvm opens the control centre" test -x /usr/local/bin/omacvm
   if python3 -c 'import textual' >/dev/null 2>&1; then ok "Textual" "$(pacman -Q python-textual 2>/dev/null | cut -d' ' -f2)"
-  else bad "Textual" "python-textual missing: omacvm shows plain text (omacvm apply on the Mac installs it)"; fi
+  else bad "Textual" "python-textual missing: omacvm shows plain text and offers to install it from the Mac"; fi
   check "checks for it" "omacvm-check.socket" systemctl is-active -q omacvm-check.socket
   if grep -q '"omacvm": {' "$H/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null; then ok "Omarchy menu" "OmacVM row"
   else bad "Omarchy menu" "no OmacVM row in ~/.config/omarchy/extensions/omarchy-menu.jsonc (omacvm apply)"; fi

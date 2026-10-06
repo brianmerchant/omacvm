@@ -165,6 +165,9 @@ helper_of() {
 }
 if (( MAC )); then
   step mac "the Mac side"
+  # OmacVM.app's apply (apply-vm.sh, or the app's omacvm the Bridge runs):
+  # the Bridge runs the app's own omacvm for the control centre (cli_file_app).
+  [[ -n ${OMACVM_APP_CLI:-} ]] && cli_file_app "$OMACVM_APP_CLI"
   args=(--quiet)
   # A repair builds that feature's Mac helper again (the others stay as they are).
   for f in ${REINSTALL[@]+"${REINSTALL[@]}"}; do

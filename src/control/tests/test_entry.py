@@ -16,11 +16,11 @@ HERE = os.path.dirname(__file__)
 ENTRY = os.path.join(HERE, "..", "omacvm")
 
 
-def run_in_pty(args, env, send=b"", wait=8.0):
+def run_in_pty(args, env, send=b"", wait=8.0, answer=b""):
     m, s = pty.openpty()
     p = subprocess.Popen([sys.executable, ENTRY] + args, stdin=s, stdout=s, stderr=s, env=env, close_fds=True)
     os.close(s)
-    out, end, sent = b"", time.monotonic() + wait, False
+    out, end, sent, answered = b"", time.monotonic() + wait, False, False
     while time.monotonic() < end:
         r, _, _ = select.select([m], [], [], 0.2)
         if r:
@@ -28,6 +28,10 @@ def run_in_pty(args, env, send=b"", wait=8.0):
                 out += os.read(m, 65536)
             except OSError:
                 break
+        # Textual missing and the Mac answers: it offers to install it from there.
+        if b"[Y/n]" in out and answer and not answered:
+            os.write(m, answer)
+            answered = True
         if b"Press Return to close." in out and send and not sent:
             os.write(m, send)
             sent = True
@@ -55,8 +59,10 @@ def test_window_waits_for_return(tmp_path):
     try:
         env = no_textual_env(tmp_path, mac, checks)
         out, alive = run_in_pty(["--window"], env, wait=6.0)
+        assert "Install it from the Mac now? [Y/n]" in out and "sudo" not in out and alive, out
+        out, alive = run_in_pty(["--window"], env, wait=6.0, answer=b"n\n")
         assert "Press Return to close." in out and alive, out
-        out, alive = run_in_pty(["--window"], env, send=b"\n", wait=8.0)
+        out, alive = run_in_pty(["--window"], env, send=b"\n", wait=8.0, answer=b"n\n")
         assert "Press Return to close." in out and not alive, out
         assert "Trackpad gestures" in out
     finally:
@@ -67,7 +73,7 @@ def test_window_waits_for_return(tmp_path):
 def test_terminal_does_not_wait(tmp_path):
     mac, checks = FakeMac(), FakeChecks()
     try:
-        out, alive = run_in_pty([], no_textual_env(tmp_path, mac, checks), wait=8.0)
+        out, alive = run_in_pty([], no_textual_env(tmp_path, mac, checks), wait=8.0, answer=b"n\n")
         assert not alive and "Press Return" not in out and "python-textual" in out, out
     finally:
         mac.stop()
