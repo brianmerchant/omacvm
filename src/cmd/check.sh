@@ -561,6 +561,17 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     else ok "Mac links (app)" "$l"; fi
   fi
 fi
+# OmacVM.app's USB devices (off by default, docs/usb.md): which ones this
+# start passed, and a chosen one macOS kept (QEMU leaves it alone).
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
+  u=$(sed -n 's/^OmacVM: USB devices: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+  busy=$(sed -n 's/.*usb-host: \([0-9a-f]\{4\}:[0-9a-f]\{4\}\) .* is in use on the host: not taken.*/\1/p' \
+    "$d/logs/qemu.log" 2>/dev/null | sort -u | tr '\n' ' ')
+  if [[ -n $u && $u != off ]]; then
+    if [[ -n $busy ]]; then warn "USB devices (app)" "$u; macOS uses ${busy% }: not passed (docs/usb.md)"
+    else ok "USB devices (app)" "$u"; fi
+  fi
+fi
 FEATURE=""
 if [[ $TYPE == app ]]; then
   # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
