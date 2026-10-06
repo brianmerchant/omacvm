@@ -28,6 +28,11 @@ itself. Details below.
   screenshots again on a Mac whose speakers have a volume (a MacBook): the
   Bridge set the Mac's volume and Omarchy never got the key. On a Mac mini
   with an audio interface it already worked.
+- The control centre updates the VM's own system too: `o` on the Updates
+  screen (or `omacvm update-system`) runs Omarchy's full update in its own
+  window, then checks that the graphics still start and says whether a
+  restart is safe. It shows how many package updates wait. Never a
+  `pacman -Sy` on its own: that partial update gave the black screen.
 - OmacVM.app tells you when macOS does not let it read the keyboard (the
   VM's ⌘ Tab, ⌘ Space and screenshot keys then went to macOS without a word):
   a note with an Allow… button in the VM's window, a line in the VM's log,

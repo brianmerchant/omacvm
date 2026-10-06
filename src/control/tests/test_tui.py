@@ -861,3 +861,43 @@ def test_gpu_memory_on_an_older_mac(tmp_path, monkeypatch):
     finally:
         mac.stop()
         checks.stop()
+
+
+def test_updates_screen_updates_omarchy_too(world, tmp_path, monkeypatch):
+    """o: Omarchy's own update in its own window, apart from OmacVM's; the
+    count of waiting packages comes from checkupdates."""
+    b, calls = tmp_path / "bin", tmp_path / "calls"
+    b.mkdir()
+    for name, body in (("checkupdates", 'printf "mesa 1 -> 2\\nllvm-libs 22 -> 23\\n"'),
+                       ("omarchy-launch-tui", f'echo "$*" >> {calls}')):
+        (b / name).write_text(f"#!/bin/sh\n{body}\n")
+        (b / name).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{b}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
+    monkeypatch.setenv("HYPRLAND_INSTANCE_SIGNATURE", "sig")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 40)) as pilot:
+            await pilot.press("U")
+            from omacvm_cc.tui import ConfirmScreen, UpdatesScreen
+            assert await settle(pilot, lambda: a.omarchy_waiting == 2)
+            body = str(a.screen.query_one("#body").render())
+            assert isinstance(a.screen, UpdatesScreen)
+            assert "Omarchy: 2 updates waiting" in body and "not OmacVM" in body
+            await pilot.press("o")
+            await pilot.pause(0.2)
+            assert isinstance(a.screen, ConfirmScreen)
+            await pilot.press("n")
+            await pilot.pause(0.2)
+            assert not calls.exists()
+            await pilot.press("o")
+            await pilot.pause(0.2)
+            await pilot.press("y")
+            end = time.monotonic() + 3
+            while time.monotonic() < end and not calls.exists():
+                await pilot.pause(0.05)
+            assert calls.read_text().strip() == "omacvm --window update-system --yes"
+            # Nothing went to the Mac: this is not the OmacVM update.
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+    asyncio.run(go())
