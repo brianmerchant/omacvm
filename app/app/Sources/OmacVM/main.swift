@@ -259,6 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !self.quitting, Updater.shared.vmEndedForRestart() { return }
             if self.quitting {
                 self.quitting = false
+                // Quit during an update with a VM restart: no VM starts by itself later.
+                Updater.shared.cancelRestart("quitting")
                 // An update asked for while the VM ran goes in now, quietly:
                 // the user is quitting.
                 if Updater.shared.installWhenIdle { Updater.shared.install(quit: false, quiet: true) }
