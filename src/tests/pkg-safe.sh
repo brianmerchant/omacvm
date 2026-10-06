@@ -37,6 +37,10 @@ case $1 in
         exit 0
       fi
       echo "pacman -S $*" >> "$T/calls"
+      if [[ -e $T/mirrors-gone ]]; then
+        for p in "$@"; do [[ $p == -* ]] || echo "error: failed retrieving file '$p-1-aarch64.pkg.tar.xz' from mirror.archlinuxarm.org : The requested URL returned error: 404" >&2; done
+        echo "error: failed to commit transaction (failed to retrieve some files)" >&2; exit 1
+      fi
       for p in "$@"; do [[ $p == -* ]] && continue; s=$(ver "$p" "$sync")
         grep -v "^$p " "$db" > "$db.n"; echo "$p $s" >> "$db.n"; mv "$db.n" "$db"; done ;;
   -Sl) while read -r n v _; do i=$(ver "$n" "$db"); echo "extra $n $v${i:+ [installed${i/#/: }]}" |
@@ -110,6 +114,14 @@ vm; printf '%s\n' "llvm-libs 23.1.1-1" >> "$T/db"; grep -v '^llvm-libs 22' "$T/d
 out=$("$P" lldb 2>&1); rc=$?
 [[ $rc == 0 && $(cat "$T/calls") == "pacman -S --noconfirm lldb" ]] && pass "the same once LLVM is up to date: installed" ||
   fail "lldb with LLVM 23: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+# A package list older than the mirrors (a fresh prebuilt VM a day later): the
+# downloads are 404s; it says to update the system, not just "pacman failed".
+vm; : > "$T/mirrors-gone"
+out=$("$P" jq 2>&1); rc=$?; rm -f "$T/mirrors-gone"
+[[ $rc == 1 && $out == *"older than the mirrors"*"omarchy update"* && $(grep -c "error: 404" "$T/pacman.log") -ge 1 ]] &&
+  pass "mirrors no longer have the listed versions: says to update the system, log kept" ||
+  fail "stale package list: rc $rc, said '$out'"
 
 vm
 out=$("$P" no-such-package 2>&1); rc=$?
