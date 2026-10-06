@@ -745,11 +745,21 @@ QEMU's environment sets another, 0 turns it off; for tests).
 (the VM's graphics driver cannot hand back an "out of memory" for it). A
 browser starts its GPU process again. Hyprland cannot: the VM's Mesa does
 not report a lost context, and Hyprland 0.56, when told, stops ("Cannot
-continue until proper GPU reset handling is implemented"). The app then
-shows "The VM's desktop stopped drawing" with a button that restarts the
-desktop session (SDDM logs you in again; apps open in the VM close),
-instead of leaving a black window. `logs/qemu.log` says which app lost its
-context and why.
+continue until proper GPU reset handling is implemented"). So the app tells
+the VM through its guest agent, and the VM's `omacvm-desktop-recover`
+restarts the desktop session by itself, within about 2 seconds of the loss:
+SDDM logs you in again (or shows its login screen when autologin is off).
+**Apps open in the VM close, and what was not saved in them is lost.** The
+new session shows a notification that says so and names the apps that
+closed. At most once in 10 minutes: when the desktop is lost again that
+soon (macOS still short of memory), the app shows "The VM's desktop
+stopped drawing" with a button that restarts it, as it always did with
+the automatic restart off (`defaults write org.omacvm.app
+desktopAutoRestart -bool false`). When only the shell (Omarchy's bar and
+launcher, Quickshell) is lost, only the shell starts again, and no app
+closes. `logs/qemu.log` says which app lost its context and why, and each
+restart the app made; `journalctl -t omacvm-desktop-recover` in the VM
+says what was closed (ADR 0037).
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses
