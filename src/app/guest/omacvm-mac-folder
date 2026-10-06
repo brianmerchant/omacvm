@@ -2,12 +2,14 @@
 # OmacVM.app: the Mac folder at ~/Mac. The app shares one folder of the Mac
 # over virtio-9p (tag omacvm-mac) when the user chose one; without it this
 # does nothing, and an empty ~/Mac from before goes.
-# Mount options (measured, tracks/shared-folders.md):
-#   msize   largest 9p message the virtio transport takes: big files 3-4x faster
-#   cache   OPTS_CACHE below
+# Mount options (measured on a Mac mini M4, docs/routes/app.md "Mac folder"):
+# cache=mmap moves big files 15-30x faster than no cache (the kernel writes
+# and reads ahead in parallel) and still sees every change made on the Mac at
+# once; cache=loose would make small files and git faster but shows old
+# content after the Mac changes a file. msize=512000 is the most this
+# kernel's virtio transport takes.
 set -uo pipefail
 TAG=omacvm-mac
-OPTS_CACHE=mmap
 user=$(getent passwd 1000 | cut -d: -f1)
 home=$(getent passwd 1000 | cut -d: -f6)
 [[ -n $user && -d $home ]] || { echo "omacvm-mac-folder: no desktop user (uid 1000)"; exit 0; }
@@ -37,4 +39,4 @@ mountpoint -q "$M" && exit 0
 install -d -o "$user" -g "$user" -m755 "$M"
 # access=client: the VM checks permissions itself, on the owners QEMU shows
 # (the Mac user's files as the desktop user's).
-exec mount -t 9p -o "trans=virtio,version=9p2000.L,access=client,msize=524288,cache=$OPTS_CACHE" "$TAG" "$M"
+exec mount -t 9p -o "trans=virtio,version=9p2000.L,access=client,msize=512000,cache=mmap" "$TAG" "$M"
