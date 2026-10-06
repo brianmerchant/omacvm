@@ -20,6 +20,8 @@ ROOT=${OMACVM_X86_ROOT:-}
 BINFMT=$ROOT/proc/sys/fs/binfmt_misc
 LOG=$ROOT/var/log/omacvm-x86-apps.log
 PACKAGER="OmacVM <omacvm@users.noreply.github.com>"
+# Packages only through guest/pkg-add: never an update of one the VM has.
+PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../guest/pkg-add}
 
 # A 160-byte static x86_64 program: write(1, "x86_64\n"), exit(0).
 HELLO=f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOAABAAAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAoAAAAAAAAACgAAAAAAAAAAAQAAAAAAAAuAEAAAC/AQAAAEiNNRAAAAC6BwAAAA8FuDwAAAAx/w8FeDg2XzY0Cg==
@@ -105,7 +107,7 @@ fail() { echo "x86 apps: $1 (details in $LOG)" >&2; exit 1; }
 : > "$LOG"
 if [[ -n $missing ]]; then
   # shellcheck disable=SC2086 # one package per word
-  pacman -S --needed --noconfirm --asdeps $missing >>"$LOG" 2>&1 || fail "pacman could not install the build tools; update Omarchy first (omarchy-update), then omacvm apply"
+  "$PKG_ADD" --asdeps $missing || fail "the build tools are not installed"
 fi
 install -m644 PKGBUILD "$B/"
 chown -R nobody: "$B"
@@ -117,7 +119,9 @@ for f in "$B/$PKG-$VER"-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=$f; done
 [[ -n $pkg ]] || fail "the build made no package"
 # OmacVM's box64 under the old name first (the two conflict); fuse2 stays.
 if old; then pacman -Rdd --noconfirm box64 >>"$LOG" 2>&1 || fail "pacman could not remove the old box64 package"; fi
-# pacman -U brings fuse2 from the distro if the VM lacks it.
+# Its libraries (fuse2) through pkg-add too, so pacman -U installs nothing else.
+# shellcheck disable=SC2046 # one package per word
+"$PKG_ADD" --asdeps $(bash -c 'source ./PKGBUILD; echo "${depends[@]}"') || fail "box64's libraries are not installed"
 pacman -U --noconfirm --needed "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
 registered || binfmt_reload on
 s=$(status)

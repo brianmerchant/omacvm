@@ -62,6 +62,12 @@ cat > "$T/bin/makepkg" <<'EOF'
 : > "$PKGDEST/omacvm-box64-$V-aarch64.pkg.tar.zst"
 EOF
 printf '#!/bin/bash\nexit 0\n' > "$T/bin/chown"
+# guest/pkg-add: installs what is missing (its own test: src/tests/pkg-safe.sh).
+cat > "$T/bin/pkg-add" <<'EOF'
+#!/bin/bash
+echo "pkg-add $*" >> "$CALLS"
+[[ $PKGADD == ok ]]
+EOF
 # The test program, as the binfmt rule would run it: say x86_64 if it is ours.
 cat > "$T/bin/timeout" <<'EOF'
 #!/bin/bash
@@ -71,7 +77,7 @@ chmod +x "$T/bin/"*
 
 # INSTALLED/PACKAGER: omacvm-box64; BOX64/BOX64_PACKAGER: a package named box64
 # (by hand, or OmacVM's from before the rename)
-run() {   # ARGS... ; env: INSTALLED PACKAGER BOX64 BOX64_PACKAGER REGISTERED MISSING MAKEPKG BINFMT_RESTART X86_RUNS
+run() {   # ARGS... ; env: INSTALLED PACKAGER BOX64 BOX64_PACKAGER REGISTERED MISSING MAKEPKG PKGADD BINFMT_RESTART X86_RUNS
   rm -rf "$T/root" "$S"; mkdir -p "$T/root/proc/sys/fs/binfmt_misc" "$T/root/var/log" "$T/root/tmp" "$S"
   [[ -n ${INSTALLED:-} ]] && echo "$INSTALLED" > "$S/omacvm-box64.ver"
   echo "${PACKAGER:-OmacVM <omacvm@users.noreply.github.com>}" > "$S/omacvm-box64.packager"
@@ -80,7 +86,7 @@ run() {   # ARGS... ; env: INSTALLED PACKAGER BOX64 BOX64_PACKAGER REGISTERED MI
   [[ ${REGISTERED:-no} == yes ]] && echo enabled > "$T/root/proc/sys/fs/binfmt_misc/box64"
   : > "$T/calls"
   OUT=$(V=$V CALLS=$T/calls S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
-    MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} BINFMT_RESTART=${BINFMT_RESTART:-works} X86_RUNS=${X86_RUNS:-yes} \
+    MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} PKGADD=${PKGADD:-ok} OMACVM_PKG_ADD=$T/bin/pkg-add BINFMT_RESTART=${BINFMT_RESTART:-works} X86_RUNS=${X86_RUNS:-yes} \
     PATH="$T/bin:$PATH" bash "$R/src/x86/guest/install.sh" "$@" 2>&1); CODE=$?
 }
 called() { grep -qF -- "$1" "$T/calls" && echo yes || echo no; }
@@ -123,7 +129,9 @@ expect "on, rule lost: registered again, no build" "0 yes no" "$CODE $(registere
 MISSING="cmake python" run on
 expect "on, fresh VM: built and installed" 0 "$CODE"; [[ $CODE == 0 ]] || echo "$OUT"
 expect "on, fresh VM: built as nobody" yes "$(called "runuser -u nobody")"
-expect "on, fresh VM: build tools as dependencies" yes "$(called "pacman -S --needed --noconfirm --asdeps cmake python")"
+expect "on, fresh VM: build tools as dependencies, through pkg-add" yes "$(called "pkg-add --asdeps cmake python")"
+expect "on, fresh VM: fuse2 through pkg-add, before pacman -U" "pkg-add --asdeps glibc gcc-libs fuse2" \
+  "$(grep -B1 '^pacman -U' "$T/calls" | head -1)"
 expect "on, fresh VM: build tools removed after" yes "$(called "pacman -Rns --noconfirm cmake python")"
 expect "on, fresh VM: binfmt rule registered" yes "$(registered)"
 expect "on, fresh VM: last line" "x86 apps: box64 $V runs x86_64 programs and AppImages" "$(tail -1 <<<"$OUT")"
@@ -142,6 +150,9 @@ expect "on, build fails: status 1" 1 "$CODE"
 expect "on, build fails: tools removed all the same" yes "$(called "pacman -Rns --noconfirm cmake")"
 expect "on, build fails: nothing installed" no "$(called "pacman -U")"
 expect "on, build fails: says where the log is" yes "$(grep -q "the build failed (details in $T/root/var/log/omacvm-x86-apps.log)" <<<"$OUT" && echo yes || echo no)"
+
+MISSING="cmake" PKGADD=fail run on
+expect "on, pkg-add cannot install the build tools: fails, no build" "1 no" "$CODE $(called "runuser")"
 
 BINFMT_RESTART=broken run on
 expect "on, binfmt never registers: fails" 1 "$CODE"
