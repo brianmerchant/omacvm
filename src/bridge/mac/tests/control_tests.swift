@@ -33,6 +33,9 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            == .startJob(JobRequest(action: .reinstall, features: ["bridge"])), "reinstall")
     expect(ok(route("POST", "/omacvm/jobs", #"{"action": "update"}"#)) == .startJob(JobRequest(action: .update, features: [])), "update")
     expect(ok(route("GET", "/omacvm/jobs/0123456789abcdef")) == .job("0123456789abcdef"), "job")
+    // The Touch ID panel's colours: the body goes to touchid_theme.swift's rules (tests/touchid_panel_tests.swift).
+    expect(ok(route("POST", "/omacvm/theme", ##"{"background": "#1a1b26"}"##)) == .theme(Data(##"{"background": "#1a1b26"}"##.utf8)), "theme")
+    expect(err(route("GET", "/omacvm/theme"))?.status == 405, "theme: POST only")
     for g in ["opengl", "vulkan", "auto"] {
       expect(ok(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "\#(g)"}"#))
              == .startJob(JobRequest(action: .graphics, features: [g])), "graphics \(g)")
