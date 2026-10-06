@@ -58,7 +58,49 @@ after omacvm-cocoa-boot-splash.patch (last of the cocoa patches).
   */
  @interface QemuWindow : NSWindow
  @end
-@@ -2612,11 +2601,12 @@ - (void) windowDidBecomeKey: (NSNotification *)aNotification
+@@ -2277,7 +2266,11 @@ static void omacvm_full_screen_take(void)
+ }
+ static NSWindowStyleMask notchSavedMask;
+ 
+-/* Enters notch full screen on the window's display, or leaves it. */
++/*
++ * OmacVM tests only (OMACVM_TEST_SKIP_DISPLAYS): the borderless full screen,
++ * over the window's display, or back. No Space, no focus, no menu bar or Dock
++ * change. Real full screen is macOS's own (doToggleFullScreen:).
++ */
+ static void omacvm_toggle_notch_full_screen(void)
+ {
+     NSWindow *w = [cocoaView window];
+@@ -2287,16 +2280,8 @@ static void omacvm_toggle_notch_full_screen(void)
+         notchSavedFrame = [w frame];
+         notchSavedMask = [w styleMask];
+         [w setStyleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable];
+-        if (omacvm_test_mode()) {
+-            /* OmacVM test: no menu bar or Dock change, no focus. */
+-            [w setFrame:[target frame] display:YES];
+-            [w orderFront:nil];
+-        } else {
+-            [NSApp setPresentationOptions:NSApplicationPresentationHideDock |
+-                                          NSApplicationPresentationHideMenuBar];
+-            [w setFrame:[target frame] display:YES];
+-            [w makeKeyAndOrderFront:nil];
+-        }
++        [w setFrame:[target frame] display:YES];
++        [w orderFront:nil];
+         [fullScreenMenuItem setTitle:@"Exit Full Screen"];
+         [cocoaView updateScale];
+         [cocoaView updateUIInfo];
+@@ -2304,9 +2289,6 @@ static void omacvm_toggle_notch_full_screen(void)
+         omacvm_displays_update();
+     } else {
+         notchFull = NO;
+-        if (!omacvm_test_mode()) {
+-            [NSApp setPresentationOptions:NSApplicationPresentationDefault];
+-        }
+         [w setStyleMask:notchSavedMask];
+         [w setFrame:notchSavedFrame display:YES];
+         [fullScreenMenuItem setTitle:@"Enter Full Screen"];
+@@ -2612,11 +2594,13 @@ - (void) windowDidBecomeKey: (NSNotification *)aNotification
  - (void) doToggleFullScreen:(id)sender
  {
      NSWindow *w = [cocoaView window];
@@ -69,8 +111,9 @@ after omacvm-cocoa-boot-splash.patch (last of the cocoa patches).
 -         [[w screen] safeAreaInsets].top > 0)) {
 +    /*
 +     * macOS's own full screen on every display, in a Space of its own, beside
-+     * a notch too (below the camera; Omanotch fills the strip). Never a window
-+     * over a Space other windows share. The borderless kind is for tests only.
++     * a notch too (below the camera). Never a window over a Space other
++     * windows share. The borderless kind is for tests only (notchFull is
++     * only ever set there).
 +     */
 +    if (notchFull || omacvm_test_mode()) {
          omacvm_toggle_notch_full_screen();

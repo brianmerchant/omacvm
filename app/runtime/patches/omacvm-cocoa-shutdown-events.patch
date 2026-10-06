@@ -15,6 +15,9 @@ mods bitmap; user report 2026-10-06, "the app quit unexpectedly" on
 shutdown). The same window let a paste wait on a destroyed QemuEvent and
 let AppKit call a released pasteboard owner. The same code is upstream.
 
+handleEventLocked: also returns at once once the display is closed (kbd
+freed), whatever path calls it.
+
 Upstream: candidate (same race in upstream ui/cocoa.m). Test:
 Tests/display/test-shutdown-events.sh (build time, on the patched
 ui/cocoa.m; --self-test catches the old code). Applies after
@@ -22,7 +25,7 @@ omacvm-cocoa-head-key-same-space.patch.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -141,6 +141,13 @@
+@@ -141,6 +141,13 @@ static void cocoa_switch(DisplayChangeListener *dcl,
  static NSTextField *pauseLabel;
  
  static bool allow_events;
@@ -36,7 +39,7 @@ omacvm-cocoa-head-key-same-space.patch.
  
  static NSInteger cbchangecount = -1;
  static QemuClipboardInfo *cbinfo;
-@@ -304,7 +311,9 @@
+@@ -304,7 +311,9 @@ static void with_bql(CodeBlock block)
      if (!locked) {
          bql_lock();
      }
@@ -47,7 +50,7 @@ omacvm-cocoa-head-key-same-space.patch.
      if (!locked) {
          bql_unlock();
      }
-@@ -318,7 +327,7 @@
+@@ -318,7 +327,7 @@ static bool bool_with_bql(BoolCodeBlock block)
      if (!locked) {
          bql_lock();
      }
@@ -56,7 +59,18 @@ omacvm-cocoa-head-key-same-space.patch.
      if (!locked) {
          bql_unlock();
      }
-@@ -7409,7 +7418,10 @@
+@@ -1577,6 +1586,10 @@ - (bool) handleEventLocked:(NSEvent *)event
+ {
+     /* Return true if we handled the event, false if it should be given to OSX */
+     COCOA_DEBUG("QemuCocoaView: handleEvent\n");
++    /* OmacVM: the display is closed (kbd freed): macOS keeps the event. */
++    if (cocoa_display_closed || !kbd) {
++        return false;
++    }
+     InputButton button;
+     unsigned int keycode;
+     NSUInteger modifiers = [event modifierFlags];
+@@ -7411,7 +7424,10 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
  
      qemu_console_register_listener(qemu_console_lookup_default(),
                                     &dcl, dcl.ops);
@@ -68,7 +82,7 @@ omacvm-cocoa-head-key-same-space.patch.
      qemu_add_mouse_mode_change_notifier(&mouse_mode_change_notifier);
      [cocoaView notifyMouseModeChange];
      [cocoaView updateUIInfo];
-@@ -7435,15 +7447,25 @@
+@@ -7437,15 +7453,25 @@ static void cocoa_display_cleanup(void)
          return;
      }
  

@@ -6,18 +6,22 @@
 #     test mode, else macOS's own toggleFullScreen:;
 #   - nothing reads OMACVM_NOTCH any more, and the guest is sized from the
 #     safe area (below the notch, where macOS puts a full-screen window);
-#   - an extra display's window hands the key back to the main window only
-#     while the main window's Space shows.
+#   - an extra display's window hands the key back to the main window at a
+#     click in it (mouseDown:), only while the main window's Space shows, and
+#     never when it merely becomes key (that depended on the order in which
+#     macOS changes the key window and the Space).
 #   test-fullscreen-space.sh <patched ui/cocoa.m>   (the runtime build)
 #   test-fullscreen-space.sh --self-test            (CI: the checks catch the old code)
 set -uo pipefail
 
 # Prints what is wrong with FILE, nothing if it is right.
 problems() {
-  local f=$1 toggle safe head
+  local f=$1 toggle safe head deleg down
   toggle=$(awk '/^- \(void\) ?doToggleFullScreen:\(id\)sender$/{on=1} on{print} on&&/^}$/{exit}' "$f")
   safe=$(awk '/^- \(NSSize\) ?screenSafeAreaSize$/{on=1} on{print} on&&/^}$/{exit}' "$f")
-  head=$(awk '/^@implementation OmacVMHeadDelegate/{on=1} on&&/windowDidBecomeKey:/{w=1} w{print} w&&/^}$/{exit}' "$f")
+  head=$(awk '/^- \(void\)handKeyBack$/{on=1} on{print} on&&/^}$/{exit}' "$f")
+  deleg=$(awk '/^@implementation OmacVMHeadDelegate/{on=1} on{print} on&&/^@end/{exit}' "$f")
+  down=$(awk '/^- \(void\)mouseDown:\(NSEvent \*\)e$/{on=1} on{print} on&&/^}$/{exit}' "$f")
   [[ -n $toggle ]] || echo "no doToggleFullScreen:"
   [[ -z $toggle ]] || {
     grep -q '\[w toggleFullScreen:sender\];' <<<"$toggle" || echo "the toggle does not use macOS's own full screen"
@@ -33,9 +37,12 @@ problems() {
   [[ -n $safe ]] || echo "no screenSafeAreaSize"
   [[ -z $safe ]] || ! grep -q 'return size;' <<<"$(sed '$d' <<<"$safe" | sed '$d')" ||
     echo "screenSafeAreaSize returns before taking off the safe area"
-  [[ -n $head ]] || echo "no windowDidBecomeKey: in OmacVMHeadDelegate"
+  [[ -n $head ]] || echo "no handKeyBack in OmacVMHeadView"
   [[ -z $head ]] || grep -q '\[main isOnActiveSpace\]' <<<"$head" ||
     echo "an extra display's window gives the key to a main window on a Space not shown (the escape combo bounces back)"
+  grep -q '\[self handKeyBack\];' <<<"$down" || echo "a click in an extra display's window does not hand the key back"
+  ! grep -q 'windowDidBecomeKey:' <<<"$deleg" ||
+    echo "an extra display's window hands the key back when it becomes key (timing-dependent: the escape combo can bounce back)"
 }
 
 if [[ ${1:-} == --self-test ]]; then
@@ -63,15 +70,24 @@ static void omacvm_toggle_notch_full_screen(void)
     }
     [w toggleFullScreen:sender];
 }
-@implementation OmacVMHeadDelegate
-- (void)windowDidBecomeKey:(NSNotification *)note
+@implementation OmacVMHeadView
+- (void)handKeyBack
 {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        NSWindow *main = [cocoaView window];
-        if ([main isVisible] && [main isOnActiveSpace] && [NSApp isActive] && ![main isKeyWindow]) {
-            [main makeKeyWindow];
-        }
-    });
+    NSWindow *main = [cocoaView window];
+    if ([main isVisible] && [main isOnActiveSpace] && [NSApp isActive] && ![main isKeyWindow]) {
+        [main makeKeyWindow];
+    }
+}
+- (void)mouseDown:(NSEvent *)e
+{
+    [self handKeyBack];
+    [self send:e button:INPUT_BUTTON_LEFT down:true];
+}
+@end
+@implementation OmacVMHeadDelegate
+- (BOOL)windowShouldClose:(id)sender
+{
+    return NO;
 }
 @end
 EOF
@@ -95,6 +111,13 @@ print(s, end="")' > "$T/notch.m"
   case_ "guest sized over the strip" fail "$T/size.m"
   good | sed 's/ \[main isOnActiveSpace\] \&\&//' > "$T/bounce.m"
   case_ "key handed to a main window on another Space" fail "$T/bounce.m"
+  good | sed 's/^    \[self handKeyBack\];$//' > "$T/noclick.m"
+  case_ "a click keeps the key in the extra window" fail "$T/noclick.m"
+  good | python3 -c '
+import sys; s = sys.stdin.read()
+s = s.replace("@implementation OmacVMHeadDelegate\n", "@implementation OmacVMHeadDelegate\n- (void)windowDidBecomeKey:(NSNotification *)note\n{\n    [[cocoaView window] makeKeyWindow];\n}\n")
+print(s, end="")' > "$T/becomekey.m"
+  case_ "key handed back when the extra window becomes key (3.0.0 candidate)" fail "$T/becomekey.m"
   good | sed 's/\[w toggleFullScreen:sender\];/omacvm_toggle_notch_full_screen();/' > "$T/never.m"
   case_ "no macOS full screen at all" fail "$T/never.m"
   exit $fail
