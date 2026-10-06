@@ -47,11 +47,10 @@ enum Graphics {
     /// Mesa of the vulkan feature). Automatic waits for it.
     static let readyFileName = "venus-ready"
 
-    /// Automatic gives Vulkan at all. 3.0.0: no, on every Mac. A Vulkan
-    /// window that bypasses the guest's software WSI still ends Hyprland's GPU
-    /// context (black desktop, CHANGELOG "Known issue"); until the host
-    /// refuses that import without ending the context, Vulkan is the user's
-    /// choice. true turns the macOS 26+ rule below on (src/lib/graphics.sh:
+    /// Automatic gives Vulkan at all. 3.0.1: no, on every Mac. Vulkan windows
+    /// show through the GPU (virgl-set-type-without-egl.patch), but what Vulkan
+    /// costs the OpenGL desktop on KosmicKrisp is not measured yet, so Vulkan
+    /// is the user's choice. true turns the macOS 26+ rule below on (src/lib/graphics.sh:
     /// GRAPHICS_AUTO_VULKAN, kept equal by src/tests/graphics-setting.sh).
     static let autoVulkan = false
     /// With autoVulkan: Vulkan from this macOS on, and only with KosmicKrisp

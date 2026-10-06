@@ -116,11 +116,19 @@ final class Runner {
         // xHCI controller. After everything else, so no other device moves.
         usb = USBChoice.load(folder: c.folder)
         a += USBChoice.arguments(usb)
+        // The Mac folder (off by default): last, so turning it on or off
+        // moves no other device (the VM finds it by its tag, wherever it is).
+        let share = MacFolder.plan(c)
+        macFolder = share.record
+        a += share.arguments
         return a
     }
 
     /// The USB devices this start passes to QEMU (USBChoice).
     private(set) var usb: [USBChoice.Entry] = []
+
+    /// What the last start did with the Mac folder (MacFolderPlan's record).
+    private(set) var macFolder = "off"
 
     /// The display for the VM's window: under the pointer, else the one with
     /// the active menu bar; nil with one display.
@@ -252,6 +260,7 @@ final class Runner {
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
         log.write(Data("OmacVM: Mac proxy: \(proxy.record(fastNetwork: network.vmnet))\n".utf8))
+        log.write(Data("OmacVM: Mac folder: \(macFolder)\n".utf8))
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
         log.write(Data("OmacVM: USB devices: \(USBChoice.record(usb))\n".utf8))
         if Settings.firmwareWait > 0 {

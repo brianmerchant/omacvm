@@ -94,12 +94,16 @@ VM runs, and goes back by itself when a new version does not start
   MoltenVK when KosmicKrisp cannot run on that Mac, logged).
   The VM needs a Venus driver that sizes GPU memory to the Mac's 16 KiB
   pages (Mesa 26.2.4 or newer; with Arch Linux ARM's 26.2.3 every Vulkan app
-  fails with `ERROR_OUT_OF_HOST_MEMORY`). While Arch Linux ARM has 26.2.3,
-  apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
-  package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
-  minutes the first time) when the setting gives the VM Vulkan (also
-  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's 26.2.4
-  replaces it on an update. Until the driver is there the VM starts with
+  fails with `ERROR_OUT_OF_HOST_MEMORY`). Apply builds Mesa 26.2.4's Venus
+  driver as Arch's own `vulkan-virtio` package, with OmacVM's patch for the
+  shared semaphores Chrome's WebGPU needs (version `26.2.4.omacvm1`,
+  [`src/app/guest/venus`](../../src/app/guest/venus), a few minutes the
+  first time) when the setting gives the VM Vulkan (also
+  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's own builds of
+  26.2.4 do not replace it; a newer Mesa from Arch does (Vulkan keeps
+  working, WebGPU in Chrome waits for OmacVM's next build of it; the check
+  says so). VMs from 3.0.0 rebuild it once, after the next start or with
+  `omacvm apply`. Until the driver is there the VM starts with
   OpenGL only, and the app, `omacvm graphics` and the control centre say
   "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the
   VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
@@ -113,8 +117,12 @@ VM runs, and goes back by itself when a new version does not start
   OpenGL turns the switch off again). That works on KosmicKrisp (macOS 26
   and newer). On MoltenVK Zink refuses the device (no `nullDescriptor`):
   there OpenCL needs the vulkan feature below. `omacvm check` has an
-  "OpenCL (rusticl on Zink)" row. WebGPU in Chrome needs the feature too
-  (its Venus driver has the semaphores Chrome's WebGPU asks for).
+  "OpenCL (rusticl on Zink)" row. WebGPU in Chromium comes with it too: a
+  "Chromium (WebGPU)" menu entry ([`venus/webgpu.sh`](../../src/app/guest/venus/webgpu.sh))
+  starts Chromium (`omacvm-chrome-webgpu`: Google Chrome) with its
+  compositor on Vulkan, which Chrome needs before it gives pages the Mac's
+  GPU for WebGPU; the normal Chromium entry stays as it is (that mode costs
+  WebGL about a fifth). `omacvm check` has a "WebGPU in Chromium" row.
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
@@ -577,6 +585,76 @@ What is missing before it can become the default: [below](#fast-network-not-done
   numbers).
 - SMAppService would give macOS's own approval (System Settings) instead of
   a password dialog; not done.
+
+## Mac folder (off by default)
+
+**Mac folder › Choose…** in the VM's settings shares one folder of the Mac
+with the VM. From the VM's next start it is at `~/Mac` in Omarchy. **Turn
+Off** stops it from the next start.
+
+- The VM can read and change everything in that folder, as your Mac user,
+  and nothing outside it. Share a project folder: the app refuses your home
+  folder and the folders above it (your keys and every app's data would be
+  in the VM).
+- Your files show as your Omarchy user's in the VM; files the VM makes are
+  yours on the Mac. `chown` in the VM fails (as root too): the Mac keeps the
+  owner.
+- How: QEMU's virtio-9p, run as your Mac user. No system service, no
+  password. The VM mounts it with `cache=mmap,msize=512000`
+  (`omacvm-mac-folder`).
+- A change on either side shows on the other at once (tested: rewrite,
+  grow, create, delete, rename on the Mac; write in the VM).
+- A folder that is not there at a start (a drive not connected), or that
+  OmacVM may not open (denied in System Settings > Privacy & Security >
+  Files and Folders, or no permission), is left out for that start, and the
+  VM starts as usual. `omacvm check` says what the start shared and why not.
+- A folder in Documents, Desktop, Downloads or iCloud Drive: macOS may ask
+  once whether OmacVM may open it (not tested yet).
+- The Mac's disk ignores case by default: two files whose names differ only
+  in case (some git repos, such as the Linux kernel) are one file there.
+- File locks are not passed to the Mac: do not use one SQLite database or
+  lock file from the Mac and the VM at the same time.
+- VMs from before 3.0.1 need the VM side once: `omacvm apply` (or the
+  control centre's update).
+- Git in one repo from both sides: each side's git re-reads every file once
+  after the other ran (the two record files differently; 57 s for 30,000
+  files the first time below). `git config core.checkStat minimal` in that
+  repo avoids most of it.
+
+Speed (Mac mini M4, macOS 27, a 4-CPU VM, one run each; small files: 12,000
+files of 0.5-16 KB; git: `git status` in a 30,000-file repo made on the Mac):
+
+| | 1 GiB write | 1 GiB read | unpack 12k files | read them | `git status` |
+|---|---|---|---|---|---|
+| VM's own disk | 1991 MB/s | 5224 MB/s | 0.7 s | 0.8 s | 0.02 s |
+| Mac folder (`cache=mmap`) | 1747 MB/s | 3135 MB/s | 18 s | 16 s | 8.1 s |
+| 9p without cache (QEMU's usual) | 123 MB/s | 114 MB/s | 19 s | 18 s | 8.1 s |
+| 9p `cache=loose` (not used) | 1670 MB/s | 3551 MB/s | 13 s | 7.5 s | 1.8 s |
+
+Big files are fast. Many small files are slow: every file operation is a
+round trip to QEMU (about 0.4 ms), and only `cache=loose` saves those, but
+it shows old content after the Mac changes a file. Build in the VM's own
+disk, keep sources on the Mac if you like.
+
+NFS instead of 9p (a user-space NFS server on the Mac, over QEMU's network,
+for comparison only): unpacking was 3x faster (5.6 s), the rest no better
+(big files 315/1227 MB/s, reading the small files 12 s, `stat` 5.6 s). It
+would need a server program, a port and its own access control, so the Mac
+folder stays on 9p. virtio-fs needs a Linux host daemon; QEMU on macOS has
+none.
+
+Tested on the Mac mini (M4, macOS 27; a throwaway copy of a test VM,
+`tests/share/rig.sh`): the VM's unit mounts `~/Mac` at boot and the desktop
+user can write there; without a share it does nothing (18 ms) and leaves no
+`~/Mac`. Not tested on macOS 15 or 26, nor on another Mac.
+
+### Mac folder: not done yet
+
+- One folder per VM, read and write; no read-only switch.
+- It changes only at the VM's next start.
+- Not measured: Parallels' and UTM's shared folders on the same Mac.
+- QEMU cannot save a VM's state while the folder is mounted (9p blocks it):
+  matters once instant resume comes.
 
 ## Every Mac display
 
