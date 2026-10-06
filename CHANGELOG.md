@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.1 (unreleased)
+
+- Fast network: a VPN whose interface is up before it gets its address (an
+  IKEv2 connection's `ipsec0`, a tunnel brought up first) now gets the VPN
+  NAT within a second. macOS announces such an address only as a new
+  route, and the service waited for the next other change. Tested with a
+  real WireGuard client (docs/routes/app.md).
+
 ## 3.0.0 (unreleased)
 
 In short: OmacVM.app updates itself, the control centre in Omarchy, a

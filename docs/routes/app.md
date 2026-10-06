@@ -525,8 +525,24 @@ What is missing before it can become the default: [below](#fast-network-not-done
     tunnel too (no VM, no service), and not without it: Parallels' (or
     macOS's) doing with a tunnel present, not the NAT. Quit and reopen
     Parallels Desktop, or `sudo killall prl_naptd`, brings them back.
-- Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
-  VM runs (the test tunnel is a `utun` as theirs), real trackpad gestures over the fast network
+- A real WireGuard client on the Mac mini (macOS 27, 2026-10-06):
+  `wireguard-go` on a `utun`, set up as a VPN app does (addresses, MTU
+  1420, split routes), and a WireGuard server in userspace that takes only
+  the tunnel's own address as source, as a real one does. A stand-in VM on
+  the fast network (the daemon's socket, ARP and pings): the NAT is on
+  about a second after the tunnel; the VM's pings reach the server as
+  `10.99.0.1`. With the service's anchor emptied by hand the server drops
+  them ("packet with disallowed source address"): what VMs got before the
+  VPN NAT. Down and up again, the VM leaving: as with the test tunnel.
+  An IKEv2-style `ipsec0` (macOS's own kernel interface for IKEv2, here
+  without a security association) got no NAT at first: macOS announces an
+  IPv4 address added to an interface that is already up only as a new
+  route, which the service did not count. Fixed: it follows route changes
+  too (not ARP entries or per-destination routes); `ipsec0` now gets its
+  rule within a second, and pf translates to its address.
+- Not tested yet: a VPN app's own tunnel (WireGuard app, an IKEv2 profile in
+  System Settings; the tests above use the same kernel interfaces without
+  touching the Mac's VPN settings), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
