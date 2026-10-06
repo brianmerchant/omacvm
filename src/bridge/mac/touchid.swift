@@ -66,7 +66,8 @@ final class LATouchID: TouchIDAuthenticator {
 /// relay connection; the app's one-line answer comes back on it. The app is
 /// this Mac user's own program behind the relay key, as trusted as the VM's
 /// Touch ID key on this Mac. Nil: the panel could not show (macOS's dialog).
-func touchIDAskAppPanel(fd: Int32, _ p: TouchIDPrompt, timeout: Double, gone: () -> Bool) -> TouchIDOutcome? {
+/// The app's connection closing (the VM's client went away) ends the wait.
+func touchIDAskAppPanel(fd: Int32, _ p: TouchIDPrompt, timeout: Double) -> TouchIDOutcome? {
   let text = touchIDPanelText(p.request, vm: p.vmLabel)
   let theme = p.theme.flatMap { touchIDThemes.load($0) } ?? .tokyoNight
   var o: [String: Any] = ["title": text.title, "line": text.line, "timeout": Int(timeout), "theme": theme.panelColors]
@@ -89,7 +90,6 @@ func touchIDAskAppPanel(fd: Int32, _ p: TouchIDPrompt, timeout: Double, gone: ()
     log("touchid: OmacVM.app's panel: \(logSafe(answer))")
     return touchIDAppPanelOutcome(answer)
   }
-  _ = gone()
   return .no(.timeout)
 }
 
@@ -172,7 +172,7 @@ func touchIDRequest(fd: Int32, peer: String, method: String, path: String, heade
   let label = control.setUpVMCount() > 1 ? vm.name : nil
   // OmacVM.app says it can show the panel (only through its relay: c.vm came from there).
   let panel: TouchIDAppPanel? = headers["x-omacvm-panel"] == "1" && vm.type == "app"
-    ? { p, timeout, gone in touchIDAskAppPanel(fd: fd, p, timeout: timeout, gone: gone) } : nil
+    ? { p, timeout, _ in touchIDAskAppPanel(fd: fd, p, timeout: timeout) } : nil
   let o = touchID.decide(vm: VMListCache.key(vm), type: vm.type, on: true, request: r, vmLabel: label,
                          passwordFallback: touchIDPasswordFallback(), theme: vmKeyName(type: vm.type, name: vm.name),
                          appPanel: panel, gone: { peerGone(fd) })

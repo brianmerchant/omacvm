@@ -343,6 +343,7 @@ final class PanelController: NSObject {
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var previousKey: NSWindow?
+    private var generation = 0   // which panel a delayed close belongs to
 
     var busy: Bool { window != nil }
 
@@ -355,7 +356,12 @@ final class PanelController: NSObject {
     }
 
     func show(_ prompt: TouchIDPanelPrompt, reply: @escaping (TouchIDPanelResult) -> Void) {
-        guard !busy else { return reply(.no("cancelled")) }   // the app sends one at a time
+        if busy {
+            // The last one is only playing its end: it goes now. Else the app
+            // sends one at a time, so this cannot be one of its own.
+            guard once.result != nil else { return reply(.no("cancelled")) }
+            close()
+        }
         guard NSApp.isActive else { return reply(.no("not-front")) }
         guard let vm = vmWindow(), let screen = vm.screen ?? NSScreen.main else { return reply(.error) }
         let c = LAContext()
@@ -367,6 +373,7 @@ final class PanelController: NSObject {
         c.touchIDAuthenticationAllowableReuseDuration = 0
         c.localizedFallbackTitle = ""
         once = PanelOnce()
+        generation += 1
         self.reply = reply
         context = c
         let theme = PanelTheme(prompt.colors)
@@ -439,13 +446,19 @@ final class PanelController: NSObject {
         reply?(r)
         reply = nil
         guard let look, let v = view else { return close() }
+        let g = generation
+        let closeLater = { (after: TimeInterval) in
+            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+                if let self, self.generation == g { self.close() }
+            }
+        }
         if look == .done {
             v.show(.reading)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { v.show(.done) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in self?.close() }
+            closeLater(1.6)
         } else {
             v.show(look, lockout: lockout)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.close() }
+            closeLater(1.0)
         }
     }
 
