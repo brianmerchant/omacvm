@@ -162,6 +162,30 @@ def fixed_note(on: bool) -> str:
     return f"OmacVM's record said {'off' if on else 'on'}: fixed"
 
 
+def feature_about(f: Feature, macos: str = "") -> str:
+    """More than the summary, for the details screen ("" nothing more).
+    macos: the Mac's macOS version as the Bridge says it ("" not known)."""
+    if f.name != "vulkan":
+        return ""
+    major = version_tuple(macos)
+    kk = ("macOS 26 or newer: Vulkan goes through KosmicKrisp, Mesa's Vulkan on Metal 4, "
+          "the fuller driver (more Vulkan features, faster).")
+    mvk = ("macOS 15: Vulkan goes through MoltenVK (KosmicKrisp needs macOS 26). WebGPU and OpenCL work, "
+           "with fewer Vulkan features, so some WebGPU pages and compute jobs may not run; "
+           "after an update to macOS 26 the VM gets KosmicKrisp by itself.")
+    if major is None:
+        mac = "On this Mac: " + kk + "\nOn " + mvk
+    elif major[0] >= 26:
+        mac = f"On this Mac (macOS {macos}): " + kk[len("macOS 26 or newer: "):]
+    else:
+        mac = f"On this Mac (macOS {macos}): " + mvk[len("macOS 15: "):]
+    return ("Needs an OmacVM.app VM; works with every Graphics setting.\n" + mac + "\n"
+            "Switching on: the VM builds OmacVM's Mesa (about 3 minutes, a 140 MB download), then "
+            "WebGPU and GPU compute from the VM's next start (shut it down and start it again).\n"
+            "Switching off: OpenGL only again from the next start; OmacVM's Mesa is removed. "
+            "You can switch it on again at any time (the build again, about 3 minutes).")
+
+
 def parse_check_tsv(text: str, side: str = "vm") -> list[Check]:
     """guest/check.sh --tsv: status name detail human feature (section lines skipped)."""
     out = []

@@ -290,6 +290,9 @@ class DetailsScreen(Screen):
         box.border_subtitle = look.WORD[r.status] if r.status in (S.Status.OFF, S.Status.UNAVAILABLE) else f"on · {look.WORD[r.status]}"
         t = Text()
         t.append(f.summary + "\n\n")
+        about = S.feature_about(f, app.c.hello.macos if app.c.hello else "")
+        if about:
+            t.append(about + "\n\n")
 
         def field(k: str, v: str) -> None:
             t.append(f"{k:<9}", style="bright_black")

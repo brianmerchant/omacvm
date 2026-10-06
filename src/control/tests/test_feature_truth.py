@@ -1,6 +1,6 @@
 """Feature state truth: the real state of what can be switched outside OmacVM
 (autologin by SDDM, the fast network by the app), the Mac's "fixed the record"
-note and the words for tags (never a bare "slow")."""
+note, the words for tags (never a bare "slow"), and the WebGPU details."""
 import os
 import sys
 
@@ -136,3 +136,20 @@ def test_slow_is_never_bare(features):
 def test_slow_words_match_the_cli():
     lib = open(os.path.join(os.path.dirname(__file__), "..", "..", "lib", "features.sh"), encoding="utf-8").read()
     assert S.TAG_HINTS["slow"] in lib
+
+
+# ---- WebGPU and GPU compute ----
+
+def test_webgpu_details_by_macos(features):
+    f = by(features, "vulkan")
+    new, old, unknown = S.feature_about(f, "26.1"), S.feature_about(f, "15.6.1"), S.feature_about(f, "")
+    assert "KosmicKrisp" in new and "MoltenVK" not in new and "macOS 26.1" in new
+    assert "MoltenVK" in old and "macOS 15.6.1" in old and "needs macOS 26" in old
+    assert "KosmicKrisp" in unknown and "MoltenVK" in unknown
+    for t in (new, old, unknown):
+        assert "about 3 minutes" in t and "next start" in t and "switch it on again" in t
+        assert "OmacVM.app" in t
+
+
+def test_other_features_have_no_extra_details(features):
+    assert S.feature_about(by(features, "bridge"), "26.0") == ""
