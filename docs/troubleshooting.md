@@ -553,10 +553,13 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   canary thread is apparently starving"). Seen when QEMU itself was
   stopped (`kill -STOP` for 15 s, as test locks do; once in a test VM's
   history); the app's own pause keeps the VM's clock and does not do it. PipeWire then runs at normal priority, and the
-  sound breaks whenever the VM is busy. Measured on a Mac mini M4, VM with
-  8 CPUs, its CPUs and GPU busy and 2 busy threads on the Mac, 5 minutes:
-  real-time PipeWire 0 sink / 3 app xruns, 2 breaks in the tone (at the
-  start); demoted 22 / 68 xruns, 81 breaks. From 3.0.1 `omacvm apply` runs
+  sound can break when the VM is busy. Measured on a Mac mini M4, VM with
+  8 CPUs, its CPUs and GPU busy and 2 busy threads on the Mac, 5 minutes
+  each, breaks in a test tone: real-time PipeWire 2, 6, 2, 0 (guest xruns
+  0-4); demoted 81 (22 / 68 xruns, the mini also busy with two builds) and
+  0 (mini less busy). In the VM, systemd's slices already give PipeWire its
+  share of the CPUs; real-time matters when the VM's CPUs get less time
+  from a busy Mac. From 3.0.1 `omacvm apply` runs
   RTKit without the watchdog (`src/guest/sound/rtkit-no-canary.conf`;
   RTKit's other limits stay), and `omacvm check` shows "sound priority".
   By hand: `systemctl --user restart pipewire pipewire-pulse wireplumber`

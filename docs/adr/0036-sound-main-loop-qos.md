@@ -76,8 +76,12 @@ start in 5 minutes). They fall to normal priority only when RTKit's
 watchdog demotes them: it takes a stretch of more than 10 s in which the
 VM's threads did not run but its clock went on (QEMU stopped from
 outside) for a runaway thread, demotes every real-time thread for the rest
-of the session and refuses new ones for 5 minutes. Then: 22 / 68 xruns,
-81 breaks.
+of the session and refuses new ones for 5 minutes (`kill -STOP` of QEMU
+for 15 s does it every time; a QMP stop does not). Breaks in 5 minutes:
+real-time 2, 6, 2, 0; demoted 81 (the mini busy with two builds as well)
+and 0. The VM's slices already give PipeWire its share of the CPUs, so
+real-time matters when the Mac is busy too. With the drop-in, PipeWire
+stayed real-time after a 15 s stop, a reboot and an RTKit restart.
 
 Options: (1) RTKit without the watchdog (`--no-canary`); (2) Arch's
 `realtime-privileges` and the realtime group, so PipeWire sets real-time
