@@ -377,6 +377,23 @@ own 12 and the 16 unknown places) leaves the other VMs and the relay all
 theirs. Long requests (`POST /wallpaper` with its 120 s body,
 `GET /wifi/password` waiting on the dialog) at most two at once per VM (429).
 
+### Touch ID (`/omacvm/touchid`, feature `touch-id`)
+
+The VM's sudo and polkit ask the Mac's Touch ID first (ADR 0041; off by
+default, `omacvm enable touch-id`). The VM's PAM client
+(`guest/omacvm-touchid`, root) posts `{"kind", "user", "detail", "action"}`
+signed with the VM's Touch ID key (`vm-keys/<vm>.touchid` on the Mac,
+`/etc/omacvm/touchid-key` in the VM) under the label
+`omacvm-touchid-request 1`; the answer, signed back
+(`omacvm-touchid-answer 1`), is `{"result": "yes"}` or `{"result": "no",
+"reason": ...}`. No key on the Mac: 403 `off`, no dialog. The Bridge asks
+macOS with a fresh `LAContext` each time, biometrics only;
+`"touch_id_password_fallback": true` in `config.json` also offers the Mac's
+password. It says no without a dialog when the Mac is locked, the VM's app
+is not in front or the Mac has no Touch ID; one dialog at a time, per VM
+one request every 2 s and 10 a minute, 60 s of no after 3 misses. The log
+has the VM, the kind and the result, never the command.
+
 ### Not built: Wi-Fi control
 
 `POST /power`, `/join`, `/disconnect` answer `501`. Design: CoreWLAN

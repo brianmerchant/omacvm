@@ -87,28 +87,29 @@ def note(user, action):
     return 0
 
 
-def local_session(user):
-    """Only someone at the VM's own screen asks: never over SSH."""
+def local_session(user, service):
+    """Only someone at the VM's own screen asks, never over SSH. logind
+    says it (sudo sets PAM_RHOST to this host's own name, so not that)."""
     if TEST:
         return E.get("OMACVM_TOUCHID_LOCAL") == "yes"
-    if os.environ.get("PAM_RHOST"):
-        return False
-
-    def show(*a):
-        try:
-            r = subprocess.run(["/usr/bin/loginctl", *a], capture_output=True, text=True, timeout=2)
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        return r.stdout.strip() if r.returncode == 0 else ""
-
     sid = ""
     try:
         sid = read(f"{PROC}/{os.getppid()}/sessionid").decode().strip()
     except OSError:
         pass
-    if not sid or sid == "4294967295":   # polkit's socket-started helper has no session: the user's own
-        sid = show("show-user", user, "-p", "Display", "--value")
-    return bool(sid) and show("show-session", sid, "-p", "Remote", "--value") == "no"
+    remote = ""
+    if sid and sid != "4294967295":
+        try:
+            r = subprocess.run(["/usr/bin/loginctl", "show-session", sid, "-p", "Remote", "--value"],
+                               capture_output=True, text=True, timeout=2)
+            remote = r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if remote in ("yes", "no"):
+        return remote == "no"
+    # No session logind knows (polkit's socket-started helper): only with the
+    # polkit rule's fresh note, which it writes for local, active users only.
+    return service == "polkit-1" and bool(polkit_action(user))
 
 
 def sudo_command():
@@ -149,7 +150,7 @@ def request():
         key, token = secret("touchid-key"), secret("touchid-token")
     except (OSError, ValueError):
         return 1   # the feature is off here
-    if not local_session(user):
+    if not local_session(user, service):
         return 1
     body = {"user": user}
     if service in ("sudo", "sudo-i"):
