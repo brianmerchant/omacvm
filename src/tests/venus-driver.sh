@@ -134,7 +134,7 @@ chmod +x "$P/pacman"; cp "$T/vercmp" "$T/ldd" "$P/"
 CALLS=$P/calls PULLS=spirv-tools PATH="$P:$PATH" OMACVM_VENUS_PROBE="$V" OMACVM_MESA_ICD=$T/none.json \
   OMACVM_PKG_ADD="$PWD/src/guest/pkg-add" OMACVM_PKG_LOG=$P/pkg.log \
   bash "$P/venus/vulkan-virtio.sh" > "$P/out" 2>&1; rc=$?
-[[ $rc == 1 ]] && grep -q 'spirv-tools 1 -> 2' "$P/out" && ! grep -q 'pacman -S --needed --noconfirm' "$P/calls" &&
+[[ $rc == 1 ]] && grep -q 'spirv-tools 1 -> 2' "$P/out" && ! grep -qE 'pacman -S (--needed )?--noconfirm' "$P/calls" &&
   ! grep -q 'pacman -Rns' "$P/calls" && pass "build tools that would update installed packages: stops, installs nothing" ||
   fail "partial upgrade not refused: rc $rc, said '$(cat "$P/out")'"
 
