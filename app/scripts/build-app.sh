@@ -194,9 +194,11 @@ rm -rf "$HB"
 # The installed Bridge runs from ~/Applications and has its own; this keeps
 # a Bridge started in place alive (src/tests/prebuilt-helpers.sh checks).
 # NSPrefersDisplaySafeAreaCompatibilityMode false: macOS never shrinks the
-# whole display below the camera for this app (no "Scale to fit below built-in
-# camera" box in Get Info). Full screen is macOS's own and sits below the
-# camera anyway; the VM's windows elsewhere keep the display's full size.
+# whole display below the camera for the launcher's windows (no "Scale to fit
+# below built-in camera" box in Get Info). It has no effect on the VM's
+# windows: QEMU runs as Contents/Resources/runtime/bin/OmacVM without a bundle
+# of its own, so AppKit never reads this file for it; its full screen is
+# macOS's own and sits below the camera.
 VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
