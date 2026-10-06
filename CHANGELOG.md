@@ -65,6 +65,13 @@ itself. Details below.
   goes after the first apply. The control centre says what "slow" meant
   (about 10 minutes to switch on) and what WebGPU and GPU compute needs on
   this Mac (KosmicKrisp on macOS 26, MoltenVK on 15).
+- Fixed: a black screen after an OmacVM job. With a refreshed package list,
+  OmacVM's installs could update Mesa on its own (Mesa 26.2.4 next to LLVM
+  22), and the desktop could not open its graphics (GBM). OmacVM now only
+  installs packages the VM lacks, never updates one alone, never runs
+  `pacman -Sy`, and checks after every install that the graphics still
+  open (and puts packages back if not). The Vulkan driver check runs only
+  with Graphics Vulkan. Recovery: docs/troubleshooting.md, 27.
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy

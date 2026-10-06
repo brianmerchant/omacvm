@@ -165,7 +165,7 @@ ssh_setup_command() {
     fusion) h=$(fusion_host) || return 1; net=${h%.*}.0/24 ;;
     app) net=10.0.2.0/24 ;;
   esac
-  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && pacman -S --needed --noconfirm openssh >/dev/null && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
+  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && { pacman -Q openssh >/dev/null 2>&1 || pacman -S --noconfirm openssh >/dev/null; } && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
     "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"
 }
 
