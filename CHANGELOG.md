@@ -46,6 +46,11 @@ in more words.
   folder that is not there or that OmacVM may not open is left out for that
   start and the VM starts as usual; the home folder and the folders above it
   are refused. VMs from before 3.0.1: `omacvm apply` once.
+- OmacVM.app's build window says more while it builds: what runs right now
+  ("Installing gum (27 of 190 packages)"), downloads with a bar, MB done,
+  speed and time left, how long the step usually takes on a Mac like yours
+  (or took last time), and "Working. Last output 4 s ago." so a quiet part
+  never looks frozen. *Show details* shows the last 20 lines of the log.
 - USB devices (experimental, OmacVM.app, off by default): give a VM a USB
   device macOS does not use itself (debug probes, SDR sticks, boards in DFU
   mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).

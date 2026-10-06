@@ -133,9 +133,19 @@ EOF
 PACLOG=/root/pacstrap.log
 PKGS=(base base-devel linux-aarch64 linux-aarch64-headers archlinuxarm-keyring
   btrfs-progs dosfstools grub efibootmgr openssh sudo git networkmanager nano vim man-db)
+# OmacVM.app sends progress.sh first: then its progress lines go to the Mac too.
+declare -F pac_progress >/dev/null || pac_progress() { cat > "$1"; }
+declare -F cache_watch >/dev/null || cache_watch() { :; }
 pacstrap_run() {   # try number; output to $PACLOG.try, appended to $PACLOG
-  local rc=0
-  pacstrap -C /root/pacman.alarm.conf /mnt "${PKGS[@]}" > "$PACLOG.try" 2>&1 || rc=$?
+  local rc
+  set +e
+  # sed -u passes whole lines only: pacman writes in blocks, and cache_watch's
+  # lines must not land in the middle of one (seen in a real build).
+  ( cache_watch /mnt/var/cache/pacman/pkg & w=$!
+    pacstrap -C /root/pacman.alarm.conf /mnt "${PKGS[@]}" 2>&1 | sed -u ''; rc=${PIPESTATUS[0]}
+    kill "$w" 2>/dev/null; exit "$rc" ) | pac_progress "$PACLOG.try"
+  rc=${PIPESTATUS[0]}
+  set -e
   { echo "---- pacstrap, try $1, exit $rc ----"; cat "$PACLOG.try"; } >> "$PACLOG"
   return "$rc"
 }

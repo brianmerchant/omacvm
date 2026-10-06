@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMBuildProgress"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -28,6 +28,10 @@ let package = Package(
         // `swift run features-tests`.
         .target(name: "OmacVMFeatures"),
         .executableTarget(name: "features-tests", dependencies: ["OmacVMFeatures"]),
+        // The build window's progress lines, speed, time left and log tail,
+        // without a VM: `swift run build-progress-tests`.
+        .target(name: "OmacVMBuildProgress"),
+        .executableTarget(name: "build-progress-tests", dependencies: ["OmacVMBuildProgress"]),
     ],
     swiftLanguageModes: [.v5]
 )

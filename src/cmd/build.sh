@@ -638,7 +638,8 @@ if [[ $TYPE == app ]]; then
 # Linux ARM, Omarchy, OmacVM from the copy inside the app), or with --prebuilt
 # the one that makes it from the image (download, first boot with a seed); it
 # leaves the VM shut down. Its STEP lines become ==> lines, curl's progress
-# bar is dropped.
+# bar is dropped, and so are the app's progress lines (only sent when the app
+# asks, OMACVM_PROGRESS=1; also dropped here for an app of another version).
 pb_arg=()
 if [[ $SOURCE == prebuilt ]]; then
   pb_arg=(--prebuilt)
@@ -653,7 +654,7 @@ for ((k = 0; k < ${#FEATS[@]}; k += 2)); do fv+=" ${FEATS[$k]}=$(onoff "${FEATS[
 printf '%s\n' "$PW" | OMACVM_CREATE_NO_MAC=${NO_MAC:-0} app_create ${pb_arg[@]+"${pb_arg[@]}"} "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
   SSH_PORT="$port" VM_USER="$U" VM_FULLNAME="$FULL" VM_HOSTNAME="$HOST" VM_TZ="$TZ_MAC" VM_LANG="$LANG_VM" \
   KEYBOARD="$KB" FEATURES="${fv# }" 2>&1 |
-  sed -l -e $'s/.*\r//' -e '/^#.*%$/d' -e '/^READY /d' -e 's|^STEP \([0-9]*/[0-9]*\) |==> \1 |' |
+  sed -l -e $'s/.*\r//' -e '/^#.*%$/d' -e '/^READY /d' -e '/^{"omacvm_progress"/d' -e '/^| /d' -e 's|^STEP \([0-9]*/[0-9]*\) |==> \1 |' |
   ui_follow "Building in OmacVM.app" ||
   die "OmacVM.app's build stopped (its logs: $VM_DIR/$VM/logs)"
 unset PW PW2
