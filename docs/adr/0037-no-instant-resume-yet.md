@@ -90,8 +90,9 @@ someone who knows it is there can use it.
 ## Consequences
 
 - Every start of an app VM is about 5.5 s shorter (14.2 to 8.7 s on the
-  mini), and so is every headless run of the image build and first boot
-  (`app/scripts/vm-common.sh`).
+  mini). Headless runs (image build, first boot: `app/scripts/vm-common.sh`)
+  lose the same wait (they boot with it: the save test above ran headless;
+  not timed).
 - No firmware menu by key at start. Nobody could see it under the boot
   logo; `firmwareWait` brings it back.
 - Instant resume stays open. Save and restore themselves are ready in
