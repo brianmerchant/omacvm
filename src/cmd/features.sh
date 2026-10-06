@@ -119,7 +119,7 @@ label() {   # INDEX -> one line for the list
   if [[ -t 1 ]] || (( interactive )); then dim=$'\033[2m'; pink=$'\033[35m'; off=$'\033[0m'; fi
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
   # Slow is about switching it on: nothing more while it is on.
-  feature_has_tag "$i" slow && [[ ${FV[$i]} != on ]] && tag=" $dim($(feature_slow_hint))$off"
+  feature_has_tag "$i" slow && [[ ${OLD[$i]} != on ]] && tag=" $dim($(feature_slow_hint))$off"
   available "$i" || tag=" $dim($REASON)$off"
   # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
   [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"

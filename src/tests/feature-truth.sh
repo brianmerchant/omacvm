@@ -154,7 +154,7 @@ expect "others: only the foreign autologin file" "$root/etc/sddm.conf.d/20-autol
 # ---- words, never a bare "slow" ----
 expect "slow hint in words" yes "$( [[ $(feature_slow_hint) == *"over an hour"* ]] && echo yes)"
 expect "slow hint only while off" yes \
-  "$(grep -qF 'feature_has_tag "$i" slow && [[ ${FV[$i]} != on ]]' "$R/src/cmd/features.sh" && echo yes)"
+  "$(grep -qF 'feature_has_tag "$i" slow && [[ ${OLD[$i]} != on ]]' "$R/src/cmd/features.sh" && echo yes)"
 grep -q 'about 10 minutes per build' "$R/src/features.tsv" && { echo "FAIL features.tsv still says about 10 minutes"; fail=1; }
 grep -q '(slow to build)' "$R/src/cmd/features.sh" && { echo "FAIL features.sh still says slow to build"; fail=1; }
 grep -q 'slow to build' "$R/src/lib/ui.sh" && { echo "FAIL ui.sh still says slow to build"; fail=1; }
