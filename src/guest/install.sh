@@ -8,7 +8,7 @@
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video, vulkan) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan, x86-apps) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -329,6 +329,15 @@ if want vulkan && [[ $TYPE == app ]]; then
     "$R/app/guest/venus/install.sh" --force || not_set_up vulkan "Vulkan (GL is as it was)"
   elif [[ -e /opt/omacvm-mesa ]]; then
     log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
+  fi
+fi
+# x86 apps: box64, built once in the VM as a pacman package. Every route.
+if want x86-apps; then
+  if [[ ${F[x86-apps]} == on ]]; then
+    log "x86 apps (the first time: box64 builds in the VM, a few minutes)"
+    "$R/x86/guest/install.sh" on || not_set_up x86-apps "x86 apps"
+  else
+    "$R/x86/guest/install.sh" off || not_set_up x86-apps "x86 apps (off)"
   fi
 fi
 if ! want battery; then
