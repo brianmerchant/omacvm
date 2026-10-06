@@ -12,6 +12,7 @@ final class Runner {
     private(set) var process: Process?
     private let sleep = VMHostSleepCoordinator()
     private var gpuMemory: GPUMemoryWatch?
+    private var featuresRoute: ControlCentreRoute?
     private var observers: [NSObjectProtocol] = []
     var onExit: ((Int32) -> Void)?
 
@@ -210,6 +211,12 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // "Features…" in QEMU's app menu asks this app to open the control
+        // centre in the VM (ControlCentreRoute).
+        let route = ControlCentreRoute(agentPath: c.agentSocket.path, vmName: c.name) { [weak self] line in
+            self?.appendLog(line)
+        }
+        env["OMACVM_FEATURES_REQUEST"] = route.requestName
         // The VM's graphics memory on the Mac, for this app and omacvm check (GPUMemory).
         env["OMACVM_GPU_MEMORY_STATUS"] = GPUMemory.file(for: c).path
         try? FileManager.default.removeItem(at: GPUMemory.file(for: c))
@@ -267,6 +274,7 @@ final class Runner {
                 self?.clipboard?.stop()
                 self?.battery?.stop()
                 self?.control?.stop()
+                self?.featuresRoute?.stop()
                 self?.onExit?(status)
             }
         }
@@ -282,6 +290,8 @@ final class Runner {
         }
         try p.run()
         process = p
+        route.start()
+        featuresRoute = route
         if network.vmnet { watchFastNetwork() }
         observeSleep()
         let watch = GPUMemoryWatch(config: c) { [weak self] line in self?.appendLog(line) }

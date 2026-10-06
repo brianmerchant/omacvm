@@ -9,6 +9,8 @@ import Foundation
 /// One connection, one command at a time (`lock`).
 enum GuestAgent {
     private static let lock = NSLock()
+    /// The longest reply read (guest-exec-status with 4 KB of output is far shorter).
+    private static let maxReply = 64 * 1024
     private static var held: (path: String, fd: Int32)?
 
     /// Connects to the agent's socket and keeps the connection (QEMU accepts
@@ -65,6 +67,49 @@ enum GuestAgent {
         guard let json = try? JSONSerialization.data(withJSONObject: body),
               let command = String(data: json, encoding: .utf8) else { return false }
         return execute(socketPath: socketPath, command)?.contains("\"return\"") == true
+    }
+
+    /// What `runAndWait` saw.
+    enum Outcome: Equatable {
+        case noAgent                 // no agent answered (the VM is starting, or has none)
+        case refused(String)         // the agent did not start it: its error, shortened
+        case running                 // still running when the wait ended
+        case exited(Int32, String)   // its exit code and the start of its output
+    }
+
+    /// Runs a program in the VM as root (guest-exec, its output captured) and
+    /// waits up to `seconds` for it to end. The guest is untrusted: only the
+    /// fields named here are read, numbers within range, at most 4 KB of output.
+    static func runAndWait(socketPath: String, _ path: String, _ args: [String], seconds: Double) -> Outcome {
+        let body: [String: Any] = ["execute": "guest-exec",
+                                   "arguments": ["path": path, "arg": args, "capture-output": true]]
+        guard let json = try? JSONSerialization.data(withJSONObject: body),
+              let command = String(data: json, encoding: .utf8),
+              let started = object(execute(socketPath: socketPath, command)) else { return .noAgent }
+        if let error = started["error"] as? [String: Any] {
+            return .refused(String(String(describing: error["desc"] ?? "error").prefix(200)))
+        }
+        guard let ret = started["return"] as? [String: Any], let pid = ret["pid"] as? Int,
+              pid > 0, pid <= Int(Int32.max) else { return .noAgent }
+        let status = "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":\(pid)}}"
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.2)
+            guard let st = object(execute(socketPath: socketPath, status))?["return"] as? [String: Any],
+                  st["exited"] as? Bool == true else { continue }
+            let code = (st["exitcode"] as? Int).map { Int32(clamping: $0) } ?? -1   // none: ended by a signal
+            var out = ""
+            if let b64 = st["out-data"] as? String, let data = Data(base64Encoded: String(b64.prefix(8192))) {
+                out = String(decoding: data.prefix(4096), as: UTF8.self)
+            }
+            return .exited(code, out)
+        }
+        return .running
+    }
+
+    private static func object(_ reply: String?) -> [String: Any]? {
+        guard let reply, let data = reply.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     /// Sends one command and waits up to two seconds for its one-line reply.
@@ -126,6 +171,7 @@ enum GuestAgent {
             if n == 0 { return nil }
             if n < 0 { break }          // no reply in time: the connection stays
             reply.append(contentsOf: chunk[0..<n])
+            if reply.count > maxReply { return nil }   // no reply is this long: a new connection
         }
         return String(data: reply, encoding: .utf8) ?? ""
     }
