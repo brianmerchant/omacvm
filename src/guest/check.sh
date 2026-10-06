@@ -159,10 +159,10 @@ if [[ $BRIDGE == on ]]; then
   # Mac's side shows only with a finger, so not asked here.
   FEATURE=touch-id
   if [[ $TOUCH_ID != on ]]; then skip "Touch ID" "off (omacvm enable touch-id)"
-  elif [[ ! -s /etc/omacvm/touchid-key || ! -s /etc/omacvm/touchid-token ]]; then bad "Touch ID" "no key in the VM (omacvm apply on the Mac)"
+  elif [[ ! -s /etc/omacvm/touchid-key || ! -s /etc/omacvm/touchid-token ]]; then bad "Touch ID" "no key in the VM (omacvm apply on the Mac, with the VM by name and without --no-token)"
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/sudo; then bad "Touch ID" "not in /etc/pam.d/sudo (omacvm apply)"
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/polkit-1; then bad "Touch ID" "not in /etc/pam.d/polkit-1 (omacvm apply)"
-  elif [[ ! -f /etc/polkit-1/rules.d/49-omacvm-touchid.rules ]]; then bad "Touch ID" "the polkit rule is missing (omacvm apply)"
+  elif [[ ! -f /etc/polkit-1/rules.d/00-omacvm-touchid.rules || ! -x /usr/lib/omacvm/omacvm-touchid-note ]]; then bad "Touch ID" "the polkit rule is missing (omacvm apply)"
   else ok "Touch ID" "sudo and polkit ask the Mac first; the password keeps working"; fi
   FEATURE=bridge
   # Right after the first login omacvm-plugins may still be enabling the widgets.

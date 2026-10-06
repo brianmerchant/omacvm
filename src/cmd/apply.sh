@@ -293,8 +293,10 @@ if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
   gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"
-elif (( NAMED )); then
-  rm -f "$(vm_key_file "$TYPE" "$VM").touchid"
+else
+  if (( NAMED )); then rm -f "$(vm_key_file "$TYPE" "$VM").touchid"; fi
+  # On without a key: the VM's PAM line gets 403 and the password comes.
+  if on touch-id; then log "Touch ID: not set up (it needs the VM by name and the Bridge token: not --ip, not --no-token)"; fi
 fi
 step copy "OmacVM into the VM"
 log "OmacVM -> $IP:/usr/local/share/omacvm"

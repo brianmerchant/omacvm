@@ -2,8 +2,9 @@
 """A fake OmacVM Bridge for src/tests/touchid-client.sh: /proof and
 POST /omacvm/touchid as touchid.swift answers them, with the answer chosen
 by the test (DIR/mode). Checks the request's signature like the Bridge.
-  fake-bridge.py DIR   (DIR/token, DIR/key; writes DIR/port, logs DIR/requests)"""
-import hashlib, hmac, http.server, json, os, sys, time
+  fake-bridge.py DIR [PORT]   (DIR/token, DIR/key; writes DIR/port, logs DIR/requests)
+PORT: 47831 as a stand-in for the Mac's Bridge inside a test VM; default any."""
+import hashlib, hmac, http.server, json, os, socketserver, sys, time
 
 D = sys.argv[1]
 token = open(f"{D}/token", "rb").read().strip()
@@ -43,7 +44,7 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         with open(f"{D}/requests", "a") as f:
-            f.write(json.dumps({"path": self.path, "auth": self.headers.get("Authorization", ""), "body": body.decode()}) + "\n")
+            f.write(json.dumps({"time": time.time(), "path": self.path, "auth": self.headers.get("Authorization", ""), "body": body.decode()}) + "\n")
         if self.headers.get("Authorization") != "Bearer " + token.decode():
             return self.send(401, {"error": "token"})
         f = (self.headers.get("X-OmacVM-Auth") or "").split(" ")
@@ -62,11 +63,37 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send(200, {"result": "yes"}, (b"o" * 64, nonce))
         elif m == "other-nonce":
             self.send(200, {"result": "yes"}, (key, "0" * 32))
-        elif m == "off":
-            self.send(403, {"error": "off", "code": "off"}, (key, nonce))
+        elif m == "off":   # as touchid.swift: no key for the VM, so not signed
+            self.send(403, {"error": "Touch ID is off for this VM", "code": "off"})
+        elif m == "off-other":   # unsigned, another code: says nothing
+            self.send(403, {"error": "x", "code": "locked"})
+        elif m == "clock":
+            self.send(403, {"error": "clock", "code": "clock"}, (key, nonce))
+        elif m == "drip":   # a "Bridge" that never finishes its answer
+            self.send_response(200)
+            self.send_header("Content-Length", "100000")
+            self.end_headers()
+            try:
+                while True:
+                    self.wfile.write(b" ")
+                    self.wfile.flush()
+                    time.sleep(0.3)
+            except OSError:
+                pass
+        elif m == "hang":   # a dialog nobody answers: waits until the client goes
+            while not self.rfile.read(1) == b"":
+                pass
+            with open(f"{D}/closed", "w") as f:
+                f.write("1")
 
 
-s = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+class Server(http.server.ThreadingHTTPServer):
+    def server_bind(self):   # not HTTPServer's: its getfqdn() can take seconds (CI's macOS)
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+
+
+s = Server(("127.0.0.1", int(sys.argv[2]) if len(sys.argv) > 2 else 0), H)
 with open(f"{D}/port.tmp", "w") as f:
     f.write(str(s.server_address[1]))
 os.replace(f"{D}/port.tmp", f"{D}/port")
