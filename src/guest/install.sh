@@ -278,7 +278,7 @@ fi
 if system && ! cmp -s "$R/guest/sound/rtkit-no-canary.conf" /etc/systemd/system/rtkit-daemon.service.d/90-omacvm-no-canary.conf; then
   log "sound: PipeWire stays real-time after the VM was stopped"
   install -Dm644 "$R/guest/sound/rtkit-no-canary.conf" /etc/systemd/system/rtkit-daemon.service.d/90-omacvm-no-canary.conf
-  systemctl daemon-reload
+  systemctl daemon-reload || true
   systemctl try-restart rtkit-daemon.service 2>/dev/null || true
 fi
 system && case $TYPE in
