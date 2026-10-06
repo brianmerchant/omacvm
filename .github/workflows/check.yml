@@ -145,6 +145,9 @@ jobs:
       - name: Magic Mouse swipe setting (3 or 4 fingers) and its row, only with a Magic Mouse
         run: src/tests/app-mouse-swipe.sh
 
+      - name: The note when macOS refuses the VM's keyboard tap
+        run: src/tests/app-key-access.sh
+
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
 

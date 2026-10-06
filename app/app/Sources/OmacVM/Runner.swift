@@ -244,6 +244,7 @@ final class Runner {
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
         }
+        log.write(Data("OmacVM: \(KeyAccess.record)\n".utf8))
         if Settings.hdr && !Mac.hasHDRDisplay {
             log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
         }
