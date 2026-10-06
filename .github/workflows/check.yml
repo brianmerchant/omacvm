@@ -89,6 +89,10 @@ jobs:
         working-directory: app/app
         run: swift run auth-tests
 
+      - name: OmacVM.app Touch ID panel (never on screen, no LAContext)
+        working-directory: app/app
+        run: swift run touchid-panel-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 

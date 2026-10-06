@@ -85,6 +85,24 @@ public final class AuthRelay: @unchecked Sendable {
         return Answer(status: r.status, signature: signature, body: r.body)
     }
 
+    /// The Bridge's interim "103 Touch ID Panel" at the start of `data`: its
+    /// prompt (nil: not a valid one) and the bytes after it. Nil: not (yet) an
+    /// interim answer.
+    public static func interim(_ data: Data) -> (TouchIDPanelPrompt?, Data)? {
+        let head = Data("HTTP/1.1 103 ".utf8)
+        guard data.count >= head.count, data.prefix(head.count) == head,
+              let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+        let lines = String(decoding: data[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
+        var prompt: TouchIDPanelPrompt?
+        for l in lines.dropFirst() {
+            let kv = l.split(separator: ":", maxSplits: 1)
+            if kv.count == 2, kv[0].lowercased() == "x-omacvm-panel" {
+                prompt = TouchIDPanelPrompt.parse(header: kv[1].trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return (prompt, Data(data[end.upperBound...]))
+    }
+
     /// The line to the VM; nil answer: status 0.
     public static func answerLine(id: String, _ a: Answer?) -> Data {
         var o: [String: Any] = ["id": id, "status": a?.status ?? 0]
@@ -109,6 +127,12 @@ public final class AuthRelay: @unchecked Sendable {
     private let connectBridge: () -> Int32?
     private let headers: () -> [(String, String)]?
     private let log: (String) -> Void
+    /// Shows Touch ID's panel in the VM window's process (QEMU) and waits for
+    /// its answer; its second argument says when the VM's client went away
+    /// (then it closes the panel). Nil: no panel, the Bridge shows the Mac's
+    /// own dialog.
+    public typealias Panel = (TouchIDPanelPrompt, @escaping () -> Bool) -> TouchIDPanelResult
+    private let panel: Panel?
     public var pingTimeout: TimeInterval = 3
     /// The Bridge's dialog waits 30 s; the client gives up at 40 s.
     public var answerTimeout: TimeInterval = 45
@@ -135,10 +159,11 @@ public final class AuthRelay: @unchecked Sendable {
     /// a connected socket to the Bridge, or nil. `headers`: the app's own
     /// headers (token, relay key, VM name), or nil when the Bridge is not set up.
     public init(guest: Int32, connectBridge: @escaping () -> Int32?, headers: @escaping () -> [(String, String)]?,
-                log: @escaping (String) -> Void = { _ in }) {
+                panel: Panel? = nil, log: @escaping (String) -> Void = { _ in }) {
         self.guest = guest
         self.connectBridge = connectBridge
         self.headers = headers
+        self.panel = panel
         self.log = log
     }
 
@@ -283,7 +308,7 @@ public final class AuthRelay: @unchecked Sendable {
         }
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        let request = Self.httpRequest(r, headers: headers)
+        let request = Self.httpRequest(r, headers: headers + (panel == nil ? [] : [("X-OmacVM-Panel", "1")]))
         let wrote = request.withUnsafeBytes { b -> Bool in
             var off = 0
             while off < b.count {
@@ -294,7 +319,7 @@ public final class AuthRelay: @unchecked Sendable {
         }
         guard wrote else { return answer(r.id, nil, note: "OmacVM Bridge does not answer") }
         let deadline = Date().addingTimeInterval(answerTimeout)
-        var data = Data(), chunk = [UInt8](repeating: 0, count: 8192)
+        var data = Data(), chunk = [UInt8](repeating: 0, count: 8192), asked = false
         while data.count <= 65536 {
             if gone() {
                 log("Touch ID: the VM's client went away, the dialog is closed")
@@ -306,7 +331,21 @@ public final class AuthRelay: @unchecked Sendable {
             if ready < 0 { if errno == EINTR { continue }; break }
             if ready == 0 { continue }
             let n = chunk.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
-            if n > 0 { data.append(contentsOf: chunk[0..<n]); continue }
+            if n > 0 {
+                data.append(contentsOf: chunk[0..<n])
+                if !asked, let (prompt, rest) = Self.interim(data) {
+                    asked = true
+                    data = rest
+                    // The panel's answer goes back on this connection; the
+                    // signed final answer follows.
+                    let result = prompt.map { p in panel?(p, gone) ?? .error } ?? .error
+                    if gone() { log("Touch ID: the VM's client went away, the panel is closed"); return }
+                    let line = result.bridgeLine
+                    let sent = line.withUnsafeBytes { b in Darwin.write(fd, b.baseAddress, b.count) == b.count }
+                    guard sent else { return answer(r.id, nil, note: "OmacVM Bridge went away during the panel") }
+                }
+                continue
+            }
             if n < 0 && errno == EINTR { continue }
             break   // the Bridge closed: the whole answer is here
         }

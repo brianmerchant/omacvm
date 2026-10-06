@@ -4,6 +4,12 @@ import PackageDescription
 let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
+    products: [
+        .executable(name: "OmacVM", targets: ["OmacVM"]),
+        // Touch ID's panel, loaded by QEMU (the VM window's process):
+        // omacvm-cocoa-touchid-panel.patch, docs/adr/0041-touch-id.md.
+        .library(name: "OmacVMTouchIDPanel", type: .dynamic, targets: ["OmacVMTouchIDPanel"]),
+    ],
     targets: [
         .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth"]),
         // The self-update's checks, apart from the UI so they can be tested
@@ -32,6 +38,9 @@ let package = Package(
         // OmacVM Bridge: `swift run auth-tests`.
         .target(name: "OmacVMAuth"),
         .executableTarget(name: "auth-tests", dependencies: ["OmacVMAuth"]),
+        // Its panel in the VM's window (QEMU loads the dylib): `swift run touchid-panel-tests`.
+        .target(name: "OmacVMTouchIDPanel", dependencies: ["OmacVMAuth"]),
+        .executableTarget(name: "touchid-panel-tests", dependencies: ["OmacVMTouchIDPanel", "OmacVMAuth"]),
     ],
     swiftLanguageModes: [.v5]
 )

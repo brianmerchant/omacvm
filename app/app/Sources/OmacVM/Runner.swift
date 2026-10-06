@@ -206,6 +206,7 @@ final class Runner {
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
         try? FileManager.default.removeItem(at: c.displaySocket)
+        try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
         let p = Process()
         p.executableURL = Paths.qemu
         // What of the Mac this start may use (its features), read once: the
@@ -236,6 +237,13 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // Touch ID's panel in QEMU's own window process (omacvm-cocoa-touchid-panel.patch):
+        // macOS reads the finger only for the app in front.
+        if links.touchID, let panel = Paths.touchIDPanel {
+            try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
+            env["OMACVM_TOUCHID_PANEL"] = panel.path
+            env["OMACVM_TOUCHID_PANEL_SOCKET"] = c.touchIDPanelSocket.path
+        }
         // The VM's graphics memory on the Mac, for this app and omacvm check (GPUMemory).
         env["OMACVM_GPU_MEMORY_STATUS"] = GPUMemory.file(for: c).path
         try? FileManager.default.removeItem(at: GPUMemory.file(for: c))
@@ -590,6 +598,15 @@ final class Runner {
 
     private func startAuth() {
         let path = config.authSocket.path, name = config.name
+        let panelPath = config.touchIDPanelSocket.path
+        let panel: AuthRelay.Panel? = Paths.touchIDPanel == nil ? nil : { prompt, gone in
+            guard let fd = try? NativeBridgeSocket.connectSecure(path: panelPath, label: "Touch ID panel") else {
+                FileHandle.standardError.write(Data("[auth] Touch ID panel: not there (the Mac's own dialog instead)\n".utf8))
+                return .error
+            }
+            defer { Darwin.close(fd) }
+            return TouchIDPanelClient.ask(fd: fd, prompt, gone: gone)
+        }
         Thread.detachNewThread { [weak self] in
             while true {
                 let running = DispatchQueue.main.sync { self?.isRunning ?? false }
@@ -598,6 +615,7 @@ final class Runner {
                    let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "auth port") {
                     let relay = AuthRelay(guest: fd, connectBridge: { NativeControlBridge.connectForAuth() },
                                           headers: { NativeControlBridge.relayHeaders(vmName: name) },
+                                          panel: panel,
                        log: { FileHandle.standardError.write(Data("[auth] \($0)\n".utf8)) })
                     DispatchQueue.main.sync { self?.auth = relay }
                     try? relay.run()

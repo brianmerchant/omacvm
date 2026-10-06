@@ -314,5 +314,113 @@ if let h = BridgeHTTP.parse(Data("HTTP/1.1 204 No Content\r\nX-A: b\r\nContent-L
 } else { expect(false, "http helper: status, headers, body") }
 expect(BridgeHTTP.parse(Data("HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n{}".utf8)) == nil, "http helper: a bad Content-Length is no answer")
 
+// MARK: Touch ID's panel (the Bridge's interim 103, the panel's socket)
+
+let promptJSON: [String: Any] = ["title": "Touch ID in Omarchy", "line": "sudo in pts/1 wants to run", "box": "pacman -Syu", "timeout": 30,
+                                 "theme": ["background": "#1a1b26", "foreground": "#a9b1d6", "accent": "#7AA2F7", "success": "#9ece6a", "extra": "#ffffff"]]
+let header = json(promptJSON).base64EncodedString()
+if let p = TouchIDPanelPrompt.parse(header: header) {
+    expect(p.title == "Touch ID in Omarchy" && p.box == "pacman -Syu" && p.timeout == 30, "panel prompt: words and timeout")
+    expect(p.colors == ["background": "#1a1b26", "foreground": "#a9b1d6", "success": "#9ece6a"], "panel prompt: lower-case #rrggbb of known keys only")
+} else { expect(false, "panel prompt: parsed") }
+var badP = promptJSON; badP["title"] = "a\u{1b}[31mb"
+expect(TouchIDPanelPrompt.parse(badP) == nil, "panel prompt: control characters refused")
+badP = promptJSON; badP["timeout"] = 600
+expect(TouchIDPanelPrompt.parse(badP) == nil, "panel prompt: timeout 5...60 s")
+badP = promptJSON; badP["box"] = String(repeating: "x", count: 1025)
+expect(TouchIDPanelPrompt.parse(badP) == nil, "panel prompt: box at most 1024 characters")
+expect(TouchIDPanelResult.parse(Data(#"{"result":"no","reason":"cancelled"}"#.utf8)) == .no("cancelled"), "panel result: no with its reason")
+expect(TouchIDPanelResult.parse(Data(#"{"result":"no","reason":"rm -rf"}"#.utf8)) == .no("failed"), "panel result: an unknown reason is failed")
+expect(TouchIDPanelResult.no("weird").bridgeLine == Data("no failed\n".utf8) && TouchIDPanelResult.error.bridgeLine == Data("error\n".utf8),
+       "panel result: the line to the Bridge")
+let interimData = Data("HTTP/1.1 103 Touch ID Panel\r\nX-OmacVM-Panel: \(header)\r\n\r\nHTTP/1.1 200".utf8)
+if let (p, rest) = R.interim(interimData) {
+    expect(p?.title == "Touch ID in Omarchy" && rest == Data("HTTP/1.1 200".utf8), "interim: the prompt and what follows it")
+} else { expect(false, "interim: found") }
+expect(R.interim(Data("HTTP/1.1 103 Touch ID Panel\r\nX-OmacVM-Panel: x".utf8)) == nil, "interim: not yet complete")
+expect(R.interim(resp) == nil, "interim: a final answer is none")
+
+/// A Bridge that asks for the panel, reads the app's line and answers with it.
+final class PanelBridge: @unchecked Sendable {
+    let lock = NSLock()
+    var gotLine = "", sawPanelHeader = false
+    func connect() -> Int32? {
+        let (a, b) = pair()
+        Thread.detachNewThread { [self] in
+            let (req, _) = readAll(b, timeout: 5, untilHeaders: true)
+            lock.lock(); sawPanelHeader = String(decoding: req, as: UTF8.self).contains("\r\nX-OmacVM-Panel: 1\r\n"); lock.unlock()
+            let interim = Data("HTTP/1.1 103 Touch ID Panel\r\nX-OmacVM-Panel: \(header)\r\n\r\n".utf8)
+            _ = interim.withUnsafeBytes { write(b, $0.baseAddress, $0.count) }
+            let (line, closed) = readAll(b, timeout: 5, untilNewline: true)
+            lock.lock(); gotLine = String(decoding: line, as: UTF8.self); lock.unlock()
+            if !closed {
+                let body = Data("{\"result\":\"yes\"}\n".utf8)
+                let r = Data("HTTP/1.1 200 OK\r\nX-OmacVM-Answer: \(sig)\r\nContent-Length: \(body.count)\r\n\r\n".utf8) + body
+                _ = r.withUnsafeBytes { write(b, $0.baseAddress, $0.count) }
+            }
+            close(b)
+        }
+        return a
+    }
+}
+do {
+    let pb = PanelBridge()
+    let (vm, app) = pair()
+    var shown: TouchIDPanelPrompt?
+    let r = AuthRelay(guest: app, connectBridge: { pb.connect() }, headers: headers, panel: { p, _ in shown = p; return .yes })
+    Thread.detachNewThread { try? r.run() }
+    send(vm, requestLine())
+    let (got, _) = readAll(vm, timeout: 5, untilNewline: true)
+    let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
+    pb.lock.lock(); let line = pb.gotLine, saw = pb.sawPanelHeader; pb.lock.unlock()
+    expect(saw, "panel relay: the app says it can show the panel")
+    expect(shown?.box == "pacman -Syu" && line == "yes\n", "panel relay: the panel's answer goes back to the Bridge")
+    expect(o["status"] as? Int == 200 && o["answer"] as? String == sig, "panel relay: the Bridge's signed answer reaches the VM")
+    r.stop(); close(vm)
+}
+do {
+    // The VM's client goes away while the panel is up: the panel is told, nothing reaches the VM.
+    let pb = PanelBridge()
+    let (vm, app) = pair()
+    let closedPanel = DispatchSemaphore(value: 0)
+    let r = AuthRelay(guest: app, connectBridge: { pb.connect() }, headers: headers, panel: { _, gone in
+        while !gone() { usleep(50_000) }
+        closedPanel.signal()
+        return .no("cancelled")
+    })
+    r.pingTimeout = 0.6
+    Thread.detachNewThread { try? r.run() }
+    send(vm, requestLine())
+    expect(closedPanel.wait(timeout: .now() + 3) == .success, "panel relay: no pings -> the panel is closed")
+    let (got, _) = readAll(vm, timeout: 0.5, untilNewline: true)
+    expect(got.isEmpty, "panel relay: nothing written for a client that is gone")
+    r.stop(); close(vm)
+}
+do {
+    // The panel's socket: show, then its answer; and when the client goes away, close.
+    let (appEnd, panelEnd) = pair()
+    let p = TouchIDPanelPrompt.parse(header: header)!
+    Thread.detachNewThread {
+        let (line, _) = readAll(panelEnd, timeout: 3, untilNewline: true)
+        let o = (try? JSONSerialization.jsonObject(with: line.dropLast())) as? [String: Any] ?? [:]
+        let ok = o["op"] as? String == "show" && (o["prompt"] as? [String: Any])?["box"] as? String == "pacman -Syu"
+        let d = ok ? TouchIDPanelResult.no("lockout").line : Data("{}\n".utf8)
+        _ = d.withUnsafeBytes { write(panelEnd, $0.baseAddress, $0.count) }
+    }
+    expect(TouchIDPanelClient.ask(fd: appEnd, p, gone: { false }) == .no("lockout"), "panel client: show, then the panel's answer")
+    close(appEnd); close(panelEnd)
+    let (a2, b2) = pair()
+    var flag = false
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { flag = true }
+    expect(TouchIDPanelClient.ask(fd: a2, p, gone: { flag }) == .no("cancelled"), "panel client: the VM's client gone -> cancelled")
+    let (sent, _) = readAll(b2, timeout: 1)
+    expect(String(decoding: sent, as: UTF8.self).contains("{\"op\":\"close\"}"), "panel client: and the panel is told to close")
+    close(a2); close(b2)
+    let (a3, b3) = pair()
+    close(b3)
+    expect(TouchIDPanelClient.ask(fd: a3, p, gone: { false }) == .error, "panel client: no panel -> error (the Mac's own dialog)")
+    close(a3)
+}
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
