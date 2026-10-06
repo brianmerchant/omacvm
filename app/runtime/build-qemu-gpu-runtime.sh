@@ -756,6 +756,12 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tes
   -framework OpenGL -o "$display_tests/test-boot-splash-fade"
 "$display_tests/test-boot-splash-fade"
 
+# Notch full screen: the window sits above the menu bar while it has the keys,
+# so clicks beside the notch reach the guest, not macOS's hidden menu bar.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-above-menubar.patch"
+grep -q 'NSStatusWindowLevel + 1 : NSNormalWindowLevel' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m's notch window is not above the menu bar (notch-above-menubar patch)"
+
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
 epoxy_root="$dependency_root/libepoxy/$epoxy_version"

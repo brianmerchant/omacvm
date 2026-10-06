@@ -1,0 +1,72 @@
+From: OmacVM
+Subject: [PATCH] cocoa: notch window above the menu bar while it has the keys
+
+What: in notch full screen (OMACVM_NOTCH=1, omacvm-cocoa-notch.patch) the
+borderless window goes to level 26 (NSStatusWindowLevel + 1) while it is the
+key window of the active app, and back to normal otherwise (another app in
+front, an alert of ours, notch full screen left).
+Why: macOS's menu bar (level 24) and status items (25) stay above a normal
+window even with HideMenuBar; with a native full-screen window on another
+display macOS draws the menu bar over the strip again. Clicks beside the
+notch then went to macOS (Control Center opened) instead of the guest's bar.
+Omanotch's strip panel (27) stays above.
+Upstream: OmacVM only (the notch patch is OmacVM's).
+Test: by hand on a notched MacBook with notch mode on and a second display
+in full screen: click the guest bar beside the notch.
+Applies after omacvm-cocoa-boot-splash.patch (last cocoa patch).
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -2277,6 +2277,25 @@
+ }
+ static NSWindowStyleMask notchSavedMask;
+ 
++/*
++ * OmacVM: macOS's menu bar (level 24) and its status items (25) stay above a
++ * normal window, hidden or not: with a native full-screen window on another
++ * display macOS even draws the menu bar again over the strip, and clicks
++ * there opened Control Center instead of reaching the VM. While the notch
++ * window is key it sits just above them (26; Omanotch's strip panel is 27);
++ * otherwise (another app, an alert of ours) back to normal.
++ */
++static void omacvm_notch_level(void)
++{
++    NSWindow *w = [cocoaView window];
++    BOOL above = notchFull && !omacvm_test_mode() && [NSApp isActive] &&
++                 [w isKeyWindow] && ![NSApp modalWindow] && ![w attachedSheet];
++    NSWindowLevel level = above ? NSStatusWindowLevel + 1 : NSNormalWindowLevel;
++    if ([w level] != level) {
++        [w setLevel:level];
++    }
++}
++
+ /* Enters notch full screen on the window's display, or leaves it. */
+ static void omacvm_toggle_notch_full_screen(void)
+ {
+@@ -2302,8 +2321,10 @@
+         [cocoaView updateUIInfo];
+         omacvm_full_screen_take();
+         omacvm_displays_update();
++        omacvm_notch_level();
+     } else {
+         notchFull = NO;
++        omacvm_notch_level();
+         if (!omacvm_test_mode()) {
+             [NSApp setPresentationOptions:NSApplicationPresentationDefault];
+         }
+@@ -2591,6 +2612,7 @@
+     omacvm_pointer_left(&omacvm_ptr);
+     [cocoaView ungrabMouse];
+     [cocoaView raiseAllKeys];
++    omacvm_notch_level();
+ }
+ 
+ /*
+@@ -2600,6 +2622,7 @@
+  */
+ - (void) windowDidBecomeKey: (NSNotification *)aNotification
+ {
++    omacvm_notch_level();
+     dispatch_async(dispatch_get_main_queue(), ^{
+         [cocoaView omacvmTakePointer:nil why:"window key"];
+     });
