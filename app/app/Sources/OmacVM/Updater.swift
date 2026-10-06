@@ -247,7 +247,10 @@ final class Updater: ObservableObject {
 
     /// Fetches and verifies the feed; a newer version is downloaded and
     /// checked. Automatic checks stay off metered and Low Data networks.
-    func check(manual: Bool) async -> Outcome {
+    /// keepSkip: a skipped version stays skipped also when asked by hand
+    /// (the VM's control centre: a version that did not start here must not
+    /// shut its VM down again and again).
+    func check(manual: Bool, keepSkip: Bool = false) async -> Outcome {
         if let why = unavailableReason { return .failed(why) }
         guard !checking, let current = Version(currentVersion) else { return .failed("A check is running.") }
         let keys = keys
@@ -286,7 +289,7 @@ final class Updater: ObservableObject {
 
         let os = Version(ProcessInfo.processInfo.operatingSystemVersion)
         // Asked for by hand: a skipped version is offered again.
-        switch UpdatePolicy.offer(feed, current: current, skipped: manual ? nil : skipped, os: os) {
+        switch UpdatePolicy.offer(feed, current: current, skipped: manual && !keepSkip ? nil : skipped, os: os) {
         case .upToDate:
             log("checked: \(currentVersion) is current (feed \(feed.version))")
             return .upToDate
@@ -649,8 +652,8 @@ final class Updater: ObservableObject {
     @Published private(set) var lastOutcome: Outcome?
 
     @discardableResult
-    func checkNow() async -> Outcome {
-        let o = await check(manual: true)
+    func checkNow(keepSkip: Bool = false) async -> Outcome {
+        let o = await check(manual: true, keepSkip: keepSkip)
         lastOutcome = o
         return o
     }
@@ -706,7 +709,8 @@ final class Updater: ObservableObject {
             return .busy("this VM does not run from this \(Product.name)")
         }
         restarting = true
-        let outcome = await checkNow()
+        // From the VM: a skipped version (by hand, or it did not start here) stays skipped.
+        let outcome = await checkNow(keepSkip: vmName != nil)
         switch outcome {
         case .ready(let v):
             guard runningVM()?.folder == vm.folder else {
@@ -717,9 +721,12 @@ final class Updater: ObservableObject {
             setState("restart-vm", RestartVM(folder: vm.folder.path, version: v, at: Date()).line)
             log("restart-update \(v) for \(vm.name): ready")
             return .ready(v)
-        case .upToDate, .skipped:
+        case .upToDate:
             restarting = false
             return .upToDate(currentVersion)
+        case .skipped(let v):
+            restarting = false
+            return .cannot("OmacVM.app \(v) is skipped on this Mac (it did not start here, or was skipped by hand)")
         case .needsMacOS(let v, let m):
             restarting = false
             return .needsMacOS(v, m)

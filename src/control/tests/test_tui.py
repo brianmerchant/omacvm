@@ -315,6 +315,27 @@ def test_app_update_refused_says_the_next_step(tmp_path, monkeypatch):
     checks.stop()
 
 
+def test_app_update_from_an_older_app_is_not_taken_as_a_restart(tmp_path, monkeypatch):
+    """An app older than 3.0.1 passes the Bridge's yes on as it is: nothing
+    restarts, so no marker stays and the user gets the step by hand."""
+    mac, checks = app_world(tmp_path, monkeypatch, answer=(200, {"go": True, "release": "2.9.1", "mac": "2.9.0"}))
+
+    async def go():
+        from omacvm_cc.local import resume_file
+        from omacvm_cc.tui import ConfirmScreen
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.manifest())
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: any(p == "/omacvm/app-update" for _, p, _ in mac.requests))
+            assert await settle(pilot, lambda: not os.path.exists(resume_file()) and not a.last_result)
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
 def test_after_the_restart_this_vms_part_follows(tmp_path, monkeypatch):
     """The marker from before the restart: the Mac app is current now, so the
     VM's update job starts without asking again."""
