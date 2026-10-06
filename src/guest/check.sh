@@ -533,6 +533,16 @@ if [[ $MAC_CLOCK == on ]]; then
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
 else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
 
+FEATURE=x86-apps
+x86=$(/usr/local/share/omacvm/x86/guest/install.sh --status 2>/dev/null)
+if [[ ${OMACVM_FEATURE_x86_apps:-off} == on ]]; then
+  if [[ ${x86%% *} != ok ]]; then bad "x86 apps" "${x86#* }"
+  elif ! /usr/local/share/omacvm/x86/guest/install.sh --test; then bad "x86 apps" "${x86#* }, but a test x86_64 program does not run"
+  else ok "x86 apps" "${x86#* }"; fi
+elif [[ -n $x86 && ${x86%% *} != off && $x86 != *"not OmacVM's"* ]]; then bad "x86 apps" "off, but OmacVM's box64 is still installed: omacvm apply"
+else skip "x86 apps" "off (omacvm enable x86-apps: x86_64 programs through box64)"; fi
+FEATURE=""
+
 section "Omanotch"
 FEATURE=omanotch
 if [[ $OMANOTCH == off ]]; then
