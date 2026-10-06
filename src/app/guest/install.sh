@@ -21,7 +21,10 @@ cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 ../../guest/pkg-add qemu-guest-agent python || true
-systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
+# Started without waiting: a VM without the agent's port (the headless QEMU
+# of a build or an update) would hold this step 60-90 s for the device.
+systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
+systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
 # HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
 # module's builder, and a pacman hook that rebuilds it for new kernels.
@@ -90,6 +93,9 @@ venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL
 # OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
 if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
 elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
+# WebGPU in Chromium on that Vulkan: the "Chromium (WebGPU)" launcher (venus/webgpu.sh).
+if [[ $graphics == vulkan ]]; then venus/webgpu.sh || echo "WARN: WebGPU in Chromium is not set up; Vulkan and OpenGL are unaffected"
+elif [[ $graphics == opengl ]]; then venus/webgpu.sh --off; fi
 # Vulkan windows: on the GPU when the Mac's app can show them, else through a
 # CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
 # environment.d file.
