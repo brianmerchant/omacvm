@@ -264,6 +264,10 @@ c=$(cut -d' ' -f1-3 "$T/calls" | uniq | tr '\n' ',')
    $out != *"Update the system with omarchy update"* ]] &&
   pass "Graphics Vulkan, old package list: system updated, then the driver built" ||
   fail "Vulkan on a stale prebuilt VM: rc $rc, calls '$c', said '$out'"
+rm_=$(grep 'pacman -Rns' "$T/calls")
+[[ $rm_ == *meson* && $rm_ != *vulkan-mesa-implicit-layers* && -n $(awk '$1 == "vulkan-mesa-implicit-layers"' "$T/db") &&
+   $out != *"build tools left installed"* ]] && pass "... build tools removed after, the driver's own dependencies kept" ||
+  fail "removal after the build: '$rm_', said '$out'"
 [[ -z $(grep -E 'pacman -Sy|pacman -S .*(mesa|llvm-libs)( |$)' "$T/calls") ]] && pass "... and never pacman -Sy or Mesa alone" ||
   fail "partial update: $(cat "$T/calls")"
 

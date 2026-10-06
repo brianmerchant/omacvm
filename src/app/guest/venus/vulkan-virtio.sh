@@ -74,14 +74,21 @@ if [[ -n ${OMACVM_VENUS_BOOT:-} ]]; then
 fi
 echo "Vulkan (Venus): building Mesa's vulkan-virtio ${FIXED#*:} (a few minutes, log $LOG)"
 # Build tools this VM lacks are added for the build and removed after.
-deps=(base-devel)
-while IFS= read -r d; do deps+=("$d"); done < <(bash -c 'source ./PKGBUILD; printf "%s\n" "${depends[@]}" "${makedepends[@]}"')
+deps=(base-devel) rdeps=()
+while IFS= read -r d; do rdeps+=("$d"); done < <(bash -c 'source ./PKGBUILD; printf "%s\n" "${depends[@]}"')
+while IFS= read -r d; do deps+=("$d"); done < <(bash -c 'source ./PKGBUILD; printf "%s\n" "${makedepends[@]}"')
+deps+=("${rdeps[@]}")
 missing=$(pacman -T "${deps[@]}" || true)
 B=$(mktemp -d /var/tmp/omacvm-vulkan-virtio.XXXXXX)
 cleanup() {
   local added
   # shellcheck disable=SC2086 # one package per word
   added=$([[ -z $missing ]] || pacman -Qq $missing 2>/dev/null || true)
+  # The driver's own dependencies (vulkan-mesa-implicit-layers) stay with it:
+  # pacman refuses the whole -Rns otherwise.
+  if [[ -n $added ]] && pacman -Q vulkan-virtio >/dev/null 2>&1; then
+    added=$(grep -vxF -f <(printf '%s\n' "${rdeps[@]}") <<<"$added" || true)
+  fi
   rm -rf "$B"
   if [[ -n $added ]]; then
     # shellcheck disable=SC2086 # one package per word
