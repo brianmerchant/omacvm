@@ -45,7 +45,7 @@ enum TouchIDPanelMetrics {
   static let pad: CGFloat = 18        // Omarchy's panel padding
   static let border: CGFloat = 2      // Omarchy's popup and polkit border
   static let icon: CGFloat = 48
-  static let glyph: CGFloat = 52      // the slot for Apple's view
+  static let glyph: CGFloat = 64      // the slot for Apple's view: LAAuthenticationView at .regular is 64 pt
   static let control: CGFloat = 28    // Omarchy's control height
   static let notchRadius: CGFloat = 10
 }
@@ -95,10 +95,10 @@ final class TouchIDPanelButton: NSView {
 /// Stands in for Apple's view where no LAContext may be made (snapshots, the
 /// mock run): the Touch ID symbol in Apple's red.
 final class TouchIDGlyphStandIn: NSView {
-  override var intrinsicContentSize: NSSize { NSSize(width: 44, height: 44) }
+  override var fittingSize: NSSize { NSSize(width: 64, height: 64) }
   override func draw(_ dirty: NSRect) {
     guard let sym = NSImage(systemSymbolName: "touchid", accessibilityDescription: "Touch ID")?
-      .withSymbolConfiguration(.init(pointSize: 38, weight: .regular).applying(.init(paletteColors: [.systemPink]))) else { return }
+      .withSymbolConfiguration(.init(pointSize: 50, weight: .regular).applying(.init(paletteColors: [.systemPink]))) else { return }
     let s = sym.size
     sym.draw(in: NSRect(x: (bounds.width - s.width) / 2, y: (bounds.height - s.height) / 2, width: s.width, height: s.height))
   }
@@ -158,8 +158,9 @@ final class TouchIDPanelView: NSView {
     if let b = text.box { y += 10 + h(b, boxAttr, inner - 20) + 14 }
     y += 14
     if place {
-      // Apple's view at its own size, centred in the slot (never larger than the slot).
-      var s = auth.intrinsicContentSize
+      // Apple's view at its own size (it pins its width and height: 16, 32, 64 or 128 pt by its
+      // control size), centred in the slot; it draws at that size whatever frame it gets.
+      var s = auth.fittingSize
       if s.width <= 0 || s.height <= 0 || s.width > m.glyph || s.height > m.glyph { s = NSSize(width: m.glyph, height: m.glyph) }
       auth.frame = NSRect(x: ((bounds.width - s.width) / 2).rounded(), y: y + (m.glyph - s.height) / 2, width: s.width, height: s.height)
     }

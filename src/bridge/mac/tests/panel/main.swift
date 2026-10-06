@@ -198,7 +198,7 @@ func live(_ scenario: String, theme name: String, vm: String?) {
     return placed
   }
   var authView: NSView?
-  f.authView = { let v = LAAuthenticationView(context: c, controlSize: .large); authView = v; return v }
+  f.authView = { let v = LAAuthenticationView(context: c, controlSize: .regular); authView = v; return v }
   f.start = { done in
     c.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "run sudo in Omarchy (pts/3): pacman -Syu") { ok, err in
       print("evaluatePolicy: ok=\(ok) error=\((err as NSError?).map { "\($0.domain) \($0.code)" } ?? "-")")
@@ -225,7 +225,7 @@ func live(_ scenario: String, theme name: String, vm: String?) {
       guard let p = f.panel else { return }
       print("panel: \(p.window.frame) style \(p.placement.style) key=\(p.window.isKeyWindow) visible=\(p.window.isVisible) "
             + "app active=\(NSApp.isActive) front=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-") "
-            + "auth view \(authView?.frame ?? .zero) intrinsic \(authView?.intrinsicContentSize ?? .zero) window id \(p.window.windowNumber)")
+            + "auth view \(authView?.frame ?? .zero) fitting \(authView?.fittingSize ?? .zero) window id \(p.window.windowNumber)")
       try? "\(p.window.windowNumber)".write(toFile: "/tmp/touchid-panel.window", atomically: true, encoding: .utf8)
     }
   }

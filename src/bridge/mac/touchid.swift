@@ -101,10 +101,12 @@ final class LAPanelTouchID: TouchIDAuthenticator {
                                 icon: NSApp.applicationIconImage, marker: VMKeys.marker)
     flow.place = { size in
       // The VM's app is in front (the decider checked): its frontmost window.
-      guard let app = NSWorkspace.shared.frontmostApplication, let w = touchIDFrontWindow(pid: app.processIdentifier) else { return nil }
-      return touchIDPanelPlacement(window: w, screens: touchIDPanelScreens(), size: size)
+      guard let app = NSWorkspace.shared.frontmostApplication, let w = touchIDFrontWindow(pid: app.processIdentifier),
+            let pl = touchIDPanelPlacement(window: w, screens: touchIDPanelScreens(), size: size) else { return nil }
+      log("touchid: panel \(pl.style == .notch ? "under the notch" : "over the VM's window") (theme \(theme.background.hex))")
+      return pl
     }
-    flow.authView = { LAAuthenticationView(context: c, controlSize: .large) }
+    flow.authView = { LAAuthenticationView(context: c, controlSize: .regular) }   // 64 pt, the panel's slot
     flow.start = { done in
       c.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: p.reason) { ok, e in done(LAPanelTouchID.end(ok, e)) }
     }

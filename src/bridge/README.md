@@ -399,6 +399,19 @@ for the person at the VM's screen (logind's display session; sudo from a
 terminal of theirs, not over SSH) and only for a sudo command it can show
 whole.
 
+The Bridge shows its own panel (`touchid_panel.swift`, from 3.0.2) instead
+of macOS's alert: over the VM's window, or hanging from the notch strip in
+full screen, in the VM's Omarchy theme, with Apple's embedded Touch ID view
+(`LAAuthenticationView`) for the request's `LAContext`. Only a finger says
+yes; Cancel, Esc and Cmd-. say no. macOS's alert stays for the password
+fallback, `"touch_id_panel": false` in `config.json`, no VM window on a
+screen, or when the embedded view failed at once (then for the rest of the
+run). The VM sends its theme with `POST /omacvm/theme` (control key; only
+with Touch ID on; `#rrggbb` colours, a border and a radius, checked for
+contrast: `touchid_theme.swift`), kept per VM in `touchid-theme/`. Tests
+without a window: `tests/run.sh`, `tests/panel/build.sh` (mock flow and
+snapshots).
+
 ### Not built: Wi-Fi control
 
 `POST /power`, `/join`, `/disconnect` answer `501`. Design: CoreWLAN
