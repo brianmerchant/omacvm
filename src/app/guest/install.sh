@@ -5,6 +5,7 @@
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
+#  * the Mac folder at ~/Mac, when the app shares one (omacvm-mac-folder)
 #  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 #  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
@@ -50,6 +51,10 @@ fi
 rm -rf "$W"
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
+# The Mac folder at ~/Mac, when the app shares one (its setting; off by default).
+install -m755 omacvm-mac-folder /usr/local/bin/
+install -m644 omacvm-mac-folder.service /etc/systemd/system/
+systemctl enable omacvm-mac-folder.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
 # Omarchy ignores the power key; here it comes only from the Mac's Quit.
 install -Dm644 90-omacvm-app-power.conf /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
