@@ -43,6 +43,7 @@ static CGDirectDisplayID movedOn[4];
 static pid_t wentTo; static CGWindowID wentWin;
 static Hotkey lastKey;
 static CFMutableDictionaryRef binding;   // the user's com.apple.symbolichotkeys (NULL: never changed)
+static int mcWhileHeld;                  // Mission Control's key posted while the combo's keys were down
 static int heldPolls, heldAsked;         // the combo's keys still down for this many looks
 
 static World *worldOf(CGDirectDisplayID id) {
@@ -97,7 +98,7 @@ static int fakeKey(Hotkey k) {
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(lateKeys * verifyAfter * NSEC_PER_SEC) + 3 * NSEC_PER_MSEC),
                      dispatch_get_main_queue(), ^{ pendingSteps--; moveSpace(w, dir); });
     } else if (!keysIgnored) moveSpace(w, dir);
-  } else if (same(k, mc)) mcKeys++;
+  } else if (same(k, mc)) { mcKeys++; if (heldPolls > 0) mcWhileHeld++; }
   return 1;
 }
 // "macOS": a Dock swipe moves the display only when swipeMoves is set (the
@@ -757,6 +758,7 @@ int main(void) {
     check(mcKeys == 1 && spaceKeys == 0 && !swipes && world[0].cur == 473,
           "double press (keys still down): Mission Control (macOS's Ctrl+Up), no Space move from the first press");
     check(!capturing && escaped, "... capture off (Mission Control is macOS's)");
+    check(!mcWhileHeld && !heldPolls, "... Mission Control's key only once Ctrl and Option are up");
     sent();
     // Released between the presses: the first press has moved one Space; the
     // second opens Mission Control and moves nothing more.

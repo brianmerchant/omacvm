@@ -1172,9 +1172,10 @@ static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourc
 
 // ---- the swipe: a Dock swipe, the events a three/four-finger swipe makes ----
 // Only for the escape combo when macOS's "Move left/right a space" did not
-// move the display: on macOS 15 the shortcut does nothing from the notched
-// built-in display's full-screen Space, the swipe does (user's log,
-// 2026-10-06 10:13-10:18). Never Mission Control.
+// move the display (macOS 15 from the notched built-in display's full-screen
+// Space). Only after the late looks (checkLeave): the user's log of
+// 2026-10-06 10:13-10:18 was the shortcut landing late, so the swipe moved a
+// second Space. Never Mission Control.
 #define kCGSEventTypeField 55
 #define kCGEventGestureHIDType 110
 #define kCGEventGestureScrollY 119
@@ -1592,6 +1593,10 @@ static void afterLook(void (^f)(void)) {
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * 0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(),
                  ^{ pendingSteps--; f(); });
 }
+static void landedLate(int rest, int moved) {
+  if (lateLooks && (moved || !rest))
+    logf_("escape combo: macOS's Space change landed late (%.1f s after the key): no further step", verifyAfter * (1 + 0.5 * lateLooks));
+}
 static void checkLeave(int by) {
   if (movesCancelled) return;
   int moved, rest = movesLeft(by, &moved);
@@ -1600,6 +1605,7 @@ static void checkLeave(int by) {
     afterLook(^{ checkLeave(by); });
     return;
   }
+  landedLate(rest, moved);
   lateLooks = 0;
   if (by == BY_DOCK && signRetried && !learnedNow) {
     if (rest) swipeSign = -swipeSign;   // the retry did not land either: as before
@@ -1628,6 +1634,7 @@ static void checkEnter(void) {
     afterLook(^{ checkEnter(); });
     return;
   }
+  landedLate(rest, moved);
   lateLooks = 0;
   if (rest) {
     logf_("escape combo: not in the VM's Space: its window to the front instead");
@@ -1649,6 +1656,8 @@ static void whenKeysUp(void (^f)(void), int tries) {
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * (int64_t)NSEC_PER_MSEC), dispatch_get_main_queue(),
                  ^{ pendingSteps--; whenKeysUp(f, tries - 1); });
 }
+
+static void missionControlWhenKeysUp(void) { whenKeysUp(^{ missionControl(); }, 50); }
 
 static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
   for (int i = 0; i < nw; i++)
@@ -1795,7 +1804,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       lastComboAt = -1;
       movesCancelled = 1;
       if (capturing) { capturing = 0; escaped = 1; logf_("escape combo: capture off"); sendState("esc"); }
-      later(missionControl);
+      // Ctrl+Up once Ctrl and Option are up, like the Space shortcut: with
+      // them still held macOS reads it as Ctrl+Option+Up (no Mission Control).
+      later(missionControlWhenKeysUp);
       swallowEscUp = 1;
       return NULL;
     }
