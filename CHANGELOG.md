@@ -26,6 +26,11 @@ in more words.
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
   `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- OmacVM.app: **Mac folder** (off by default). One folder of the Mac at
+  `~/Mac` in the VM (virtio-9p; big files fast, many small files slow). A
+  folder that is not there or that OmacVM may not open is left out for that
+  start and the VM starts as usual; the home folder and the folders above it
+  are refused. VMs from before 3.0.1: `omacvm apply` once.
 - USB devices (experimental, OmacVM.app, off by default): give a VM a USB
   device macOS does not use itself (debug probes, SDR sticks, boards in DFU
   mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
@@ -58,6 +63,10 @@ in more words.
   tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
   Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
   ([details](docs/features.md#x86-linux-apps))
+- OmacVM.app's own window (start, options, setup) opens centred on the
+  MacBook's built-in display, not somewhere on an external monitor. With
+  the lid closed or on a Mac without a built-in display, it opens centred
+  on the main display. The VM's window still opens where you are.
 
 ## 3.0.0
 

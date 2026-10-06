@@ -129,5 +129,13 @@ else expect "no app anywhere: none found" "" "$(HOME=$H app_bundle)"; fi
 fakeapp "$H/Applications/My OmacVM.app"
 expect "~/Applications has it: found there first" "$H/Applications/My OmacVM.app" "$(HOME=$H app_bundle)"
 expect "new installs go to ~/Applications" "$H/Applications" "$(HOME=$H app_install_dir)"
+# The app's own omacvm (OMACVM_APP_RUNTIME) means that app, also on another drive.
+fakeapp "$H/Drive/OmacVM.app"
+expect "the app whose omacvm runs: that one first" "$H/Drive/OmacVM.app" \
+  "$(HOME=$H OMACVM_APP_RUNTIME="$H/Drive/OmacVM.app/Contents/Resources/runtime" app_bundle)"
+mkdir -p "$H/Drive/Other.app/Contents/Resources/scripts"; : > "$H/Drive/Other.app/Contents/Resources/scripts/create-vm.sh"
+defaults write "$H/Drive/Other.app/Contents/Info" CFBundleIdentifier org.example.other
+expect "a runtime of an app with another id: not taken" "$H/Applications/My OmacVM.app" \
+  "$(HOME=$H OMACVM_APP_RUNTIME="$H/Drive/Other.app/Contents/Resources/runtime" app_bundle)"
 
 exit $fail
