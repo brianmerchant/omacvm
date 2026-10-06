@@ -132,11 +132,14 @@ static void frame(MTDeviceRef dev, int k, const float *xs, const float *ys) {
   }
   mouseFrameCb(dev, t, k, 0, 0);
 }
+// Real time (the helper's clock): 2 ms a frame, so a busy CI runner that
+// oversleeps a lot still stays well inside MOUSE_FLICK_TIME (10 ms frames
+// went past it there now and then).
 static void flick(MTDeviceRef dev, float from, float to) {
   for (int i = 0; i <= 12; i++) {
     float x = from + (to - from) * (float)i / 12.0f, y = 45;
     frame(dev, 1, &x, &y);
-    usleep(10000);
+    usleep(2000);
   }
   frame(dev, 0, NULL, NULL);
 }
