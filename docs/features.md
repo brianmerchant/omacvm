@@ -89,6 +89,16 @@ In an OmacVM.app window, ⌃⌥ Esc gives the keyboard back to macOS (the app
 you were in before, else Finder); press it again in macOS to get the window
 back with the keyboard.
 
+A **Magic Mouse** in the full-screen VM: two fingers sideways swipe
+Omarchy's workspaces, as four fingers on a trackpad (macOS's own Space
+swipe is off meanwhile); a one-finger flick sideways goes back or forward.
+Scrolling stays as macOS sends it. While a Magic Mouse is connected,
+OmacVM.app shows **Magic Mouse swipe** (in the setup and the VM window):
+*4 fingers* (the default; Omarchy switches workspaces with 4) or *3
+fingers*. It counts from the next swipe. For Parallels, UTM and VMware
+Fusion: `defaults write org.omacvm.gestures MouseSwipeFingers -int 3` (or
+`4`).
+
 Media keys while a VM is in front (OmacVM.app full screen or in a window;
 Parallels, UTM and Fusion full screen): volume and mute change the Mac's
 output, with Omarchy's popup. When the output has no volume macOS can set
