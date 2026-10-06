@@ -49,9 +49,12 @@ Nothing in the VM learns of the loss by itself:
 
 ## Consequences
 
-- No black screen that needs a click; the VM is usable again within a few
-  seconds (proven on the Mac mini with a forced low cap: see the track
-  notes `gpu-auto-recovery.md`).
+- No black screen that needs a click. Mac mini, 5K at scale 1, a forced
+  1400 MB cap and three WebGL browser windows: Hyprland lost, the app
+  restarted the desktop 0.5 s after QEMU reported it, and the new desktop
+  drew 1.9 s after the loss (2 to 3 s over two runs). Lost again within
+  10 minutes, the app asked instead, and its button brought the desktop
+  back in 2 s.
 - The automatic restart closes apps the user may have wanted to save, also
   when nobody was looking at the screen (a build in a terminal ends too).
   A black desktop gave no way to save them either, short of SSH; the

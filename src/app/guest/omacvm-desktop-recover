@@ -72,7 +72,8 @@ notify)
   else cause="the VM's graphics on the Mac failed"; fi
   if [[ -n $apps ]]; then closed="These apps were closed: $apps. Anything not saved in them is lost."
   else closed="Apps that were open were closed; anything not saved in them is lost."; fi
-  text="At ${at:-?} $cause and the screen went black, so OmacVM restarted the desktop. $closed"
+  # What was lost first: the popup shows only the first lines.
+  text="$closed At ${at:-?} $cause and the screen went black, so OmacVM restarted the desktop."
   # The notification daemon comes up with the session: try for half a minute.
   for _ in $(seq 15); do
     notify-send -a OmacVM -u critical "The desktop was restarted" "$text" 2>/dev/null && exit 0

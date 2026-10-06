@@ -747,7 +747,8 @@ browser starts its GPU process again. Hyprland cannot: the VM's Mesa does
 not report a lost context, and Hyprland 0.56, when told, stops ("Cannot
 continue until proper GPU reset handling is implemented"). So the app tells
 the VM through its guest agent, and the VM's `omacvm-desktop-recover`
-restarts the desktop session by itself, within about 2 seconds of the loss:
+restarts the desktop session by itself, a few seconds after the loss (on
+the Mac mini the desktop drew again 2 to 3 seconds after QEMU reported it):
 SDDM logs you in again (or shows its login screen when autologin is off).
 **Apps open in the VM close, and what was not saved in them is lost.** The
 new session shows a notification that says so and names the apps that
