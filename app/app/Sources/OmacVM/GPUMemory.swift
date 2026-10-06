@@ -82,7 +82,6 @@ final class GPUMemoryWatch {
     private var alert: NSAlert?
     private var lastDesktopRestart: Date?
     private var lastShellRestart: Date?
-    private var restarting = false
 
     init(config: VMConfig, log: @escaping (String) -> Void) {
         self.config = config
@@ -149,7 +148,7 @@ final class GPUMemoryWatch {
     }
 
     private func lost(_ names: [String], _ m: GPUMemory) {
-        guard alert == nil, !restarting else { return }
+        guard alert == nil else { return }
         let now = Date()
         let action = DesktopRecovery.action(lost: names, enabled: DesktopRecovery.enabled(),
                                             lastDesktop: lastDesktopRestart, lastShell: lastShellRestart, now: now)
@@ -162,17 +161,13 @@ final class GPUMemoryWatch {
             guest("/usr/local/bin/omacvm-desktop-recover", ["shell"]) { _ in }
         case .restartDesktop:
             lastDesktopRestart = now
-            restarting = true
             log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
             log("OmacVM: restarting the VM's desktop by itself: apps open in the VM close (once per 10 min, else the app asks)")
             let why = DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)
             guest("/usr/local/bin/omacvm-desktop-recover", ["desktop", why]) { [weak self] ok in
-                guard let self else { return }
-                self.restarting = false
-                if !ok {
-                    self.log("OmacVM: the VM's agent did not restart the desktop: asking")
-                    self.desktopLost(m, again: false)
-                }
+                guard let self, !ok else { return }
+                self.log("OmacVM: the VM's agent did not restart the desktop: asking")
+                self.desktopLost(m, again: false)
             }
         case .ask(let again):
             log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
