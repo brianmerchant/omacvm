@@ -289,6 +289,86 @@ def update_offered(release, vm, mac=None) -> bool:
     return m is None or r >= m
 
 
+# What u does (Controller.update_plan): nothing, this VM only (the Mac is
+# current), OmacVM.app first and then this VM (the app restarts the VM once),
+# the app only, a Mac checkout and this VM in one job, or the app by hand.
+PLANS = ("none", "vm", "app+vm", "app", "mac-checkout", "manual")
+
+
+def update_plan(release, vm, mac, mac_app: bool, app_vm: bool, app_update: bool) -> str:
+    """mac_app: the Mac's omacvm is OmacVM.app's copy (the app updates it).
+    app_vm: this VM runs in OmacVM.app. app_update: the Mac takes
+    POST /omacvm/app-update (3.0.1 on). Forward only."""
+    r, v, m = version_tuple(release), version_tuple(vm), version_tuple(mac)
+    if r is None or (m is not None and r < m):
+        return "none"   # no release, or the Mac is ahead of it
+    vm_older = v is None or v < r
+    mac_older = m is None or m < r
+    if not mac_older:
+        return "vm" if vm_older else "none"
+    if not mac_app:
+        return "mac-checkout"
+    if app_vm and app_update:
+        return "app+vm" if vm_older else "app"
+    return "manual"
+
+
+def update_line(plan: str, version) -> str:
+    """The top line when an update is there ("" for none)."""
+    who = {"vm": "this VM", "app+vm": "Mac app and this VM", "app": "Mac app",
+           "mac-checkout": "the Mac and this VM", "manual": "Mac app and this VM"}.get(plan)
+    return f"Update available: {version} ({who}) · u updates" if who else ""
+
+
+# ---- progress while an update runs ----
+
+# The one-key update through OmacVM.app: four steps, the first two before the
+# VM shuts down, the last two after it started again ({v}: the release).
+APP_STEPS = ("the Mac gets OmacVM.app {v}", "shutting down this VM",
+             "OmacVM.app {v} installs and starts this VM again", "updating this VM")
+
+
+def bar(fraction: float, width: int = 30) -> str:
+    """A progress bar of block characters."""
+    n = max(0, min(width, round(fraction * width)))
+    return "█" * n + "░" * (width - n)
+
+
+def latest_line(lines) -> str:
+    """The last line a job wrote ("" none), without the "==> " of a step."""
+    for line in reversed(list(lines or [])):
+        s = str(line).strip()
+        if s:
+            return s[4:] if s.startswith("==> ") else s
+    return ""
+
+
+def job_step(job: Job) -> str:
+    """ "step 3 of 9: text" for a running job ("starting" before its first step)."""
+    text = job.text.strip() or "starting"
+    return f"step {job.step} of {job.of}: {text}" if job.of else text
+
+
+def progress_lines(title: str, job: Job | None, lines=(), *, steps: tuple[str, ...] = (),
+                   at: int = 0, version: str = "", waiting: str = "") -> list[tuple[str, str]]:
+    """What an update shows while it runs, as (text, style) lines: the title,
+    with steps (the app path) each step marked done, now or to come; the
+    job's step and a bar; the job's latest log line. at: the step now (1..);
+    waiting: why the job's answers are late (the Mac restarts its Bridge)."""
+    out: list[tuple[str, str]] = [(title, "bold")]
+    for i, s in enumerate(steps, 1):
+        mark, style = ("✓", "green") if i < at else ("›", "bold") if i == at else (" ", "bright_black")
+        out.append((f"  {mark} {i} of {len(steps)}  {s.format(v=version)}", style))
+    if job is not None:
+        frac = job.step / job.of if job.of else 0.0
+        indent = "      " if steps else "  "
+        out.append((f"{indent}{bar(frac)}  {job_step(job)}", ""))
+        last = waiting or latest_line(lines)
+        if last and last != job.text.strip():
+            out.append((f"{indent}{last}", "bright_black"))
+    return out
+
+
 def part_changed(name: str, installed: dict, offer: dict) -> bool:
     """An update changes this part: the offered digest is not the installed one."""
     o = (offer or {}).get(name)

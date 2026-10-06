@@ -48,6 +48,23 @@ in more words.
   reached the most one VM may use (three quarters of the Mac's memory), the
   window now says so. It said "macOS ran short of memory", also when macOS
   still had memory (seen on an 8 GB MacBook Air with a browser full of WebGL).
+- Updates in one step. `u` in the control centre checks, then updates what
+  is older: with OmacVM.app on the Mac, the app first (it shuts the VM down
+  cleanly, updates, restarts and starts the VM again; one confirm, "save your
+  work"), then the VM's part right after the restart. The top line says
+  what: "Update available: 3.0.2 (Mac app and this VM) · u updates". No
+  more U, then c, then i. The app's window gets **Check Now** and "Update to
+  X…". From 3.0.0, update the app once by hand (shut the VM down, then
+  OmacVM › Check for Updates…): the one-step update works from 3.0.1 on.
+- The control centre shows an update while it runs: step n of N with a bar
+  and the latest log line (also on the Updates screen); through OmacVM.app
+  the four steps (the Mac gets the app, the VM shuts down, the app installs
+  and starts the VM again, the VM updates). At the end "Updated to X" or the
+  error with the next step, the list at once, and R restarts the VM for the
+  kernel, memory and keyboard changes.
+- Error texts say the next step: "update OmacVM.app first: u in the control
+  centre does it, or Check Now in OmacVM on the Mac" instead of
+  "OmacVM.app is older than this release".
 - `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
   VM goes back to what it had and the command fails (exit 4), as in the
   control centre. Before, it ended with 0 and the record said Vulkan was on,

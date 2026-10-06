@@ -37,6 +37,7 @@ class FakeMac:
         self.job_end = ("done", "done")   # (state, text) a job ends with
         self.job_extra: dict = {}         # more fields of the ended job (failed_part, mac_omacvm)
         self.job_polls_to_end = 2
+        self.on_job_end = None            # called once with the job when it ends (a VM side that changed)
         self.requests: list[tuple[str, str, dict]] = []
         self.jobs: dict[str, dict] = {}
         self.checks_enabled = True
@@ -58,6 +59,8 @@ class FakeMac:
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
         self.mouse_swipe: dict | None = None   # {"magic_mouse", "fingers"} (None: an older Mac without it)
         self.notch = False   # a MacBook with a notch: Omanotch can go on
+        self.mac_app: bool | None = None  # the Mac's omacvm is OmacVM.app's copy (None: an older Mac says nothing)
+        self.app_update: tuple | None = None  # (status, body) for POST /omacvm/app-update (None: an older Mac)
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -128,7 +131,8 @@ class FakeMac:
                     time.sleep(fake.hello_delay)
                     names = [l.split("\t")[0] for l in open(os.path.join(SRC, "features.tsv"), encoding="utf-8")
                              if l.strip() and not l.startswith("#")]
-                    reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else [])
+                    reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else []) \
+                        + (["app-update"] if fake.app_update is not None else [])
                     reqs += ["settings/mouse-swipe"] if fake.mouse_swipe is not None else []
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
                                            "requests": reqs, "macos": "15.7.4", "chip": "Apple M4 Max"})
@@ -163,6 +167,9 @@ class FakeMac:
                     if j["polls"] >= fake.job_polls_to_end:
                         j["state"], j["text"] = fake.job_end
                         j.update(fake.job_extra)
+                        if fake.on_job_end and not j.get("ended"):
+                            j["ended"] = True
+                            fake.on_job_end(j)
                     return self.send(200, {k: v for k, v in j.items() if k != "polls"})
                 if p in ("/state", "/scan?cached=1", "/bluetooth"):
                     return self.send(200, {"ssid": "ZorroNet 5G", "bssid": "a4:2b:b0:11:22:33",
@@ -188,6 +195,8 @@ class FakeMac:
                                       "state": "running", "step": 1, "of": 4, "text": "the Mac side",
                                       "lines": ["==> OmacVM Bridge on the Mac"], "polls": 0}
                     return self.send(202, {k: v for k, v in fake.jobs[jid].items() if k != "polls"})
+                if self.path == "/omacvm/app-update" and fake.app_update is not None:
+                    return self.send(*fake.app_update)
                 if self.path == "/omacvm/settings/update-checks":
                     fake.checks_enabled = bool(b["enabled"])
                     return self.send(200, fake.updates())
@@ -206,8 +215,11 @@ class FakeMac:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def updates(self) -> dict:
-        return {"checks_enabled": self.checks_enabled, "omacvm": self.version, "checked_at": self.checked_at,
-                "ok": self.manifest is not None, "offline": False, "error": None, "manifest": self.manifest}
+        u = {"checks_enabled": self.checks_enabled, "omacvm": self.version, "checked_at": self.checked_at,
+             "ok": self.manifest is not None, "offline": False, "error": None, "manifest": self.manifest}
+        if self.mac_app is not None:
+            u["mac_app"] = self.mac_app
+        return u
 
     def stop(self) -> None:
         self.server.shutdown()

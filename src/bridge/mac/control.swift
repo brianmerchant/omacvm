@@ -99,7 +99,7 @@ func controlCLI() -> Result<String, PolicyError> {
   let raw = env["OMACVM_CONTROL_CLI"] ?? (try? String(contentsOfFile: omacvmSupport + "/cli", encoding: .utf8)) ?? ""
   let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
   guard path.hasPrefix("/"), !path.contains("/../") else {
-    return .failure(PolicyError(503, "no-cli", "the Mac's OmacVM is not set up for the control centre: open OmacVM.app once (or omacvm update on the Mac)"))
+    return .failure(PolicyError(503, "no-cli", "the Mac's OmacVM is not set up for the control centre: open OmacVM on the Mac once"))
   }
   let root = (path as NSString).deletingLastPathComponent
   for p in [path, root, root + "/src", root + "/src/cmd", root + "/src/lib"] {
@@ -133,6 +133,11 @@ func macFeatures(_ cli: String) -> [String] {
     let name = String(line.split(separator: "\t", maxSplits: 1).first ?? "")
     return validFeatureName(name) ? name : nil
   }
+}
+
+/// The Mac's omacvm is OmacVM.app's own copy: the app updates it.
+func macIsAppCopy(_ cli: String) -> Bool {
+  cliIsAppCopy(cli, hasGit: FileManager.default.fileExists(atPath: cliRoot(cli) + "/.git"))
 }
 
 func macVersion(_ cli: String) -> String {
@@ -249,7 +254,7 @@ final class Control {
       let v = ProcessInfo.processInfo.operatingSystemVersion
       return answer(200, ["proto": proto, "proto_min": controlProtoMin, "omacvm": version,
                           "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs",
-                                       "gpu-memory", "settings/mouse-swipe"],
+                                       "gpu-memory", "settings/mouse-swipe", "app-update"],
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
@@ -261,6 +266,7 @@ final class Control {
     // socket (server.swift), or on 127.0.0.1 from an app older than it.
     let vm: VMEntry
     let relayed = peer == relayPeer || fromThisMac(fd, peer: peer)
+    var viaApp = false
     if relayed {
       guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
@@ -270,6 +276,7 @@ final class Control {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
+      viaApp = true
       if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
       switch vmForPeer(peer, vmList(cli, fresh: fresh) { if case .success = vmForPeer(peer, $0) { return true }; return false }) {
@@ -303,7 +310,22 @@ final class Control {
     }
     vmName = vm.name
     switch route {
-    case .updates: return answer(200, updatesAnswer(version))
+    case .updates: return answer(200, updatesAnswer(version, cli))
+    case .appUpdate:
+      // OmacVM.app asks this for its VM, then checks its own signed feed and
+      // updates itself (it shuts the VM down cleanly first). The Bridge gates
+      // as for an update job: a verified release, newer than the Mac's.
+      let m = verifiedManifest()
+      if let e = appUpdateGate(viaApp: viaApp, vmType: vm.type, macAppCopy: macIsAppCopy(cli), release: m?.version, mac: version) {
+        return refuse(e)
+      }
+      let at = (lastResult()["checked_at"] as? String).flatMap { isoFormat.date(from: $0) }
+      if let e = updateGate(checksEnabled: updateChecks(), checkedAt: at) { return refuse(e) }
+      if runningOnDisk(vmKey(vm)) { return refuse(PolicyError(409, "busy", "a job runs for this VM: wait for it")) }
+      // Counts toward the jobs per hour; nothing runs here, so it is free again at once.
+      if let e = q.sync(execute: { limiter.admit(vmKey(vm)) }) { return refuse(e) }
+      q.sync { limiter.finished(vmKey(vm)) }
+      return answer(200, ["go": true, "release": m?.version ?? "", "mac": version], "app-update for \(vm.name)")
     case .updatesCheck:
       let wait = q.sync { () -> Double in
         let w = 60 - Date().timeIntervalSince(lastCheck)
@@ -312,10 +334,10 @@ final class Control {
       }
       if wait > 0 { return refuse(PolicyError(429, "rate", "checked a moment ago: try again in \(Int(wait) + 1) s")) }
       _ = checkFeed()
-      return answer(200, updatesAnswer(version))
+      return answer(200, updatesAnswer(version, cli))
     case .setUpdateChecks(let on):
       setUpdateChecks(on)
-      return answer(200, updatesAnswer(version), on ? "checks on" : "checks off")
+      return answer(200, updatesAnswer(version, cli), on ? "checks on" : "checks off")
     case .mouseSwipe:
       answer(200, mouseSwipeAnswer(magicMouse: magicMouseConnected(), fingers: mouseSwipeNow()))
     case .setMouseSwipe(let n):
@@ -796,9 +818,10 @@ final class Control {
     if Date().timeIntervalSince(at) > 7 * 86400 { checkFeed() }
   }
 
-  private func updatesAnswer(_ version: String) -> [String: Any] {
+  private func updatesAnswer(_ version: String, _ cli: String) -> [String: Any] {
     let r = lastResult()
-    var a: [String: Any] = ["checks_enabled": updateChecks(), "omacvm": version,
+    // mac_app: the Mac's omacvm is OmacVM.app's copy (the app updates it: app-update).
+    var a: [String: Any] = ["checks_enabled": updateChecks(), "omacvm": version, "mac_app": macIsAppCopy(cli),
                             "checked_at": r["checked_at"] ?? NSNull(), "ok": r["ok"] ?? false,
                             "offline": r["offline"] ?? false, "unsigned": r["unsigned"] ?? false,
                             "error": r["error"] ?? NSNull(), "manifest": NSNull()]

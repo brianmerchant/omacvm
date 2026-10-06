@@ -189,7 +189,7 @@ def test_older_mac_is_read_only(tmp_path, monkeypatch):
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.mac_error is not None)
             assert a.c.mac_error.kind == "old"
-            assert "omacvm update on the Mac" in a.banner()
+            assert "update OmacVM on the Mac" in a.banner()
     asyncio.run(go())
     mac.stop()
     checks.stop()
@@ -216,17 +216,13 @@ def test_updates_screen_and_silence(world):
             # Checks off: no marks, no count on the features screen; the Updates screen still shows it.
             assert not any(r.update for r in a.rows) and "update" not in a.subtitle()
             assert rows_with_updates(a)["gestures"].update
-            # ... and the last result is old: i installs nothing until c checked again.
+            # ... and the last result is old: i checks first, then asks (no separate c).
             await pilot.press("i")
-            await pilot.pause(0.3)
             from omacvm_cc.tui import ConfirmScreen
-            assert not isinstance(a.screen, ConfirmScreen)
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            assert any(p == "/omacvm/updates/check" for _, p, _ in world.requests)
+            assert a.c.manifest_fresh()
             assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
-            await pilot.press("c")
-            assert await settle(pilot, lambda: a.c.manifest_fresh())
-            await pilot.press("i")
-            await pilot.pause(0.2)
-            assert isinstance(a.screen, ConfirmScreen)
             await pilot.press("y")
             assert await settle(pilot, lambda: any(b == {"action": "update"} for _, p, b in world.requests if p == "/omacvm/jobs"))
     asyncio.run(go())
@@ -236,7 +232,7 @@ def rows_with_updates(a):
     return {r.feature.name: r for r in a.c.rows(with_updates=True)}
 
 
-def test_checks_off_hides_marks_and_u_waits(world):
+def test_checks_off_hides_marks_and_u_checks_first(world):
     world.manifest = {"version": "2.9.1", "parts": {"gestures": {"digest": "sha256:" + "c" * 64, "release": "2.9.1"}}}
     world.checks_enabled = False
 
@@ -247,12 +243,188 @@ def test_checks_off_hides_marks_and_u_waits(world):
             await pilot.pause(0.1)
             assert not any(r.update for r in a.rows)
             assert "update" not in a.subtitle()
+            # Checks off and an old result: no top line, nothing installed by itself.
+            assert "Update available" not in a.banner()
             await pilot.press("u")
-            await pilot.pause(0.3)
             from omacvm_cc.tui import ConfirmScreen
-            assert not isinstance(a.screen, ConfirmScreen)
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            assert any(p == "/omacvm/updates/check" for _, p, _ in world.requests)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+            await pilot.press("n")
             assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
     asyncio.run(go())
+
+
+def app_world(tmp_path, monkeypatch, answer=(202, {"state": "restarting", "code": "restarting", "version": "2.9.1"})):
+    """An OmacVM.app VM whose Mac runs the app's own omacvm, older than the release."""
+    mac, checks = FakeMac(version="2.9.0"), FakeChecks()
+    mac.manifest = {"version": "2.9.1", "parts": {"gestures": {"digest": "sha256:" + "c" * 64, "release": "2.9.1"}}}
+    mac.checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    mac.mac_app = True
+    mac.app_update = answer
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path, "OMACVM_VM_TYPE=app\n").items():
+        monkeypatch.setenv(k, v)
+    return mac, checks
+
+
+def test_u_updates_the_mac_app_and_this_vm(tmp_path, monkeypatch):
+    """One u: the top line says what, one confirm, the Mac updates OmacVM.app
+    and restarts this VM; a marker says to do this VM's part after it."""
+    mac, checks = app_world(tmp_path, monkeypatch)
+
+    async def go():
+        from omacvm_cc.local import resume_file
+        from omacvm_cc.tui import ConfirmScreen
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.manifest())
+            assert a.c.update_plan() == ("app+vm", "2.9.1")
+            assert a.banner() == "Update available: 2.9.1 (Mac app and this VM) · u updates"
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            assert "save your work" in str(a.screen.text)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: any(p == "/omacvm/app-update" for _, p, _ in mac.requests))
+            assert await settle(pilot, lambda: "shuts down in a moment" in a.last_result)
+            # Not used in this boot: the VM has not restarted yet.
+            a.live_refresh()
+            await pilot.pause(0.5)
+            assert os.path.exists(resume_file()) and "shuts down in a moment" in a.last_result
+            assert not any(p == "/omacvm/jobs" for _, p, _ in mac.requests)
+            # The four steps: the first done, the shutdown now, two to come.
+            shown = a.banner_text(110).plain.splitlines()
+            assert shown[0].startswith("Update to OmacVM 2.9.1")
+            assert shown[1] == "  ✓ 1 of 4  the Mac gets OmacVM.app 2.9.1"
+            assert shown[2] == "  › 2 of 4  shutting down this VM"
+            assert shown[3] == "    3 of 4  OmacVM.app 2.9.1 installs and starts this VM again"
+            assert shown[4] == "    4 of 4  updating this VM"
+            # A second u while it runs does nothing.
+            await pilot.press("u")
+            await pilot.pause(0.2)
+            assert sum(1 for _, p, _ in mac.requests if p == "/omacvm/app-update") == 1
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
+def test_a_vm_that_does_not_shut_down_says_the_update_stopped(tmp_path, monkeypatch):
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "SHUTDOWN_WAIT", 1.0)
+    mac, checks = app_world(tmp_path, monkeypatch)
+
+    async def go():
+        from omacvm_cc.local import resume_file
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.manifest())
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: a.app_step == ("2.9.1", 2))
+            assert await settle(pilot, lambda: "did not shut down in 3 minutes" in a.last_result, 6)
+            assert a.app_step is None and not os.path.exists(resume_file())
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
+def test_app_update_refused_says_the_next_step(tmp_path, monkeypatch):
+    mac, checks = app_world(tmp_path, monkeypatch, answer=(409, {"code": "busy", "error": "OmacVM.app is busy (a VM is being built): try again in a minute"}))
+
+    async def go():
+        from omacvm_cc.local import resume_file
+        from omacvm_cc.tui import ConfirmScreen
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.manifest())
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: any(p == "/omacvm/app-update" for _, p, _ in mac.requests))
+            # The error stays on show with the next step; nothing waits for a restart.
+            assert await settle(pilot, lambda: not os.path.exists(resume_file()) and "try again in a minute" in a.last_result)
+            assert a.app_step is None and not a.progress()
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
+def test_app_update_from_an_older_app_is_not_taken_as_a_restart(tmp_path, monkeypatch):
+    """An app older than 3.0.1 passes the Bridge's yes on as it is: nothing
+    restarts, so no marker stays and the user gets the step by hand."""
+    mac, checks = app_world(tmp_path, monkeypatch, answer=(200, {"go": True, "release": "2.9.1", "mac": "2.9.0"}))
+
+    async def go():
+        from omacvm_cc.local import resume_file
+        from omacvm_cc.tui import ConfirmScreen
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.manifest())
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: any(p == "/omacvm/app-update" for _, p, _ in mac.requests))
+            assert await settle(pilot, lambda: not os.path.exists(resume_file()) and "Check Now" in a.last_result)
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
+def test_after_the_restart_this_vms_part_follows(tmp_path, monkeypatch):
+    """The marker from before the restart: the Mac app is current now, so the
+    VM's update job starts without asking again."""
+    mac, checks = app_world(tmp_path, monkeypatch)
+    mac.version = "2.9.1"   # OmacVM.app updated itself
+    from omacvm_cc.local import resume_file, write_resume
+    write_resume("2.9.1", boot="the boot before")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: any(b == {"action": "update"} for _, p, b in mac.requests if p == "/omacvm/jobs"))
+            assert not os.path.exists(resume_file())
+            # Step 4 of 4 with the job's own steps under it.
+            assert await settle(pilot, lambda: "step 2 of 4: the VM side" in a.banner_text(110).plain)
+            shown = a.banner_text(110).plain
+            assert "✓ 3 of 4" in shown and "› 4 of 4  updating this VM" in shown
+            assert await settle(pilot, lambda: a.last_result.startswith("Updated to OmacVM"), 15)
+            assert "(the Mac app and this VM)" in a.last_result and a.app_step is None
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
+def test_after_the_restart_an_app_that_did_not_update_says_why(tmp_path, monkeypatch):
+    mac, checks = app_world(tmp_path, monkeypatch)
+    from omacvm_cc.local import write_resume
+    write_resume("2.9.1", boot="the boot before")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "was not updated on the Mac" in a.last_result)
+            assert not any(p in ("/omacvm/jobs", "/omacvm/app-update") for _, p, _ in mac.requests)
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
+def test_after_the_restart_without_update_information_claims_nothing(tmp_path, monkeypatch):
+    """The Mac sends no manifest after the restart: no "Updated to", u finishes it."""
+    mac, checks = app_world(tmp_path, monkeypatch)
+    mac.version, mac.manifest = "2.9.1", None
+    from omacvm_cc.local import write_resume
+    write_resume("2.9.1", boot="the boot before")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "u finishes the update" in a.last_result)
+            assert "Updated to" not in a.last_result and a.app_step is None
+            assert not any(p in ("/omacvm/jobs", "/omacvm/app-update") for _, p, _ in mac.requests)
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
 
 
 def test_lost_job_ends_failed_and_offers_a_retry(world, monkeypatch):
@@ -507,10 +679,62 @@ def test_update_of_core_only_shows_progress_in_the_banner(world):
             await pilot.press("u")
             await pilot.pause(0.2)
             await pilot.press("y")
-            assert await settle(pilot, lambda: "(2/4)" in a.banner())
-            assert a.banner() == "Update: the VM side (2/4)"
+            assert await settle(pilot, lambda: "step 2 of 4" in a.banner())
+            assert a.banner() == "Update: step 2 of 4: the VM side"
             assert not any(r.status.value == "busy" for r in a.rows)
     asyncio.run(go())
+
+
+def test_update_shows_live_progress_then_the_result_and_a_restart(world, monkeypatch, tmp_path):
+    """While it runs: the title, a bar with step n of N, the latest log line,
+    on the features screen and the updates screen. At the end: "Updated to",
+    the list at once, and R restarts the VM (asked first)."""
+    from omacvm_cc import tui
+    from omacvm_cc.local import restart_file
+    ran = tmp_path / "rebooted"
+    monkeypatch.setattr(tui, "REBOOT", ["touch", str(ran)])
+    monkeypatch.setenv("OMACVM_BOOT_ID", "boot-1")
+    world.manifest = {"version": "2.9.1", "parts": {"core": {"digest": "sha256:" + "e" * 64, "release": "2.9.1"}}}
+    world.job_polls_to_end = 5
+
+    def updated(job):   # the job brought this VM to the release
+        with open(os.path.join(os.environ["OMACVM_SHARE"], "VERSION"), "w") as f:
+            f.write("2.9.1\n")
+    world.on_job_end = updated
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
+            await pilot.press("U")
+            await pilot.pause(0.2)
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: "step 2 of 4" in a.banner())
+            shown = a.banner_text(100).plain
+            assert shown.startswith("Updating to OmacVM 2.9.1  ·  0:0"), shown
+            assert "█" in shown and "░" in shown and "step 2 of 4: the VM side" in shown
+            assert "OmacVM Bridge on the Mac" in shown        # the latest log line
+            body = str(a.screen.query_one("#body").render())
+            assert "step 2 of 4: the VM side" in body
+            # Done: the result stays, a restart waits (this boot only).
+            assert await settle(pilot, lambda: a.last_result.startswith("Updated to OmacVM"), 15)
+            assert "R restarts it now" in a.last_result and a.c.active_job() is None and not a.progress()
+            assert os.path.exists(restart_file())
+            body = str(a.screen.query_one("#body").render())
+            assert "Updated to OmacVM 2.9.1" in body and "Up to date: OmacVM 2.9.1" in body
+            assert a.screen.query_one(".box").border_title == "Updates"
+            await pilot.press("R")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: ran.exists())
+    asyncio.run(go())
+    # A new control centre in the same boot still says it; after a restart it does not.
+    from omacvm_cc.local import restart_needed
+    assert restart_needed()
+    monkeypatch.setenv("OMACVM_BOOT_ID", "boot-2")
+    assert restart_needed() is None
 
 
 def test_lost_job_names_the_right_mac_command(world, monkeypatch):

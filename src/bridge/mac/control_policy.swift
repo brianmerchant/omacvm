@@ -20,7 +20,7 @@ let graphicsChoices: Set<String> = ["opengl", "vulkan", "auto"]
 struct JobRequest: Equatable { let action: ControlAction; let features: [String] }
 
 enum ControlRoute: Equatable {
-  case hello, status, updates, updatesCheck, gpuMemory
+  case hello, status, updates, updatesCheck, gpuMemory, appUpdate
   case setUpdateChecks(Bool)
   case mouseSwipe, setMouseSwipe(Int)
   case startJob(JobRequest)
@@ -77,6 +77,10 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
     case ("POST", "updates/check"):
       if let o = try strictObject(body, allowed: []), !o.isEmpty { throw PolicyError(400, "unknown-key", "no keys") }
       return .success(.updatesCheck)
+    case ("POST", "app-update"):
+      // The VM never names a version: the Mac's own verified release counts.
+      if let o = try strictObject(body, allowed: []), !o.isEmpty { throw PolicyError(400, "unknown-key", "no keys") }
+      return .success(.appUpdate)
     case ("POST", "settings/update-checks"):
       guard let o = try strictObject(body, allowed: ["enabled"]), let b = strictBool(o["enabled"]) else {
         throw PolicyError(400, "bad-body", "send {\"enabled\": true|false}")
@@ -122,7 +126,7 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
     case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
-         (_, "gpu-memory"), (_, "settings/mouse-swipe"):
+         (_, "gpu-memory"), (_, "settings/mouse-swipe"), (_, "app-update"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")
@@ -583,7 +587,7 @@ func versionLess(_ a: String, _ b: String) -> Bool? {
 func versionGate(_ r: JobRequest, mac: String, vm: String) -> PolicyError? {
   if r.action == .update || mac == vm { return nil }
   if versionLess(mac, vm) == true {
-    return PolicyError(409, "mac-older", "this VM has OmacVM \(vm), the Mac \(mac): update the Mac first (omacvm update on the Mac)")
+    return PolicyError(409, "mac-older", "this VM has OmacVM \(vm), the Mac \(mac): update the Mac first (u in the control centre)")
   }
   if r.action == .disable || r.action == .reinstall || r.action == .graphics { return nil }
   return PolicyError(409, "update-first", "the Mac has OmacVM \(mac), this VM \(vm.isEmpty ? "none" : vm): update first")
@@ -600,6 +604,31 @@ func forwardGate(release: String, mac: String, vm: String) -> PolicyError? {
   }
   if versionLess(mac, release) == false && versionLess(vm, release) == false {
     return PolicyError(409, "not-newer", "the Mac and this VM have OmacVM \(release) already")
+  }
+  return nil
+}
+
+/// The Mac's omacvm is OmacVM.app's own copy (no checkout): the app updates
+/// it, never `omacvm update`.
+func cliIsAppCopy(_ cli: String, hasGit: Bool) -> Bool {
+  cli.hasSuffix(".app/Contents/Resources/omacvm/omacvm") && !hasGit
+}
+
+/// POST /omacvm/app-update: the Bridge only says yes; OmacVM.app (which relays
+/// the request) checks its own signed feed and updates itself. Only for the
+/// app's own VMs, only when the Mac's omacvm is the app's copy, only forward.
+func appUpdateGate(viaApp: Bool, vmType: String, macAppCopy: Bool, release: String?, mac: String) -> PolicyError? {
+  guard viaApp, vmType == "app" else {
+    return PolicyError(409, "not-app", "the Mac updates OmacVM.app only for its own VMs: update it on the Mac")
+  }
+  guard macAppCopy else {
+    return PolicyError(409, "not-app-copy", "this Mac has an OmacVM checkout: u updates the Mac and this VM as usual")
+  }
+  guard let release else {
+    return PolicyError(409, "no-update", "no verified update on the Mac: check for updates first")
+  }
+  guard versionLess(mac, release) == true else {
+    return PolicyError(409, "not-newer", "OmacVM.app has \(mac), the release \(release): nothing newer")
   }
   return nil
 }
