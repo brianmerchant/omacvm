@@ -1,0 +1,51 @@
+# box64 for the x86-apps feature: runs x86_64 Linux programs on the VM's ARM
+# CPU (it translates them; system libraries like glibc, GTK, X11, Wayland and
+# OpenGL stay the VM's own, native). Arch Linux ARM has no box64 package, so
+# OmacVM builds this one in the VM (install.sh here) and installs it with
+# pacman: `pacman -R box64` removes all of it.
+# Generic ARM64 build (not upstream's M1 profile: that one is for Asahi's
+# 16 KiB pages; Omarchy's kernel uses 4 KiB). The binfmt rule goes to
+# /usr/lib/binfmt.d, so systemd's pacman hook registers it; x86_64 programs
+# and AppImages then start like native ones. Upstream's x86 library bundle
+# (x86_64 part only) adds libraries box64 does not replace with the VM's own.
+pkgname=box64
+pkgver=0.4.4
+pkgrel=1
+pkgdesc="Linux userspace x86_64 emulator (built by OmacVM for its x86-apps feature)"
+arch=(aarch64)
+url="https://github.com/ptitSeb/box64"
+license=(MIT)
+depends=(glibc gcc-libs fuse2)   # fuse2: AppImages mount themselves through it
+makedepends=(cmake python)
+backup=(etc/box64.box64rc)
+options=(!debug !strip)
+source=("box64-$pkgver.tar.gz::https://github.com/ptitSeb/box64/archive/refs/tags/v$pkgver.tar.gz"
+        "https://github.com/ptitSeb/box64/releases/download/v$pkgver/box64-bundle-x86-libs-v$pkgver.tar.gz")
+noextract=("box64-bundle-x86-libs-v$pkgver.tar.gz")
+sha256sums=('99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029'
+            '1d4a8787a8a92267c1be673ec194c69e3bb33d14c800575d94131084142fcff0')
+
+build() {
+  cmake -S "box64-$pkgver" -B build \
+    -D CMAKE_BUILD_TYPE=RelWithDebInfo -D CMAKE_INSTALL_PREFIX=/usr \
+    -D ARM64=ON -D ARM_DYNAREC=ON -D NOGIT=ON
+  cmake --build build -j "$(nproc)"
+}
+
+package() {
+  # The bundle first: box64's own copies of the same libraries win.
+  rm -rf bundle; mkdir bundle
+  bsdtar -xf "box64-bundle-x86-libs-v$pkgver.tar.gz" -C bundle
+  install -d "$pkgdir/usr/lib"
+  cp -a bundle/usr/lib/box64-x86_64-linux-gnu "$pkgdir/usr/lib/"
+  DESTDIR="$pkgdir" cmake --install build
+  # Arch's place for packaged binfmt rules (/etc is the admin's).
+  install -d "$pkgdir/usr/lib/binfmt.d"
+  mv "$pkgdir/etc/binfmt.d/box64.conf" "$pkgdir/usr/lib/binfmt.d/box64.conf"
+  rmdir "$pkgdir/etc/binfmt.d"
+  strip --strip-debug "$pkgdir/usr/bin/box64"   # keeps its symbols; the x86 libraries are left as they are (!strip)
+  install -Dm644 "box64-$pkgver/LICENSE" -t "$pkgdir/usr/share/licenses/$pkgname"
+  # The rule must point at the installed box64.
+  grep -q ':/usr/bin/box64:$' "$pkgdir/usr/lib/binfmt.d/box64.conf" ||
+    { echo "box64: unexpected binfmt rule: $(cat "$pkgdir/usr/lib/binfmt.d/box64.conf")" >&2; return 1; }
+}
