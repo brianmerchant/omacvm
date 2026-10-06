@@ -60,9 +60,9 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
   Applications › Utilities). The shortcuts work again at once. From the
   Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
-- **⌃⌥ Esc showed "macOS did not switch the Space"**: macOS's "Move
-  left/right a space" shortcut did not move the Space (the VM stays full
-  screen; OmacVM never opens Mission Control). Check that the shortcuts are
+- **⌃⌥ Esc showed "macOS did not switch the Space"**: neither macOS's "Move
+  left/right a space" shortcut nor the swipe after it moved the Space (the
+  VM stays full screen; OmacVM never opens Mission Control). Check that the shortcuts are
   on in System Settings › Keyboard › Keyboard Shortcuts › Mission Control;
   a trackpad swipe works meanwhile. The Gestures log
   (`~/Library/Logs/omacvm-gestures.log`) says what happened ("escape combo:

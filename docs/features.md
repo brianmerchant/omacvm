@@ -79,8 +79,10 @@ Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
 EscapeSwipe all` (or `pointer`).
 
 Never out of full screen, and never Mission Control: every move is checked.
-If the shortcut is off, the Space did not change or macOS gives no Spaces
-information, Omarchy shows a short notice (which setting to turn on) and
+If the shortcut is off or did not move the Space (macOS 15 ignores it on a
+MacBook's built-in display), OmacVM swipes the Space like a trackpad. If that
+did not move it either, or macOS gives no Spaces information, Omarchy shows
+a short notice (which setting to turn on) and
 nothing else happens; the trackpad is macOS's, so a swipe still works.
 Back in, if the shortcut does not land, the VM's window comes to the front
 and macOS shows its Space.
