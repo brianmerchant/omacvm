@@ -65,6 +65,17 @@ in more words.
   they were still moving. It now hears every move and tells the Mac within
   half a second. In the VM, a reinstall of the guest files no longer stops
   the display agent.
+- OmacVM.app's VM window: Resources › Custom… sets CPUs and memory one by
+  one (from 4 GB; macOS always keeps an eighth of the memory, at least
+  2 GB, and a warning shows when it keeps too little). Disk shows what it takes on the Mac and its max: Grow… makes the
+  max larger with the VM off, and Omarchy grows into it at the next start;
+  Compact… gives the Mac back the space the VM no longer uses (the max
+  stays; making it smaller is not offered, it could lose the VM).
+  "omacvm in Terminal" Install links the app's own `omacvm` into
+  ~/.local/bin or /usr/local/bin (never over another omacvm); offered once
+  in the first setup. The keyboard note goes grey ("allowed, takes effect at
+  the next VM start") once OmacVM is allowed, checked again when the app
+  comes to the front.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).

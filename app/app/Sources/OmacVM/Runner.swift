@@ -440,6 +440,9 @@ final class Runner {
         startControl()
         // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
         Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
+        // Grow or Compact asked for in the window (VMDisk), once the guest answers.
+        let pid = p.processIdentifier
+        VMDisk.runJobs(config: c, agentPath: agentPath, running: { kill(pid, 0) == 0 })
     }
 
     /// What of the Mac this start of the VM may use (its features).
