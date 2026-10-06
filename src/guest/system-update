@@ -82,7 +82,7 @@ if [[ -z ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then
   # right after login): wait for it, as guest/install.sh does. A lock
   # without pacman is from an install that was cut off.
   for ((i = 0; i < 120; i++)); do
-    [[ -e /var/lib/pacman/db.lck ]] && pgrep -x pacman >/dev/null || break
+    if [[ ! -e /var/lib/pacman/db.lck ]] || ! pgrep -x pacman >/dev/null; then break; fi
     (( i )) || say "waiting for pacman ($(pgrep -ax pacman | head -1 | cut -c1-80))"
     sleep 5
   done
