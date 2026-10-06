@@ -582,6 +582,17 @@ round trip to QEMU (about 0.4 ms), and only `cache=loose` saves those, but
 it shows old content after the Mac changes a file. Build in the VM's own
 disk, keep sources on the Mac if you like.
 
+NFS instead of 9p (a user-space NFS server on the Mac, over QEMU's network,
+for comparison only): unpacking was 3x faster (5.6 s), the rest no better
+(big files 315/1227 MB/s, reading the small files 12 s, `stat` 5.6 s). It
+would need a server program, a port and its own access control, so the Mac
+folder stays on 9p. virtio-fs needs a Linux host daemon; QEMU on macOS has
+none.
+
+Tested on the Mac mini (a throwaway copy of a test VM, `tests/share/rig.sh`):
+the VM's unit mounts `~/Mac` at boot and the desktop user can write there;
+without a share it does nothing (18 ms) and leaves no `~/Mac`.
+
 ### Mac folder: not done yet
 
 - One folder per VM, read and write; no read-only switch.
