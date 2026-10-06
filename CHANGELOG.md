@@ -53,9 +53,12 @@ in more words.
   longer shows up on the display right under the notch strip for a few
   seconds at boot (a second copy came back for 3 s about 8 s after login),
   and the strip no longer shows a stretched or empty frame first. When the
-  strip showed at the end of the last session, the bar starts in the strip,
-  with the notch layout of then; if the VM is windowed now, Omanotch gives
-  the bar back at once (an older Omanotch: after 8 s).
+  strip showed at the end of the last session, or Omanotch sees the VM full
+  screen when it connects (also the first full-screen start after a windowed
+  one), the bar starts in the strip with the notch layout of then. A Mac
+  restart or an Omanotch quit with the VM running keeps that. If the VM is
+  windowed now, Omanotch gives the bar back as soon as it connects (an older
+  Omanotch, or none running: after 8 s).
 
 ## 3.0.0
 

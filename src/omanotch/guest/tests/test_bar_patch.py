@@ -133,13 +133,13 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertIn("// omarchy-notch-bar patch v16", self.text)
+        self.assertIn("// omarchy-notch-bar patch v17", self.text)
 
     def test_state_files_read_fresh_after_reload(self):
         # blockLoading alone: text() right after reload() gives the old content
         # (the "0" notchcast wrote at its start), which unparked the bar ~5 s
         # after login for one 3 s tick: two bars, one under the other.
-        for name in ("notchBeatFile", "notchParkFile", "notchExpectFile", "notchGeomFile"):
+        for name in ("notchBeatFile", "notchParkFile", "notchExpectFile", "notchGeomFile", "notchBuiltinFile"):
             self.assertIn("blockAllReads: true", file_view(self.text, name), name)
 
     def test_boot_reads_the_hint_once(self):
@@ -153,7 +153,7 @@ class Patch(unittest.TestCase):
             f = d / "Bar.qml"
             f.write_text(self.text)
             out = subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True, text=True)
-            self.assertIn("already patched (v16)", out.stdout)
+            self.assertIn("already patched (v17)", out.stdout)
             self.assertEqual(f.read_text(), self.text)
         finally:
             shutil.rmtree(d)
@@ -174,8 +174,10 @@ function fv(name) {
 const root = {
   notchParked: false, notchParkedScreen: "Virtual-1", notchLeft: 918, notchRight: 1138,
   notchHeight: 0, notchBarHeight: 0, notchLastBeat: 0, notchBootPark: false, notchBooted: false,
-  notchBootGraceMs: %(grace)s,
+  notchBootGraceMs: %(grace)s, notchStartedAt: now,
   notchBeatFile: fv("beat"), notchParkFile: fv("park"), notchExpectFile: fv("expect"), notchGeomFile: fv("geom"),
+  notchBuiltinFile: fv("builtin"), notchBootExpiry: { interval: 0, restart() { root.expiryAt = now + this.interval; } },
+  expiryAt: null,
 };
 const Date_ = { now: () => now };
 const scope = new Proxy(root, {
@@ -185,12 +187,19 @@ const scope = new Proxy(root, {
 });
 root.notchFollowParkFile = function () { with (scope) { %(follow)s } };
 root.notchBoot = function () { with (scope) { %(boot)s } };
+root.notchBootParkOn = function (name) { with (scope) { %(bootparkon)s } };
+root.notchWatchdog = function () { with (scope) { %(watchdog)s } };
+root.notchArmExpiry = function () { with (scope) { %(armexpiry)s } };
+function bootPark(name) { with (scope) { %(bootpark)s } }
 function tick() { with (scope) { %(tick)s } }
 const seen = [];
 for (const step of %(steps)s) {
   if (step.files) Object.assign(files, step.files);
   if (step.at !== undefined) now = step.at;
   if (step.ipc === "setParked") { root.notchLastBeat = now; root.notchBootPark = false; root.notchParked = step.on; }
+  if (step.ipc === "bootPark") bootPark(step.name);
+  // The one-shot grace timer fires when its time has come.
+  if (root.expiryAt !== null && now >= root.expiryAt) { root.expiryAt = null; root.notchWatchdog(); }
   if (step.tick) tick();
   seen.push({ parked: root.notchParked, screen: root.notchParkedScreen });
 }
@@ -212,6 +221,8 @@ class Behaviour(unittest.TestCase):
             "files": json.dumps(files), "now": self.START, "steps": json.dumps(steps),
             "grace": re.search(r"notchBootGraceMs: (\d+)", text).group(1),
             "follow": function(text, "notchFollowParkFile"), "boot": function(text, "notchBoot"), "tick": tick,
+            "bootparkon": function(text, "notchBootParkOn"), "watchdog": function(text, "notchWatchdog"),
+            "bootpark": function(text, "bootPark"), "armexpiry": function(text, "notchArmExpiry"),
         }
         out = subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True)
         return json.loads(out.stdout)
@@ -297,6 +308,119 @@ class Behaviour(unittest.TestCase):
         beat = str(self.START - 1000)
         r = self.run_js({"expect": "0\n", "park": "1 Virtual-1\n", "beat": beat}, self.ticks(1))
         self.assertTrue(r["seen"][0]["parked"])
+
+    def test_not_confirmed_comes_back_on_time(self):
+        # The one-shot grace timer, not the next 3 s tick.
+        steps = self.ticks(1) + [{"at": self.START + 7900}, {"at": self.START + 8100}]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "0\n"}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [True, True, False])
+        self.assertEqual(r["written"].get("expect"), "0\n")
+
+    def test_connected_waiting_keeps_the_guess(self):
+        # notchcast is connected ("w") but the strip's first frame takes long:
+        # parked past the grace time, back 15 s after the last beat if no
+        # word comes.
+        steps = self.ticks(1) + [{"at": self.START + 2000, "files": {"park": "w Virtual-1\n",
+                                                                     "beat": str(self.START + 2000)}}]
+        steps += [{"tick": True, "at": self.START + 3000 * i} for i in range(1, 6)]  # to +15 s
+        steps += [{"tick": True, "at": self.START + 18000}]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "0\n"}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [True] * 7 + [False])
+        self.assertEqual(r["written"].get("expect"), "0\n")
+
+    def test_connected_waiting_then_confirmed(self):
+        steps = self.ticks(1) + [
+            {"at": self.START + 2000, "files": {"park": "w Virtual-1\n", "beat": str(self.START + 2000)}},
+            {"tick": True, "at": self.START + 3000},
+            {"tick": True, "at": self.START + 6000},
+            {"at": self.START + 7000, "files": {"park": "1 Virtual-1\n", "beat": str(self.START + 7000)}},
+            {"ipc": "setParked", "on": True},
+        ]
+        steps += [{"tick": True, "at": self.START + 9000 + 3000 * i, "files": {"beat": str(self.START + 8000 + 3000 * i)}}
+                  for i in range(6)]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "0\n"}, steps)
+        self.assertTrue(all(s["parked"] for s in r["seen"]), r["seen"])
+        self.assertNotIn("expect", r["written"])
+
+    def test_connected_before_the_shell_started(self):
+        # Boot: notchcast connected (and wrote "w" with a beat) 1.5 s before
+        # the shell's bar came up. That beat still counts for the wait.
+        steps = self.ticks(1) + [{"tick": True, "at": self.START + 3000 * i} for i in range(1, 5)]
+        steps += [{"at": self.START + 13600}]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "w Virtual-1\n", "beat": str(self.START - 1500)}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [True] * 5 + [False])  # 15 s after the beat
+
+    def test_waiting_changes_nothing_when_not_guessing(self):
+        steps = self.ticks(1) + [
+            {"at": self.START + 2000, "files": {"park": "w Virtual-1\n", "beat": str(self.START + 2000)}},
+            {"tick": True, "at": self.START + 3000},
+        ]
+        r = self.run_js({"expect": "0\n", "park": "0\n"}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [False, False, False])
+
+    def test_hint_after_a_windowed_session(self):
+        # The hint said "0" (windowed last time); Omanotch sees full screen at
+        # connect: notchcast writes expect 1, "w" and a beat, and calls bootPark.
+        steps = self.ticks(1) + [
+            {"at": self.START + 500, "files": {"expect": "1 Virtual-1\n", "park": "w Virtual-1\n",
+                                               "beat": str(self.START + 500)}},
+            {"ipc": "bootPark", "name": "Virtual-1"},
+            {"tick": True, "at": self.START + 3000},
+            {"at": self.START + 3500, "files": {"park": "1 Virtual-1\n", "beat": str(self.START + 3500)}},
+            {"ipc": "setParked", "on": True},
+            {"tick": True, "at": self.START + 6000},
+            {"at": self.START + 9000},
+        ]
+        r = self.run_js({"expect": "0\n", "park": "0\n"}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [False, False, True, True, True, True, True, True])
+        self.assertNotIn("expect", r["written"])
+
+    def test_hint_while_parked_changes_nothing(self):
+        steps = [{"at": self.START, "files": {"park": "1 Virtual-1\n", "beat": str(self.START - 500)}, "tick": True},
+                 {"ipc": "bootPark", "name": "Virtual-3"}]
+        r = self.run_js({"expect": "0\n"}, steps)
+        self.assertEqual(r["seen"][-1], {"parked": True, "screen": "Virtual-1"})
+
+    def test_builtin_display_named_by_the_app(self):
+        # OmacVM.app with external displays: the built-in display is another
+        # output than in the last session.
+        r = self.run_js({"expect": "1 Virtual-1\n", "builtin": "Virtual-2\n"}, self.ticks(1))
+        self.assertEqual(r["seen"][0], {"parked": True, "screen": "Virtual-2"})
+        r = self.run_js({"expect": "1 Virtual-1\n", "builtin": "../x\n"}, self.ticks(1))
+        self.assertEqual(r["seen"][0], {"parked": True, "screen": "Virtual-1"})
+
+    def test_power_off_beat_of_the_last_boot_is_ignored(self):
+        # Killed notchcast (power-off): its beat stays, and a reboot within
+        # 15 s finds it fresh next to the new notchcast's start-up "0".
+        steps = [{"tick": True, "at": self.START, "files": {"beat": str(self.START - 6000)}},
+                 {"at": self.START + 1000, "files": {"park": "0\n"}},
+                 {"tick": True, "at": self.START + 3000}]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "1 Virtual-1\n"}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [True, True, True])
+
+    def test_shell_restart_with_the_hint_keeps_the_bar_parked(self):
+        # Mid-session restart while the strip shows: parked from the hint, the
+        # next beat (after the start) confirms it.
+        steps = self.ticks(1) + [
+            {"tick": True, "at": self.START + 3000, "files": {"beat": str(self.START + 2000)}},
+            {"at": self.START + 9000},
+            {"tick": True, "at": self.START + 12000, "files": {"beat": str(self.START + 10000)}},
+        ]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "1 Virtual-1\n", "beat": str(self.START - 1000)}, steps)
+        self.assertTrue(all(s["parked"] for s in r["seen"]), r["seen"])
+        self.assertNotIn("expect", r["written"])
+
+    def test_helper_gone_brings_the_bar_back_and_keeps_the_hint(self):
+        # notchcast's "park 0 gone": park 0 and a beat, the hint file untouched.
+        steps = self.ticks(1) + [
+            {"at": self.START + 2000, "files": {"park": "1 Virtual-1\n", "beat": str(self.START + 2000)}},
+            {"ipc": "setParked", "on": True},
+            {"at": self.START + 5000, "files": {"park": "0\n", "beat": str(self.START + 5000)}},
+            {"tick": True, "at": self.START + 6000},
+        ]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "0\n"}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [True, True, True, True, False])
+        self.assertNotIn("expect", r["written"])
 
     def test_geometry_of_the_last_session(self):
         r = self.run_js({"geom": "646 825 33 0\n"}, self.ticks(1))

@@ -312,7 +312,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
         evaluate()
         if connected {
-            for c in state.connected(id, served: frontGuest == id) { link.send(c.line, to: c.guest) }
+            let seen: ParkState.Seen = frontGuest == id ? .fullScreen
+                : StripDetector.detect(vmOwners: settings.vmOwners, onScreenOnly: false) != nil ? .otherSpace : .none
+            for c in state.connected(id, seen: seen) { link.send(c.line, to: c.guest) }
         }
     }
 

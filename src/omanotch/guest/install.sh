@@ -39,7 +39,6 @@ done
 say "building notchcast"
 build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
-
 cp "$here/notchcast/notchcast.c" "$here/notchcast/notch-place.h" "$here/notchcast/notchrule.h" "$here/notchcast/build.sh" "$build/"
 bash "$build/build.sh" "$build/out" >/dev/null
 mkdir -p "$bin"

@@ -540,16 +540,20 @@ static void state_path(char *out, size_t size, const char *name) {
 }
 
 // Heartbeat for the bar's watchdog: the time in ms, rewritten in place.
+// The worker and the net thread both write it.
+static pthread_mutex_t beat_lock = PTHREAD_MUTEX_INITIALIZER;
 static void write_beat(void) {
     char path[600];
     state_path(path, sizeof path, "beat");
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
+    pthread_mutex_lock(&beat_lock);
     FILE *f = fopen(path, "w");
     if (f) {
         fprintf(f, "%.0f\n", ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6);
         fclose(f);
     }
+    pthread_mutex_unlock(&beat_lock);
 }
 
 // The parking the helper asked for, for a shell that starts (or restarts)
@@ -567,12 +571,33 @@ static void write_park(int on) {
     fclose(f);
 }
 
+// "w <output>": connected to Omanotch, its word on the strip still to come
+// (bar patch v17+). A bar parked on the boot hint stays parked while the
+// beat that goes with it is fresh, however long the strip's first frame
+// takes; a bar that is not parked ignores it.
+static void write_park_wait(void) {
+    char path[600], scr[64];
+    state_path(path, sizeof path, "park");
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "w %s\n", screen_name(scr));
+    fclose(f);
+}
+
+static void remove_beat(void) {
+    char path[600];
+    state_path(path, sizeof path, "beat");
+    unlink(path);
+}
+
 // Whether the strip showed when this was last decided, for the next start of
 // the shell: "1 <output>" while the helper keeps the bar parked, "0" once it
-// says the strip is hidden or goes away. Unlike `park` it survives a reboot:
-// the bar (patch v16+) starts parked on it, so the first desktop frame after
-// login already has the bar in the strip only. A stop of notchcast (the
-// session ending) leaves it alone.
+// says the strip is hidden. Unlike `park` it survives a reboot: the bar
+// (patch v17+) starts parked on it, so the first desktop frame after login
+// already has the bar in the strip only. Only the helper's own word changes
+// it: a helper that goes away (the Mac restarting with the VM running,
+// Omanotch quit or updated) and a stop of notchcast (the session ending)
+// leave it alone.
 static void write_expect(int on) {
     char path[600], scr[64];
     state_path(path, sizeof path, "expect");
@@ -581,6 +606,16 @@ static void write_expect(int on) {
     if (on) fprintf(f, "1 %s\n", screen_name(scr));
     else fputs("0\n", f);
     fclose(f);
+}
+
+static int read_expect(void) {
+    char path[600], buf[8] = "";
+    state_path(path, sizeof path, "expect");
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int on = fgets(buf, sizeof buf, f) && !strncmp(buf, "1 ", 2);
+    fclose(f);
+    return on;
 }
 
 // The bar's own report (bar patch v9+): {"parked":…,"barSize":…,"started":…}.
@@ -860,6 +895,11 @@ static int is_number(const char *s) {
 #define BEAT_EVERY_MS 4000
 static int bar_parked = -1;
 static double bar_beat_ms;
+// bar_parked == 1, for the net thread (see net_thread).
+static atomic_int parked_now;
+// The park file says "w" (wait, hint): the helper's next park is written
+// whatever bar_parked says.
+static int park_waiting;
 static char want_notch_l[32], want_notch_r[32], want_strip[32], want_bar[32];
 static char sent_notch_l[32], sent_notch_r[32], sent_strip[32], sent_bar[32];
 
@@ -949,10 +989,13 @@ static void handle_command(char *line) {
     // heartbeat every few seconds, and the notch geometry is only passed on
     // when it changes, or again when the heartbeat shows that the shell was
     // restarted (it then starts unparked, from its defaults).
-    if (!strcmp(c, "park") && argc == 2) {
+    // "park 0 gone" comes from the net thread when the helper disconnects:
+    // the bar comes back, but the boot hint stays (see write_expect).
+    int gone = argc == 3 && !strcmp(c, "park") && !strcmp(argv[1], "0") && !strcmp(argv[2], "gone");
+    if (!strcmp(c, "park") && (argc == 2 || gone)) {
         int on = !strcmp(argv[1], "1");
         double now = now_ms();
-        if (on != bar_parked || now - bar_beat_ms > BEAT_EVERY_MS) {
+        if (on != bar_parked || park_waiting || now - bar_beat_ms > BEAT_EVERY_MS) {
             int fresh = 0;
             if (on && bar_parked == 1) {
                 write_beat();
@@ -971,22 +1014,28 @@ static void handle_command(char *line) {
                     free(r);
                 }
             }
-            if (on != bar_parked || fresh) {
+            if (on != bar_parked || fresh || park_waiting) {
                 char scr[64];
+                park_waiting = 0;
                 // Files first: a shell starting right now reads them, and the
                 // bar follows them by itself when an IPC call goes nowhere
                 // (the shell still loading). The beat goes last: a bar that
                 // sees it fresh must find the new park file.
                 write_park(on);
                 write_beat();
-                if (on != bar_parked) write_expect(on);
                 free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
                 free(ipc_call(0, "setParked", on ? "true" : "false", NULL, NULL));
                 if (on && fresh) sync_geometry(1);
             }
             bar_parked = on;
+            atomic_store(&parked_now, on == 1);
             bar_beat_ms = now;
         }
+        // Outside the throttle: a "park 0" right after the helper went away
+        // (bar already back) must still clear the hint. The file, not a copy
+        // here: the bar writes "0" into it itself when its guess was not
+        // confirmed.
+        if (!gone && on != read_expect()) write_expect(on);
     } else if (!strcmp(c, "screen") && argc == 1) {
         // The built-in display is another output now (update_screen).
         char scr[64];
@@ -994,6 +1043,28 @@ static void handle_command(char *line) {
             write_park(1);
             write_expect(1);
             free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
+        }
+    } else if (!strcmp(c, "wait") && argc == 1) {
+        // From the net thread, connected: a bar parked on the boot hint
+        // waits for the helper's word instead of its own grace time.
+        if (bar_parked != 1 && read_expect()) {
+            write_park_wait();
+            write_beat();
+            park_waiting = 1;
+        }
+    } else if (!strcmp(c, "hint") && argc == 2 && !strcmp(argv[1], "1")) {
+        // The helper sees the VM full screen on the built-in display: the
+        // strip is coming. Park the bar now (also after a windowed session,
+        // when the boot hint said "0"), so the display shows no bar that
+        // then moves into the strip. park 1 follows with the strip's first
+        // frame; if it never does, the bar's grace time brings the bar back.
+        if (bar_parked != 1) {
+            char scr[64];
+            write_expect(1);
+            write_park_wait();
+            write_beat();
+            park_waiting = 1;
+            free(ipc_call(0, "bootPark", screen_name(scr), NULL, NULL));
         }
     } else if (!strcmp(c, "beat") && argc == 1) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
@@ -1281,6 +1352,7 @@ static void *net_thread(void *unused) {
         pthread_mutex_unlock(&lock);
         send_hello();
         send_cursors();
+        enqueue_command("wait");
         // OmacVM.app: wake every 2 s to see whether the app moved the VM to
         // the other network (the old path may stay silent, not closed).
         if (app) {
@@ -1308,8 +1380,21 @@ static void *net_thread(void *unused) {
             char *start = buf, *nl;
             while ((nl = memchr(start, '\n', len - (size_t)(start - buf)))) {
                 *nl = 0;
-                if (!strncmp(start, "cursor ", 7)) handle_command(start);  // fast path
-                else enqueue_command(start);
+                if (!strncmp(start, "cursor ", 7)) {
+                    handle_command(start);  // fast path
+                } else {
+                    // The helper's "park 1" every 2 s keeps the bar's beat
+                    // going from here too: while a shell starts, the
+                    // worker's `qs ipc` calls can hang for many seconds, and
+                    // the bar's watchdog must not take that for a helper
+                    // that went away.
+                    static double net_beat_ms;
+                    if (!strcmp(start, "park 1") && atomic_load(&parked_now) && now_ms() - net_beat_ms > BEAT_EVERY_MS) {
+                        write_beat();
+                        net_beat_ms = now_ms();
+                    }
+                    enqueue_command(start);
+                }
                 start = nl + 1;
             }
             len -= (size_t)(start - buf);
@@ -1317,7 +1402,7 @@ static void *net_thread(void *unused) {
             if (len >= sizeof buf - 1) len = 0;  // oversized line: discard
         }
         LOG("helper disconnected");
-        enqueue_command("park 0");  // bring the bar back now, not after the watchdog
+        enqueue_command("park 0 gone");  // bring the bar back now, not after the watchdog
         pthread_mutex_lock(&lock);
         if (sock_fd == fd) sock_fd = -1;
         pthread_mutex_unlock(&lock);
@@ -1889,9 +1974,9 @@ static void fill_cursor(uint8_t *px, double cx, double cy) {
     }
 }
 
-// The first frame of a capture session goes out only once the bar has a copy
-// on the hidden output. Before that the output shows the bare wallpaper or
-// Hyprland's grey, and the strip would flash it on its way to the bar. Not
+// The first frame of a capture session is only asked for once the bar has a
+// copy on the hidden output. Before that the output shows the bare wallpaper
+// or Hyprland's grey, and the strip would flash it on its way to the bar. Not
 // longer than BAR_GATE_MS: a bar that never comes must not keep the strip dark.
 #define BAR_GATE_MS 4000
 static int bar_on_output(void) {
@@ -1934,11 +2019,21 @@ static void capture_session(struct wl_output *out) {
     fmt = sess_fmt;
     pthread_mutex_unlock(&lock);
     LOG("capturing %s: %ux%u format 0x%x scale %.2f", cfg_output, W, H, fmt, out_scale);
-    // A capture only completes when the output repaints; ask the bar for one
-    // so the helper gets its first frame straight away.
-    if (!have_frame) free(ipc_call(0, "poke", NULL, NULL, NULL));
-    double session_ms = now_ms();
-    int held = 0;
+    if (!have_frame) {
+        // Checked before the first frame is asked for, every 100 ms, so the
+        // wait ends on time whether or not the output repaints meanwhile.
+        double gate_ms = now_ms();
+        int held = 0;
+        while (!bar_on_output() && now_ms() - gate_ms < BAR_GATE_MS && !sess_stopped) {
+            if (!held++) LOG("first frame held until the bar is on %s", cfg_output);
+            usleep(100000);
+            if (wl_display_roundtrip(dpy) < 0) break;
+        }
+        if (held) LOG("bar %s after %.0f ms", bar_on_output() ? "on the output" : "not there", now_ms() - gate_ms);
+        // A capture only completes when the output repaints; ask the bar for
+        // one so the helper gets its first frame straight away.
+        free(ipc_call(0, "poke", NULL, NULL, NULL));
+    }
 
     double pcx = -1e9, pcy = -1e9;  // cursor position at the previous frame
     while (!sess_stopped && !outputs_changed && !atomic_load(&remake_output)) {
@@ -1961,20 +2056,6 @@ static void capture_session(struct wl_output *out) {
             if (frame_failed - 1 == EXT_IMAGE_COPY_CAPTURE_FRAME_V1_FAILURE_REASON_BUFFER_CONSTRAINTS) break;
             usleep(50000);
             continue;
-        }
-        // have_frame is only written on this thread.
-        if (!have_frame && now_ms() - session_ms < BAR_GATE_MS) {
-            if (!bar_on_output()) {
-                if (!held++) LOG("first frame held until the bar is on %s", cfg_output);
-                continue;  // the bar's arrival repaints the output
-            }
-            if (held) {
-                // This frame may have been drawn just before the bar: take
-                // the next one, which the poke asks for.
-                held = 0;
-                free(ipc_call(0, "poke", NULL, NULL, NULL));
-                continue;
-            }
         }
         double t0 = now_ms();
         double cx, cy;
@@ -2047,9 +2128,7 @@ static void *signal_thread(void *arg) {
     write_park(0);
     // No beat from a notchcast that is gone: a shell that starts soon (a quick
     // reboot) must not take the "0" above for this session's word.
-    char path[600];
-    state_path(path, sizeof path, "beat");
-    unlink(path);
+    remove_beat();
     _exit(0);
     return NULL;
 }
@@ -2083,7 +2162,11 @@ int main(int argc, char **argv) {
     if (getenv("NOTCHBAR_SCREEN"))
         snprintf(cfg_screen_buf, sizeof cfg_screen_buf, "%s", getenv("NOTCHBAR_SCREEN"));
     update_screen();
-    write_park(0);  // nothing is parked until the helper says so
+    // Nothing is parked until the helper says so. A beat left by a notchcast
+    // that was killed (power-off) goes first, so the bar does not take this
+    // "0" for the current word.
+    remove_beat();
+    write_park(0);
     const char *op = getenv("OMARCHY_PATH") ? getenv("OMARCHY_PATH") : "/usr/share/omarchy";
     if (asprintf((char **)&cfg_shell, "%s/shell", op) < 0) return 1;
 

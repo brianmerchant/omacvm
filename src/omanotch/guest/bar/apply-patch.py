@@ -34,7 +34,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 16
+VERSION = 17
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -241,6 +241,15 @@ def main():
       root.notchBootPark = false
       return root.notchParked ? "parked" : "unparked"
     }
+    // Omanotch saw the VM full screen on the built-in display when it
+    // connected: the strip is coming. Parked now, as with the boot hint, so
+    // the display shows no bar of its own in the meantime (after a windowed
+    // session the hint said "0").
+    function bootPark(name: string): string {
+      if (root.notchParked && !root.notchBootPark) return "parked"
+      root.notchBootParkOn(name)
+      return "boot-parked"
+    }
     function click(x: real, y: real, button: int): string {
       // bar-off or fullscreen: nothing is shown in the strip
       if (root.barHidden || root.notchFullscreen) return "miss"
@@ -316,10 +325,24 @@ def main():
     notchBeatFile.reload()
     var beat = parseFloat(String(notchBeatFile.text()).trim())
     if (!(beat > 0) || Date.now() - beat > 15000) return
-    if (beat > notchLastBeat) notchLastBeat = beat
-    notchBootPark = false
     notchParkFile.reload()
     var p = String(notchParkFile.text()).trim().split(/\\s+/)
+    // "w <output>": notchcast is connected and waits for Omanotch's word
+    // (often since before this shell started). Keeps a boot-parked bar
+    // parked up to 15 s after that beat (the strip's first frame can take a
+    // few seconds); changes nothing else.
+    if (p[0] === "w") {
+      if (notchBootPark && beat > notchLastBeat) {
+        notchLastBeat = beat
+        notchArmExpiry()
+      }
+      return
+    }
+    // Parked on the boot hint: any other word from before this shell started
+    // may be the last boot's (a power-off leaves it); wait for a new one.
+    if (notchBootPark && beat < notchStartedAt) return
+    if (beat > notchLastBeat) notchLastBeat = beat
+    notchBootPark = false
     if (p[0] === "1" && p.length === 2 && /^[A-Za-z0-9_.-]+$/.test(p[1])) {
       if (notchParkedScreen !== p[1]) notchParkedScreen = p[1]
       if (!notchParked) notchParked = true
@@ -339,6 +362,36 @@ def main():
   // lays out the NOTCH copy right from its first frame.
   readonly property real notchBootGraceMs: 8000
   property bool notchBootPark: false
+  // OmacVM.app with external displays: the built-in display may be another
+  // output than in the last session; this file names it (when it is there yet).
+  FileView {
+    id: notchBuiltinFile
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/omacvm/builtin"
+    blockLoading: true
+    blockAllReads: true
+    printErrors: false
+  }
+  function notchBootParkOn(name) {
+    notchBuiltinFile.reload()
+    var b = String(notchBuiltinFile.text()).trim()
+    if (/^Virtual-[0-9]+$/.test(b)) name = b
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) return
+    notchParkedScreen = name
+    notchLastBeat = Date.now() - 15000 + notchBootGraceMs
+    notchBootPark = true
+    notchParked = true
+    notchArmExpiry()
+  }
+  // Brings a guessed bar back on time when nothing confirms the guess (the
+  // 3 s timer alone would make it up to 3 s later).
+  Timer {
+    id: notchBootExpiry
+    onTriggered: root.notchWatchdog()
+  }
+  function notchArmExpiry() {
+    notchBootExpiry.interval = Math.max(50, notchLastBeat + 15000 - Date.now() + 50)
+    notchBootExpiry.restart()
+  }
   FileView {
     id: notchExpectFile
     path: root.notchStateDir + "/expect"
@@ -361,17 +414,23 @@ def main():
       notchHeight = g[2] > 0 && g[2] < 200 ? g[2] : 0
       notchBarHeight = g[3] > 0 && g[3] < 200 ? g[3] : 0
     }
-    notchFollowParkFile()
-    if (notchParked) return
+    // The hint first: parked on it, the park file is only followed with a
+    // beat from after this shell's start (a power-off leaves the last
+    // boot's beat and park file behind).
     var e = String(notchExpectFile.text()).trim().split(/\\s+/)
-    if (e[0] === "1" && e.length === 2 && /^[A-Za-z0-9_.-]+$/.test(e[1])) {
-      notchParkedScreen = e[1]
-      notchLastBeat = Date.now() - 15000 + notchBootGraceMs
-      notchBootPark = true
-      notchParked = true
-    }
+    if (e[0] === "1" && e.length === 2 && /^[A-Za-z0-9_.-]+$/.test(e[1])) notchBootParkOn(e[1])
+    notchFollowParkFile()
   }
   property bool notchBooted: false
+  function notchWatchdog() {
+    if (notchParked && Date.now() - notchLastBeat > 15000) {
+      notchParked = false
+      if (notchBootPark) {
+        notchBootPark = false
+        notchExpectFile.setText("0\\n")
+      }
+    }
+  }
 
   // Follows the park file (at once when the shell starts: a restarted shell
   // must not wait for the next IPC call), and unparks when the helper goes
@@ -391,13 +450,7 @@ def main():
       } else {
         root.notchFollowParkFile()
       }
-      if (root.notchParked && Date.now() - root.notchLastBeat > 15000) {
-        root.notchParked = false
-        if (root.notchBootPark) {
-          root.notchBootPark = false
-          notchExpectFile.setText("0\\n")
-        }
-      }
+      root.notchWatchdog()
     }
   }
 

@@ -57,7 +57,7 @@ static inline int layer_on_output(const char *json, const char *output, const ch
     return 0;
 }
 
-// The geometry file the bar reads when it starts (bar patch v16+):
+// The geometry file the bar reads when it starts (bar patch v17+):
 // "left right strip bar" in the built-in display's logical px. Empty values
 // are "0" (not known yet).
 static inline void geom_line(char *out, size_t size, const char *l, const char *r, const char *strip,
