@@ -53,13 +53,15 @@ struct GPUMemory: Equatable {
     }
 
     /// Why a context was lost, for the alert. A refusal with macOS's pressure
-    /// normal and the peak at the budget came from the budget (all graphics
-    /// together at three quarters of the Mac), not from macOS running short:
-    /// on an 8 GB Mac a browser with big WebGL pages gets there while macOS
-    /// still says normal (Air M2, 2026-10-06).
+    /// normal and the graphics in use at the budget came from the budget (all
+    /// graphics together at three quarters of the Mac), not from macOS running
+    /// short: on an 8 GB Mac a browser with big WebGL pages gets there while
+    /// macOS still says normal (Air M2, 2026-10-06). In use, not the peak: the
+    /// peak counts from the VM's start, so after one hit every later loss
+    /// would blame the budget.
     var lostReason: String {
         if refused == 0 && pressure == "normal" { return "Its graphics on the Mac failed." }
-        if pressure == "normal" && budgetMB > 0 && peakMB + 512 >= budgetMB {
+        if pressure == "normal" && budgetMB > 0 && inUseMB + 512 >= budgetMB {
             return "Its graphics reached the most one VM may use on this Mac (\(GPUMemory.gb(budgetMB)))."
         }
         return "macOS ran short of memory for its graphics."
@@ -76,7 +78,8 @@ struct GPUMemory: Equatable {
         VM memory is the Mac memory the VM gets as its RAM (set above). Graphics memory \
         is extra: the textures and buffers the VM's desktop and apps draw with, taken \
         from the Mac's memory as they need it (a 5K desktop with a browser: about 2 GB). \
-        There is no fixed limit; only when macOS itself runs short are new big ones refused.
+        New ones are refused when macOS itself runs short, or when all of them together \
+        reach three quarters of the Mac's memory.
         """
 }
 
@@ -187,8 +190,8 @@ final class GPUMemoryWatch {
         let socket = config.agentSocket.path
         log("OmacVM: restarting the VM's desktop session")
         DispatchQueue.global(qos: .userInitiated).async {
-            // The login manager starts again and logs the user in again
-            // (Omarchy's SDDM autologin runs when SDDM starts).
+            // The login manager starts again: with SDDM autologin on it logs
+            // the user in again, with it off it shows the login screen.
             GuestAgent.run(socketPath: socket, "/usr/bin/systemctl", ["restart", "sddm"])
         }
     }
