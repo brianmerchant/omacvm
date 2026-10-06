@@ -61,10 +61,20 @@ enum GuestAgent {
     /// Arguments are passed as they are, no shell in between.
     @discardableResult
     static func run(socketPath: String, _ path: String, _ args: [String]) -> Bool {
+        start(socketPath: socketPath, path, args) == .started
+    }
+
+    enum Start { case started, refused, noAnswer }
+
+    /// As `run`, and tells a refusal (the agent answered with an error, such
+    /// as no such program in the VM) from no answer (the program may still
+    /// have started).
+    static func start(socketPath: String, _ path: String, _ args: [String]) -> Start {
         let body: [String: Any] = ["execute": "guest-exec", "arguments": ["path": path, "arg": args]]
         guard let json = try? JSONSerialization.data(withJSONObject: body),
-              let command = String(data: json, encoding: .utf8) else { return false }
-        return execute(socketPath: socketPath, command)?.contains("\"return\"") == true
+              let command = String(data: json, encoding: .utf8) else { return .refused }
+        guard let reply = execute(socketPath: socketPath, command) else { return .noAnswer }
+        return reply.contains("\"return\"") ? .started : .refused
     }
 
     /// Sends one command and waits up to two seconds for its one-line reply.

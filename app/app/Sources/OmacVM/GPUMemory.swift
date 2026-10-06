@@ -176,15 +176,18 @@ final class GPUMemoryWatch {
     }
 
     /// Runs a program in the VM off the main thread. A VM set up before
-    /// omacvm-desktop-recover (3.0.0) has no such program: the login manager
-    /// is restarted directly there (no note in the new session).
+    /// omacvm-desktop-recover (3.0.0) has no such program (the agent refuses):
+    /// the login manager is restarted directly there (no note in the new
+    /// session). Not when the agent did not answer: the restart may be under
+    /// way, and a second one would end the new session too.
     private func guest(_ path: String, _ args: [String], done: @escaping @MainActor (Bool) -> Void) {
         let socket = config.agentSocket.path
         DispatchQueue.global(qos: .userInitiated).async {
-            var ok = GuestAgent.run(socketPath: socket, path, args)
-            if !ok, args.first == "desktop" {
-                ok = GuestAgent.run(socketPath: socket, "/usr/bin/systemctl", ["restart", "sddm"])
+            var result = GuestAgent.start(socketPath: socket, path, args)
+            if result == .refused, args.first == "desktop" {
+                result = GuestAgent.start(socketPath: socket, "/usr/bin/systemctl", ["restart", "sddm"])
             }
+            let ok = result == .started
             Task { @MainActor in done(ok) }
         }
     }
