@@ -1,0 +1,240 @@
+#!/usr/bin/python3 -I
+"""omacvm-touchid: the Mac's Touch ID for sudo and polkit in the VM (ADR 0041).
+
+PAM runs it as root, in /etc/pam.d/sudo and /etc/pam.d/polkit-1 only:
+  auth sufficient pam_exec.so quiet seteuid stdout /usr/lib/omacvm/omacvm-touchid
+Exit 0 only for a "yes" the Mac signed for this very request. Anything else
+is 1, and PAM asks for the password as before.
+
+  omacvm-touchid --note USER ACTION   the polkit rule (as polkitd): which action USER was just asked for
+
+Keys (root, 0600, put there by omacvm apply): /etc/omacvm/touchid-key (this
+VM's Touch ID key, the Mac has the same) and /etc/omacvm/touchid-token (the
+Bridge token, only sent to a Bridge that proved it knows it).
+"""
+import hashlib
+import hmac
+import http.client
+import json
+import os
+import pwd
+import re
+import secrets
+import subprocess
+import sys
+import time
+
+# Tests only (not as root): another folder for the files, the Bridge's
+# address and the session's answer. PAM's own runs take nothing from the
+# environment but the PAM_* items.
+TEST = os.environ.get("OMACVM_TOUCHID_TEST") == "1" and os.geteuid() != 0
+E = os.environ if TEST else {}
+ETC = E.get("OMACVM_TOUCHID_ETC", "/etc/omacvm")
+RUN = E.get("OMACVM_TOUCHID_RUN", "/run/omacvm-touchid")
+PROC = E.get("OMACVM_TOUCHID_PROC", "/proc")
+PORT = int(E.get("OMACVM_TOUCHID_PORT", "47831"))
+CONNECT_TIMEOUT = 1.0
+ANSWER_TIMEOUT = 35.0
+NOTE_AGE = 5
+WHY = {"locked": "Mac locked", "not-front": "VM not in front", "no-touch-id": "no Touch ID",
+       "lockout": "too many tries", "rate": "too many tries", "busy": "another Touch ID prompt is open",
+       "off": "Touch ID off"}
+
+
+def say(s):
+    print(s, flush=True)
+
+
+def read(path, limit=4096):
+    with open(path, "rb") as f:
+        return f.read(limit)
+
+
+def env_file():
+    out = {}
+    try:
+        for line in read(ETC + "/env", 65536).decode(errors="replace").splitlines():
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip().strip("'\"")
+    except OSError:
+        pass
+    return out
+
+
+def secret(name):
+    p = f"{ETC}/{name}"
+    st = os.lstat(p)
+    if not TEST and (st.st_uid != 0 or st.st_mode & 0o077):
+        raise PermissionError(p)
+    k = read(p, 256).strip()
+    if len(k) < 32:
+        raise ValueError(p)
+    return k
+
+
+def mac(key, text):
+    return hmac.new(key, text.encode(), hashlib.sha256).hexdigest()
+
+
+def note(user, action):
+    """The polkit rule says which action this user was asked for (as polkitd)."""
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", user) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", action):
+        return 1
+    tmp = f"{RUN}/.{user}.{os.getpid()}"
+    with open(tmp, "w") as f:
+        f.write(f"{int(time.time())} {action}\n")
+    os.replace(tmp, f"{RUN}/{user}")
+    return 0
+
+
+def local_session(user):
+    """Only someone at the VM's own screen asks: never over SSH."""
+    if TEST:
+        return E.get("OMACVM_TOUCHID_LOCAL") == "yes"
+    if os.environ.get("PAM_RHOST"):
+        return False
+
+    def show(*a):
+        try:
+            r = subprocess.run(["/usr/bin/loginctl", *a], capture_output=True, text=True, timeout=2)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return r.stdout.strip() if r.returncode == 0 else ""
+
+    sid = ""
+    try:
+        sid = read(f"{PROC}/{os.getppid()}/sessionid").decode().strip()
+    except OSError:
+        pass
+    if not sid or sid == "4294967295":   # polkit's socket-started helper has no session: the user's own
+        sid = show("show-user", user, "-p", "Display", "--value")
+    return bool(sid) and show("show-session", sid, "-p", "Remote", "--value") == "no"
+
+
+def sudo_command():
+    try:
+        args = read(f"{PROC}/{os.getppid()}/cmdline", 4096).split(b"\0")[1:]
+    except OSError:
+        return ""
+    text = b" ".join(a for a in args if a).decode("ascii", errors="replace")
+    return "".join(c for c in text if c.isprintable() and c != "�")[:200]
+
+
+def polkit_action(user):
+    """The action the polkit rule noted for this user in the last few seconds."""
+    p = f"{RUN}/{user}"
+    try:
+        st = os.lstat(p)
+        if not TEST:
+            owners = {0}
+            try:
+                owners.add(pwd.getpwnam("polkitd").pw_uid)
+            except KeyError:
+                pass
+            if st.st_uid not in owners:
+                return ""
+        t, _, action = read(p, 256).decode().strip().partition(" ")
+        if 0 <= time.time() - int(t) < NOTE_AGE and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", action):
+            return action
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
+def request():
+    user, service = os.environ.get("PAM_USER", ""), os.environ.get("PAM_SERVICE", "")
+    if os.environ.get("PAM_TYPE", "auth") != "auth" or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", user):
+        return 1
+    try:
+        key, token = secret("touchid-key"), secret("touchid-token")
+    except (OSError, ValueError):
+        return 1   # the feature is off here
+    if not local_session(user):
+        return 1
+    body = {"user": user}
+    if service in ("sudo", "sudo-i"):
+        body["kind"], body["detail"] = "sudo", sudo_command()
+    elif service == "polkit-1":
+        action = polkit_action(user)
+        if action.startswith("com.1password."):
+            body["kind"] = "1password"
+        else:
+            body["kind"] = "polkit"
+            if action:
+                body["action"] = action
+    else:
+        return 1
+    env = env_file()
+    if env.get("OMACVM_VM_TYPE") == "app" and not TEST:
+        # OmacVM.app: its own port (org.omacvm.auth) comes with the app's next version.
+        say("Touch ID not available (OmacVM.app: not yet), use your password")
+        return 1
+    host = E.get("OMACVM_TOUCHID_HOST") or env.get("OMACVM_HOST") or "10.211.55.2"
+    if not re.fullmatch(r"[0-9.]{7,15}", host):
+        return 1
+    data = json.dumps(body, separators=(",", ":")).encode()
+
+    # The Bridge proves it knows the token before the token goes out (as omacvm-bridge).
+    n = secrets.token_hex(16)
+    c = http.client.HTTPConnection(host, PORT, timeout=CONNECT_TIMEOUT)
+    try:
+        c.request("GET", f"/proof?nonce={n}")
+        r = c.getresponse()
+        proof = json.loads(r.read(4096) or b"{}").get("proof", "") if r.status == 200 else ""
+    except (OSError, ValueError, http.client.HTTPException):
+        return 1
+    finally:
+        c.close()
+    if not isinstance(proof, str) or not hmac.compare_digest(mac(token, f"omacvm-bridge mac {host} {n}"), proof):
+        return 1
+
+    say("Touch ID on your Mac, or wait for the password prompt")
+    t, nonce = int(time.time()), secrets.token_hex(16)
+    path = "/omacvm/touchid"
+    sig = mac(key, "\n".join(["omacvm-touchid-request 1", "POST", path, str(t), nonce, "1", hashlib.sha256(data).hexdigest()]))
+    c = http.client.HTTPConnection(host, PORT, timeout=CONNECT_TIMEOUT)
+    try:
+        c.connect()
+        c.sock.settimeout(ANSWER_TIMEOUT)
+        c.request("POST", path, body=data, headers={
+            "Authorization": "Bearer " + token.decode(), "Content-Type": "application/json",
+            "X-OmacVM-Proto": "1", "X-OmacVM-Auth": f"1 {t} {nonce} {sig}"})
+        r = c.getresponse()
+        answer = r.read(4096)
+        got = r.getheader("X-OmacVM-Answer") or ""
+        status = r.status
+    except (OSError, http.client.HTTPException):
+        return 1
+    finally:
+        c.close()
+    want = mac(key, "\n".join(["omacvm-touchid-answer 1", nonce, str(status), hashlib.sha256(answer).hexdigest()]))
+    if not hmac.compare_digest(want, got):
+        return 1   # not the Mac that has this VM's key
+    try:
+        o = json.loads(answer)
+    except ValueError:
+        return 1
+    if status == 200 and o.get("result") == "yes":
+        return 0
+    why = WHY.get(o.get("reason") if status == 200 else o.get("code"))
+    if why:
+        say(f"Touch ID not available ({why}), use your password")
+    return 1
+
+
+def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--note":
+        return note(sys.argv[2], sys.argv[3])
+    if len(sys.argv) != 1:
+        return 2
+    try:
+        return request()
+    except KeyboardInterrupt:
+        return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception:   # never more than a "no": the password prompt follows
+        sys.exit(1)

@@ -1,6 +1,7 @@
 # 0041: Touch ID in the VM: the Mac answers yes or no to the VM's own PAM
 
-Status: proposed (`touch-id`, for 3.0.2). Not built.
+Status: accepted (`touch-id`, for 3.0.2). Built for Parallels, UTM and
+VMware Fusion; OmacVM.app's auth port is still to do (see Built, below).
 
 ## Context
 
@@ -210,3 +211,44 @@ reports: key on both sides, PAM lines present, the polkit rule, the port
   `pkexec true`, a polkit action standing in for 1Password; remote session
   refused; Bridge down falls to the password in under 2 s). One manual
   check with a real finger, by the person, on a Mac with Touch ID.
+
+## Built
+
+- Mac: `src/bridge/mac/touchid_policy.swift` (request, texts, limits, the
+  order of the checks) and `touchid.swift` (LocalAuthentication, the Mac's
+  state, the request). `control.swift` finds the VM and checks the
+  signature (`touchIDCaller`); `requestMAC`, `answerMAC` and
+  `verifyControlAuth` take the label.
+- VM: `src/bridge/guest/omacvm-touchid` (the PAM client; Python, run with
+  `-I`, not bash + curl + openssl: no key or token in any process's
+  arguments, and the timeouts in one place), `touchid.sh on|off` (the PAM
+  lines, the polkit rule `49-omacvm-touchid.rules`, `/run/omacvm-touchid`
+  through tmpfiles, owned by `polkitd`), `guest/install.sh` and
+  `omacvm check`. The polkit rule notes the action by user name (polkit
+  gives rules no uid).
+- Keys: `omacvm apply` makes `vm-keys/<vm>.touchid` (`touchid_key_ensure`)
+  and puts it and the Bridge token in `/etc/omacvm` (root, 0600); off: the
+  Mac's copy goes in apply, the VM's in `touchid.sh off`.
+- The feature is on for a VM exactly when its Touch ID key is on the Mac:
+  no key, 403 `off`, no dialog.
+- Tests: `src/bridge/mac/tests/run.sh` (LAContext and the Mac's state
+  mocked: request shapes, texts, every fast no, rate, pause after misses,
+  busy, timeout, client gone, labels kept apart) and
+  `src/tests/touchid-client.sh` (the client against a fake Bridge: yes, each
+  no, unsigned, other key, other nonce, Bridge without the token, another
+  PAM service, SSH, no key, polkit notes, Bridge down under 2 s; PAM lines
+  in and out byte for byte). Both in CI.
+
+Still to do:
+
+- OmacVM.app: the `org.omacvm.auth` virtio port and its relay in the app.
+  Until then the client says "Touch ID not available (OmacVM.app: not
+  yet)" on the app's VMs and the password prompt comes.
+- In a test VM (Parallels, UTM or Fusion): sudo, `pkexec true`, a polkit
+  action standing in for 1Password, a remote session refused; real PAM and
+  polkit, the Bridge with a mocked dialog.
+- The manual check with a real finger (the person, on a Mac with Touch ID):
+  `omacvm enable touch-id`, then in the VM `sudo true` (Touch ID dialog
+  "run sudo in Omarchy: true", touch: no password), Cancel (the password
+  prompt), the Mac locked or another app in front (password at once), and
+  1Password's "Unlock using system authentication" after its first unlock.

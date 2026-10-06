@@ -160,6 +160,18 @@ vm_key_ensure() {   # TYPE NAME [new] -> the key's file
   echo "$f"
 }
 
+# Touch ID's key for one VM (ADR 0041), beside its control key: the Bridge
+# shows a Touch ID dialog only for a VM whose request carries it. In the VM
+# it is root's alone (/etc/omacvm/touchid-key). Gone when the feature is off.
+touchid_key_ensure() {   # TYPE NAME [new] -> the key's file
+  local f; f=$(vm_key_file "$1" "$2").touchid
+  if [[ ${3:-} == new || ! -s $f ]]; then
+    mkdir -p "$VM_KEYS" && chmod 700 "$VM_KEYS"
+    (umask 077; openssl rand -hex 32 > "$f.tmp") && mv -f "$f.tmp" "$f"
+  fi
+  echo "$f"
+}
+
 # Omanotch on this Mac serves OmacVM.app's VMs (on 127.0.0.1) only from the
 # version that knows the app's QEMU: 0 it does, 1 too old, 2 not installed.
 omanotch_serves_app() {

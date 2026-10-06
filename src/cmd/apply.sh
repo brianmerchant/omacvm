@@ -287,6 +287,15 @@ if (( TOKEN && NAMED )) && on control-centre; then
     install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
     install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/vm-key\"" < "$vk"
 fi
+# Touch ID (ADR 0041): its own key and the Bridge token, root's alone in the
+# VM (PAM asks as root); off: the Mac's copy goes (the VM's goes in guest/install.sh).
+if (( TOKEN && NAMED )) && on touch-id; then
+  tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
+  gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
+  gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"
+elif (( NAMED )); then
+  rm -f "$(vm_key_file "$TYPE" "$VM").touchid"
+fi
 step copy "OmacVM into the VM"
 log "OmacVM -> $IP:/usr/local/share/omacvm"
 # Unpacked beside the one there; swapped in only once it is all there. The

@@ -53,8 +53,11 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
           cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
 
-      - name: Bridge's control centre requests (allow-list, limits, manifest signatures)
+      - name: Bridge's control centre and Touch ID requests (allow-list, limits, manifest signatures, LocalAuthentication mocked)
         run: src/bridge/mac/tests/run.sh
+
+      - name: Touch ID's PAM client against a fake Bridge, and its PAM lines in and out
+        run: src/tests/touchid-client.sh
 
       - name: Update parts cover src/
         run: python3 src/release/manifest.py parts > /dev/null

@@ -8,7 +8,7 @@
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video, vulkan) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan, touch-id) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -381,6 +381,14 @@ elif [[ ${F[external-brightness]} == on ]]; then
 elif grep -qs '^# omacvm-ddcutil' "$DDC"; then
   log "external display brightness: off"
   rm -f "$DDC" && rm -rf "/run/user/$(id -u "$U")/omarchy-brightness-display-ddc"
+fi
+# Touch ID for sudo, polkit and 1Password (ADR 0041): the keys come from omacvm apply.
+if want touch-id; then
+  if [[ ${F[touch-id]} == on ]]; then
+    log "Touch ID (sudo, polkit, 1Password)"; "$R/bridge/guest/touchid.sh" on || not_set_up touch-id "Touch ID"
+  elif [[ -e /usr/lib/omacvm/omacvm-touchid || -e /etc/omacvm/touchid-key ]]; then
+    log "Touch ID: off"; "$R/bridge/guest/touchid.sh" off
+  fi
 fi
 # The control centre (omacvm in Omarchy): on, or gone again.
 if want control-centre; then

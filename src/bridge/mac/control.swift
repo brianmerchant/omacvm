@@ -437,6 +437,48 @@ final class Control {
     return ("address " + peer, false)
   }
 
+  /// Touch ID (touchid.swift): the VM that asks, found as for the control
+  /// centre's requests, and its Touch ID key and checked nonce. `key` nil:
+  /// the feature is off for that VM (no key on the Mac). The nonce is also
+  /// given back with an error once the signature checked out, so the
+  /// refusal can be signed.
+  func touchIDCaller(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data)
+      -> (vm: VMEntry?, key: String?, nonce: String?, error: PolicyError?) {
+    let cli: String
+    switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e) }
+    let vm: VMEntry
+    let found: Result<VMEntry, PolicyError>
+    if peer == relayPeer || fromThisMac(fd, peer: peer) {
+      guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
+            let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
+        return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"))
+      }
+      found = vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false })
+    } else {
+      found = vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false })
+    }
+    switch found { case .success(let v): vm = v; case .failure(let e): return (nil, nil, nil, lookingAgain(e)) }
+    let path0 = omacvmSupport + "/vm-keys/" + touchIDKeyName(type: vm.type, name: vm.name)
+    var st = stat()
+    guard lstat(path0, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == getuid(), st.st_mode & 0o077 == 0, st.st_size < 256,
+          let raw = try? String(contentsOfFile: path0, encoding: .utf8) else { return (vm, nil, nil, nil) }
+    let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let checked = q.sync { () -> Result<String, AuthFailure> in
+      let r = verifyControlAuth(header: headers["x-omacvm-auth"], key: key, vm: vmKeyName(type: vm.type, name: vm.name),
+                                method: method, path: path, proto: headers["x-omacvm-proto"] ?? "", body: body,
+                                now: Date(), nonces: &nonces, label: touchIDRequestLabel)
+      keepNonces()
+      return r
+    }
+    switch checked {
+    case .success(let n): return (vm, key, n, nil)
+    case .failure(let f): return (vm, key, f.nonce, f.error)
+    }
+  }
+
+  /// How many VMs this Mac has set up (the dialog names the VM when more than one).
+  func setUpVMCount() -> Int { q.sync { vms.list.filter { $0.setup }.count } }
+
   /// An address the cache does not have was turned away for the limits: a
   /// VM that just started may be one, so look again (at most once a minute).
   func unknownTurnedAway() {

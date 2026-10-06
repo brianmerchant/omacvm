@@ -1,0 +1,13 @@
+// OmacVM Touch ID (ADR 0041): notes which action a user at the VM's own
+// screen is asked about, so the Mac's Touch ID dialog can name it
+// (/run/omacvm-touchid/<user>). Decides nothing: polkit's own rules do.
+polkit.addRule(function (action, subject) {
+  if (subject.local && subject.active) {
+    try {
+      polkit.spawn(["/usr/lib/omacvm/omacvm-touchid", "--note", subject.user, action.id]);
+    } catch (e) {
+      // no note: the dialog says "a system request"
+    }
+  }
+  return polkit.Result.NOT_HANDLED;
+});

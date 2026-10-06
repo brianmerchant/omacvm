@@ -95,6 +95,7 @@ GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=
 CONTROL=${OMACVM_FEATURE_control_centre:-off}
 MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
 EXT_BRIGHTNESS=${OMACVM_FEATURE_external_brightness:-off}
+TOUCH_ID=${OMACVM_FEATURE_touch_id:-off}
 CHROMIUM_VIDEO=${OMACVM_FEATURE_chromium_video:-on}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
@@ -154,6 +155,15 @@ if [[ $BRIDGE == on ]]; then
       elif (.displays | length) == 0 then "no external display on the Mac now"
       else [.displays[] | "\(.name): \(if .method == "ddc" then "DDC/CI" elif .method == "apple" then "its own control" else "not settable" end)"] | join(", ") end' <<<"$ex")"
   else bad "external brightness" "the Bridge does not answer /display/external (an older Bridge: omacvm update on the Mac)"; fi
+  # Touch ID (ADR 0041): the keys, the PAM lines and the polkit rule. The
+  # Mac's side shows only with a finger, so not asked here.
+  FEATURE=touch-id
+  if [[ $TOUCH_ID != on ]]; then skip "Touch ID" "off (omacvm enable touch-id)"
+  elif [[ ! -s /etc/omacvm/touchid-key || ! -s /etc/omacvm/touchid-token ]]; then bad "Touch ID" "no key in the VM (omacvm apply on the Mac)"
+  elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/sudo; then bad "Touch ID" "not in /etc/pam.d/sudo (omacvm apply)"
+  elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/polkit-1; then bad "Touch ID" "not in /etc/pam.d/polkit-1 (omacvm apply)"
+  elif [[ ! -f /etc/polkit-1/rules.d/49-omacvm-touchid.rules ]]; then bad "Touch ID" "the polkit rule is missing (omacvm apply)"
+  else ok "Touch ID" "sudo and polkit ask the Mac first; the password keeps working"; fi
   FEATURE=bridge
   # Right after the first login omacvm-plugins may still be enabling the widgets.
   for _ in $(seq 60); do
