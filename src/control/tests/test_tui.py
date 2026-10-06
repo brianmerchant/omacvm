@@ -409,6 +409,24 @@ def test_after_the_restart_an_app_that_did_not_update_says_why(tmp_path, monkeyp
     checks.stop()
 
 
+def test_after_the_restart_without_update_information_claims_nothing(tmp_path, monkeypatch):
+    """The Mac sends no manifest after the restart: no "Updated to", u finishes it."""
+    mac, checks = app_world(tmp_path, monkeypatch)
+    mac.version, mac.manifest = "2.9.1", None
+    from omacvm_cc.local import write_resume
+    write_resume("2.9.1", boot="the boot before")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "u finishes the update" in a.last_result)
+            assert "Updated to" not in a.last_result and a.app_step is None
+            assert not any(p in ("/omacvm/jobs", "/omacvm/app-update") for _, p, _ in mac.requests)
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
 def test_lost_job_ends_failed_and_offers_a_retry(world, monkeypatch):
     from omacvm_cc import tui
     monkeypatch.setattr(tui, "LOST_AFTER", 2)

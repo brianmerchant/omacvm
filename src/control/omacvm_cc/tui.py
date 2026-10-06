@@ -1148,6 +1148,12 @@ class ControlCentre(App):
                                 "version did not start there, the old one came back and skips it until a later one. "
                                 "This VM was not changed. OmacVM's window on the Mac says why once this VM is shut down.")
             self.call_from_thread(self.refresh_all)
+        elif not now:
+            # No update information from the Mac: say nothing about the result.
+            self.app_step = None
+            self.last_result = (f"OmacVM.app restarted this VM for the update to {version}, but the Mac sent no "
+                                "update information yet: u finishes the update.")
+            self.call_from_thread(self.refresh_all)
         else:
             self.app_step = None
             self.last_result = f"Updated to OmacVM {c.mac_version() or version} (the Mac app; this VM had it already)."

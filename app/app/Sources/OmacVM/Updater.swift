@@ -740,7 +740,9 @@ final class Updater: ObservableObject {
     /// The VM shuts down cleanly (power button, then the guest agent); the
     /// install follows when it has ended (vmEndedForRestart).
     func shutDownForRestart() {
-        guard restarting else { return }
+        // The VM may have ended in the few seconds before this (shut down in
+        // it): vmEndedForRestart took over, and its timer must keep running.
+        guard restarting, runningVM() != nil else { return }
         log("restart-update: shutting the VM down")
         powerDownVM()
         restartTimer?.invalidate()
