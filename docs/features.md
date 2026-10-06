@@ -27,7 +27,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **Fast network** *(experimental, OmacVM.app, off by default)* | The VM on macOS's own VM network (vmnet) instead of QEMU's built-in one: faster to and from the Mac, steady latency, an address of its own. A small system service, so macOS asks for your password once: the app's **Fast network › Turn On…** button, or `omacvm enable fast-network` ([how](routes/app.md#fast-network-experimental-off-by-default)). On it the VM is a machine on a network of the Mac (`192.168.77.0/24`, the Mac at `192.168.77.1`), as with Parallels and UTM: it reaches every service the Mac offers on all its addresses (Remote Login, File Sharing, a dev server on `0.0.0.0`), not only OmacVM's own as on QEMU's built-in network |
 | **Graphics: OpenGL, Vulkan or Automatic** *(OmacVM.app, Automatic by default)* | Per VM, in the app's setup and VM window, `omacvm graphics` or the control centre. OpenGL: Omarchy and its apps draw with OpenGL on the Mac's GPU. Vulkan: the same plus Vulkan on the Mac's GPU for Vulkan apps (KosmicKrisp on macOS 26 and newer, MoltenVK before). Vulkan windows are copied through the CPU. Automatic is OpenGL on every Mac in 3.0.0 ([how](routes/app.md)) |
 | **WebGPU and GPU compute** *(experimental, OmacVM.app, off by default)* | WebGPU (Firefox, and Chromium from its "Chromium (WebGPU)" menu entry) and OpenCL (darktable, ffmpeg's OpenCL filters, Geekbench GPU) on the Mac's GPU: `omacvm enable vulkan`, then restart the VM. The VM builds a Mesa for it the first time (about 3 minutes, a 140 MB download) ([how](routes/app.md)) |
-| **x86 Linux apps** *(experimental, off by default)* | x86_64 Linux programs and AppImages run in the VM through box64, which translates them to ARM: `omacvm enable x86-apps`. Slower than native ARM apps; the VM builds box64 the first time (about 5 minutes) ([details](#x86-linux-apps)) |
+| **x86 Linux apps** *(experimental, off by default)* | x86_64 Linux programs and AppImages run in the VM through box64, which translates them to ARM: `omacvm enable x86-apps`. Slower than native ARM apps; the VM builds box64 the first time (about 5 minutes). Command-line tools and AppImages; Electron apps not yet ([details](#x86-linux-apps)) |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
 <p align="center">
@@ -177,30 +177,34 @@ in OmacVM.app, UTM's QEMU VMs or VMware Fusion, so OmacVM brings its own
 translator: [box64](https://github.com/ptitSeb/box64).
 
 - **On:** `omacvm enable x86-apps` (or the control centre). The VM builds
-  box64 0.4.4 as a pacman package, about 5 minutes and 70 MB of downloads (sources and build tools; the tools go again after), and
-  installs it (76 MB). From then on an x86_64 program or AppImage starts like
-  any other: `./Some-App-x86_64.AppImage`. box64 runs the app's own code
-  translated, and uses the VM's native libraries (glibc, GTK, X11, Wayland,
-  OpenGL, SDL, FUSE) where it can.
+  box64 (a pinned build of its main branch) as a pacman package and
+  installs it: about 5 minutes, 70 MB of downloads (sources and build
+  tools; the tools go again after), 76 MB on disk. From then on an x86_64
+  program or AppImage starts like any other: `./Some-App-x86_64.AppImage`.
+  box64 translates the app's own code and uses the VM's native libraries
+  (glibc, GTK, X11, Wayland, OpenGL, SDL, FUSE) where it can.
 - **Off:** `omacvm disable x86-apps` removes the package and its binfmt
   rule. A box64 you installed yourself is left alone.
 - `omacvm check` runs a tiny x86_64 program to show it works.
 
-**Speed**, the same program and version, x86_64 build through box64 against
-the native ARM build, on the same machine:
+**Speed**, the same program and version, the x86_64 build through box64
+against the native ARM build, on the same machine:
 
 | Test | x86_64 through box64 | Native ARM | x86 in % of native |
 |---|---|---|---|
-| 7-Zip 26.03 benchmark, 1 thread | 5,578 MIPS | 6,806 MIPS | 82 % |
-| 7-Zip 26.03 benchmark, all threads | 24,359 MIPS | 32,693 MIPS | 75 % |
-| ripgrep 15.2.0, regex over 222 MB | 0.160 s | 0.034 s | 21 % |
-| Start of a small program (ripgrep `--version`) | 32 ms | 0.9 ms | |
+| 7-Zip 26.03 benchmark, 1 thread | 5,489 MIPS | 6,659 MIPS | 82 % |
+| 7-Zip 26.03 benchmark, all threads | 24,464 MIPS | 31,815 MIPS | 77 % |
+| ripgrep 15.2.0, regex over 222 MB | 0.082 s | 0.037 s | 45 % |
+| Start of a small program (ripgrep `--version`) | 31 ms | 0.9 ms | |
+| Start of Node.js 24 (`node -e`) | 3.1 s | 0.02 s | |
 
 Measured on a 4-core ARM64 Linux machine (GitHub's ARM runner) with this
-feature's own build; the M4 numbers follow. Plain computing code runs at
-about three quarters of native speed; code that leans on x86 vector
-instructions (SSE, AVX) is several times slower; every start costs about
-30 ms. Prefer the ARM build of an app when there is one.
+feature's own build. Plain computing code runs at about three quarters of
+native speed, vector-heavy code at about half; every start costs extra,
+a lot for big runtimes like Node.js. Prefer the ARM build of an app when
+there is one.
 
-Not covered: 32-bit x86 programs and Windows programs (Wine).
-
+**What works:** command-line tools and AppImages (tested: 7-Zip, ripgrep,
+Node.js, appimagetool). **What does not yet:** Electron apps (Obsidian's
+x86_64 AppImage opened no window; its ARM AppImage opens in under a
+second), 32-bit x86 programs and Windows programs (Wine).
