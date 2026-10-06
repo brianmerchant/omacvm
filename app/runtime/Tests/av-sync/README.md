@@ -27,7 +27,28 @@ screen.
   `mini/fix.sh` (after the matrix): the 3.0.1 fix, re-measured: installs
   `omacvm-audio-latency` in the test VM, sets the delay as the app would and
   plays the clips again (expected: about minus the device's latency, since
-  avcap takes the sound before the device).
+  avcap takes the sound before the device). `QPART` sets QEMU's part,
+  `TAG` a label suffix; `mini/confirm.sh` waits for the mini lock and runs
+  it twice with 115 ms.
+
+## Results (Mac mini M4, LG UltraFine 12.8 ms, 2026-10-06)
+
+Sound minus picture at macOS's mixer, ms (add 12.8 for the ear):
+
+| run | median |
+|---|---|
+| native Chrome on the Mac, H.264 / VP9 | +2.3 / -1.7 |
+| 3.0.0, H.264 hardware / software decode | 143.4 / 151.0 |
+| 3.0.0, VP9 | 113.6 |
+| 3.0.0, H.264 with glmark2 stalls | 114 (p10 69, p90 140) |
+| audioClassic, H.264 / with stalls | 112.0 / 107 |
+| Vulkan, H.264 / VP9 | 146.9 / 126.0 |
+| fix, QEMU part 115 (told 128), run a: H.264 / VP9 / stalls | -12.6 / -1.0 / -11.8 |
+| fix, run b (VM restarted): H.264 / VP9 / stalls | +16.3 / +29.2 / -14.1 |
+
+Steady within a run (sd 0.1-7 ms); from run to run QEMU's part moves
+106-151 ms. After stalls the sound comes up to the stall's length earlier
+for a few seconds.
 
 ScreenCaptureKit takes the sound before the output device and the picture
 before the display's scan-out: add the device latency `outlat` prints for
