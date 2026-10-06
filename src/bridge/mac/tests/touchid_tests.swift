@@ -53,7 +53,14 @@ func value(_ r: Result<TouchIDRequest, PolicyError>) -> TouchIDRequest? { if cas
     check(code(req(#"{"kind":"root","user":"v"}"#)) == "kind", "bad kind")
     check(code(req(#"{"user":"v"}"#)) == "kind", "no kind")
     check(code(req(#"{"kind":"sudo"}"#)) == "user", "no user")
-    check(code(req(#"{"kind":"sudo","user":"Root"}"#)) == "user", "user upper case")
+    check(value(req(#"{"kind":"sudo","user":"First.Last"}"#))?.user == "First.Last", "user with a dot and capitals")
+    check(code(req(#"{"kind":"sudo","user":"root"}"#)) == "user", "root never")
+    check(code(req(#"{"kind":"sudo","user":".x"}"#)) == "user", "user dot first")
+    check(value(req(#"{"kind":"sudo","user":"v","detail":"true","tty":"pts/3"}"#))?.tty == "pts/3", "tty")
+    check(value(req(#"{"kind":"sudo","user":"v","tty":"tty2"}"#))?.tty == "tty2", "console tty")
+    for t in ["pts/", "pts/x", "pts/12345", "ssh", "../pts/1", "pts/1 x", "tty"] {
+      check(code(req(#"{"kind":"sudo","user":"v","tty":"\#(t)"}"#)) == "tty", "bad tty \(t)")
+    }
     check(code(req(#"{"kind":"sudo","user":"1v"}"#)) == "user", "user digit first")
     check(code(req(#"{"kind":"sudo","user":"\#(String(repeating: "a", count: 33))"}"#)) == "user", "user too long")
     check(code(req(#"{"kind":"sudo","user":"v","detail":5}"#)) == "detail", "detail not text")
@@ -69,12 +76,21 @@ func value(_ r: Result<TouchIDRequest, PolicyError>) -> TouchIDRequest? { if cas
     check(touchIDReason(r1, vm: nil) == "unlock 1Password in Omarchy", "1password text")
     check(touchIDReason(r1, vm: "Work") == "unlock 1Password in Omarchy (Work)", "with the VM's name")
     check(touchIDReason(sudo!, vm: nil) == "run sudo in Omarchy: pacman -Syu", "sudo text")
+    let sudoTTY = TouchIDRequest(kind: .sudo, user: "v", detail: "pacman -Syu", action: "", tty: "pts/3")
+    check(touchIDReason(sudoTTY, vm: nil) == "run sudo in Omarchy (pts/3): pacman -Syu", "sudo text with its terminal")
+    check(touchIDReason(sudoTTY, vm: "Work") == "run sudo in Omarchy (Work, pts/3): pacman -Syu", "... and the VM's name")
     check(touchIDReason(TouchIDRequest(kind: .sudo, user: "v", detail: "", action: ""), vm: nil) == "run sudo in Omarchy", "sudo, no command")
     check(touchIDReason(TouchIDRequest(kind: .polkit, user: "v", detail: "", action: "org.x.y"), vm: nil) == "allow \"org.x.y\" in Omarchy", "polkit text")
     check(touchIDReason(TouchIDRequest(kind: .polkit, user: "v", detail: "", action: ""), vm: nil) == "allow a system request in Omarchy", "polkit, no action")
     check(touchIDClean("rm\n-rf\u{202E}/ \u{7}x", max: 80) == "rm -rf / x", "control and bidi characters go")
     let long = touchIDClean(String(repeating: "a", count: 100), max: 80)
-    check(long.count == 80 && long.hasSuffix("…"), "cut to 80")
+    check(long.count == 80 && long.hasSuffix("… (cut)"), "cut to 80, said so")
+    check(touchIDClean("a\u{00A0}b\u{2003}c\u{200B}d\u{200D}e\u{2060}f\u{3000}g\u{2800}h\u{202F}i\u{205F}j\u{00AD}k", max: 80)
+          == "a b c d e f g h i j k", "odd spaces and invisible characters become one plain space")
+    check(touchIDClean("ls\u{FE0F}\u{E0041}", max: 80) == "ls", "variation selectors and tags go")
+    let full = String(repeating: "b", count: touchIDCommandMax)
+    check(touchIDReason(TouchIDRequest(kind: .sudo, user: "v", detail: full, action: ""), vm: nil) == "run sudo in Omarchy: " + full,
+          "a command as long as the client sends is shown whole")
 
     // ---- which app is in front ----
     check(vmTypeOfExecutable("/Applications/OmacVM.app/Contents/Resources/runtime/bin/OmacVM") == "app", "OmacVM.app")
@@ -128,6 +144,26 @@ func value(_ r: Result<TouchIDRequest, PolicyError>) -> TouchIDRequest? { if cas
     a.answer = .yes; _ = decide(a, at: t0.addingTimeInterval(78), d: d2)
     a.answer = .no(.failed); _ = decide(a, at: t0.addingTimeInterval(81), d: d2)
     check(decide(a, at: t0.addingTimeInterval(84), d: d2) == .no(.failed), "a yes starts the count again")
+    // Dialogs nobody answers count as misses too, and the pauses grow: 60 s, 5 min, 30 min.
+    a = MockAuth(); a.answer = .no(.timeout)
+    let d7 = TouchIDDecider(auth: a, mac: MockMac())
+    var at = t0
+    func three() { for _ in 0..<3 { _ = decide(a, at: at, d: d7); at = at.addingTimeInterval(3) } }
+    three()
+    check(decide(a, at: at, d: d7) == .no(.rate), "3 timeouts: paused")
+    at = at.addingTimeInterval(61); three()
+    check(decide(a, at: at.addingTimeInterval(200), d: d7) == .no(.rate), "second pause: 5 min")
+    at = at.addingTimeInterval(301); three()
+    check(decide(a, at: at.addingTimeInterval(1700), d: d7) == .no(.rate), "third pause: 30 min")
+    at = at.addingTimeInterval(1801); a.answer = .yes
+    check(decide(a, at: at, d: d7) == .yes, "after it: again")
+    a.answer = .no(.cancelled); at = at.addingTimeInterval(3); three()
+    check(decide(a, at: at.addingTimeInterval(61), d: d7) != .no(.rate), "a yes starts the pauses at 60 s again")
+    at = at.addingTimeInterval(64); three()
+    check(decide(a, at: at.addingTimeInterval(200), d: d7) == .no(.rate), "two pauses close together: 5 min")
+    at = at.addingTimeInterval(300 + 3700); three()
+    check(decide(a, at: at.addingTimeInterval(61), d: d7) != .no(.rate), "an hour later: 60 s again")
+
     a = MockAuth(); a.notThere = .noTouchID
     let d3 = TouchIDDecider(auth: a, mac: MockMac())
     for i in 0..<4 { _ = decide(a, at: t0.addingTimeInterval(Double(i * 3)), d: d3) }

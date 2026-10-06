@@ -19,6 +19,7 @@ struct TouchIDRequest: Equatable {
   let user: String
   let detail: String
   let action: String
+  var tty = ""   // sudo: the terminal it runs in (pts/3), shown in the dialog
 }
 
 /// Why the answer is no. The VM shows the fast ones (TouchIDNo.fast).
@@ -33,13 +34,23 @@ private func matches(_ s: String, first: (UInt8) -> Bool, rest: (UInt8) -> Bool,
 }
 private func lower(_ c: UInt8) -> Bool { (97...122).contains(c) }
 private func digit(_ c: UInt8) -> Bool { (48...57).contains(c) }
+private func upper(_ c: UInt8) -> Bool { (65...90).contains(c) }
+
+/// "pts/3" or "tty2": a terminal's name under /dev, digits after the prefix.
+func isTTYName(_ s: String) -> Bool {
+  for p in ["pts/", "tty"] where s.hasPrefix(p) {
+    let n = s.dropFirst(p.count)
+    return (1...4).contains(n.utf8.count) && n.utf8.allSatisfy(digit)
+  }
+  return false
+}
 
 /// Strict JSON, at most 1 KB, known keys only, each field checked.
 func parseTouchIDRequest(_ body: Data) -> Result<TouchIDRequest, PolicyError> {
   guard body.count <= touchIDBodyMax else { return .failure(PolicyError(413, "too-large", "body over \(touchIDBodyMax) bytes")) }
   let o: [String: Any]
   do {
-    guard let obj = try strictObject(body, allowed: ["kind", "user", "detail", "action"]) else {
+    guard let obj = try strictObject(body, allowed: ["kind", "user", "detail", "action", "tty"]) else {
       return .failure(PolicyError(400, "bad-json", "body must be a JSON object"))
     }
     o = obj
@@ -52,9 +63,11 @@ func parseTouchIDRequest(_ body: Data) -> Result<TouchIDRequest, PolicyError> {
   guard let k = text("kind"), let ks = k, let kind = TouchIDKind(rawValue: ks) else {
     return .failure(PolicyError(400, "kind", "kind: sudo, polkit or 1password"))
   }
-  guard let u = text("user"), let user = u,
-        matches(user, first: { lower($0) || $0 == 95 }, rest: { lower($0) || digit($0) || $0 == 95 || $0 == 45 }, max: 32) else {
-    return .failure(PolicyError(400, "user", "user: a Linux user name"))
+  // A desktop user's name (dots and capitals too, as useradd --badname allows), never root.
+  guard let u = text("user"), let user = u, user != "root",
+        matches(user, first: { lower($0) || upper($0) || $0 == 95 },
+                rest: { lower($0) || upper($0) || digit($0) || $0 == 95 || $0 == 45 || $0 == 46 }, max: 32) else {
+    return .failure(PolicyError(400, "user", "user: a Linux user name, not root"))
   }
   guard let d = text("detail") else { return .failure(PolicyError(400, "detail", "detail: text")) }
   let detail = d ?? ""
@@ -65,31 +78,46 @@ func parseTouchIDRequest(_ body: Data) -> Result<TouchIDRequest, PolicyError> {
   guard action.isEmpty || matches(action, first: actionChar, rest: actionChar, max: 128) else {
     return .failure(PolicyError(400, "action", "action: a polkit action id"))
   }
-  return .success(TouchIDRequest(kind: kind, user: user, detail: detail, action: action))
+  guard let y = text("tty") else { return .failure(PolicyError(400, "tty", "tty: pts/N or ttyN")) }
+  let tty = y ?? ""
+  guard tty.isEmpty || isTTYName(tty) else { return .failure(PolicyError(400, "tty", "tty: pts/N or ttyN")) }
+  return .success(TouchIDRequest(kind: kind, user: user, detail: detail, action: action, tty: tty))
 }
 
-/// Text from the VM for the dialog: no control or direction characters, cut to `max`.
+/// Text from the VM for the dialog: control, direction, invisible and
+/// unusual space characters become one plain space; cut to `max` with "… (cut)".
 func touchIDClean(_ s: String, max: Int) -> String {
   let bad: (Unicode.Scalar) -> Bool = { c in
     let v = c.value
-    return v < 0x20 || (0x7f...0x9f).contains(v) || v == 0x061c || v == 0x200e || v == 0x200f
-      || (0x202a...0x202e).contains(v) || (0x2066...0x2069).contains(v) || v == 0x2028 || v == 0x2029 || v == 0xfeff
+    return v < 0x20 || (0x7f...0xa0).contains(v) || v == 0x00ad || v == 0x034f || v == 0x061c || v == 0x115f || v == 0x1160
+      || v == 0x1680 || v == 0x180e || (0x2000...0x200f).contains(v) || (0x2028...0x202f).contains(v)
+      || (0x205f...0x206f).contains(v) || v == 0x2800 || v == 0x3000 || v == 0x3164 || (0xfe00...0xfe0f).contains(v)
+      || v == 0xfeff || v == 0xffa0 || (0xfff9...0xfffb).contains(v) || (0xe0000...0xe007f).contains(v)
   }
   var out = String(String.UnicodeScalarView(s.unicodeScalars.map { bad($0) ? Unicode.Scalar(UInt8(32)) : $0 }))
   out = out.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
-  if out.count > max { out = String(out.prefix(max - 1)) + "…" }
+  let mark = "… (cut)"
+  if out.count > max { out = String(out.prefix(max - mark.count)) + mark }
   return out
 }
+
+/// The longest command the dialog shows; the VM's client asks for the
+/// password instead of sending a longer one (ADR 0041).
+let touchIDCommandMax = 120
 
 /// macOS shows "OmacVM Bridge is trying to <reason>." `vm`: the VM's name when
 /// this Mac has more than one VM set up, else nil.
 func touchIDReason(_ r: TouchIDRequest, vm: String?) -> String {
-  let place = "Omarchy" + (vm.map { " (\(touchIDClean($0, max: 40)))" } ?? "")
+  let label = vm.map { touchIDClean($0, max: 40) }
+  let place = "Omarchy" + (label.map { " (\($0))" } ?? "")
   switch r.kind {
   case .onePassword: return "unlock 1Password in \(place)"
   case .sudo:
-    let cmd = touchIDClean(r.detail, max: 80)
-    return cmd.isEmpty ? "run sudo in \(place)" : "run sudo in \(place): \(cmd)"
+    // The terminal it runs in: a dialog for a terminal the person has not open stands out.
+    let parts = [label, r.tty.isEmpty ? nil : r.tty].compactMap { $0 }
+    let at = "Omarchy" + (parts.isEmpty ? "" : " (\(parts.joined(separator: ", ")))")
+    let cmd = touchIDClean(r.detail, max: touchIDCommandMax)
+    return cmd.isEmpty ? "run sudo in \(at)" : "run sudo in \(at): \(cmd)"
   case .polkit:
     return r.action.isEmpty ? "allow a system request in \(place)" : "allow \"\(r.action)\" in \(place)"
   }
@@ -108,13 +136,18 @@ func vmTypeOfExecutable(_ path: String) -> String? {
 }
 
 /// One dialog at a time on the Mac; per VM one request every 2 s, 10 a
-/// minute, and 60 s of "rate" after 3 cancelled or failed in a row.
+/// minute, and after 3 misses in a row (cancelled, failed or not answered)
+/// a pause of "rate": 60 s, then 5 min, then 30 min, until a yes or an hour
+/// without a pause. So a VM
+/// that keeps dialogs up for nobody stops doing so quickly.
+let touchIDPauses: [TimeInterval] = [60, 300, 1800]
 struct TouchIDLimiter {
   private(set) var busy = false
   private var last: [String: Date] = [:]
   private var minute: [String: [Date]] = [:]
   private var failures: [String: Int] = [:]
   private var pausedUntil: [String: Date] = [:]
+  private var pauses: [String: Int] = [:]
 
   mutating func admit(_ vm: String, now: Date) -> TouchIDNo? {
     if let p = pausedUntil[vm], now < p { return .rate }
@@ -132,10 +165,15 @@ struct TouchIDLimiter {
   /// After an admitted request: the dialog is closed, and the count of misses goes on.
   mutating func finished(_ vm: String, yes: Bool, no: TouchIDNo?, now: Date) {
     busy = false
-    if yes { failures[vm] = 0; return }
-    guard no == .cancelled || no == .failed else { return }
+    if yes { failures[vm] = 0; pauses[vm] = 0; return }
+    guard no == .cancelled || no == .failed || no == .timeout else { return }
     let n = (failures[vm] ?? 0) + 1
-    if n >= 3 { pausedUntil[vm] = now.addingTimeInterval(60); failures[vm] = 0 } else { failures[vm] = n }
+    guard n >= 3 else { failures[vm] = n; return }
+    // An hour without a pause starts the pauses at 60 s again.
+    var p = pauses[vm] ?? 0
+    if let u = pausedUntil[vm], now.timeIntervalSince(u) > 3600 { p = 0 }
+    pausedUntil[vm] = now.addingTimeInterval(touchIDPauses[min(p, touchIDPauses.count - 1)])
+    pauses[vm] = p + 1; failures[vm] = 0
   }
 }
 
