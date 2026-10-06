@@ -21,7 +21,10 @@ cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 ../../guest/pkg-add qemu-guest-agent python || true
-systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
+# Started without waiting: a VM without the agent's port (the headless QEMU
+# of a build or an update) would hold this step 60-90 s for the device.
+systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
+systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
 # HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
 # module's builder, and a pacman hook that rebuilds it for new kernels.
