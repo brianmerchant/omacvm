@@ -169,8 +169,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runner?.powerDown()
             DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
                 guard let self, self.quitting else { return }
+                // QEMU's exit replies (see the termination handler); forceStop
+                // kills it after 5 s if SIGTERM does nothing, so the app does
+                // not leave a hung QEMU behind. Quit anyway 10 s later.
                 self.runner?.forceStop()
-                NSApp.reply(toApplicationShouldTerminate: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                    guard let self, self.quitting else { return }
+                    self.quitting = false
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                }
             }
             return .terminateLater
         }
