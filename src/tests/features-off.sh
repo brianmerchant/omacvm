@@ -261,10 +261,10 @@ EOF
     app_features_write "$T/vm" "bridge=off wallpaper=off gestures=off omanotch=off battery=off camera=off"
     expect "app: all off: no port to the Mac, no battery, no camera" "ports= battery=false camera=false test=" "$("$T/links" "$T/vm")"
     app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on"
-    # The test identity: its own helpers' ports, never Omanotch (it has none).
-    expect "app: all on" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/vm")"
+    # The test identity: its own helpers' ports; Omanotch to a test Omanotch's 47911.
+    expect "app: all on" "ports=47811,47830,47831 battery=true camera=true test=47811>47911,47830>47930,47831>47931" "$("$T/links" "$T/vm")"
     mkdir -p "$T/old"
-    expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/old")"
+    expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47811>47911,47830>47930,47831>47931" "$("$T/links" "$T/old")"
   else
     echo "FAIL MacLinks.swift does not compile:"; cat "$T/swiftc.log"; fail=1
   fi

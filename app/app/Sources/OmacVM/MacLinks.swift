@@ -41,18 +41,19 @@ struct MacLinks: Equatable {
     var hostPorts: String { hostPorts(test: TestIdentity.isOn) }
 
     /// The test identity's VMs reach its own Gestures and Bridge (47930,
-    /// 47931) on the usual guest ports, and never the installed helpers. It
-    /// has no Omanotch of its own, so Omanotch stays closed to them.
+    /// 47931) on the usual guest ports, and never the installed helpers.
+    /// Omanotch goes to 47911, where only a test Omanotch listens (its
+    /// `port` setting; src/omanotch/README.md), never the installed one.
     func hostPorts(test: Bool) -> String {
         let ports = test
-            ? [(gestures, "47830>47930"), (bridge, "47831>47931")]
+            ? [(omanotch, "47811>47911"), (gestures, "47830>47930"), (bridge, "47831>47931")]
             : [(omanotch, "47811"), (gestures, "47830"), (bridge, "47831")]
         return ports.filter { $0.0 }.map { $0.1 }.joined(separator: ",")
     }
 
     /// For qemu.log, which omacvm check reads: "Omanotch on, Gestures off, ...".
     var record: String {
-        [("Omanotch", omanotch && !TestIdentity.isOn), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera)]
+        [("Omanotch", omanotch), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera)]
             .map { "\($0.0) \($0.1 ? "on" : "off")" }.joined(separator: ", ")
     }
 }

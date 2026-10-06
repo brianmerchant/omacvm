@@ -121,7 +121,8 @@ Mac app — `defaults write ch.gillesgoetsch.omanotch <key> <value>`, then
 | `vmInterfacePrefixes` | `bridge`, `vnic` | VM network interfaces the Mac listens on … |
 | `vmSubnets` | `192.168.64.0/24`, `10.211.55.0/24`, `10.37.129.0/24` | … if their network is one of these (UTM, Parallels shared, Parallels host-only); guests are accepted only from that network |
 | `listenHost` | *(automatic)* | listen on this one IPv4 address instead |
-| `port` | `47811` | |
+| `port` | `47811` | OmacVM's test identity ("OmacVM Test") sends its VMs to `47911`: a test Omanotch sets `port` 47911 and `bridgeDir` |
+| `bridgeDir` | `omacvm-bridge` | the folder in `~/Library/Application Support` with the Bridge's token; `omacvm-test-bridge` for a test Omanotch |
 | `flush` | `false` | `true`: the bar is exactly as tall as the camera housing, as in OmacVM.app's notch-strip mode; the few points of the strip below it show the wallpaper. `false`: the bar fills the strip (macOS's menu bar height). Taken up within two seconds, no restart needed |
 
 VM — `systemctl --user edit notchcast`, `Environment=…`:
