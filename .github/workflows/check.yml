@@ -173,8 +173,8 @@ jobs:
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 
-      - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
-        run: src/tests/app-notch.sh
+      - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
+        run: src/tests/app-fullscreen-space.sh
 
       - name: Keyboard light steps (offline)
         run: src/tests/keyboard-light.sh

@@ -72,13 +72,6 @@ final class Runner {
             "-monitor", "none",
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
-        // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
-        if Settings.useNotch, let s = Mac.notchScreen {
-            let k = s.backingScaleFactor
-            let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
-            let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
-            a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
-        }
         // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch):
         // the guest then presents Vulkan on the GPU, not through a CPU copy (omacvm-vulkan-present).
         if Graphics.vulkanWindowsOnGPU(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
@@ -198,7 +191,6 @@ final class Runner {
         // Omanotch, Gestures, Bridge.
         links = MacLinks.load(folder: c.folder)
         env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
-        env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for

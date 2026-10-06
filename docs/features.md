@@ -4,7 +4,7 @@ The short version is the grid at the top of the [README](../README.md).
 
 | Feature | What it does |
 |---|---|
-| **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own ("Use the notch for the menu bar", on by default) |
+| **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app too: its full screen has a Space of its own, below the camera, and Omanotch fills the strip once it is on for the VM (app VMs start with it off for now: `omacvm enable omanotch`) |
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥ Esc takes you back to macOS, and from macOS back into the VM. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling on a trackpad in every direction with your Mac's own acceleration and momentum, pinch included; mice scroll one to one. On by default ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
@@ -79,10 +79,12 @@ pointer, the default) or *All monitors*, every monitor that shows the VM. For
 Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
 EscapeSwipe all` (or `pointer`).
 
-Never stuck, and never out of full screen: every move is checked. If the
-shortcut is off or the Space did not change, OmacVM tries a Dock swipe (the
-events a three-finger swipe makes); if that does not land either, or macOS
-gives no Spaces information, Mission Control opens and you pick a Space.
+Never out of full screen, and never Mission Control: every move is checked.
+If the shortcut is off or did not move the Space (macOS 15 ignores it on a
+MacBook's built-in display), OmacVM swipes the Space like a trackpad. If that
+did not move it either, or macOS gives no Spaces information, Omarchy shows
+a short notice (which setting to turn on) and
+nothing else happens; the trackpad is macOS's, so a swipe still works.
 Back in, if the shortcut does not land, the VM's window comes to the front
 and macOS shows its Space.
 

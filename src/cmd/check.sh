@@ -565,12 +565,11 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
 fi
 FEATURE=""
 if [[ $TYPE == app ]]; then
-  # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
-  # (Omanotch then leaves the strip alone).
-  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 1)
+  # OmacVM.app's full screen is macOS's own, in its own Space, below the notch;
+  # Omanotch fills the strip beside it.
   if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
-  elif [[ $n == 1 ]]; then skip "notch strip (app)" "on: Omarchy's bar beside the notch (full screen has no Space of its own)"
-  else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
+  elif [[ $(feat omanotch off) == on ]]; then skip "notch strip (app)" "full screen in its own Space; Omanotch fills the strip"
+  else skip "notch strip (app)" "full screen in its own Space; the strip stays black (Omanotch is off for this VM: omacvm enable omanotch)"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
 if (( MAC_ONLY )); then

@@ -112,7 +112,6 @@ now=$(cat "$R/src/VERSION")
 # ---------- the features it gets ----------
 features_read_env "$probe"
 PREV=("${FV[@]}")   # what the VM has now: --transaction goes back to it
-notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # OmacVM.app: see below
 # New to OmacVM (or a prebuilt VM before its first apply): the defaults,
 # Omanotch with a notch.
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
@@ -189,9 +188,8 @@ if (( MAC )); then
   needs_bridge || args+=(--no-bridge)
   on gestures || args+=(--skip-gestures)
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
-  # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
-  # app's own notch-strip mode is a separate switch in the app, which apply
-  # leaves alone).
+  # Omanotch from src/omanotch. OmacVM.app too, as for the other routes: its
+  # full screen sits below the camera and Omanotch fills the strip.
   on omanotch && args+=(--omanotch)
   MAC_FAILED=$(mktemp -t omacvm-mac)
   mrc=0; OMACVM_MAC_FAILED_FILE=$MAC_FAILED "$R/src/mac/install.sh" "${args[@]}" || mrc=$?

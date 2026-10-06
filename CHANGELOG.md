@@ -12,6 +12,27 @@ a boot splash, any Omarchy scale on 5K and larger displays, less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
+- A Magic Mouse works in the full-screen VM like the trackpad: two
+  fingers sideways swipe Omarchy's workspaces (macOS no longer gets that
+  swipe while the VM has the input), a one-finger flick sideways goes back
+  or forward. Scrolling stays as it was.
+- OmacVM.app's full screen always gets a Space of its own, on every
+  display, the MacBook's too. Before, on a Mac with a notch, full screen
+  was a window over the Space you were on: other windows could share it,
+  and the escape combo opened Mission Control instead of moving to macOS.
+  macOS keeps a full-screen window below the camera: with Omanotch on for
+  the VM it fills the strip beside the notch (as with Parallels and UTM),
+  else the strip stays black (new app VMs start with Omanotch off for now:
+  `omacvm enable omanotch`). The switch "Use the notch for the menu bar" is
+  gone. With two displays the escape combo
+  no longer jumps back into the VM a moment after leaving it.
+- OmacVM.app no longer quits with "OmacVM quit unexpectedly" when the VM
+  shuts down: a key or mouse event that came in while QEMU was closing
+  read its freed keyboard state. A VM that starts in full screen now shows
+  nothing until it is there (no windowed frame, no macOS menu bar over the
+  splash). Hyprland no longer warns "Monitor Virtual-2 overlaps with other
+  monitor(s)" when an external display comes back into the VM's full
+  screen.
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy
@@ -171,8 +192,8 @@ itself. Details below.
   › Keyboard › Keyboard Shortcuts, ⌃← and ⌃→ by default), with macOS's own
   animation; pressed again in macOS, it moves back into the VM. On macOS 27
   the swipe OmacVM made before did nothing on a Mac mini. If the shortcut
-  is off or does not move, a Dock swipe is tried, then Mission Control
-  opens so you pick a Space. The VM is never hidden.
+  is off or does not move, Omarchy says so and nothing else happens (never
+  Mission Control). The VM is never hidden.
 - OmacVM.app: when a VM's window opens, OMACVM turns into Omarchy's logo
   (about 3.5 s; just the logo with Reduce motion). The logo then stays until
   Omarchy's desktop (or its login or lock screen) is there, over the

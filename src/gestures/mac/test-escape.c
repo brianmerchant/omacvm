@@ -2,8 +2,11 @@
 // moves the display under the pointer one Space toward the one it showed
 // before the VM, with macOS's own "Move left/right a space" shortcut (as the
 // user set it in com.apple.symbolichotkeys); in macOS back into the VM. Each
-// move is checked: not moved -> a Dock swipe -> Mission Control. The VM is
-// never taken out of full screen and never hidden. Drives the helper's own
+// move is checked: not moved or the shortcut off -> a Dock swipe (macOS 15
+// ignores the shortcut from the notched display's full-screen Space); still
+// not moved, or no Spaces information -> a log line and "N <why>" for
+// Omarchy's notice, nothing else (never Mission Control). The VM is never taken out of full screen and
+// never hidden. Drives the helper's own
 // tapCb with made-up key events and its capture logic (frontChanged) with
 // made-up front apps, against a made-up world of displays and Spaces whose
 // "macOS" acts on the user's binding: the window server is not asked,
@@ -11,6 +14,7 @@
 #define main helper_main
 #include "omacvm-gestures.c"
 #undef main
+#define HOTKEY_MISSION_CONTROL 32   // Ctrl+Up: the helper must never post it
 #include <fcntl.h>
 #include <sys/wait.h>
 
@@ -29,13 +33,12 @@ static int nWorld;
 #define MAX_SPACE_ID 512
 static pid_t owner[MAX_SPACE_ID];        // the app that is in front when this Space shows
 static CGWindowID winOn[MAX_SPACE_ID];   // its window there
+static pid_t hiddenPid;                  // the app hidden now (its windows are off screen)
 static pid_t front, finder;
 static CGPoint pointer;
-static int worldSign = 1;     // 1: the Dock swipes as the helper thinks; -1: the other way
-static int swipesIgnored;     // the Dock does nothing with a swipe (macOS 27)
 static int keysIgnored;       // the Space shortcut reaches nothing (a VM app took it)
-static int refuse, hidden, all, saved, vmAlive = 1;
-static int swipes, went, keys, spaceKeys, mcKeys, mcApp;
+static int refuse, hidden, all, vmAlive = 1;
+static int went, keys, spaceKeys, mcKeys, swipes, swipeMoves, signSaves;
 static CGDirectDisplayID movedOn[4];
 static pid_t wentTo; static CGWindowID wentWin;
 static Hotkey lastKey;
@@ -77,14 +80,6 @@ static void moveSpace(World *w, int dir) {
 }
 static int warps;
 static void fakeWarp(CGPoint p) { pointer = p; warps++; }
-static int fakeSwipe(CGDirectDisplayID d, CGRect b, int dir) {
-  (void)b; (void)d;
-  World *w = underPointer();
-  swipes++;
-  if (!w || swipesIgnored) return 1;
-  moveSpace(w, dir * swipeSign * worldSign);
-  return 1;
-}
 static int same(Hotkey a, Hotkey b) { return a.enabled && b.enabled && a.keycode == b.keycode && a.flags == b.flags; }
 // "macOS": the key is one of the user's Space shortcuts (as set now) -> that move.
 static int fakeKey(Hotkey k) {
@@ -99,17 +94,25 @@ static int fakeKey(Hotkey k) {
   } else if (same(k, mc)) mcKeys++;
   return 1;
 }
+// "macOS": a Dock swipe moves the display only when swipeMoves is set (the
+// user's MacBook on macOS 15); its sign as the helper has it now.
+static int fakeSwipe(CGDirectDisplayID id, CGRect b, int dir) {
+  (void)b; swipes++;
+  if (swipeMoves) moveSpace(worldOf(id), dir * swipeSign > 0 ? 1 : -1);
+  return 1;
+}
+static void fakeSaveSign(void) { signSaves++; }   // never the real settings
 static CFDictionaryRef fakeHotkeys(void) { return binding ? CFRetain(binding) : NULL; }
 static CGEventFlags fakeHeld(void) {
   heldAsked++;
   if (heldPolls > 0) { heldPolls--; return kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand; }
   return 0;
 }
-static int fakeMissionApp(void) { mcApp++; return 1; }
 static CGPoint fakePointer(void) { return pointer; }
 // The VM's on-screen windows: full screen on each display that shows its Space.
 static int fakeVMWindows(pid_t pid, CGRect *out, int cap) {
   int k = 0;
+  if (pid == hiddenPid) return 0;
   for (int i = 0; i < nWorld && k < cap; i++) if (owner[world[i].cur] == pid) out[k++] = world[i].b;
   return k;
 }
@@ -126,15 +129,15 @@ static int fakeActivate(pid_t pid, CGWindowID win) {
   wentTo = pid; wentWin = win; went++;
   if (refuse) return 0;
   front = pid;
+  if (pid == hiddenPid) hiddenPid = 0;   // activation unhides
   uint64_t s = fakeWindowSpace(win);
   for (int i = 0; s && i < nWorld; i++) if (idx(&world[i], s) >= 0) world[i].cur = s;
   return 1;
 }
-static int fakeHide(pid_t pid) { hidden++; if (front == pid) front = finder; return 1; }
+static int fakeHide(pid_t pid) { hidden++; hiddenPid = pid; if (front == pid) front = finder; return 1; }
 static pid_t fakeFront(void) { return front; }
 static pid_t fakeFinder(void) { return finder; }
 static int fakeAll(void) { return all; }
-static void fakeSave(void) { saved++; }
 static int fakeVMWindow(pid_t pid, CGWindowID win) { (void)win; return vmAlive && alive(pid); }
 static pid_t launcher;   // OmacVM.app's launcher: the VMs' process name, but no QEMU
 static int fakeIsQemu(pid_t pid) { return pid != launcher; }
@@ -185,7 +188,7 @@ static void settleSteps(void) {
 // Press and release; 1 if both were eaten, 0 if both passed, -1 mixed. Runs
 // the main queue so the moves, their checks and the fallbacks happen.
 static int press(CGEventFlags f, int64_t state, int repeat) {
-  went = swipes = hidden = keys = spaceKeys = mcKeys = mcApp = 0;
+  went = hidden = keys = spaceKeys = mcKeys = swipes = 0;
   CGEventRef d = key(1, f, state, repeat), u = key(0, f, state, 0);
   CGEventRef rd = tapCb(NULL, kCGEventKeyDown, d, NULL), ru = tapCb(NULL, kCGEventKeyUp, u, NULL);
   CFRelease(d); CFRelease(u);
@@ -223,10 +226,11 @@ static void layout(int displays, const uint64_t *a, int na, const uint64_t *b, i
 
 int main(void) {
   activateFn = fakeActivate; finderFn = fakeFinder; frontFn = fakeFront; vmWindowFn = fakeVMWindow;
-  spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; swipeFn = fakeSwipe; pointerFn = fakePointer;
-  vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll; saveSignFn = fakeSave;
+  spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; pointerFn = fakePointer;
+  vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll;
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
-  hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld; missionAppFn = fakeMissionApp;
+  hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
+  swipeFn = fakeSwipe; saveSignFn = fakeSaveSign;
   verifyAfter = 0.01; cameFromEvery = 0;
   initKeymap();
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
@@ -308,7 +312,7 @@ int main(void) {
   pointer = CGPointMake(1000, 700);
   front = terminal; world[0].cur = 101;
   frontChanged(terminal, -1, 0, "", 11, 1);
-  check(press(K, HID, 0) == 0 && !went && !keys && !swipes, "in macOS before any VM: the combo passes, nothing happens");
+  check(press(K, HID, 0) == 0 && !went && !keys, "in macOS before any VM: the combo passes, nothing happens");
   front = vm; world[0].cur = 102;
   frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0);
   check(!strcmp(sent(), "S on|"), "VM full screen in front: captured");
@@ -316,7 +320,7 @@ int main(void) {
   check(press(K, HID, 0) == 1, "mini: combo in the VM: eaten (down and up)");
   check(!strcmp(sent(), "S esc ctrl-opt|") && !capturing, "... Omarchy lets go (S esc ctrl-opt), capture off at once");
   check(spaceKeys == 1 && lastKey.keycode == 123 && world[0].cur == 101, "... macOS's Move left a space (Ctrl+Left): Desktop 1");
-  check(!swipes && !mcKeys && !mcApp, "... no Dock swipe, no Mission Control");
+  check(!mcKeys, "... no Mission Control");
   check(front == terminal && !went && !hidden, "... the keyboard is Terminal's (no app switch), the VM not hidden");
   settle(vm, NET_APP);
   check(!escaped && !strcmp(sent(), ""), "on Desktop 1: nothing more sent, capture re-arms");
@@ -377,76 +381,71 @@ int main(void) {
   d.n = 1;
   check(leaveDir(&d, 0) == 0, "plan: a single Space: no move");
 
-  // ---- Checked, with fallbacks; never out of full screen, never hidden ----
+  // ---- Checked; no way out -> a notice, nothing else; never out of full
+  // screen, never hidden, never Mission Control ----
   layout(1, mini, 2, NULL, 0);
   owner[101] = terminal; owner[102] = vm;
   front = terminal; world[0].cur = 101; settle(vm, NET_APP); inVM(vm, 102);
-  // The shortcut reaches nothing (an old VM runtime took it): the Dock swipe.
+  // The shortcut reaches nothing (an old VM runtime took it, macOS 27 on the mini).
   keysIgnored = 1;
-  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 1 && world[0].cur == 101 && front == terminal,
-        "shortcut did not move: a Dock swipe, it lands");
-  check(!mcKeys && !mcApp && !hidden && !went, "... no Mission Control, nothing hidden");
-  settle(vm, NET_APP); sent();
-  // Back in, the shortcut ignored: the VM's window to the front (its Space shows).
-  check(press(K, HID, 0) == 1 && spaceKeys == 1 && !swipes && went >= 1 && wentTo == vm && world[0].cur == 102 && front == vm,
-        "back in, the shortcut did not move: the VM's window to the front instead");
-  settle(vm, NET_APP); sent();
-  // The shortcut off: straight to the Dock swipe.
-  keysIgnored = 0;
-  setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752);
-  check(press(K, HID, 0) == 1 && !keys && swipes == 1 && world[0].cur == 101, "Move left a space off: nothing posted, a Dock swipe");
-  unsetKeys(); settle(vm, NET_APP); sent();
-  inVM(vm, 102);
-
-  // Only two Spaces and the swipe's sign the wrong way round: the swipe
-  // bounces at the edge, the other direction is tried once, lands and is kept.
-  keysIgnored = 1; worldSign = -1; saved = 0;
-  check(press(K, HID, 0) == 1 && swipes == 2 && world[0].cur == 101 && saved == 1 && swipeSign == -1 && !mcKeys && !mcApp,
-        "shortcut ignored, swipe the wrong way: bounced, retried the other way, lands, kept");
-  settle(vm, NET_APP); sent(); inVM(vm, 102);
-  worldSign = 1; swipeSign = 1; saved = 0;
-
-  // macOS 27 on the mini: the shortcut and the swipe do nothing -> Mission
-  // Control (its shortcut: OmacVM.app's QEMU lets it through). The VM stays.
-  swipesIgnored = 1;
-  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 2 && mcKeys == 1 && !mcApp,
-        "shortcut and swipe do nothing: Mission Control (Ctrl+Up), the user picks a Space");
-  check(world[0].cur == 102 && !hidden && !went && swipeSign == 1 && !saved,
-        "... the VM stays full screen and is not hidden, no app switch, the swipe's sign as before");
-  check(!capturing && escaped, "... capture stays off (the trackpad and keys are macOS's for Mission Control)");
-  // Mission Control's shortcut off: its app.
-  setKey(HOTKEY_MISSION_CONTROL, kCFBooleanFalse, 126, 8650752);
-  sent();
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 2 && world[0].cur == 102,
+        "shortcut did not move, nor the swipe (both ways): the VM's Space stays");
+  check(!strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "... Omarchy is told (N space-unchanged)");
+  check(!mcKeys && !hidden && !went && keys == 1, "... no Mission Control, nothing hidden, no app switch, one key only");
+  check(!capturing && escaped, "... capture off (the trackpad and keys are macOS's, as after any escape)");
   int r = press(K, HID, 0); const char *got = sent();
-  check(r == 1 && capturing && !keys && !swipes && !strcmp(got, "S on|"),
-        "... the combo again there: captured again, nothing moves");
-  inVM(vm, 102);
-  check(press(K, HID, 0) == 1 && !mcKeys && mcApp == 1 && world[0].cur == 102 && !hidden,
-        "Mission Control's shortcut off: the Mission Control app instead");
-  unsetKeys();
-  // Everything off and ignored: no key at all, still Mission Control.
+  check(r == 1 && capturing && !keys && !strcmp(got, "S on|"), "... the combo again there: captured again, nothing moves");
+  // Back in, the shortcut ignored: the VM's window to the front (its Space shows).
+  keysIgnored = 0;
+  press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
+  check(world[0].cur == 101 && front == terminal, "(out again with the shortcut working)");
+  keysIgnored = 1;
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && went >= 1 && wentTo == vm && world[0].cur == 102 && front == vm,
+        "back in, the shortcut did not move: the VM's window to the front instead");
+  keysIgnored = 0;
+  settle(vm, NET_APP); sent();
+  // macOS 15 from the notched display's full-screen Space (user's log, 10:13-10:18):
+  // the shortcut does nothing, the Dock swipe moves it. Out, no Mission Control.
+  keysIgnored = 1; swipeMoves = 1;
+  check(press(K, HID, 0) == 1 && spaceKeys == 1 && swipes == 1 && world[0].cur == 101 && !mcKeys && !hidden &&
+        !strcmp(sent(), "S esc ctrl-opt|"), "shortcut ignored, the Dock swipe moves out: one swipe, no notice, no Mission Control");
+  check(!capturing && escaped, "... capture off");
+  keysIgnored = 0; swipeMoves = 0;
+  settle(vm, NET_APP); sent();
+  press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
+  check(world[0].cur == 102 && front == vm, "... and back in with the shortcut");
+  // The swipe goes the other way at first (sign not known): learned, kept, out.
+  keysIgnored = 1; swipeMoves = 1; swipeSign = -1; signSaves = 0;
+  check(press(K, HID, 0) == 1 && world[0].cur == 101 && swipeSign == 1 && signSaves == 1 && !mcKeys,
+        "the swipe bounced at the edge: the other direction lands and is kept");
+  keysIgnored = 0; swipeMoves = 0; sent();
+  settle(vm, NET_APP); sent(); press(K, HID, 0); sent(); settle(vm, NET_APP); sent();
+  // The shortcut off: nothing posted, Omarchy says which setting.
+  setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752);
+  check(press(K, HID, 0) == 1 && !keys && swipes == 2 && world[0].cur == 102 && !mcKeys && !hidden && !went,
+        "Move left a space off: no key posted, the swipe does not move either, no Mission Control");
+  check(!strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "... Omarchy is told (N space-shortcut-off)");
+  press(K, HID, 0); sent(); unsetKeys(); inVM(vm, 102);
+  // Every shortcut off, Mission Control's too: still nothing but the notice.
   setKey(HOTKEY_SPACE_LEFT, kCFBooleanFalse, 123, 8650752); setKey(HOTKEY_SPACE_RIGHT, kCFBooleanFalse, 124, 8650752);
   setKey(HOTKEY_MISSION_CONTROL, kCFBooleanFalse, 126, 8650752);
-  press(K, HID, 0); sent(); inVM(vm, 102);
-  check(press(K, HID, 0) == 1 && !keys && swipes == 2 && mcApp == 1 && world[0].cur == 102 && !hidden,
-        "every shortcut off, the swipe ignored: Mission Control's app, nothing hidden");
+  check(press(K, HID, 0) == 1 && !keys && world[0].cur == 102 && !hidden && !went &&
+        !strcmp(sent(), "S esc ctrl-opt|N space-shortcut-off|"), "every shortcut off: the notice only");
   unsetKeys();
-  keysIgnored = 0; swipesIgnored = 0;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
   // The Mac mini at 12:58 and 15:25: nothing moved and Finder had no window.
-  // Now: Mission Control, the VM never leaves full screen.
   end(terminal); terminal = child(); owner[101] = terminal;   // the app from before has quit
-  keysIgnored = swipesIgnored = 1;
-  check(press(K, HID, 0) == 1 && mcKeys == 1 && !went && !hidden && world[0].cur == 102,
-        "mini, nothing moves (the app from before has quit): Mission Control, not Finder, not hidden");
-  keysIgnored = swipesIgnored = 0;
+  keysIgnored = 1;
+  check(press(K, HID, 0) == 1 && !mcKeys && !went && !hidden && world[0].cur == 102,
+        "mini, nothing moves (the app from before has quit): not Finder, not hidden, no Mission Control");
+  keysIgnored = 0;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
-  // No Spaces information (an older or newer macOS without the call): Mission Control.
+  // No Spaces information (an older or newer macOS without the call): the notice.
   int saveN = nWorld; nWorld = 0;
-  check(press(K, HID, 0) == 1 && !spaceKeys && !swipes && mcKeys == 1 && !went && !hidden,
-        "no Spaces information: Mission Control");
+  check(press(K, HID, 0) == 1 && !spaceKeys && !mcKeys && !went && !hidden && !strcmp(sent(), "S esc ctrl-opt|N no-spaces|"),
+        "no Spaces information: N no-spaces, nothing else");
   nWorld = saveN;
   press(K, HID, 0); sent(); inVM(vm, 102);
 
@@ -472,7 +471,7 @@ int main(void) {
 
   // The pointer on a display without the VM: nothing moves, the keyboard goes there.
   world[1].cur = 301;
-  check(press(K, HID, 0) == 1 && !keys && !swipes && went == 1 && wentTo == safari && wentWin == 44 && world[0].cur == 202,
+  check(press(K, HID, 0) == 1 && !keys && went == 1 && wentTo == safari && wentWin == 44 && world[0].cur == 202,
         "pointer on a display without the VM: no move, the keyboard goes to what it shows");
   sent(); settle(vm, NET_APP);
   world[1].cur = 302; front = vm; settle(vm, NET_APP); sent();
@@ -488,12 +487,12 @@ int main(void) {
   check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && front == vm,
         "all: ... and both back into it");
   settle(vm, NET_APP); sent();
-  // One display does not move: only that one gets the Dock swipe.
+  // Neither display moves: the notice, once.
   keysIgnored = 1;
-  check(press(K, HID, 0) == 1 && spaceKeys == 2 && swipes == 2 && world[0].cur == 201 && world[1].cur == 301 && !mcKeys,
-        "all, the shortcut ignored: each display swiped, both out");
+  check(press(K, HID, 0) == 1 && spaceKeys == 2 && world[0].cur == 202 && world[1].cur == 302 && !mcKeys &&
+        !strcmp(sent(), "S esc ctrl-opt|N space-unchanged|"), "all, the shortcut ignored: nothing moves, one notice");
   keysIgnored = 0;
-  sent(); settle(vm, NET_APP); front = vm; world[0].cur = 202; world[1].cur = 302; settle(vm, NET_APP); sent();
+  press(K, HID, 0); sent(); front = vm; world[0].cur = 202; world[1].cur = 302; settle(vm, NET_APP); sent();
   all = 0;
 
   // "Displays have separate Spaces" off: one list of Spaces for both displays.
@@ -558,7 +557,7 @@ int main(void) {
   frontChanged(terminal, -1, 0, "", 11, 1);
   inVM(vm, 102);
   {
-    went = swipes = hidden = keys = spaceKeys = mcKeys = mcApp = 0;
+    went = hidden = keys = spaceKeys = mcKeys = swipes = 0;
     CGEventRef d = key(1, K, HID, 0), rd = tapCb(NULL, kCGEventKeyDown, d, NULL);
     CFRelease(d); settleSteps();
     check(!rd && world[0].cur == 101 && !capturing, "combo down, its up taken by QEMU's tap: moved out");
@@ -570,7 +569,7 @@ int main(void) {
   front = finder; world[0].cur = 401;
   frontChanged(finder, -1, 0, "", 0, 1); sent();
 
-  // ---- Parallels: the same way out and back; Mission Control by its app ----
+  // ---- Parallels: the same way out and back; no Mission Control either ----
   layout(1, mini, 2, NULL, 0);
   owner[101] = terminal; winOn[101] = 11; owner[102] = parallels; winOn[102] = 55;
   pointer = CGPointMake(1000, 700); world[0].cur = 101; front = terminal;
@@ -581,10 +580,10 @@ int main(void) {
   frontChanged(terminal, -1, 0, "", 11, 1);
   check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[0].cur == 102 && front == parallels, "... and into the Parallels VM again");
   frontChanged(parallels, 0, 1, "Omarchy", 55, 0); sent();
-  keysIgnored = swipesIgnored = 1;
-  check(press(K, HID, 0) == 1 && !mcKeys && mcApp == 1 && world[0].cur == 102 && !hidden,
-        "Parallels, nothing moves: Mission Control's app (Parallels may take keys), nothing hidden");
-  keysIgnored = swipesIgnored = 0;
+  keysIgnored = 1;
+  check(press(K, HID, 0) == 1 && !mcKeys && world[0].cur == 102 && !hidden,
+        "Parallels, nothing moves: no Mission Control, nothing hidden");
+  keysIgnored = 0;
   press(K, HID, 0); frontChanged(parallels, 0, 1, "Omarchy", 55, 0); sent();
 
   // The same VM app in front in a window (it left full screen): the combo is the VM's, as before.
@@ -662,6 +661,30 @@ int main(void) {
   end(winvm);
   check(press(K, HID, 0) == 0 || wentTo != winvm, "the VM window's VM has quit: the combo does not go there");
   end(launcher); launcher = 0;
+
+  // ---- A MacBook display on a desktop Space (Terminal), the VM's own Space
+  // on the external: the Space move, never hidden (no notch cover any more) ----
+  {
+    const uint64_t mbp[] = { 451, 452 }, ext[] = { 461, 462 };
+    layout(2, mbp, 2, ext, 2);
+    owner[451] = terminal; winOn[451] = 11; owner[452] = safari; winOn[452] = 33;
+    owner[461] = terminal; winOn[461] = 11; owner[462] = vm; winOn[462] = 23;
+    world[0].cur = 451; world[1].cur = 461; front = terminal; pointer = CGPointMake(3000, 600);
+    frontChanged(terminal, -1, 0, "", 11, 1);
+    world[1].cur = 462; front = vm;
+    frontChanged(vm, NET_APP, 1, "Omarchy", 23, 0); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 461 && !hidden && !mcKeys,
+          "native full screen next to a desktop Space: the Space move, not hidden");
+    sent(); frontChanged(terminal, -1, 0, "", 11, 1);
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 462 && front == vm && !hidden, "... and back in by a Space move");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 23, 0); sent();
+    // A window of the VM's app that covers a whole display on a desktop Space
+    // (the old notch cover): the same Space move, no hide.
+    owner[451] = vm; winOn[451] = 24; world[0].cur = 451; pointer = CGPointMake(1000, 700);
+    frontChanged(vm, NET_APP, 1, "Omarchy", 24, 0); sent();
+    check(press(K, HID, 0) == 1 && !hidden && !mcKeys && spaceKeys == 1, "a VM window over a desktop Space: never hidden");
+    sent(); frontChanged(terminal, -1, 0, "", 11, 1); front = terminal; escaped = 0;
+  }
 
   // Which apps the combo goes back to.
   check(isOther(terminal, -1, "Terminal", 1), "back to: a regular app");

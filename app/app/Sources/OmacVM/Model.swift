@@ -439,16 +439,6 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// "Use the notch for the menu bar" (see NotchSetting): on unless the
-    /// user switched it off.
-    static var useNotch: Bool {
-        get { NotchSetting.choice(stored: UserDefaults.standard.object(forKey: NotchSetting.key)) }
-        set { UserDefaults.standard.set(newValue, forKey: NotchSetting.key) }
-    }
-    /// What a VM start gets: off on a Mac without a notch.
-    static var notchActive: Bool {
-        NotchSetting.active(choice: useNotch, hasNotch: Mac.hasNotch)
-    }
     /// Full screen hides the Dock and the menu bar on every display and keeps
     /// the Mac's cursor off the screen corners and the Dock's edge, so neither
     /// the Dock nor a hot corner comes up from inside the VM (QEMU's
@@ -460,18 +450,6 @@ enum Settings {
 }
 
 extension Mac {
-    /// The built-in display, when it has a camera notch. Asked at run time
-    /// from the display itself (no model list); nil with the lid closed, on a
-    /// Mac without a notch, or at a resolution that ends below the notch.
-    static var notchScreen: NSScreen? {
-        NSScreen.screens.first { s in
-            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
-                  CGDisplayIsBuiltin(id) != 0 else { return false }
-            return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
-        }
-    }
-    static var hasNotch: Bool { notchScreen != nil }
-
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs
     /// without one (MacBook Air, SDR monitors) keep the 8-bit SDR path.

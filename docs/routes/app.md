@@ -138,8 +138,9 @@ VM runs, and goes back by itself when a new version does not start
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
-- Full screen, like Parallels; on a MacBook with a notch Omarchy's bar goes
-  beside the notch ("Use the notch for the menu bar", below).
+- Full screen, like Parallels: macOS's own, in a Space of its own on every
+  display; on a MacBook with a notch Omanotch puts Omarchy's bar beside the
+  notch (below).
 - Every Mac display in full screen: with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
@@ -167,12 +168,14 @@ VM runs, and goes back by itself when a new version does not start
   while the VM runs (`omacvm enable bridge`) gets its link to the Mac at the
   next start: shut the VM down and start it again. `omacvm apply` names
   such features, and `omacvm check` fails on them until then.
-- On a MacBook with a notch, "Use the notch for the menu bar" (on by
-  default): full screen covers the strip beside the notch too and Omarchy's
-  bar goes there, but that full screen has no Space of its own (macOS 15
-  keeps full-screen Spaces below the notch). Switched off, full screen is in
-  its own Space below the notch. The switch shows only while the Mac's
-  built-in display has a notch; elsewhere it is off.
+- On a MacBook with a notch, full screen sits below the camera in its own
+  Space (macOS keeps full-screen windows there and the strip beside the
+  notch black). With Omanotch on for the VM it fills the strip with
+  Omarchy's bar; app VMs start with it off for now (`omacvm enable
+  omanotch`), and then the strip stays black. Before 3.0.0 the app had a switch, "Use the notch for the
+  menu bar", whose full screen covered the strip but had no Space of its
+  own: other windows could share it and the escape combo had nothing to
+  leave. It is gone.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).

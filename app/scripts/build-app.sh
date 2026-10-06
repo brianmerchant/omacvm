@@ -193,6 +193,12 @@ rm -rf "$HB"
 # the helper if the app's Info.plist has no reason for it (OS_REASON_TCC).
 # The installed Bridge runs from ~/Applications and has its own; this keeps
 # a Bridge started in place alive (src/tests/prebuilt-helpers.sh checks).
+# NSPrefersDisplaySafeAreaCompatibilityMode false: macOS never shrinks the
+# whole display below the camera for the launcher's windows (no "Scale to fit
+# below built-in camera" box in Get Info). It has no effect on the VM's
+# windows: QEMU runs as Contents/Resources/runtime/bin/OmacVM without a bundle
+# of its own, so AppKit never reads this file for it; its full screen is
+# macOS's own and sits below the camera.
 VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -211,6 +217,7 @@ cat > "$C/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
   <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>OmacVM Bridge shows this Mac's Bluetooth devices in your Linux VM's status bar, and connects, disconnects or forgets them when you ask there.</string>$( (( TEST )) && printf '\n  <key>OmacVMGesturesDomain</key><string>%s</string>' "$GESTURES_ID")
