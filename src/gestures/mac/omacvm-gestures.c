@@ -1524,9 +1524,12 @@ static double doublePress = 0.4;     // s between the two presses (the offline t
 int ns_open_mission_control(void);
 static int (*missionAppFn)(void) = ns_open_mission_control;
 static int movesCancelled;           // the first press's steps not posted yet are dropped
+static double mcClosedAt = -1;       // when we last closed Mission Control (its shortcut toggles it)
+static double mcClosing = 1.0;       // s it may still be listed while it closes (the offline test sets its own)
 static double lastComboAt = -1;
 
 static void missionControl(void) {
+  mcClosedAt = -1;   // opened again: the next close is a real one
   Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
   if (k.enabled && keyFn(k)) {
     logf_("escape combo: pressed twice: Mission Control (macOS's shortcut)");
@@ -1791,12 +1794,23 @@ static void afterMissionControl(int looks) {
   enterVMNow(0);
 }
 
+// Its shortcut toggles it: posted only while it is still open and not
+// already being closed by us (its close animation still lists it), else a
+// second close would open it again.
+static int closeMissionControlOnce(const char *why) {
+  double now = monoNow();
+  if ((mcClosedAt >= 0 && now - mcClosedAt < mcClosing) || !missionControlOpenFn()) return 0;
+  mcClosedAt = now;
+  Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
+  int byKey = k.enabled && keyFn(k), ok = byKey || missionAppFn();
+  logf_("%s: closing Mission Control (%s)", why, byKey ? "macOS's shortcut" : ok ? "the app" : "macOS refused!");
+  return 1;
+}
+
 static void closeMissionControlThenEnter(void) {
   whenKeysUp(^{
     if (movesCancelled) return;
-    Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
-    int byKey = k.enabled && keyFn(k), ok = byKey || missionAppFn();
-    logf_("escape combo: Mission Control is open: closing it (%s)", byKey ? "macOS's shortcut" : ok ? "the app" : "macOS refused!");
+    closeMissionControlOnce("escape combo: Mission Control is open");
     after(^{ afterMissionControl(0); });
   }, 50);
 }
@@ -1807,12 +1821,7 @@ static void closeMissionControlThenEnter(void) {
 // Mission Control's own shortcut closes it instead, back to the Space it was
 // opened from.
 static void closeMissionControl(void) {
-  whenKeysUp(^{
-    Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
-    int byKey = k.enabled && keyFn(k), ok = byKey || missionAppFn();
-    logf_("Esc in Mission Control (the VM would have taken it): closing Mission Control (%s)",
-          byKey ? "macOS's shortcut" : ok ? "the app" : "macOS refused!");
-  }, 50);
+  whenKeysUp(^{ closeMissionControlOnce("Esc in Mission Control (the VM would have taken it)"); }, 50);
 }
 
 static void enterVMNow(int mayCloseMC) {
@@ -1862,7 +1871,7 @@ static void enterWindow(void) {
 static void later(void (*f)(void)) { pendingSteps++; dispatch_async(dispatch_get_main_queue(), ^{ pendingSteps--; f(); }); }
 
 // ---- event tap: drop macOS gestures while capturing; escape combo ----
-static int swallowEscUp;
+static int swallowEscUp, escClosedMC;
 
 static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u) {
   (void)p; (void)u;
@@ -1875,11 +1884,18 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
     int combo = escapeCombo(kc, f);
-    if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo && !frontIsVM && appPid > 0 && appPid == vmPid &&
+    // vmOffSpace (no VM window on this Space, as in Mission Control) first:
+    // an Esc in a windowed VM never pays for the window list.
+    if (kc == ESC_KEYCODE && escClosedMC) {   // the rest of that Esc: held (repeats) and its up
+      if (type == kCGEventKeyUp) { escClosedMC = 0; swallowEscUp = 0; return NULL; }
+      if (CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat)) return NULL;
+      escClosedMC = 0;
+    }
+    if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo && !frontIsVM && vmOffSpace && appPid > 0 && appPid == vmPid &&
         !(f & (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift)) &&
         CGEventGetIntegerValueField(e, kCGEventSourceStateID) == kCGEventSourceStateHIDSystemState &&
         !CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) && isQemuFn(vmPid) && missionControlOpenFn()) {
-      swallowEscUp = 1;   // its up too: QEMU must not see half a key
+      escClosedMC = 1;   // its repeats and its up too: QEMU must not see half a key
       later(closeMissionControl);
       return NULL;
     }

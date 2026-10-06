@@ -263,6 +263,7 @@ int main(void) {
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
   swipeFn = fakeSwipe; saveSignFn = fakeSaveSign;
   verifyAfter = 0.01; cameFromEvery = 0; doublePress = 0; missionAppFn = fakeMissionApp; missionControlOpenFn = fakeMCOpen;
+  mcClosing = 0;
   initKeymap();
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   int sv[2]; socketpair(AF_UNIX, SOCK_STREAM, 0, sv); peer = sv[1]; fcntl(peer, F_SETFL, O_NONBLOCK);
@@ -914,6 +915,30 @@ int main(void) {
     frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
     check(press(0, HID, 0) == 1 && mcKeys == 1 && !mcShown && world[0].cur == 102 && !spaceKeys && !strcmp(sent(), ""),
           "MC open, VM's app in front, Esc: eaten (down and up), Mission Control closed, back on the VM's Space");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // Esc held in Mission Control: its repeats and its up are eaten too (none reach the VM).
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; front = vm; escaped = 0; mcClosedAt = -1;
+    frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    {
+      CGEventRef d = key(1, 0, HID, 0), r1 = key(1, 0, HID, 1), r2 = key(1, 0, HID, 1), u = key(0, 0, HID, 0);
+      CGEventRef a1 = tapCb(NULL, kCGEventKeyDown, d, NULL), a2 = tapCb(NULL, kCGEventKeyDown, r1, NULL);
+      CGEventRef a3 = tapCb(NULL, kCGEventKeyDown, r2, NULL), a4 = tapCb(NULL, kCGEventKeyUp, u, NULL);
+      CFRelease(d); CFRelease(r1); CFRelease(r2); CFRelease(u);
+      mcKeys = 0; settleSteps();
+      check(!a1 && !a2 && !a3 && !a4 && mcKeys == 1 && !mcShown, "MC open, Esc held: down, repeats and up all eaten, closed once");
+      check(press(0, HID, 0) == 0, "... the next Esc is the VM's again");
+    }
+    frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+    // Closed by us and still listed while it closes: no second close (that would open it again).
+    mcShown = 1; mcFrom = 102; world[0].cur = 101; front = vm; escaped = 0; mcClosedAt = -1; mcLate = 3;
+    frontChanged(vm, NET_APP, 0, "", 0, 0); sent();
+    mcClosing = 5;
+    press(0, HID, 0);   // Esc: closes it; macOS still lists it for a while
+    mcShown = 1;        // ... as the Dock's window is still there
+    int k1 = mcKeys;
+    press(K, HID, 0);
+    check(k1 == 1 && mcKeys == 0, "MC closing (still listed), the combo right after: no second Mission Control key");
+    mcShown = 0; mcLate = 0; mcClosing = 0; settleSteps();
     frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
     // ... with another app in front, Mission Control gets the Esc itself.
     mcShown = 1; mcFrom = 102; world[0].cur = 101; front = terminal; escaped = 0;
