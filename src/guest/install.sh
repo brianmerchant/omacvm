@@ -488,7 +488,7 @@ if ! want thp-kernel; then
   :
 elif [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
-    log "memory-optimized kernel (about 10 minutes)"
+    log "memory-optimized kernel: a kernel build on $(nproc) CPUs (about 10 minutes with 16, over an hour with 4)"
     "$R/kernel/build-thp-kernel.sh" "$U" || not_set_up thp-kernel "memory-optimized kernel"
   else
     log "memory-optimized kernel skipped: this VM does not boot with GRUB"

@@ -5,6 +5,11 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- The memory-optimized kernel says how long it really takes: a kernel build
+  in the VM, about 10 minutes with 16 CPUs, over an hour with 4 (it said
+  about 10 minutes). The control centre and `omacvm features` say it only
+  while it is off. A control centre job may now run 4 hours (it was 1 hour,
+  which could stop a kernel build on a 4-CPU VM).
 - OmacVM.app: a VM build, and each apply in a VM without a window, is about
   a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or

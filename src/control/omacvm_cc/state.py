@@ -156,13 +156,19 @@ def sddm_autologin_user(texts: list[str]) -> str:
 
 # What a tag means, in words (never a bare tag; src/lib/features.sh says the
 # same in feature_slow_hint). NOTE: short, for the table's note column.
-TAG_NOTES = {"experimental": "experimental", "slow": "about 10 min to switch on"}
+# "slow" is about switching it on: nothing is said about it while it is on.
+TAG_NOTES = {"experimental": "experimental", "slow": "a build to switch on, up to 1 h+"}
 TAG_HINTS = {"experimental": "experimental: it may change or be removed",
-             "slow": "switching it on takes about 10 minutes: a build in the VM, then a restart"}
+             "slow": "a build in the VM to switch it on, then a restart: minutes to over an hour, faster with more CPUs"}
+ON_SILENT = {"slow"}
 
 
-def tag_note(f: Feature) -> str:
-    return ", ".join(TAG_NOTES[t] for t in f.tags if t in TAG_NOTES)
+def tag_note(f: Feature, on: bool = False) -> str:
+    return ", ".join(TAG_NOTES[t] for t in f.tags if t in TAG_NOTES and not (on and t in ON_SILENT))
+
+
+def tag_hints(f: Feature, on: bool = False) -> list[str]:
+    return [TAG_HINTS[t] for t in f.tags if t in TAG_HINTS and not (on and t in ON_SILENT)]
 
 
 def fixed_note(on: bool) -> str:
