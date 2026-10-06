@@ -74,7 +74,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          bounds.size.width = cursor->width * scale;
          bounds.size.height = cursor->height * scale;
-@@ -1221,8 +1238,70 @@
+@@ -1221,8 +1238,73 @@
          size.height = [[[self window] screen] frame].size.height - omacvm_main_full_top;
      }
      return size;
@@ -88,8 +88,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +#else
 +    return false;
 +#endif
-+}
-+
+ }
+ 
 +/*
 + * OmacVM: the guest is the scale size picked for this area: as wide, pixel
 + * for pixel, omacvm_full_cut points shorter.
@@ -112,13 +112,16 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    if (omacvm_present_layer()) {
 +        [CATransaction begin];
 +        [CATransaction setDisableActions:YES];
-+        /* The layer's y goes up: its top is the screen's top. */
-+        [[self layer] setContentsGravity:top ? kCAGravityTop : kCAGravityResize];
++        CALayer *layer = [self layer];
++        /* "Top" is the larger y, unless the layer's contents are flipped. */
++        NSString *at = [layer contentsAreFlipped] ? kCAGravityBottom : kCAGravityTop;
++
++        [layer setContentsGravity:top ? at : kCAGravityResize];
 +        [CATransaction commit];
 +    }
 +    [self updateCursorLayout];
- }
- 
++}
++
 +/*
 + * OmacVM: where the window sits in full screen. Filling the area (also with
 + * the guest at its top) or as wide as it: at the top, right below the menu
@@ -145,7 +148,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  - (void) resizeWindow
  {
      /*
-@@ -1231,6 +1310,7 @@
+@@ -1231,6 +1313,7 @@
       * Fitting the window to every new guest mode shrank it step by step.
       */
      if (!([[self window] styleMask] & NSWindowStyleMaskFullScreen)) {
@@ -153,7 +156,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          return;
      }
  
-@@ -1243,8 +1323,12 @@
+@@ -1243,8 +1326,12 @@
          [[self window] setContentSize:NSMakeSize(width, height)];
          [[self window] center];
      } else if ([[self window] styleMask] & NSWindowStyleMaskFullScreen) {
@@ -168,7 +171,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      } else {
          [[self window] setContentSize:[self fixAspectRatio:[self frame].size]];
      }
-@@ -1269,6 +1353,7 @@
+@@ -1269,6 +1356,7 @@
      /* Must be called with the BQL, i.e. via updateUIInfo */
      NSSize frameSize;
      QemuUIInfo info = { 0 };
@@ -176,7 +179,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
      if (!qemu_console_is_graphic(dcl.con)) {
          return;
-@@ -1282,6 +1367,7 @@
+@@ -1282,6 +1370,7 @@
          uint32_t refreshRate = 0;
  
          frameSize = isFullscreen ? [self fullScreenSize] : [self frame].size;
@@ -184,7 +187,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
          if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
              CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
-@@ -1328,15 +1414,22 @@
+@@ -1328,15 +1417,22 @@
  #ifdef CONFIG_OPENGL
      omacvm_splash_view_size(backingFrameSize.width, backingFrameSize.height);
  #endif
@@ -216,7 +219,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
      qemu_console_set_ui_info(dcl.con, &info, TRUE);
  }
-@@ -1961,7 +2054,9 @@
+@@ -1961,7 +2057,9 @@
              [self omacvmQueuePointer:event view:self output:0]) {
              /* OmacVM: placed within the guest's outputs */
          } else if (isAbsoluteEnabled) {
@@ -227,7 +230,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
              NSPoint p = [event locationInWindow];
              NSView *gv = self;
              int go = 0, guarded;
-@@ -1978,6 +2073,7 @@
+@@ -1978,6 +2076,7 @@
  
              /* Note that the origin for Cocoa mouse coords is bottom left, not top left. */
              if (!guarded || (guarded > 0 && gv == self)) {
@@ -235,7 +238,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
                  qemu_input_queue_abs(dcl.con, INPUT_AXIS_X, p.x * d, 0, screen.width);
                  qemu_input_queue_abs(dcl.con, INPUT_AXIS_Y, screen.height - p.y * d, 0, screen.height);
              }
-@@ -2210,6 +2306,11 @@
+@@ -2210,6 +2309,11 @@
          return true;
      }
      size = [view bounds].size;
@@ -247,7 +250,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
      if (size.width <= 0 || size.height <= 0 ||
          !omacvm_map_pointer(output, p.x / size.width, 1.0 - p.y / size.height,
-@@ -2357,7 +2458,8 @@
+@@ -2357,7 +2461,8 @@
      NSRect available = [hostScreen visibleFrame];
      CGFloat unit = floor(MIN(NSWidth(available) * 0.75 / 16.0,
                               NSHeight(available) * 0.75 / 9.0));
@@ -257,7 +260,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  
      return NSMakeRect(floor(NSMidX(available) - size.width / 2.0),
                        floor(NSMidY(available) - size.height / 2.0),
-@@ -2555,6 +2657,7 @@
+@@ -2555,6 +2660,7 @@
  - (void)windowWillExitFullScreen:(NSNotification *)notification
  {
      omacvm_main_full_settled = false;
@@ -265,10 +268,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      omacvm_corner_release();
  }
  
-@@ -2587,6 +2690,43 @@
+@@ -2585,6 +2691,43 @@
+ {
+     [cocoaView updateScale];
      [cocoaView updateUIInfo];
- }
- 
++}
++
 +/*
 + * OmacVM: the window's content in 20 point steps (ui/omacvm-clean-size.h),
 + * so Omarchy's scale presets fit its guest. Not in full screen.
@@ -304,12 +309,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        return newFrame;
 +    }
 +    return omacvm_window_on_steps(window, newFrame);
-+}
-+
+ }
+ 
  /* Called when the user clicks on a window's close button */
- - (BOOL)windowShouldClose:(id)sender
- {
-@@ -6205,6 +6345,8 @@
+@@ -6205,6 +6348,8 @@
              omacvm_mac_box[0].y = d.origin.y + omacvm_main_full_top;
              omacvm_mac_box[0].h = d.size.height - omacvm_main_full_top;
          }
