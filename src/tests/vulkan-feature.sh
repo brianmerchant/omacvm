@@ -25,14 +25,14 @@ block=$(awk '/^  # Vulkan \(Venus\) from the VM.s next start/ {on = 1} on {print
 [[ $pre == *'FV[$(feature_index vulkan)]=off'* ]] || { echo "FAIL vulkan Mesa check not found in src/cmd/apply.sh"; exit 1; }
 [[ $block == *'on vulkan'* ]] || { echo "FAIL vulkan block not found in src/cmd/apply.sh"; exit 1; }
 mac() {   # ON(on|off) RUNNING(yes|no) [had] -> files in the VM folder, what apply said, the record's vulkan
-  # ICD=no: the VM has no OmacVM Mesa (its build failed).
+  # ICD=no: the VM has no OmacVM Mesa (its build failed). SSH=down: every SSH call fails (255).
   ( d=$T/vm; rm -rf "$d"; mkdir -p "$d"; [[ ${3:-} == had ]] && : > "$d/vulkan"
     FV=("$1") RUN=$2 SAID="" IP=vm
     feature_index() { echo 0; }
     on() { [[ $1 == vulkan && ${FV[0]} == on ]]; }
     app_pid_dir() { [[ $RUN == yes ]] && echo 123; }
     info() { SAID="said"; }
-    gssh() { [[ $2 != "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" || ${ICD:-yes} == yes ]]; }
+    gssh() { [[ ${SSH:-up} == up ]] || return 255; [[ $2 != "test -f /etc/vulkan/icd.d/omacvm_venus_icd.json" || ${ICD:-yes} == yes ]]; }
     eval "$pre"; eval "$block"
     echo "$(ls "$d" | tr '\n' ' ')$SAID${REC:+ ${FV[0]}}" )
 }
@@ -47,6 +47,7 @@ expect "on, Mesa build failed, file from before: removed, message" "said" "$(ICD
 expect "off, no Mesa: file removed" "" "$(ICD=no mac off no had)"
 expect "on, Mesa build failed: the record says off" "said off" "$(ICD=no REC=1 mac on no)"
 expect "on, Mesa there: the record says on" "vulkan  on" "$(REC=1 mac on no)"
+expect "on, SSH fails: the record stays on, no message" "vulkan  on" "$(SSH=down REC=1 mac on no)"
 
 # guest/install.sh: the vulkan step of OmacVM.app's VMs.
 gblock=$(awk '/^  if \[\[ \$\{F\[vulkan\]\} == on \]\]; then$/ {on = 1} on {print} on && /^  fi$/ {exit}' "$R/src/guest/install.sh")
