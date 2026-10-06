@@ -13,8 +13,10 @@
 # they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
 # started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
-# "default", "experimental", "available", "reason", "needs", "title", "summary"}]};
-# reason: why this Mac or VM cannot have it ("" when available).
+# "default", "experimental", "available", "reason", "needs", "title", "summary",
+# "fixed"}]}; reason: why this Mac or VM cannot have it ("" when available);
+# on: as the VM really is (src/lib/features.sh: features_real); fixed: what
+# OmacVM's record had wrong and that it was fixed ("" when it was right).
 # Without --vm it starts nothing: the state of the VM it would pick if that
 # one runs, else the defaults ("vm": null).
 # --in-vm: the VM must run with someone logged in to its desktop, and have the
@@ -38,7 +40,7 @@ while (( $# )); do
     --in-vm) INVM=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,22s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
        WANT+=("$1"); shift ;;
@@ -77,10 +79,28 @@ fi
 probe=""; [[ -z $IP ]] || probe=$(vm_probe "$IP") || true
 version=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 features_read_env "$probe"
+DRIFT=(); FIXED=""
 if [[ -z $version ]]; then   # not an OmacVM VM yet: what it would get
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
+else
+  # The record (an OmacVM.app VM's features file), then what was switched
+  # outside OmacVM as it really is; the record is fixed to match.
+  rd=""; [[ $TYPE == app && -n $VM ]] && { rd=$(app_dir "$VM" 2>/dev/null) || rd=""; }
+  features_read_record "$rd"
+  features_real "$probe" "$rd"
+  if [[ -n ${DRIFT[*]+x} ]]; then
+    features_record_fix "$IP" "$rd" && FIXED="fixed the record" || FIXED="the record could not be fixed"
+  fi
 fi
 OLD=("${FV[@]}")
+drift_of() {   # NAME -> "on (the app's Fast network setting); OmacVM's record said off: fixed the record", or nothing
+  local d n v w said
+  for d in ${DRIFT[@]+"${DRIFT[@]}"}; do
+    IFS=$'\t' read -r n v w said <<<"$d"
+    [[ $n == "$1" ]] && echo "$v ($w); OmacVM's record said $said: $FIXED"
+  done
+  return 0
+}
 
 available() { feature_available "$1"; }   # INDEX -> status 0 if this Mac and VM can use it; REASON otherwise
 
@@ -105,12 +125,12 @@ if (( JSON )); then
     "$( [[ -n $version ]] && json_str "$version" || echo null)"
   for ((i = 0; i < ${#FN[@]}; i++)); do
     available "$i" && av=true || av=false
-    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s}' \
+    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s, "fixed": %s}' \
       "$( ((i)) && echo ,)" "${FN[$i]}" "$( [[ ${FV[$i]} == on ]] && echo true || echo false)" \
       "$( [[ $(feature_default "$i") == on ]] && echo true || echo false)" \
       "$(feature_has_tag "$i" experimental && echo true || echo false)" "$av" "$(json_str "$REASON")" \
       "$( [[ ${FNEEDS[$i]} == - ]] && echo null || json_str "${FNEEDS[$i]}")" \
-      "$(json_str "${FTITLE[$i]}")" "$(json_str "${FSUM[$i]}")"
+      "$(json_str "${FTITLE[$i]}")" "$(json_str "${FSUM[$i]}")" "$(json_str "$(drift_of "${FN[$i]}")")"
   done
   printf '\n]}\n'
   exit 0
@@ -122,7 +142,7 @@ label() {   # INDEX -> one line for the list
   local i=$1 tag="" dim="" pink="" off=""
   if [[ -t 1 ]] || (( interactive )); then dim=$'\033[2m'; pink=$'\033[35m'; off=$'\033[0m'; fi
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
-  feature_has_tag "$i" slow && tag=" $dim(slow to build)$off"
+  feature_has_tag "$i" slow && tag=" $dim($(feature_slow_hint))$off"
   available "$i" || tag=" $dim($REASON)$off"
   # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
   [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"
@@ -133,6 +153,7 @@ if [[ $MODE == features ]]; then
   if [[ -t 1 ]]; then printf '\n\033[1m%s\033[0m (%s%s)\n' "$VM" "$TYPE" "${version:+, OmacVM $version}"
   else printf '%s (%s%s)\n' "$VM" "$TYPE" "${version:+, OmacVM $version}"; fi
   [[ -n $version ]] || say "    OmacVM is not on this VM yet: these are the defaults it would get."
+  while IFS= read -r l; do [[ -z $l ]] || say "    $l"; done < <(features_drift_lines "$FIXED")
   if (( ! interactive )); then
     for ((i = 0; i < ${#FN[@]}; i++)); do
       printf '  %-4s %-16s %s\n' "${FV[$i]}" "${FN[$i]}" "$(label "$i")"

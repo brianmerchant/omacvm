@@ -74,6 +74,10 @@ jobs:
         working-directory: app/app
         run: swift run usb-tests
 
+      - name: OmacVM.app new VM features (Omanotch on with a notch)
+        working-directory: app/app
+        run: swift run features-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
@@ -87,18 +91,25 @@ jobs:
           src/bridge/mac/build.sh
 
       - name: Omanotch offline tests
-        run: src/omanotch/mac/test.sh
+        run: |
+          src/omanotch/mac/test.sh
+          src/omanotch/guest/tests/test.sh
 
       - name: External display brightness offline tests (Bridge and VM side)
         run: |
           src/bridge/mac/test.sh
           src/tests/external-brightness.sh
 
+      - name: Building behind a proxy (scutil samples, the VM's variables, sudo, systemd-run, retries, a stub proxy)
+        run: src/tests/proxy.sh
+
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
       - name: The control centre opened from the Mac (the VM's script, a made-up Hyprland)
         run: src/tests/cc-open.sh
+      - name: omacvm check's media keys line (normal Bridge log lines are not failures)
+        run: src/tests/media-keys-check.sh
 
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null
@@ -114,6 +125,9 @@ jobs:
 
       - name: Vulkan (Venus) driver step for app VMs (when it builds Mesa's vulkan-virtio)
         run: src/tests/venus-driver.sh
+
+      - name: Guest packages never update one alone (no partial update), GBM guard undoes a broken install
+        run: src/tests/pkg-safe.sh
 
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
@@ -144,8 +158,17 @@ jobs:
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
 
+      - name: Magic Mouse swipe setting (3 or 4 fingers) and its row, only with a Magic Mouse
+        run: src/tests/app-mouse-swipe.sh
+
+      - name: The note when macOS refuses the VM's keyboard tap
+        run: src/tests/app-key-access.sh
+
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
+
+      - name: Feature state truth (the record against the fast network and SDDM autologin)
+        run: src/tests/feature-truth.sh
 
       - name: The vulkan feature's Mesa build (build tools come and go)
         run: src/tests/venus-build-tools.sh
@@ -177,14 +200,17 @@ jobs:
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 
-      - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
-        run: src/tests/app-notch.sh
+      - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
+        run: src/tests/app-fullscreen-space.sh
 
       - name: Keyboard light steps (offline)
         run: src/tests/keyboard-light.sh
 
       - name: A feature that is off is off on every route (VM side, checks, Mac side)
         run: src/tests/features-off.sh
+
+      - name: Guest check accepts NOTCH right above the built-in display (offline)
+        run: src/tests/notch-check.sh
 
       - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
         run: src/tests/app-storage.sh

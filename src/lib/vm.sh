@@ -1,5 +1,5 @@
 # Finding and reaching VMs from the Mac (sourced after mac.sh; bash 3.2).
-#   vms_list                 one line per VM: NAME<TAB>parallels|utm|fusion|app<TAB>running|stopped|...
+#   vms_list [no-utm]        one line per VM: NAME<TAB>parallels|utm|fusion|app<TAB>running|stopped|...
 #                            (Parallels' and UTM's other states as they name them;
 #                            unknown: UTM runs but does not answer this terminal)
 #   vm_find_ip NAME TYPE [s] the VM's address (waits up to s seconds)
@@ -24,7 +24,8 @@ vms_list() {
   if [[ -x $PRLCTL ]]; then
     "$PRLCTL" list -a -o status,name 2>/dev/null | awk 'NR > 1 { s = $1; $1 = ""; sub(/^ /, ""); print $0 "\tparallels\t" s }'
   fi
-  utm_used && utm_list
+  # no-utm: the caller named a VM of another app (resolve_vm): UTM's data is not read.
+  [[ ${1:-} == no-utm ]] || { utm_used && utm_list; }
   local n x
   while IFS=$'\t' read -r n x; do
     [[ -n $n ]] && printf '%s\tfusion\t%s\n' "$n" "$(fusion_state "$n")"
@@ -135,6 +136,12 @@ vm_probe() {
     grep -q "^OMACVM_FEATURE_omanotch=" /etc/omacvm/env 2>/dev/null || { [ -x "$H/.local/bin/notchcast" ] && echo OMACVM_FEATURE_omanotch=on; }
     grep -q "^OMACVM_FEATURE_autologin=" /etc/omacvm/env 2>/dev/null || { [ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ] && echo OMACVM_FEATURE_autologin=on; }
     grep -q "^OMACVM_FEATURE_thp_kernel=" /etc/omacvm/env 2>/dev/null || { pacman -Q linux-aarch64-thp >/dev/null 2>&1 && echo OMACVM_FEATURE_thp_kernel=on; }
+    # Autologin as SDDM does it, whoever wrote the file (src/guest/autologin.sh: the same rule).
+    if [ -d /etc/sddm.conf.d ] || [ -f /etc/sddm.conf ]; then
+      u=$(cat /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf 2>/dev/null |
+        awk "/^[[:space:]]*\\[/ { s = (\$0 ~ /^[[:space:]]*\\[Autologin\\]/) } s && /^[[:space:]]*User[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, \"\"); sub(/[[:space:]]+\$/, \"\"); u = \$0 } END { print u }")
+      [ -n "$u" ] && echo OMACVM_REAL_autologin=on || echo OMACVM_REAL_autologin=off
+    fi
     true' < /dev/null 2>/dev/null
 }
 
@@ -158,7 +165,7 @@ ssh_setup_command() {
     fusion) h=$(fusion_host) || return 1; net=${h%.*}.0/24 ;;
     app) net=10.0.2.0/24 ;;
   esac
-  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && pacman -S --needed --noconfirm openssh >/dev/null && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
+  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && { pacman -Q openssh >/dev/null 2>&1 || pacman -S --noconfirm openssh >/dev/null; } && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
     "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"
 }
 
@@ -167,7 +174,9 @@ ssh_setup_command() {
 # empty for it. Exits 2 when it cannot tell which VM ("soft": returns 1).
 resolve_vm() {
   local running list state
-  list=$(vms_list)   # once: it can take 15 s while UTM does not answer
+  # once: it can take 15 s while UTM does not answer. A named VM of another
+  # app (--vm NAME --vm-type app): UTM is left out, its data never read.
+  if [[ -n ${VM:-} && -n ${TYPE:-} && $TYPE != utm ]]; then list=$(vms_list no-utm); else list=$(vms_list); fi
   if [[ -z ${VM:-} ]]; then
     if cut -f1 <<<"$list" | grep -qxF Omarchy; then VM=Omarchy
     else
