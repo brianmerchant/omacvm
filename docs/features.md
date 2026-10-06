@@ -11,7 +11,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
 | **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](how-it-works.md#the-mac-and-the-vm)). On UTM and Fusion it comes through OmacVM Bridge, which is then installed even with the Bridge turned off |
-| **External display brightness** | With the VM in front on an external display, the brightness keys set *that* display, over DDC/CI, in macOS's 16 steps (Option: small steps), with Omarchy's popup. So do Omarchy's own brightness keys, `omarchy brightness display` and its monitor panel in the VM. A Studio Display, Pro Display XDR or LG UltraFine goes through macOS's own control. OmacVM.app: also in a window; Parallels, UTM and VMware Fusion: in full screen. On the built-in display nothing changes. Some displays and connections have no DDC/CI (some Macs' HDMI ports, or DDC/CI switched off in the display's own menu): there the keys do what they did before, and `omacvm check` says so. Off: `omacvm disable external-brightness` ([how it works](#external-display-brightness)) |
+| **External display brightness** | With the VM in front on an external display, the brightness keys set *that* display, over DDC/CI, in 32 steps (twice as fine as macOS's; Option: finer still), with Omarchy's popup. So do Omarchy's own brightness keys, `omarchy brightness display` and its monitor panel in the VM. A Studio Display, Pro Display XDR or LG UltraFine goes through macOS's own control. OmacVM.app: also in a window; Parallels, UTM and VMware Fusion: in full screen. On the built-in display nothing changes. Some displays and connections have no DDC/CI (some Macs' HDMI ports, or DDC/CI switched off in the display's own menu): there the keys do what they did before, and `omacvm check` says so. Off: `omacvm disable external-brightness` ([how it works](#external-display-brightness)) |
 | **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, with four dimmer steps below macOS's lowest (for night work), Option takes small steps, as in Omarchy |
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels and VMware Fusion also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept. Any Omarchy scale works on 4K, 5K, 6K and 8K displays; 2x is the sharp one ([what in-between scales cost](routes/app.md#display-scale-on-4k-5k-and-larger-displays)) |
 | **The GPU, in the desktop and the browsers** | Hyprland's animations, and pages and WebGL in Chromium, Chrome, Brave and Firefox, drawn by the Mac's GPU on every route (OmacVM fixes what each app gets wrong: [UTM](troubleshooting.md#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty), [Fusion](troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
@@ -115,10 +115,12 @@ VM is on:
   pointer when the VM covers several displays. OmacVM.app counts in a window
   too; Parallels, UTM and VMware Fusion in full screen, as for the other media
   keys. On the MacBook's own display the keys work as before.
-- **How.** It reads the display's level first, then steps in macOS's 16
-  steps (Option or Shift+Option: 64), and shows Omarchy's popup. Held keys
-  are sent at most every 50 ms, only the latest level, and the keys never wait
-  for the display.
+- **How.** It reads the display's level first, then steps in 32 steps
+  (macOS has 16; Option or Shift+Option: 64), and shows Omarchy's popup.
+  The built-in display steps the same while a VM is in front. Held keys
+  are sent at most every 50 ms, only the latest level, bigger jumps ramp
+  over a few writes, and the keys never wait for the display.
+  `"brightness_steps"` in the Bridge's `config.json` changes the step (8 to 100).
 - **From the VM.** Omarchy drives an external monitor with `ddcutil`; OmacVM
   puts a small `ddcutil` in the VM (`/usr/local/bin/ddcutil`) that asks the
   Bridge instead: "set the brightness of the display this output is on, 0 to

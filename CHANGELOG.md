@@ -12,6 +12,11 @@ a boot splash, any Omarchy scale on 5K and larger displays, less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
+- The display brightness keys step twice as fine while a VM is in front:
+  32 steps instead of macOS's 16 (Option: 64), on the MacBook's display,
+  Apple displays and DDC/CI monitors alike. Bigger jumps on a DDC/CI
+  monitor ramp over a few writes instead of jumping. `"brightness_steps"`
+  in the Bridge's `config.json` changes it.
 - A Magic Mouse works in the full-screen VM like the trackpad: two
   fingers sideways swipe Omarchy's workspaces (macOS no longer gets that
   swipe while the VM has the input), a one-finger flick sideways goes back
