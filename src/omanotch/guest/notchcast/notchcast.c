@@ -61,6 +61,7 @@
 
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
+#include "notch-place.h"
 #include "notchrule.h"
 
 #define FRAME_MAGIC 0x4843544eu  // "NTCH" little-endian
@@ -99,6 +100,9 @@ static const char *screen_name(char out[64]) {
 // Set by the keeper: close the capture session, then remove and create the
 // hidden output again (see keeper_thread).
 static _Atomic int remake_output;
+// Where NOTCH sits relative to the screen (1: right above it, 0: over its top
+// edge), for the cursor hand-off; set by the keeper (notch-place.h).
+static _Atomic int notch_above;
 // Height of the Mac's black strip in points (`strip H`); 0 until reported.
 // The hidden output is made this tall so the strip needs no padding.
 static _Atomic int strip_height;
@@ -494,16 +498,23 @@ static void show_guest_cursor_at_exit(const char *dir, double strip_x, double de
         set_guest_cursor_visible(1);
         return;
     }
+    double nh = 0;
+    if (!atomic_load(&notch_above) || monitor_field(j, cfg_output, "height", &nh)) nh = 0;
     free(j);
     double lw = w / s;
     double tx = x + (strip_x < 0 ? 0 : strip_x > lw - 1 ? lw - 1 : strip_x);
     // depth: how far the pointer already is inside the destination display,
-    // measured from the edge it crossed.
+    // measured from the edge it crossed. Up: the display above the strip,
+    // whose bottom edge is NOTCH's top when NOTCH sits above the screen.
     if (depth < 1) depth = 1;
-    double ty = !strcmp(dir, "up") ? y - 1 - depth : y + depth;
+    double top = y - nh / s;  // NOTCH has the screen's scale
+    double ty = !strcmp(dir, "up") ? top - depth : y + depth;
+    // Shown first, then moved: the move repaints the outputs it touches with
+    // the cursor already visible (shown after the move, it waited for the
+    // next repaint of that output, up to a second on an idle desktop).
     char lua[256];
     snprintf(lua, sizeof lua,
-             "hl.dispatch(hl.dsp.cursor.move({ x = %d, y = %d })) hl.config({ cursor = { invisible = false } })",
+             "hl.config({ cursor = { invisible = false } }) hl.dispatch(hl.dsp.cursor.move({ x = %d, y = %d }))",
              (int)tx, (int)ty);
     hypr_eval(lua);
 }
@@ -1577,6 +1588,12 @@ static int update_screen(void) {
     return changed;
 }
 
+// Under OmacVM.app (its pointer follows the outputs the guest reports): 1.
+static int omacvm_app(void) {
+    char type[16] = "";
+    return omacvm_env("OMACVM_VM_TYPE", type, sizeof type) && !strcmp(type, "app");
+}
+
 // The hidden output's size in pixels for a display `sw` px wide at scale
 // `ss`: the strip's height (in points converted with the display's current
 // width, so a scale change resizes it once, not via an intermediate height),
@@ -1592,18 +1609,26 @@ static int notch_size(double sw, double ss, int *w, int *h) {
     return notch_mode(sw, ss, bs, w, h);
 }
 
-// Size (pixels) and place of the hidden output for the display at (sx, sy),
-// `sw` px wide at scale `ss`: over the display's top edge. Returns its
-// logical height.
-static int notch_target(double sx, double sy, double sw, double ss, int *w, int *h, double *px, double *py) {
-    *px = sx;
-    *py = sy;
-    return notch_size(sw, ss, w, h);
+// Size (pixels) and place of the hidden output for the display `scr` at
+// (sx, sy), `sw` px wide at scale `ss` (`j`: a `j/monitors all` reply).
+// Returns its logical height; *above: right above the display (notch-place.h).
+static int notch_target(const char *j, const char *scr, double sx, double sy, double sw, double ss, int *w, int *h,
+                        double *px, double *py, int *above) {
+    int lh = notch_size(sw, ss, w, h);
+    double sh_px;
+    NotchRect others[NOTCH_MAX_OUTPUTS];
+    int no = notch_other_outputs(j, cfg_output, scr, others, NOTCH_MAX_OUTPUTS);
+    *above = notch_place((NotchRect){sx, sy, sw / ss, monitor_field(j, scr, "height", &sh_px) ? 0 : sh_px / ss},
+                         lh, others, no, omacvm_app(), px, py);
+    return lh;
 }
 
 // Keeps the hidden output present and exactly as wide as the display whose
-// bar it stands in for, overlapping that display's top edge. Overlapping keeps
-// it inside the existing layout, so absolute pointers keep their mapping.
+// bar it stands in for. Under OmacVM.app it sits right above that display,
+// where the strip is on the Mac (no overlap, so no Hyprland warning); else,
+// or when that place is taken, over the display's top edge, which keeps it
+// inside the existing layout, so absolute pointers keep their mapping
+// (notch-place.h).
 static void *keeper_thread(void *unused) {
     (void)unused;
     char last_applied[256] = "";
@@ -1626,9 +1651,9 @@ static void *keeper_thread(void *unused) {
                 // notchbar.lua's rule may come from before the display existed
                 // (1024x52), and its first frames would reach the strip.
                 char lua[256];
-                int w, h;
+                int w, h, above;
                 double px, py;
-                notch_target(sx, sy, sw, ss, &w, &h, &px, &py);
+                notch_target(j, scr, sx, sy, sw, ss, &w, &h, &px, &py, &above);
                 notch_rule_lua(lua, sizeof lua, cfg_output, w, h, (int)px, (int)py, ss);
                 LOG("creating headless output %s: %s", cfg_output, lua);
                 const char *rule[] = {"hyprctl", "eval", lua, NULL};
@@ -1636,7 +1661,7 @@ static void *keeper_thread(void *unused) {
                 const char *argv[] = {"hyprctl", "output", "create", "headless", cfg_output, NULL};
                 run_quiet(argv);
                 created_attempts++;
-            } else if (have_notch && have_screen && listed_before(j, cfg_output, scr) &&
+            } else if (have_notch && have_screen && !atomic_load(&notch_above) && listed_before(j, cfg_output, scr) &&
                        now_ms() - last_recreate_ms > 10000) {
                 // Hyprland gives a point that two outputs cover to the one made
                 // first. A display that came later (OmacVM.app's external
@@ -1655,13 +1680,17 @@ static void *keeper_thread(void *unused) {
                     if (last_lw > 0) enqueue_command("regeom");
                     last_lw = sw / ss;
                 }
-                int want_w, want_h;
+                int want_w, want_h, above;
                 double px, py;
-                int lh = notch_target(sx, sy, sw, ss, &want_w, &want_h, &px, &py);
+                int lh = notch_target(j, scr, sx, sy, sw, ss, &want_w, &want_h, &px, &py, &above);
                 static int saved_lh;
                 if (lh != saved_lh && atomic_load(&strip_height) > 0) {
                     saved_lh = lh;
                     save_strip_height(lh);
+                }
+                if (above != atomic_load(&notch_above)) {
+                    LOG("%s goes %s %s", cfg_output, above ? "right above" : "over the top edge of", scr);
+                    atomic_store(&notch_above, above);
                 }
                 if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)px || (int)ny != (int)py ||
                     ns < ss - 0.01 || ns > ss + 0.01) {

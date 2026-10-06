@@ -71,6 +71,20 @@ restart_hint() {
   [[ ${1:-} == port && $HOST == 192.168.77.1 ]] && return 0
   printf '; turned on while the VM was running? shut it down and start it again'
 }
+# Where Omanotch's hidden NOTCH output sits next to the built-in display $2,
+# from `hyprctl monitors all -j` ($1); $3 is the VM type. Prints "over" (on
+# the display's top edge: Parallels, UTM, Fusion, and the app's fallback),
+# "above" (right above it, touching its top edge: OmacVM.app, notchcast's
+# notch-place.h) or nothing when NOTCH is anywhere else.
+notch_spot() {
+  jq -r --arg b "$2" --arg t "$3" '
+    (.[] | select(.name == "NOTCH")) as $n | (.[] | select(.name == $b)) as $m
+    | ($n.y + $n.height / $n.scale - $m.y) as $gap
+    | if $n.x != $m.x or $n.width != $m.width then empty
+      elif $n.y == $m.y then "over"
+      elif $t == "app" and $gap > -1 and $gap < 1 then "above"
+      else empty end' <<<"$1" 2>/dev/null | head -1
+}
 FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
@@ -207,6 +221,13 @@ FEATURE=""
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
 else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
+# PipeWire's sound threads run real-time (RTKit, install.sh); at normal
+# priority the sound breaks whenever the VM is busy.
+pw=$(pgrep -u "$U" -x pipewire | head -1)
+if [[ -z $pw ]]; then skip "sound priority" "PipeWire is not running"
+elif ps -L -o cls=,comm= -p "$pw" | awk '$2 ~ /^data-loop/ && ($1 == "RR" || $1 == "FF") { f = 1 } END { exit !f }'; then
+  ok "sound priority" "real-time (PipeWire's data loop)"
+else bad "sound priority" "PipeWire runs at normal priority, so the sound breaks when the VM is busy: omacvm apply, then systemctl --user restart pipewire pipewire-pulse wireplumber"; fi
 
 section "The Mac's battery"
 FEATURE=battery
@@ -495,7 +516,13 @@ if [[ $IDLE_LOCK == off ]]; then
   else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 FEATURE=autologin
-[[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
+# As SDDM does it, whoever wrote the file (the Mac's omacvm check fixes OmacVM's record to match).
+# Run with bash -s from the Mac: the VM's copy (an older one has OmacVM's own file only).
+if [[ -f /usr/local/share/omacvm/guest/autologin.sh ]]; then
+  source /usr/local/share/omacvm/guest/autologin.sh; al=$(sddm_autologin_user)
+else al=""; [[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && al=$U; fi
+if [[ -n $al ]]; then ok "autologin" "on: SDDM logs $al in"
+else ok "autologin" "off"; fi
 FEATURE=mac-clock
 if [[ $MAC_CLOCK == on ]]; then
   f=$(jq -r '.bar.layout.right[-1] | select(.id == "omarchy.clock") | .format' "$H/.config/omarchy/shell.json" 2>/dev/null)
@@ -503,6 +530,16 @@ if [[ $MAC_CLOCK == on ]]; then
   elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
 else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
+
+FEATURE=x86-apps
+x86=$(/usr/local/share/omacvm/x86/guest/install.sh --status 2>/dev/null)
+if [[ ${OMACVM_FEATURE_x86_apps:-off} == on ]]; then
+  if [[ ${x86%% *} != ok ]]; then bad "x86 apps" "${x86#* }"
+  elif ! /usr/local/share/omacvm/x86/guest/install.sh --test; then bad "x86 apps" "${x86#* }, but a test x86_64 program does not run"
+  else ok "x86 apps" "${x86#* }"; fi
+elif [[ -n $x86 && ${x86%% *} != off && $x86 != *"not OmacVM's"* ]]; then bad "x86 apps" "off, but OmacVM's box64 is still installed: omacvm apply"
+else skip "x86 apps" "off (omacvm enable x86-apps: x86_64 programs through box64)"; fi
+FEATURE=""
 
 section "Omanotch"
 FEATURE=omanotch
@@ -519,16 +556,18 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
   elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says$(restart_hint port))"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
-  # The hidden NOTCH output sits on the built-in display, and the bar parked
-  # under the strip is that display's (else the MacBook shows two bars).
-  # OmacVM.app with external displays says which output that is.
+  # The hidden NOTCH output sits on the built-in display (OmacVM.app: right
+  # above it), and the bar parked under the strip is that display's (else the
+  # MacBook shows two bars). OmacVM.app with external displays says which
+  # output that is.
   b=$(cat "$RUN/omacvm/builtin" 2>/dev/null || echo Virtual-1)
   mons=$(as_user hyprctl monitors all -j 2>/dev/null)
   at() { jq -r --arg n "$1" '.[] | select(.name == $n) | "\(.x),\(.y),\(.width)"' <<<"$mons" 2>/dev/null; }
   st=$(as_user omarchy-shell notchbar state 2>/dev/null)
   parked=$(jq -r '.parked' <<<"$st" 2>/dev/null); pscreen=$(jq -r '.screen' <<<"$st" 2>/dev/null)
   if [[ -z $(at NOTCH) || -z $(at "$b") ]]; then skip "notch display" "no NOTCH or $b output now"
-  elif [[ $(at NOTCH) != "$(at "$b")" ]]; then bad "notch display" "NOTCH is not on $b, the built-in display (journalctl --user -u notchcast)"
+  elif ! spot=$(notch_spot "$mons" "$b" "$TYPE") || [[ -z $spot ]]; then
+    bad "notch display" "NOTCH is not on $b, the built-in display, nor right above it (journalctl --user -u notchcast)"
   elif [[ $parked == true && $pscreen != "$b" ]]; then bad "notch display" "the bar on $pscreen is parked, not $b's: two bars on the MacBook"
   elif beat=$(tr -cd 0-9 2>/dev/null < "$H/.local/state/omanotch/beat") &&
        [[ $parked != true && -n $beat && $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
@@ -541,7 +580,7 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
               and .y < $m.y + $m.height / $m.scale and .y + .h > $m.y)] | length' 2>/dev/null) -gt 0 ]]; then
     # What Hyprland composites, whatever the bar says about itself.
     bad "notch display" "the strip shows the bar and a bar is also on $b: two bars on the MacBook (omarchy-restart-shell)"
-  else ok "notch display" "$b$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
+  else ok "notch display" "$b$([[ $spot == above ]] && echo ", NOTCH right above it")$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
 
 section "Control centre"
@@ -549,7 +588,7 @@ FEATURE=control-centre
 if [[ $CONTROL == on ]]; then
   check "omacvm" "/usr/local/bin/omacvm opens the control centre" test -x /usr/local/bin/omacvm
   if python3 -c 'import textual' >/dev/null 2>&1; then ok "Textual" "$(pacman -Q python-textual 2>/dev/null | cut -d' ' -f2)"
-  else bad "Textual" "python-textual missing: omacvm shows plain text (omacvm apply on the Mac installs it)"; fi
+  else bad "Textual" "python-textual missing: omacvm shows plain text and offers to install it from the Mac"; fi
   check "checks for it" "omacvm-check.socket" systemctl is-active -q omacvm-check.socket
   if grep -q '"omacvm": {' "$H/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null; then ok "Omarchy menu" "OmacVM row"
   else bad "Omarchy menu" "no OmacVM row in ~/.config/omarchy/extensions/omarchy-menu.jsonc (omacvm apply)"; fi
