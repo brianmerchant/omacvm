@@ -59,6 +59,7 @@ run() {   # MISSING(build tools the VM lacks) MESON(ok|fail) -> sets OUT, CODE, 
   sed -E "s#/(opt|etc|usr|var)/#$V/\1/#g" "$R/src/app/guest/venus/install.sh" > "$V/venus/install.sh"
   : > "$T/calls"
   OUT=$(CALLS=$T/calls MISSING=$1 MESON=$2 PFX=$V/opt/omacvm-mesa PATH="$T/bin:$PATH" \
+    OMACVM_PKG_ADD="$R/src/guest/pkg-add" OMACVM_PKG_LOG=$T/pkg.log \
     bash "$V/venus/install.sh" --force 2>&1); CODE=$?
 }
 asdeps() { grep -- '--asdeps' "$T/calls" | sed 's/.*--asdeps //'; }

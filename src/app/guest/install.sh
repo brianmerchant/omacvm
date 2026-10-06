@@ -19,7 +19,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
-pacman -S --needed --noconfirm qemu-guest-agent python >/dev/null 2>&1 || true
+../../guest/pkg-add qemu-guest-agent python || true
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
 # HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
@@ -29,7 +29,7 @@ install -Dm644 virtio-gpu/linux-virtio-gpu-deep-color.patch /usr/local/lib/omacv
 ln -sf /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-build /usr/local/bin/omacvm-virtio-gpu-build
 install -Dm644 virtio-gpu/95-omacvm-virtio-gpu.hook /etc/pacman.d/hooks/95-omacvm-virtio-gpu.hook
 # Clipboard both ways, over a virtio port (the agent is try-omarchy's).
-pacman -S --needed --noconfirm wl-clipboard >/dev/null 2>&1 || true
+../../guest/pkg-add wl-clipboard || true
 # uaccess: the logged-in user may open the port (before 73-seat-late.rules).
 install -m644 70-omacvm-clipboard.rules /etc/udev/rules.d/
 udevadm control --reload 2>/dev/null; udevadm trigger --subsystem-match=virtio-ports 2>/dev/null || true
@@ -61,7 +61,7 @@ A=$H/.config/hypr/autostart.lua
 grep -q omacvm-display-sync "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-display-sync")' >> "$A"; chown "$U:$U" "$A"; }
 # Video decoding on the Mac's media engine (the app's QEMU passes VA-API to
 # VideoToolbox): vainfo, the driver shim for Firefox, and Firefox's switch.
-pacman -S --needed --noconfirm libva-utils >/dev/null 2>&1 || true
+../../guest/pkg-add libva-utils || true
 T=$(mktemp -d)
 if cc -shared -fPIC -O2 -o "$T/omacvm_drv_video.so" omacvm_drv_video.c -ldl 2>/dev/null; then
   install -Dm755 "$T/omacvm_drv_video.so" /usr/local/lib/dri/omacvm_drv_video.so
@@ -97,7 +97,14 @@ rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service
 install -Dm644 venus/omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service
 install -Dm644 venus/omacvm-venus-driver.timer /etc/systemd/system/omacvm-venus-driver.timer
 systemctl daemon-reload
-systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
+# Only for a VM whose Graphics gives it Vulkan (or with the vulkan feature):
+# with OpenGL nothing of it runs (2026-10-06: it ran at every boot).
+vfeat=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+if [[ $graphics == vulkan || $vfeat == on ]]; then
+  systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
+else
+  systemctl disable --now omacvm-venus-driver.timer >/dev/null 2>&1 || true
+fi
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then
