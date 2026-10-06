@@ -28,6 +28,13 @@ itself. Details below.
   `omacvm enable omanotch`). The switch "Use the notch for the menu bar" is
   gone. With two displays the escape combo
   no longer jumps back into the VM a moment after leaving it.
+- The escape combo moves one Space, to the one beside the VM, also when
+  macOS's slide lands late (it could end two Spaces over, on Desktop 1).
+  Pressed twice quickly it opens Mission Control; once, never.
+- Omanotch under OmacVM.app: the hidden NOTCH output sits above the
+  built-in display, where the strip is, so Hyprland no longer warns
+  "Monitor NOTCH overlaps" at start; the pointer's hand-over between the
+  VM and the strip beside the notch is quicker.
 - OmacVM.app no longer quits with "OmacVM quit unexpectedly" when the VM
   shuts down: a key or mouse event that came in while QEMU was closing
   read its freed keyboard state. A VM that starts in full screen now shows
