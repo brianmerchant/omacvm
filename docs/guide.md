@@ -55,7 +55,7 @@ Return to confirm):
    | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
    | The Mac's camera as *Mac Camera*, on only while a Linux app uses it (UTM and Fusion: through OmacVM Bridge, also with the Bridge off) | on |
    | External display brightness: the brightness keys (and Omarchy's own) set the external display the VM is on, over DDC/CI (needs the Bridge) | on |
-   | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
+   | Screensaver and lock disabled: Omarchy's own screensaver and lock after idle stay off, the Mac's lock protects the VM | off |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
    | The OmacVM control centre: `omacvm` in Omarchy, also in the Omarchy menu and the bar | on |

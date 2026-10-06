@@ -28,6 +28,13 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- The feature "Screensaver and lock" is now "Screensaver and lock
+  disabled" (`no-idle-lock`), ticked when OmacVM keeps Omarchy's own
+  screensaver and lock off. Before, switching them off showed an empty
+  row, as if something was missing. Nothing changes on a VM: its old
+  choice is read the other way round, and `omacvm enable/disable
+  idle-lock` still works as before. New VMs keep Omarchy's own screensaver
+  and lock, as before.
 
 ## 3.0.0
 

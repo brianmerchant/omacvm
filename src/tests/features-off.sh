@@ -29,7 +29,7 @@ battery:battery/guest/install.sh off on every apply; OmacVM.app does not serve t
 external-brightness:install.sh removes OmacVM's ddcutil on every apply; apply sets the Bridge's external_brightness false, so no DDC (src/tests/external-brightness.sh)
 chromium-video:vdec/guest/install.sh off on every apply of an app VM; never on the other routes; nothing of it talks to the Mac
 control-centre:control/guest/install.sh off removes omacvm, its check socket, menu row and bar item (install.sh runs it while any of them is there); nothing left in the VM asks the Mac
-idle-lock:nothing of it talks to the Mac
+no-idle-lock:nothing of it talks to the Mac; off is Omarchy's own screensaver and lock
 autologin:nothing of it talks to the Mac
 thp-kernel:nothing of it talks to the Mac
 fast-network:apply takes the Mac's service off when no VM has it (src/net/mac/test.sh)

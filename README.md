@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with its live status, on or off with space, plus updates and "report a problem".
 
 <p align="center">
-  <img src="docs/images/control-centre.svg" alt="The OmacVM control centre, a floating terminal window in Omarchy's Tokyo Night colours, titled OmacVM 3.0.0. A list of features with green ticks: OmacVM Bridge, wallpaper, trackpad gestures, scroll momentum, Omanotch, the Mac's clock, camera and battery, external display brightness, Chromium video, screensaver and lock, the control centre and the fast network. Autologin, the memory-optimized kernel and WebGPU are off. Graphics says Automatic: OpenGL; Graphics memory says 1.1 GB, peak 1.6 GB. At the bottom: OmacVM.app, Mac linked, and the keys space on/off, r repair, u update, enter details, U updates, ! report, esc quit." width="80%">
+  <img src="docs/images/control-centre.svg" alt="The OmacVM control centre, a floating terminal window in Omarchy's Tokyo Night colours, titled OmacVM 3.0.0. A list of features with green ticks: OmacVM Bridge, wallpaper, trackpad gestures, scroll momentum, Omanotch, the Mac's clock, camera and battery, external display brightness, Chromium video, screensaver and lock disabled, the control centre and the fast network. Autologin, the memory-optimized kernel and WebGPU are off. Graphics says Automatic: OpenGL; Graphics memory says 1.1 GB, peak 1.6 GB. At the bottom: OmacVM.app, Mac linked, and the keys space on/off, r repair, u update, enter details, U updates, ! report, esc quit." width="80%">
 </p>
 
 <a name="four-ways-parallels-utm-vmware-fusion-or-omacvmapp"></a>
