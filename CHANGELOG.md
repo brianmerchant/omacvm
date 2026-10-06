@@ -3,15 +3,20 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.1 (unreleased)
+## 3.0.2 (unreleased)
 
 - Touch ID in the VM (experimental, off by default: `omacvm enable
   touch-id`): sudo, polkit prompts and 1Password's "Unlock using system
   authentication" in Omarchy ask the Mac's Touch ID first; the password
   keeps working, and comes at once when the Mac is locked, another app is
-  in front or the Mac has no Touch ID. The Mac asks every time and gives
-  the VM only yes or no. Over SSH it never asks. Parallels, UTM and VMware
-  Fusion; OmacVM.app with its next version (ADR 0041).
+  in front or the Mac has no Touch ID. The Mac asks every time, shows the
+  command and its terminal, and gives the VM only yes or no. Only for the
+  person at the VM's screen: never over SSH or for a program without a
+  terminal. Parallels, UTM and VMware Fusion; OmacVM.app with its next
+  version (ADR 0041).
+
+## 3.0.1 (unreleased)
+
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
