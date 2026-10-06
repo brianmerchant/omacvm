@@ -736,7 +736,9 @@ final class Updater: ObservableObject {
         log("restart-update: shutting the VM down")
         powerDownVM()
         restartTimer?.invalidate()
-        restartTimer = Timer.scheduledTimer(withTimeInterval: RestartVM.shutdownTimeout, repeats: false) { [weak self] _ in
+        // Test builds: OMACVM_RESTART_TIMEOUT (seconds) for the timeout path.
+        let timeout = TestHooks.value("OMACVM_RESTART_TIMEOUT", bundleID: bundleID).flatMap(TimeInterval.init) ?? RestartVM.shutdownTimeout
+        restartTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.shutdownTimedOut() }
         }
     }
@@ -755,10 +757,16 @@ final class Updater: ObservableObject {
         guard restarting, runningVM() != nil else { return }
         let version = staged?.version
         cancelRestart("the VM still runs after \(Int(RestartVM.shutdownTimeout)) s")
-        NSApp.activate()
         // The second confirm: forcing it off loses what is not saved in the VM.
-        guard Self.shutdownTimeoutAlert().runModal() == .alertSecondButtonReturn,
-              let vm = runningVM(), let version else { return }
+        // Test builds answer it with OMACVM_RESTART_FORCE (1: force, else OK).
+        let force: Bool
+        if let hook = TestHooks.value("OMACVM_RESTART_FORCE", bundleID: bundleID) {
+            force = hook == "1"
+        } else {
+            NSApp.activate()
+            force = Self.shutdownTimeoutAlert().runModal() == .alertSecondButtonReturn
+        }
+        guard force, let vm = runningVM(), let version else { return }
         restarting = true
         setState("restart-vm", RestartVM(folder: vm.folder.path, version: version, at: Date()).line)
         log("restart-update: the user forced the VM off")
@@ -788,6 +796,7 @@ final class Updater: ObservableObject {
     func restartFromMac() async {
         let r = await prepareRestart(vmName: nil)
         if case .ready = r { shutDownForRestart(); return }
+        log("restart-update not started: \(r.answer.text)")
         if case .busy(let why) = r { notice = Self.sentence(why) }
         if case .cannot(let why) = r { notice = why }
     }

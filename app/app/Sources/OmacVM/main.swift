@@ -56,6 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
                 return
             }
+            // Test builds (self-update-test.sh): an update with a VM restart, as Shut Down and Update does.
+            if args.contains("--update-restart"), TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
+                DistributedNotificationCenter.default().postNotificationName(
+                    Self.restartRequest, object: nil, userInfo: nil, deliverImmediately: true)
+                NSApp.terminate(nil)
+                return
+            }
             if CommandLine.arguments.contains("--start") {
                 let vm = args.firstIndex(of: "--vm").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ""
                 DistributedNotificationCenter.default().postNotificationName(
@@ -74,6 +81,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: Self.updateRequest, object: nil, queue: .main) { _ in
             // From `--update-now` of a second launcher: this one stays open.
             Task { @MainActor in await Updater.shared.runScripted(quitWhenDone: false) }
+        }
+        if TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
+            DistributedNotificationCenter.default().addObserver(
+                forName: Self.restartRequest, object: nil, queue: .main) { _ in
+                Task { @MainActor in await Updater.shared.restartFromMac() }
+            }
         }
         // Before any VM start reads the Graphics setting.
         Settings.migrateVenusSwitch()
@@ -154,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// installed app's start requests.
     static let startRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").start")
     static let updateRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").update-now")
+    static let restartRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").update-restart")
     /// The VM's window belongs to QEMU's process: the one from this app
     /// (another copy of OmacVM may run a VM of its own).
     static var qemuApp: NSRunningApplication? {
