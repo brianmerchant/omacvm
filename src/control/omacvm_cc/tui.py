@@ -850,8 +850,16 @@ class ControlCentre(App):
         if not self.can_ask():
             return
         name = r.feature.name   # that feature only (apply --reinstall)
+        texts = []
+        # A row that works: nothing to repair, so say what r would do and ask
+        # (before, r there started a reinstall with no word first).
+        if r.status is S.Status.WORKS:
+            texts.append(f"{r.feature.title} works: nothing to repair. Install it again anyway? "
+                         "Its parts go in once more (on the Mac and in this VM); this can take a minute.")
         if self.brings_mac_version():
-            self.push_screen(ConfirmScreen(f"Repair {r.feature.title}", self.brings_mac_version()),
+            texts.append(self.brings_mac_version())
+        if texts:
+            self.push_screen(ConfirmScreen(f"Repair {r.feature.title}", "\n".join(texts)),
                              lambda yes: yes and self.run_job("reinstall", [name]))
         else:
             self.run_job("reinstall", [name])
