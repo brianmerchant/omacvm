@@ -582,3 +582,12 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
   `error` and the Bridge showed macOS's dialog in the same request. The
   first request after a Bridge start still gets `unknown-vm` once (the
   Bridge's VM list is cold): the password that time.
+- MacBook Pro VM pass (2026-10-06 23:26-23:40; headless clone of a 3.0.0
+  VM, only the `org.omacvm.auth` port; the relay as Runner runs it with a
+  stand-in Bridge and a stand-in panel, no dialog or window on that Mac):
+  real PAM, polkit 127 and the port. sudo and pkexec yes with and without
+  the panel path (64-129 ms; the Bridge's 103 and the app's `yes` line),
+  the panel's `no cancelled` gives sudo's password prompt, Ctrl+C with the
+  panel up closes the panel and drops the Bridge connection, SSH never
+  asks, `touchid.sh off` takes it all out. A pkexec within 2 s of a sudo
+  gets the password: the Bridge's own 2 s rule (and the relay's 0.2 s).
