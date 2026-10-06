@@ -2,7 +2,7 @@
 # `omacvm enable/disable`, the VM installer (guest/install.sh) and the checks
 # follow. One feature per line, tab-separated:
 #   name  default (on|off|notch: on with a notch|laptop: on with a battery, not on Parallels)  sides (mac,vm)  tags  needs  title  summary
-# Tags: experimental, slow (adds build/update time), notch (needs a MacBook with a notch),
+# Tags: experimental, slow (switching it on takes about 10 minutes: a build in the VM; shown in words, never as "slow"), notch (needs a MacBook with a notch),
 # laptop (needs a Mac with a battery), not-parallels (Parallels does it itself),
 # app-only (OmacVM.app's VMs only).
 bridge	on	mac,vm	-	-	OmacVM Bridge	the Mac's Wi-Fi, Bluetooth, audio, Night Shift and media keys in Omarchy's bar
