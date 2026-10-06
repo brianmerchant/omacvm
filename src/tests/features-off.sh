@@ -29,7 +29,7 @@ battery:battery/guest/install.sh off on every apply; OmacVM.app does not serve t
 external-brightness:install.sh removes OmacVM's ddcutil on every apply; apply sets the Bridge's external_brightness false, so no DDC (src/tests/external-brightness.sh)
 chromium-video:vdec/guest/install.sh off on every apply of an app VM; never on the other routes; nothing of it talks to the Mac
 control-centre:control/guest/install.sh off removes omacvm, its check socket, menu row and bar item (install.sh runs it while any of them is there); nothing left in the VM asks the Mac
-idle-lock:nothing of it talks to the Mac
+no-idle-lock:nothing of it talks to the Mac; off is Omarchy's own screensaver and lock
 autologin:nothing of it talks to the Mac
 thp-kernel:nothing of it talks to the Mac
 fast-network:apply takes the Mac's service off when no VM has it (src/net/mac/test.sh)
@@ -98,14 +98,14 @@ reset_root
 file "$H/.local/bin/notchcast"; file "$H/.config/systemd/user/notchcast.service"
 file "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
 link "$H/.config/systemd/user/graphical-session.target.wants/notchcast.service" "$H/.config/systemd/user/notchcast.service"
-file "$H/.config/hypr/notchbar.lua"; file "$H/.local/state/omacvm/omanotch"
+file "$H/.config/hypr/notchbar.lua"; file "$H/.local/state/omacvm/omanotch"; file "$H/.local/state/omanotch/expect"
 file /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
 printf '%s\n' 'require("hypr.other")' '' '-- omarchy-notch-bar: hidden output for the macOS notch helper.' 'require("hypr.notchbar")' > "$ROOT$H/.config/hypr/hyprland.lua"
 run_off omanotch_off 0
 expect "omanotch off, built: its uninstall tried in the session" yes "$(called "in_session bash /repo/omanotch/guest/uninstall.sh")"
 for p in "$H/.local/bin/notchcast" "$H/.config/systemd/user/notchcast.service" "$H/.config/systemd/user/notchcast.service.d" \
          "$H/.config/systemd/user/graphical-session.target.wants/notchcast.service" "$H/.config/hypr/notchbar.lua" \
-         /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook; do
+         "$H/.local/state/omanotch/expect" /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook; do
   expect "omanotch off, built, no session: $p gone" no "$(has "$p")"
 done
 expect "omanotch off: hyprland.lua no longer loads notchbar" "$(printf '%s\n' 'require("hypr.other")' '')" "$(cat "$ROOT$H/.config/hypr/hyprland.lua")"
