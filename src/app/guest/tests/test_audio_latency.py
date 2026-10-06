@@ -43,7 +43,7 @@ class Parse(unittest.TestCase):
         self.assertEqual(lat.parse_ms("1000"), 1000)
 
     def test_rejects_the_rest(self):
-        for bad in ("", "-5", "12.5", "1001", "abc", "1e3"):
+        for bad in ("", "-5", "12.5", "1001", "abc", "1e3", "\u00b2", "\u0661\u0662"):
             self.assertIsNone(lat.parse_ms(bad), bad)
 
 
@@ -70,6 +70,19 @@ class Apply(unittest.TestCase):
             self.assertTrue(lat.apply(163, wait_s=0))
         self.assertIn(("set-port-latency-offset", "alsa_card.pci-0000_00_03.0", "analog-output", "163000"), calls)
         self.assertFalse(any("usb" in " ".join(c) for c in calls if c[0] == "set-port-latency-offset"))
+
+    def test_takes_the_newest_kept_value(self):
+        # The login unit read 286 (AirPods last time); the app sent 128 while
+        # it waited for the card: 128 goes on the port.
+        calls = []
+
+        def fake(*args, capture=False):
+            calls.append(args)
+            return mock.Mock(returncode=0, stdout=__import__("json").dumps(CARDS))
+        with mock.patch.object(lat, "pactl", fake):
+            self.assertTrue(lat.apply(286, wait_s=0, latest=lambda: 128))
+        self.assertIn(("set-port-latency-offset", "alsa_card.pci-0000_00_03.0", "analog-output", "128000"), calls)
+        self.assertNotIn("286000", [c[-1] for c in calls])
 
     def test_no_pipewire_gives_up(self):
         with mock.patch.object(lat, "pactl", lambda *a, **k: mock.Mock(returncode=1, stdout="")):
@@ -107,7 +120,7 @@ class Root(unittest.TestCase):
     def test_apply_without_a_value_does_nothing(self):
         with tempfile.TemporaryDirectory() as d, \
                 mock.patch.object(lat, "STATE", os.path.join(d, "none")), \
-                mock.patch.object(lat, "apply", lambda ms: self.fail("applied")):
+                mock.patch.object(lat, "apply", lambda *a, **k: self.fail("applied")):
             self.assertEqual(lat.main(["omacvm-audio-latency", "--apply"]), 0)
 
 
