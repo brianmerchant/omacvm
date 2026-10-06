@@ -68,6 +68,7 @@ in more words.
   MacBook's built-in display, not somewhere on an external monitor. With
   the lid closed or on a Mac without a built-in display, it opens centred
   on the main display. The VM's window still opens where you are.
+- Vulkan on an M1 or M2 Mac gets a host memory window of 1 GB or more (3.0.0: 256 MB).
 
 ## 3.0.0
 
