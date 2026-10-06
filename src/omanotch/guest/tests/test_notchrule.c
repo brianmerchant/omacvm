@@ -1,5 +1,5 @@
 // Offline tests for notchcast's pure helpers (notchrule.h). Run: ./test.sh
-#include "../notchcast/notchrule.h"
+#include "notchrule.h"
 
 static int failures;
 #define CHECK(cond, what) do { if (!(cond)) { failures++; printf("FAIL line %d: %s\n", __LINE__, what); } } while (0)

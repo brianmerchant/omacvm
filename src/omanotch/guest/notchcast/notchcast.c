@@ -1592,10 +1592,13 @@ static int notch_size(double sw, double ss, int *w, int *h) {
     return notch_mode(sw, ss, bs, w, h);
 }
 
-static void notch_rule_for(char *out, size_t size, double sx, double sy, double sw, double ss) {
-    int w, h;
-    notch_size(sw, ss, &w, &h);
-    notch_rule_lua(out, size, cfg_output, w, h, (int)sx, (int)sy, ss);
+// Size (pixels) and place of the hidden output for the display at (sx, sy),
+// `sw` px wide at scale `ss`: over the display's top edge. Returns its
+// logical height.
+static int notch_target(double sx, double sy, double sw, double ss, int *w, int *h, double *px, double *py) {
+    *px = sx;
+    *py = sy;
+    return notch_size(sw, ss, w, h);
 }
 
 // Keeps the hidden output present and exactly as wide as the display whose
@@ -1623,7 +1626,10 @@ static void *keeper_thread(void *unused) {
                 // notchbar.lua's rule may come from before the display existed
                 // (1024x52), and its first frames would reach the strip.
                 char lua[256];
-                notch_rule_for(lua, sizeof lua, sx, sy, sw, ss);
+                int w, h;
+                double px, py;
+                notch_target(sx, sy, sw, ss, &w, &h, &px, &py);
+                notch_rule_lua(lua, sizeof lua, cfg_output, w, h, (int)px, (int)py, ss);
                 LOG("creating headless output %s: %s", cfg_output, lua);
                 const char *rule[] = {"hyprctl", "eval", lua, NULL};
                 run_quiet(rule);
@@ -1649,16 +1655,18 @@ static void *keeper_thread(void *unused) {
                     if (last_lw > 0) enqueue_command("regeom");
                     last_lw = sw / ss;
                 }
-                int want_w, want_h, lh = notch_size(sw, ss, &want_w, &want_h);
+                int want_w, want_h;
+                double px, py;
+                int lh = notch_target(sx, sy, sw, ss, &want_w, &want_h, &px, &py);
                 static int saved_lh;
                 if (lh != saved_lh && atomic_load(&strip_height) > 0) {
                     saved_lh = lh;
                     save_strip_height(lh);
                 }
-                if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)sx || (int)ny != (int)sy ||
+                if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)px || (int)ny != (int)py ||
                     ns < ss - 0.01 || ns > ss + 0.01) {
                     char lua[256];
-                    notch_rule_lua(lua, sizeof lua, cfg_output, want_w, want_h, (int)sx, (int)sy, ss);
+                    notch_rule_lua(lua, sizeof lua, cfg_output, want_w, want_h, (int)px, (int)py, ss);
                     // Do not hammer Hyprland with a rule it keeps refusing.
                     if (strcmp(lua, last_applied) || now_ms() - last_apply_ms > 30000) {
                         LOG("resizing %s: %s", cfg_output, lua);
