@@ -401,6 +401,11 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// Seconds the firmware waits for a key (its boot manager) before it boots.
+    /// 0, the default: it boots at once (the boot logo covers the firmware, so
+    /// the wait only cost time: 5 s on every start up to 3.0.0).
+    /// Hidden: defaults write org.omacvm.app firmwareWait -int 5 (the old wait)
+    static var firmwareWait: Int { min(max(UserDefaults.standard.integer(forKey: "firmwareWait"), 0), 60) }
     /// The hidden Vulkan switch up to 2.9 (`venus`): moved once into each
     /// VM's Graphics setting at the first 3.0.0 launch, then removed
     /// (Graphics.migrateVenusSwitch).
