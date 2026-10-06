@@ -257,30 +257,6 @@ struct BuildView: View {
     }
 }
 
-extension ReadyView {
-    /// Moves the VM's folder to the Trash after a plain confirmation.
-    func deleteVM() {
-        let alert = NSAlert()
-        alert.messageText = "Delete \(state.config.name)?"
-        alert.informativeText = "The VM's disk and everything in Omarchy goes to the Trash."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Delete")
-        alert.buttons[1].hasDestructiveAction = true
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-        guard state.config.folderIsSafe else {
-            state.message = "Not deleted: \(state.config.folder.path) is not a VM folder of this app."
-            return
-        }
-        do {
-            try FileManager.default.trashItem(at: state.config.folder, resultingItemURL: nil)
-            state.config.location = nil
-            state.reload()
-        } catch {
-            state.message = "Could not delete: \(error.localizedDescription)"
-        }
-    }
-}
-
 struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
@@ -371,7 +347,7 @@ struct ReadyView: View {
             }
             fastNetwork
             Divider()
-            StorageSection(storage: state.storage)
+            StorageSection(storage: state.storage, selected: state.config.location == nil ? nil : state.config.folder)
             Divider()
             if let m = state.message { Text(m).foregroundStyle(.red) }
             if let p = state.config.filesProblem {
@@ -379,7 +355,7 @@ struct ReadyView: View {
             }
             UpdateSection(updater: Updater.shared)
             HStack {
-                Button("Delete…") { deleteVM() }
+                Button("Delete…") { state.storage.delete(state.config) }
                     .disabled(state.storage.moving != nil)
                 Spacer()
                 Button("Start") { state.startVM() }
