@@ -211,9 +211,8 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   password). Only the reading thread closes the port's socket. The HTTP
   lines to the Bridge are one helper (`BridgeHTTP`) for the control centre
   and Touch ID.
-- Who shows the dialog: the Bridge, as for Parallels, UTM and Fusion (the
-  system dialog, no click needed). An Omarchy-style panel shown from the
-  process that owns the VM window is the panel's own step.
+- Who asks: from 3.0.2 QEMU's Omarchy panel (the VM window's own process;
+  see the addendum), with the Bridge's system dialog as the fallback.
 
 ### Request and answer
 
