@@ -281,9 +281,10 @@ public final class AuthRelay: @unchecked Sendable {
         let sent = d.withUnsafeBytes { b -> Bool in
             var off = 0
             while off < b.count {
+                // A zero timeval means "no timeout": never pass one.
                 let left = deadline.timeIntervalSinceNow
-                guard left > 0 else { return false }
-                var tv = timeval(tv_sec: Int(left), tv_usec: Int32((left - left.rounded(.down)) * 1_000_000))
+                guard left > 0.001 else { return false }
+                var tv = timeval(tv_sec: Int(left), tv_usec: max(1, Int32((left - left.rounded(.down)) * 1_000_000)))
                 setsockopt(guest, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
                 let n = Darwin.write(guest, b.baseAddress!.advanced(by: off), b.count - off)
                 if n > 0 { off += n; continue }
