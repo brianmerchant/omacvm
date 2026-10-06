@@ -105,6 +105,8 @@ static _Atomic int notch_above;
 // Height of the Mac's black strip in points (`strip H`); 0 until reported.
 // The hidden output is made this tall so the strip needs no padding.
 static _Atomic int strip_height;
+// When notchcast hid the guest cursor (now_ms), 0 while it is shown.
+static _Atomic long long cursor_hidden_at;
 static int cfg_port;
 static int verbose;
 
@@ -453,6 +455,7 @@ static int on_vmware(void) {
 // Hides or shows the guest's own cursor (while the pointer is over the strip
 // the helper shows the guest's cursor images itself).
 static void set_guest_cursor_visible(int visible) {
+    atomic_store(&cursor_hidden_at, visible ? 0 : (long long)now_ms() + 1);
     if (visible) {
         hypr_eval("hl.config({ cursor = { invisible = false } })");
         return;
@@ -508,6 +511,7 @@ static void show_guest_cursor_at_exit(const char *dir, double strip_x, double de
     if (depth < 1) depth = 1;
     double top = y - nh / s;  // NOTCH has the screen's scale
     double ty = !strcmp(dir, "up") ? top - depth : y + depth;
+    atomic_store(&cursor_hidden_at, 0);
     // Shown first, then moved: the move repaints the outputs it touches with
     // the cursor already visible (shown after the move, it waited for the
     // next repaint of that output, up to a second on an idle desktop).
@@ -1869,6 +1873,7 @@ static void capture_session(struct wl_output *out) {
     if (!have_frame) free(ipc_call(0, "poke", NULL, NULL, NULL));
 
     double pcx = -1e9, pcy = -1e9;  // cursor position at the previous frame
+    int pmask = 0;                    // whether it was masked there
     while (!sess_stopped && !outputs_changed && !atomic_load(&remake_output)) {
         frame_ready = frame_failed = 0;
         struct ext_image_copy_capture_frame_v1 *f = ext_image_copy_capture_session_v1_create_frame(ses);
@@ -1900,14 +1905,18 @@ static void capture_session(struct wl_output *out) {
             send_text_locked(locked_now ? "lock 1" : "lock 0");
         }
         if (!cursor_pos(&cx, &cy)) {
+            long long hid = atomic_load(&cursor_hidden_at);
+            int m = notch_cursor_masked((NotchRect){out_x, out_y, W / out_scale, H / out_scale}, cx, cy,
+                                        hid ? t0 - (double)hid : 0);
             if (have_frame) {
-                mask_cursor(px, cx, cy);
-                mask_cursor(px, pcx, pcy);
-            } else {
+                if (m) mask_cursor(px, cx, cy);
+                if (pmask) mask_cursor(px, pcx, pcy);
+            } else if (m) {
                 fill_cursor(px, cx, cy);
             }
             pcx = cx;
             pcy = cy;
+            pmask = m;
         }
         // Bounding box of changed pixels.
         int y0 = -1, y1 = -1, x0 = (int)W, x1 = -1;

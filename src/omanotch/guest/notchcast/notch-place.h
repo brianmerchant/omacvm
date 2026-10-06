@@ -103,4 +103,17 @@ static int notch_other_outputs(const char *json, const char *skip_a, const char 
     return n;
 }
 
+// Whether notchcast masks the guest cursor in a captured NOTCH frame (it
+// restores those pixels from the previous frame, so the strip never shows a
+// cursor the Mac draws itself). Only while the hotspot is on NOTCH: a cursor
+// on the display below that reaches up into NOTCH is drawn there by Hyprland,
+// which also repaints NOTCH when it moves away. Masking it froze the strip
+// under it: hiding the bar left a box of the old bar at the strip's end. Not
+// while notchcast keeps the cursor hidden either (hidden_ms > 300: the first
+// frame after hiding may still show it).
+static inline int notch_cursor_masked(NotchRect out, double cx, double cy, double hidden_ms) {
+    if (hidden_ms > 300) return 0;
+    return cx >= out.x && cx < out.x + out.w && cy >= out.y && cy < out.y + out.h;
+}
+
 #endif

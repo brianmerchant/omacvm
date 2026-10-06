@@ -35,7 +35,12 @@ in more words.
   built-in display in OmacVM.app (#130); the wallpaper patch no longer
   found its display there, and every output drew its own copy: the strip
   a zoomed piece of the image's middle. Background patch v6 finds the
-  display in both places.
+  display in both places. In a window (no strip on screen) the VM's
+  wallpaper is now laid out the same way, so it sits a little lower and
+  larger than in 3.0.0.
+- Omanotch: no more box of the old bar (the clock's last digits) at the
+  strip's end after hiding the bar while the pointer was at the top edge.
+  notchcast froze the pixels around a cursor that was not on NOTCH at all.
 
 ## 3.0.0
 
