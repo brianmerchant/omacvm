@@ -126,6 +126,8 @@ case ${1:-} in
     vssh 'umount /mnt/mac' </dev/null
     ;;
   service)   # service: the VM's own unit mounts ~/Mac at boot; the user can write
+    scp -q -i "$KEY" -P $PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      "$H/../../src/app/guest/omacvm-mac-folder" "$H/../../src/app/guest/omacvm-mac-folder.service" root@127.0.0.1:/root/sf/
     vssh 'install -m755 /root/sf/omacvm-mac-folder /usr/local/bin/ && install -m644 /root/sf/omacvm-mac-folder.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable omacvm-mac-folder.service' </dev/null
     halt; boot share
     vssh 'U=$(getent passwd 1000 | cut -d: -f1); H=$(getent passwd 1000 | cut -d: -f6)

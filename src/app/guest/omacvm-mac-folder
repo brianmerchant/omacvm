@@ -27,9 +27,12 @@ if [[ ${1:-} == --stop ]]; then
   mountpoint -q "$M" && umount "$M"
   exit 0
 fi
-modprobe -q 9pnet_virtio 2>/dev/null || true
-# The driver binds right after the module loads; give it a moment.
-for _ in 1 2 3 4 5 6 7 8 9 10; do shared && break; sleep 0.2; done
+# A 9p device at all (virtio id 9)? Then its driver binds right after the
+# module loads; give it a moment. Without one (the usual case) no wait.
+if grep -qx 0x0009 /sys/bus/virtio/devices/*/device 2>/dev/null; then
+  modprobe -q 9pnet_virtio 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do shared && break; sleep 0.2; done
+fi
 if ! shared; then
   mountpoint -q "$M" && umount "$M"
   rmdir "$M" 2>/dev/null || true
