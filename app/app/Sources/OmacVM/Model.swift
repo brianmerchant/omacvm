@@ -58,9 +58,18 @@ enum Paths {
     /// the drive of the VMs folder (Storage.downloadsFolder).
     static var downloads: URL { Storage.downloadsFolder(vmsRoot: vmsRoot, home: VMsFolder.home) }
 
-    /// This one, the Mac's own and those of the other VMs folders; Storage >
-    /// Downloaded images > Remove empties them.
-    static var allDownloads: [URL] { Storage.downloadsFolders(vmsRoots: vmsRoots, home: VMsFolder.home) }
+    /// Downloads of VMs folders the app left that could not go along
+    /// (Storage.dropDownloads): kept until removed or used up.
+    static var oldDownloads: [URL] {
+        get { (UserDefaults.standard.stringArray(forKey: "oldDownloads") ?? []).map { URL(fileURLWithPath: $0) } }
+        set { UserDefaults.standard.set(newValue.map { $0.standardizedFileURL.path }, forKey: "oldDownloads") }
+    }
+
+    /// This one, the Mac's own, those of the other VMs folders and the old
+    /// ones; Storage > Downloaded images > Remove empties them.
+    static var allDownloads: [URL] {
+        Storage.downloadsFolders(vmsRoots: vmsRoots, home: VMsFolder.home, old: oldDownloads)
+    }
 
     /// The app's resources: Contents/Resources in the app, the source tree when
     /// run with `swift run` (OMACVM_RESOURCES).

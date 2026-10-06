@@ -161,11 +161,17 @@ struct PrebuiltImage: Equatable {
 
     /// For the build scripts: the test identity, and the downloads on the
     /// drive of the VMs folder (vm-common.sh CACHE). Never into a folder of a
-    /// drive that is not connected: that would be the Mac's own disk.
+    /// drive that is not connected: that would be the Mac's own disk. The
+    /// other downloads folders: a live system there moves over (live_reuse).
     static func environment() -> [String: String] {
         var e = TestIdentity.environment()
         e["OMACVM_CACHE"] = nil
-        if Storage.missingDrive(for: Paths.vmsRoot) == nil { e["OMACVM_CACHE"] = Paths.downloads.path }
+        e["OMACVM_VMS_ROOT"] = nil
+        let here = Paths.downloads
+        if Storage.missingDrive(for: Paths.vmsRoot) == nil { e["OMACVM_CACHE"] = here.path }
+        e["OMACVM_LIVE_FROM"] = Paths.allDownloads
+            .filter { $0.path != here.standardizedFileURL.path && Storage.missingDrive(for: $0) == nil }
+            .map(\.path).joined(separator: "\n")
         return e
     }
 

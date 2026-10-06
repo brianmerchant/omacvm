@@ -26,6 +26,8 @@ final class StorageModel: ObservableObject {
     @Published var free: Int64?
     @Published var vms: [Entry] = []
     @Published var downloads: Int64?
+    /// The downloads folders with something in them (for the Remove alert).
+    @Published var downloadFolders: [URL] = []
     /// One line per VMs folder on a drive that is not connected.
     @Published var disconnected: [String] = []
     @Published var moving: Moving?
@@ -53,16 +55,20 @@ final class StorageModel: ObservableObject {
         }
         refreshRun += 1
         let run = refreshRun, folders = vms.map(\.folder), root = root
+        let dlFolders = Paths.allDownloads, old = Paths.oldDownloads
         DispatchQueue.global(qos: .utility).async {
             let free = Storage.freeBytes(at: root)
             let sizes = folders.map { Storage.allocatedSize(of: $0) }
-            let downloads = Paths.allDownloads.reduce(Int64(0)) { $0 + Storage.downloadsSize($1) }
+            let dlSizes = dlFolders.map { Storage.downloadsSize($0) }
+            let gone = Set(old.map(\.path)).subtracting(Storage.oldDownloadsKept(old).map(\.path))
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
+                    if !gone.isEmpty { Paths.oldDownloads = Paths.oldDownloads.filter { !gone.contains($0.path) } }
                     guard run == self.refreshRun else { return }
                     self.free = Storage.missingDrive(for: root) == nil ? free : nil
                     for (i, s) in sizes.enumerated() where i < self.vms.count { self.vms[i].size = s }
-                    self.downloads = downloads
+                    self.downloads = dlSizes.reduce(0, +)
+                    self.downloadFolders = zip(dlFolders, dlSizes).filter { $0.1 > 0 }.map(\.0)
                 }
             }
         }
@@ -129,10 +135,23 @@ final class StorageModel: ObservableObject {
             r.path != new.standardizedFileURL.path && r.path != legacy
                 && (Storage.missingDrive(for: r) != nil || VMsFolder.hasVMs(r, fm: .default))
         }
-        // A folder left without VMs: its downloads go to the new place or away.
+        // A folder left without VMs: its downloads go along on the same
+        // drive, else they stay listed there (off the main thread: ps, drives).
         let kept = Set(Paths.vmsRoots.map(\.path))
-        for r in old where !kept.contains(r.path) { Storage.dropDownloads(ofRoot: r, to: Paths.downloads) }
+        let left = old.filter { !kept.contains($0.path) }, to = Paths.downloads
         refresh()
+        guard !left.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let lines = Storage.processLines()
+            let stay = left.compactMap { Storage.dropDownloads(ofRoot: $0, to: to, lines: lines) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let known = Set(Paths.oldDownloads.map(\.path))
+                    Paths.oldDownloads += stay.filter { !known.contains($0.path) }
+                    self.refresh()
+                }
+            }
+        }
     }
 
     /// The VMs in 2.9's hidden folder (none while that is the VMs folder:
@@ -259,25 +278,37 @@ final class StorageModel: ObservableObject {
     /// Empties the app's caches of Omarchy images (Paths.allDownloads). Never
     /// the Mac's Downloads folder.
     func removeImages() {
-        if building() || Paths.allDownloads.contains(where: { Storage.downloadsInUse($0) }) {
+        let lines = Storage.processLines()
+        if building() || Paths.allDownloads.contains(where: { Storage.downloadsInUse($0, lines: lines) }) {
             say("A VM is being set up from these images; remove them once it is done.", error: true)
             return
         }
         let size = Storage.format(downloads ?? 0)
         guard removeImagesAlert().runModal() == .alertFirstButtonReturn else { return }
-        do {
-            for f in Paths.allDownloads { try Storage.clearDownloads(f) }
-            say("Downloaded images removed (\(size)).")
-        } catch {
-            say("Could not remove all downloaded images: \(error.localizedDescription)", error: true)
+        let folders = Paths.allDownloads, old = Set(Paths.oldDownloads.map(\.path))
+        DispatchQueue.global(qos: .utility).async {
+            var failure: String?
+            for f in folders where Storage.missingDrive(for: f) == nil {
+                do {
+                    try Storage.clearDownloads(f)
+                    if old.contains(f.path) { Storage.removeIfEmpty(f) }
+                } catch { failure = failure ?? error.localizedDescription }
+            }
+            let failed = failure
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if let failed { self.say("Could not remove all downloaded images: \(failed)", error: true) }
+                    else { self.say("Downloaded images removed (\(size)).") }
+                    self.refresh()
+                }
+            }
         }
-        refresh()
     }
 
     func removeImagesAlert() -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Remove the downloaded images (\(Storage.format(downloads ?? 0)))?"
-        alert.informativeText = "These are the Omarchy images \(Product.name) downloaded to set up VMs, in \(Paths.allDownloads.filter { Storage.downloadsSize($0) > 0 }.map { Self.short($0) }.joined(separator: " and ")). Your VMs keep everything; a new VM downloads them again.\n\nYour Mac's Downloads folder is not touched."
+        alert.informativeText = "These are the Omarchy images \(Product.name) downloaded to set up VMs, in \((downloadFolders.isEmpty ? [Paths.downloads] : downloadFolders).map { Self.short($0) }.joined(separator: " and ")). Your VMs keep everything; a new VM downloads them again.\n\nYour Mac's Downloads folder is not touched."
         alert.addButton(withTitle: "Remove")
         alert.addButton(withTitle: "Cancel")
         return alert

@@ -34,9 +34,10 @@ source "$HERE/vm-common.sh"
 R=$(cd "$OMACVM_SRC/.." && pwd)
 info() { log "$*"; }
 source "$OMACVM_SRC/prebuilt/lib.sh"
-PREBUILT_CACHE=$CACHE/prebuilt   # the app's downloads folder (vm-common.sh)
+PREBUILT_CACHE=$CACHE/prebuilt   # the downloads folder (vm-common.sh)
 
 if [[ ${1:-} == --lookup ]]; then
+  cache_ready || exit 1
   prebuilt_lookup app 2>/dev/null || exit 1
   echo "$PB_TAG $PB_SIZE ${PB_OMARCHY%% *} $PB_VERSION"
   exit 0
@@ -44,7 +45,7 @@ fi
 
 VM_DIR=${1:?usage: prebuilt-vm.sh VM_DIR | --lookup}
 vm_load "$VM_DIR"
-PREBUILT_CACHE=$CACHE/prebuilt   # next to the VM unless the app said where
+cache_ready || die "could not make $CACHE"
 IFS= read -r PASSWORD || true
 [[ -n $PASSWORD ]] || die "no password on stdin"
 # OmacVM's Mac helpers and the clock format are built with Apple's tools.

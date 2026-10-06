@@ -181,10 +181,11 @@ enum Storage {
     }
 
     /// Every downloads folder of these VMs folders, the Mac's own always
-    /// (older versions used only that one); each once, the first root's first.
-    static func downloadsFolders(vmsRoots: [URL], home: URL) -> [URL] {
+    /// (older versions used only that one), then OLD ones of folders the app
+    /// left (dropDownloads); each once, the first root's first.
+    static func downloadsFolders(vmsRoots: [URL], home: URL, old: [URL] = []) -> [URL] {
         var seen = Set<String>(), out: [URL] = []
-        let all = vmsRoots.map { downloadsFolder(vmsRoot: $0, home: home) } + [home.appendingPathComponent("Library/Caches/omacvm")]
+        let all = vmsRoots.map { downloadsFolder(vmsRoot: $0, home: home) } + [home.appendingPathComponent("Library/Caches/omacvm")] + old
         for f in all where seen.insert(f.standardizedFileURL.path).inserted { out.append(f.standardizedFileURL) }
         return out
     }
@@ -213,23 +214,37 @@ enum Storage {
         }
     }
 
-    /// The downloads of a VMs folder the app no longer uses: to NEWFOLDER when
-    /// that is on the same drive and not there yet (a rename), else removed
-    /// (the next build downloads again). Not the Mac's own folder, not while
-    /// a build uses them, not on a drive that is not connected.
-    static func dropDownloads(ofRoot root: URL, to newFolder: URL, lines: [String] = processLines()) {
+    /// The downloads of a VMs folder the app no longer uses: renamed to
+    /// NEWFOLDER when that is on the same drive, not there yet and no build
+    /// uses them. Else they stay where they are and the folder comes back,
+    /// for Paths.oldDownloads: Storage counts and removes them there, and the
+    /// next build takes the live system from there (vm-common.sh live_reuse).
+    static func dropDownloads(ofRoot root: URL, to newFolder: URL, lines: [String]) -> URL? {
         let old = root.standardizedFileURL.appendingPathComponent(".downloads")
         let fm = FileManager.default
-        guard missingDrive(for: root) == nil, fm.fileExists(atPath: old.path),
-              old.path != newFolder.standardizedFileURL.path, !downloadsInUse(old, lines: lines) else { return }
+        guard old.path != newFolder.standardizedFileURL.path else { return nil }
+        if missingDrive(for: root) != nil { return old }
+        guard fm.fileExists(atPath: old.path) else { return nil }
         if newFolder.lastPathComponent == ".downloads", !fm.fileExists(atPath: newFolder.path), sameVolume(old, newFolder),
+           !downloadsInUse(old, lines: lines),
            (try? fm.createDirectory(at: newFolder.deletingLastPathComponent(), withIntermediateDirectories: true)) != nil,
            (try? fm.moveItem(at: old, to: newFolder)) != nil {
-            return
+            return nil
         }
-        try? clearDownloads(old)
-        try? fm.removeItem(at: old.appendingPathComponent(".DS_Store"))
-        rmdir(old.path)   // only when empty now: anything else in it stays
+        return old
+    }
+
+    /// Old downloads folders still worth listing: on a drive not connected,
+    /// or still there.
+    static func oldDownloadsKept(_ old: [URL]) -> [URL] {
+        old.filter { missingDrive(for: $0) != nil || FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// An old downloads folder once its downloads are gone: removed when
+    /// nothing else is in it.
+    static func removeIfEmpty(_ folder: URL) {
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(".DS_Store"))
+        rmdir(folder.path)
     }
 }
 

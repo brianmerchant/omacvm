@@ -254,7 +254,8 @@ app_create() {
   for kv in "$@"; do
     v=${kv#*=}; printf "%s='%s'\n" "${kv%%=*}" "${v//$q/$q\\$q$q}"
   done > "$dir/vm.env"
-  /bin/bash "$a/Contents/Resources/scripts/$script" "$dir"
+  # The downloads go to the drive of the VMs folder, as in the app.
+  OMACVM_VMS_ROOT=$(dirname "$dir") /bin/bash "$a/Contents/Resources/scripts/$script" "$dir"
 }
 
 app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
@@ -263,7 +264,7 @@ app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
 # downloads (the app looks with its version, not this omacvm's).
 app_prebuilt_lookup() {
   local out
-  out=$(/bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
+  out=$(OMACVM_VMS_ROOT=$(app_vms_root) /bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
   read -r PB_TAG PB_SIZE PB_OMARCHY PB_VERSION <<<"$out"
   [[ $PB_TAG =~ ^[A-Za-z0-9._-]{1,80}$ && $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_OMARCHY =~ ^[!-~]{1,80}$ &&
      ${PB_VERSION:-} =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]

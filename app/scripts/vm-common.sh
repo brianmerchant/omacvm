@@ -21,9 +21,31 @@ else
   OMACVM_SRC=$_root/omacvm/src
 fi
 [[ -x $QEMU && -f $FIRMWARE && -d $OMACVM_SRC ]] || die "the app is incomplete (QEMU, firmware or OmacVM missing under $_root)"
-# Downloads (try-omarchy, prebuilt VMs): OMACVM_CACHE (the app passes it),
-# else next to the VM (vm_load: downloads_dir).
-CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/omacvm}
+# downloads_dir ROOT: where builds of VMs in the VMs folder ROOT keep their
+# downloads: ~/Library/Caches/omacvm when ROOT is on the home folder's drive,
+# else ROOT/.downloads, so VMs on another drive leave the Mac's disk alone.
+# The app's Storage.downloadsFolder has the same rule (src/tests/app-storage.sh).
+# -L: a linked VMs folder counts where it points, as in the app.
+downloads_dir() {
+  local a=$1
+  until [[ -e $a || $a == / ]]; do a=$(dirname "$a"); done
+  if [[ $(stat -L -f %d "$a") == "$(stat -L -f %d "$HOME")" ]]; then echo "$HOME/Library/Caches/omacvm"
+  else echo "${1%/}/.downloads"; fi
+}
+
+# Downloads (try-omarchy, prebuilt VMs): OMACVM_CACHE (the app passes it), else
+# those of the VMs folder OMACVM_VMS_ROOT (omacvm build passes it), else the
+# Mac's. Made only by builds and lookups (cache_ready).
+if [[ -n ${OMACVM_CACHE:-} ]]; then CACHE=$OMACVM_CACHE
+elif [[ -n ${OMACVM_VMS_ROOT:-} ]]; then CACHE=$(downloads_dir "$OMACVM_VMS_ROOT")
+else CACHE=$HOME/Library/Caches/omacvm; fi
+
+# cache_ready: makes CACHE. Time Machine leaves it out, each time: a lookup may
+# have made it first (~/Library/Caches is left out anyway).
+cache_ready() {
+  mkdir -p "$CACHE" || return 1
+  tmutil addexclusion "$CACHE" >/dev/null 2>&1 || true
+}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 source "$OMACVM_SRC/vm/live/release.sh"
 # A script of "OmacVM Test" run by hand (apply-vm.sh from a shell) is the
@@ -63,24 +85,9 @@ proxy_to_vm() {
   printf '%s\n' "$e" | vssh "umask 022; cat > /root/omacvm-proxy.env"
 }
 
-# downloads_dir ROOT: where builds of VMs in the VMs folder ROOT keep their
-# downloads: ~/Library/Caches/omacvm when ROOT is on the home folder's drive,
-# else ROOT/.downloads, so VMs on another drive leave the Mac's disk alone.
-# The app's Storage.downloadsFolder has the same rule (src/tests/app-storage.sh).
-downloads_dir() {
-  if [[ $(stat -f %d "$1") == "$(stat -f %d "$HOME")" ]]; then echo "$HOME/Library/Caches/omacvm"
-  else echo "$1/.downloads"; fi
-}
-
 vm_load() {
   VM_DIR=$(cd "$1" && pwd)
   [[ -f $VM_DIR/vm.env ]] || die "no vm.env in $VM_DIR"
-  [[ -n ${OMACVM_CACHE:-} ]] || CACHE=$(downloads_dir "$(dirname "$VM_DIR")")
-  if [[ ! -d $CACHE ]]; then
-    mkdir -p "$CACHE"
-    # Time Machine leaves it out (~/Library/Caches is left out anyway).
-    tmutil addexclusion "$CACHE" >/dev/null 2>&1 || true
-  fi
   source "$VM_DIR/vm.env"
   : "${NAME:?}" "${CPUS:?}" "${MEM_MB:?}" "${DISK_GB:?}" "${SSH_PORT:?}" "${VM_USER:?}"
   LOG=$VM_DIR/logs; mkdir -p "$LOG"
@@ -111,6 +118,7 @@ efi_vars_create() { [[ -f $VM_DIR/efi-vars.fd ]] || mkfile -n 64m "$VM_DIR/efi-v
 # the release's own manifest. Downloaded once.
 live_fetch() {
   local d=$CACHE/live dmg vol app g
+  cache_ready || die "could not make $CACHE"
   mkdir -p "$d"
   LIVE_KERNEL=$d/vmlinuz-linux LIVE_INITRD=$d/initramfs-linux.img LIVE_ROOTFS=$d/rootfs.ext4
   # macOS may clear Caches: the marker counts only with the files still there.
@@ -151,22 +159,56 @@ live_fetch() {
   rm -f "$dmg"
 }
 
-# live_reuse DIR: the live system of an earlier build in the Mac's own cache
-# (the VMs were on the Mac then, or OmacVM 3.0.0 and older) moves to DIR
-# instead of being downloaded again: copied, then deleted there.
+# others_building: another OmacVM build runs: not this script, what it started
+# or what started it (omacvm build, say). It may read a downloads folder.
+others_building() {
+  local mine=" " p=$$
+  while [[ -n $p && $p -gt 1 ]]; do mine+="$p "; p=$(ps -o ppid= -p "$p" | tr -d ' '); done
+  # bash running one of the build scripts (not a shell line or an editor that names one)
+  local build='^[^ ]*bash ([^-].*/)?((create-vm|prebuilt-vm|build-live|make-image)[.]sh|omacvm build)( |$)'
+  ps -x -ww -U "$(id -u)" -o pid=,ppid=,args= | awk -v me=$$ -v mine="$mine" -v build="$build" '
+    { pid[NR] = $1; pp[$1] = $2; a = $0; sub(/^ *[0-9]+ +[0-9]+ /, "", a); args[NR] = a }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (index(mine, " " pid[i] " ") || args[i] !~ build) continue
+        q = pid[i]; ours = 0
+        for (n = 0; n < 64 && q + 0 > 1; n++) { if (q == me) { ours = 1; break }; q = pp[q] }
+        if (!ours) found = 1
+      }
+      exit !found
+    }'
+}
+
+# live_reuse DIR: a live system of this release in another downloads folder
+# (the Mac's own, or the app's others in OMACVM_LIVE_FROM, one per line) moves
+# to DIR instead of being downloaded again: copied (a clone on one APFS drive),
+# then deleted there. Any other live system there (an older release, a second
+# copy) is of no use then: deleted too. While another build runs, all stay (it
+# may read them).
 live_reuse() {
-  local d=$1 old=$HOME/Library/Caches/omacvm/live f
-  [[ $d != "$old" && -f $old/ok-$LIVE_RELEASE ]] || return 1
-  for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do [[ -f $old/$f ]] || return 1; done
-  log "moving the live system from $old"
-  rm -rf "$d/.moving"; mkdir -p "$d/.moving"
-  for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do
-    cp "$old/$f" "$d/.moving/$f" || { rm -rf "$d/.moving"; log "could not copy it: downloading instead"; return 1; }
-  done
-  for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do mv -f "$d/.moving/$f" "$d/$f"; done
-  rmdir "$d/.moving"
-  touch "$d/ok-$LIVE_RELEASE"
-  rm -f "$old/ok-$LIVE_RELEASE" "$old/vmlinuz-linux" "$old/initramfs-linux.img" "$old/rootfs.ext4"
+  local d=$1 s f busy=0 found=1
+  others_building && busy=1
+  while IFS= read -r s; do
+    [[ -n $s ]] || continue
+    s=${s%/}/live
+    [[ -d $s && ! -L $s && ! -L ${s%/live} && ! $s -ef $d ]] || continue
+    if (( found )) && [[ -f $s/ok-$LIVE_RELEASE && -f $s/vmlinuz-linux && -f $s/initramfs-linux.img && -f $s/rootfs.ext4 ]]; then
+      log "moving the live system from $s"
+      rm -rf "$d/.moving" && mkdir -p "$d/.moving" || return 1
+      for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do
+        cp -c "$s/$f" "$d/.moving/$f" 2>/dev/null || cp "$s/$f" "$d/.moving/$f" ||
+          { rm -rf "$d/.moving"; log "could not copy it: downloading instead"; return 1; }
+      done
+      for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do
+        mv -f "$d/.moving/$f" "$d/$f" || { rm -rf "$d/.moving"; return 1; }
+      done
+      rmdir "$d/.moving" && touch "$d/ok-$LIVE_RELEASE" || return 1
+      found=0
+    fi
+    (( busy )) && continue
+    rm -f "$s"/ok-* && rm -f "$s/vmlinuz-linux" "$s/initramfs-linux.img" "$s/rootfs.ext4" "$s"/TryOmarchy-*.dmg || true
+  done <<<"$(printf '%s\n%s\n' "$HOME/Library/Caches/omacvm" "${OMACVM_LIVE_FROM:-}")"
+  return $found
 }
 
 # qemu_headless NAME ARGS...: QEMU without a window, serial console in
