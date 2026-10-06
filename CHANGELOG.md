@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.1 (unreleased)
+
+- **x86 Linux apps** (experimental, off by default): `omacvm enable
+  x86-apps` builds box64 in the VM; x86_64 programs and AppImages then run
+  like ARM ones, slower (about 75-80 % of native speed for plain code,
+  much less for vector-heavy code). `omacvm disable x86-apps` removes it.
+  Every route. ([details](docs/features.md#x86-linux-apps))
+
 ## 3.0.0 (unreleased)
 
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
