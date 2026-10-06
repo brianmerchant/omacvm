@@ -85,7 +85,11 @@ int main(void)
     full_is(3024, 1890, 2, 3024, 1888);   /* MacBook Pro 14 */
     full_is(3456, 2160, 2, 3456, 2160);   /* MacBook Pro 16: as it is */
     full_is(3420, 2082, 2, 3420, 2080);   /* Air 13 at 1710x1107 */
-    /* Displays without a notch fit already: nothing cut. */
+    /*
+     * Displays without a notch: ui/cocoa.m never asks for a cut there (a
+     * 4.5K iMac at 4480x2520 would lose 4 points only to get 3.2 for
+     * 3.33). These fit already anyway: nothing cut.
+     */
     full_is(2560, 1600, 2, 2560, 1600);
     full_is(5120, 2880, 2, 5120, 2880);
     full_is(3840, 2160, 2, 3840, 2160);
@@ -152,6 +156,37 @@ int main(void)
                   s.w, s.h, panel_text(s.w, s.h));
             CHECK(panel_has(s.w, s.h, 192, 200), "%ux%u: no 1.6-1.67 (%s)",
                   s.w, s.h, panel_text(s.w, s.h));
+        }
+    }
+
+    /*
+     * The black rows when a frame is shown at the top of the full-screen
+     * view: only a frame as wide and at most 6 points shorter.
+     */
+    CHECK(omacvm_top_band(2940, 1846, 2940, 1840, 2) == 6, "Air: %u",
+          omacvm_top_band(2940, 1846, 2940, 1840, 2));
+    CHECK(omacvm_top_band(2940, 1846, 2940, 1846, 2) == 0, "same size: filled");
+    CHECK(omacvm_top_band(2940, 1846, 2932, 1840, 2) == 0, "other width: filled");
+    CHECK(omacvm_top_band(2940, 1846, 2940, 1834, 2) == 12, "6 points: at the top");
+    CHECK(omacvm_top_band(2940, 1846, 2940, 1832, 2) == 0, "7 points: filled");
+    CHECK(omacvm_top_band(2940, 1846, 2940, 1900, 2) == 0, "taller: filled");
+    CHECK(omacvm_top_band(2940, 1846, 0, 0, 2) == 0, "no frame");
+    CHECK(omacvm_top_band(1920, 1080, 1920, 1074, 1) == 6, "1x, 6 rows");
+    CHECK(omacvm_top_band(1920, 1080, 1920, 1073, 1) == 0, "1x, 7 rows: filled");
+
+    /* Every full-screen pick is shown at the top, its cut black below. */
+    {
+        static const uint32_t areas[][2] = {
+            { 2940, 1846 }, { 2880, 1798 }, { 3024, 1890 }, { 3456, 2160 },
+            { 3420, 2082 }, { 4112, 2572 },
+        };
+
+        for (size_t i = 0; i < sizeof(areas) / sizeof(areas[0]); i++) {
+            OmacVMSize s = omacvm_clean_size(areas[i][0], areas[i][1], 2, true);
+            uint32_t band = omacvm_top_band(areas[i][0], areas[i][1], s.w, s.h, 2);
+
+            CHECK(band == areas[i][1] - s.h, "%ux%u -> %ux%u: %u black rows",
+                  areas[i][0], areas[i][1], s.w, s.h, band);
         }
     }
 

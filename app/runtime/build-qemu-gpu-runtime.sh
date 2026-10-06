@@ -783,8 +783,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-clean-size.pa
 "$native_dir/Tests/display/test-clean-size.sh"
 grep -q 'OmacVMSize clean = omacvm_clean_size(' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not size the guest for Omarchy's scales (clean-size patch)"
-grep -q 'setContentSize:top ? area' "$source_dir/ui/cocoa.m" || \
+grep -q '\[\[self window\] setContentSize:area\];' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-screen window must fill the area (Omanotch), clean-size patch"
+grep -q 'full = isFullscreen && omacvm_present_layer() &&' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: rows may be cut only with the IOSurface layer below a notch, clean-size patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
