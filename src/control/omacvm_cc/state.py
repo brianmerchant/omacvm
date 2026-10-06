@@ -452,15 +452,17 @@ MOUSE_SWIPE_FEATURE = Feature(
             "Omarchy switches workspaces with 4.")
 
 
-def mouse_swipe_row(answer: dict | None, gestures_on: bool = True) -> Row | None:
+def mouse_swipe_row(answer: dict | None, gestures_on: bool = True, offline: bool = False) -> Row | None:
     """The Magic Mouse swipe row: only while the Mac has a Magic Mouse (its
-    answer says so). Gestures off: the setting stays, the row says why
-    nothing swipes."""
+    last answer says so). Gestures off: the setting stays, the row says why
+    nothing swipes. offline: the Mac does not answer right now."""
     if not isinstance(answer, dict) or answer.get("magic_mouse") is not True:
         return None
     n = answer.get("fingers")
     if n not in (3, 4) or isinstance(n, bool):
         return None
+    if offline:
+        return Row(MOUSE_SWIPE_FEATURE, True, Status.UNKNOWN, f"{n} fingers (needs the Mac)")
     if not gestures_on:
         return Row(MOUSE_SWIPE_FEATURE, False, Status.OFF, f"{n} fingers (Trackpad gestures is off)")
     return Row(MOUSE_SWIPE_FEATURE, True, Status.WORKS, f"{n} fingers")

@@ -979,3 +979,97 @@ def test_no_mouse_swipe_row_without_a_magic_mouse_or_on_an_older_mac(world):
             await pilot.pause(0.3)
             assert "mouse-swipe" not in rows(a)
     asyncio.run(go2())
+
+
+def test_mouse_swipe_row_that_goes_takes_no_other_feature(world):
+    """The cursor on Magic Mouse swipe, the mouse goes: space does not switch
+    the row that took its place. The mouse back: the cursor is back on it."""
+    world.mouse_swipe = {"magic_mouse": True, "fingers": 4}
+    world.notch = True   # the row after it, Omanotch, can be switched on
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "mouse-swipe" in rows(a))
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            at = [r.feature.name for r in a.rows].index("mouse-swipe")
+            t.move_cursor(row=at)
+            await pilot.pause(0.1)
+            world.mouse_swipe = {"magic_mouse": False, "fingers": 4}
+            a.live_refresh()
+            assert await settle(pilot, lambda: "mouse-swipe" not in rows(a))
+            other = a.rows[t.cursor_row].feature.name
+            assert other == "omanotch"
+            await pilot.press("space")
+            await pilot.pause(0.3)
+            assert not any(m == "POST" for m, _, _ in world.requests)
+            # Not moved since the row went: back on it when it returns.
+            world.mouse_swipe = {"magic_mouse": True, "fingers": 4}
+            a.live_refresh()
+            assert await settle(pilot, lambda: "mouse-swipe" in rows(a))
+            await pilot.pause(0.1)
+            assert a.rows[t.cursor_row].feature.name == "mouse-swipe"
+            await pilot.press("space")
+            assert await settle(pilot, lambda: world.mouse_swipe["fingers"] == 3)
+            # Gone again, and the cursor moved on by hand: space is for that row.
+            world.mouse_swipe = {"magic_mouse": False, "fingers": 3}
+            a.live_refresh()
+            assert await settle(pilot, lambda: "mouse-swipe" not in rows(a))
+            await pilot.press("k")
+            await pilot.pause(0.1)
+            assert a.rows[t.cursor_row].feature.name != other
+            assert a.screen.away is None
+    asyncio.run(go())
+
+
+def test_mouse_swipe_row_stays_while_the_mac_is_away(world):
+    """A blip (the Bridge restarting, a refused request): the row stays with
+    the last answer and says it needs the Mac; space asks nothing."""
+    world.mouse_swipe = {"magic_mouse": True, "fingers": 4}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "mouse-swipe" in rows(a))
+            world.old = True
+            a.live_refresh()
+            assert await settle(pilot, lambda: not a.c.linked)
+            assert await settle(pilot, lambda: rows(a)["mouse-swipe"].note == "4 fingers (needs the Mac)")
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            t.move_cursor(row=[r.feature.name for r in a.rows].index("mouse-swipe"))
+            await pilot.press("space")
+            await pilot.pause(0.3)
+            assert not any(m == "POST" for m, _, _ in world.requests)
+            world.old = False
+            a.live_refresh()
+            assert await settle(pilot, lambda: a.c.linked and rows(a)["mouse-swipe"].note.startswith("4 fingers ("))
+            assert a.rows[t.cursor_row].feature.name == "mouse-swipe"
+    asyncio.run(go())
+
+
+def test_mouse_swipe_look_from_before_a_switch_is_dropped(world):
+    """A look that was out while a switch went through may carry the old
+    value: it is not kept, so the row and the next space go from the switch."""
+    from omacvm_cc.controller import Controller
+    world.mouse_swipe = {"magic_mouse": True, "fingers": 4}
+    c = Controller()
+    c.refresh_mac()
+    assert c.mouse_swipe == {"magic_mouse": True, "fingers": 4}
+    look = c.bridge.mouse_swipe
+
+    def slow_look():
+        old = look()
+        c.set_mouse_swipe(3)   # lands while this look is on its way back
+        return old
+    c.bridge.mouse_swipe = slow_look
+    c.refresh_mouse_swipe()
+    assert c.mouse_swipe["fingers"] == 3
+    c.bridge.mouse_swipe = look
+    c.refresh_mouse_swipe()
+    assert c.mouse_swipe["fingers"] == 3
+    # An older Mac (hello without the request): no row.
+    world.mouse_swipe = None
+    c.refresh_mac()
+    assert c.mouse_swipe is None

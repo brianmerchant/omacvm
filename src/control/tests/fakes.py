@@ -57,6 +57,7 @@ class FakeMac:
         self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
         self.mouse_swipe: dict | None = None   # {"magic_mouse", "fingers"} (None: an older Mac without it)
+        self.notch = False   # a MacBook with a notch: Omanotch can go on
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -144,7 +145,8 @@ class FakeMac:
                     return self.send(200, {"omacvm": fake.version, "features": [], "checks": [], "graphics": fake.graphics})
                 if p == "/omacvm/status":
                     return self.send(200, {"omacvm": fake.version, "features": [
-                        {"name": "omanotch", "on": False, "available": False, "reason": "needs a MacBook with a notch"}],
+                        {"name": "omanotch", "on": False, "available": fake.notch,
+                         "reason": "" if fake.notch else "needs a MacBook with a notch"}],
                         "checks": [{"status": "fail", "name": "keyboard/trackpad access", "detail":
                                     "waiting for Accessibility: System Settings > Privacy & Security", "needs_human": True,
                                     "feature": "gestures"}]})

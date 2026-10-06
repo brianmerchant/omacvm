@@ -28,7 +28,8 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 `graphics` jobs and `gpu-memory`, read-only numbers for OmacVM.app VMs, 3.0.0;
 `settings/mouse-swipe`, Gestures' Magic Mouse swipe: GET says whether the
 Mac has a Magic Mouse and 3 or 4 fingers, POST takes `{"fingers": 3|4}`
-only, 3.0.1.)
+only, 3.0.1. It is a Mac-wide setting: a switch from one VM applies to all
+VMs and to OmacVM.app.)
 
 - The Mac decides which VM: the peer address must match exactly one running
   VM that OmacVM set up (pinned host key); otherwise 409 and nothing runs.

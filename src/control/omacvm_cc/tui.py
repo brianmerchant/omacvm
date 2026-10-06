@@ -142,6 +142,10 @@ class FeaturesScreen(Screen):
         Binding("j", "down", show=False), Binding("k", "up", show=False),
     ]
 
+    # The cursor's row that went: (name, where the cursor waits, title).
+    away: tuple[str, int, str] | None = None
+    away_said = False
+
     def compose(self) -> ComposeResult:
         with Vertical(classes="box") as box:
             box.border_title = f"OmacVM {self.app.c.local.version}"
@@ -181,14 +185,24 @@ class FeaturesScreen(Screen):
         title_w = max(len(r.feature.title) for r in rows)
         width = max(16, self.size.width - 4 - 3 - 3 - (title_w + 2) - 3)
         # Rows come and go (Magic Mouse swipe with the mouse): new keys, new
-        # table, the cursor stays on its row.
+        # table, the cursor stays on its row. If its row went, the cursor
+        # waits on the row that took its place and goes back when it returns.
         names = [r.feature.name for r in rows]
         if before != names:
+            gone = before[keep] if 0 <= keep < len(before) else None
+            gone_title = str(t.get_cell(gone, "title")) if gone is not None else ""
             t.clear()
             for r in rows:
                 t.add_row(status_cell(r, app.tick), "", r.feature.title, "", key=r.feature.name)
-            if 0 <= keep < len(before) and before[keep] in names:
-                keep = names.index(before[keep])
+            if self.away is not None and self.away[0] in names and keep == self.away[1]:
+                keep = names.index(self.away[0])
+                self.away = None
+            elif gone in names:
+                keep = names.index(gone)
+            elif gone is not None and self.away is None:
+                keep = min(keep, len(names) - 1)
+                self.away = (gone, keep, gone_title)
+                self.away_said = False
         for r in rows:
             dim = r.status in (S.Status.UNAVAILABLE, S.Status.OFF)
             note = r.note or S.tag_note(r.feature)
@@ -219,7 +233,20 @@ class FeaturesScreen(Screen):
 
     @on(DataTable.RowHighlighted)
     def _highlight(self) -> None:
+        if self.away is not None and self.table.cursor_row != self.away[1]:
+            self.away = None   # moved on: it is the user's row now
         self.show_hint()
+
+    def row_went(self) -> bool:
+        """The cursor's row went and the cursor has not moved since: say so
+        once, instead of acting on the row that took its place."""
+        if self.away is None or self.away_said or self.table.cursor_row != self.away[1]:
+            return False
+        r = self.selected()
+        now = f": the cursor is on {r.feature.title} now" if r is not None else ""
+        self.notify(f"{self.away[2]} went away{now}", severity="warning")
+        self.away_said = True
+        return True
 
     def action_down(self) -> None:
         self.table.action_cursor_down()
@@ -229,12 +256,12 @@ class FeaturesScreen(Screen):
 
     def action_toggle(self) -> None:
         r = self.selected()
-        if r is not None:
+        if r is not None and not self.row_went():
             self.app.toggle(r)
 
     def action_repair(self) -> None:
         r = self.selected()
-        if r is not None:
+        if r is not None and not self.row_went():
             self.app.repair(r)
 
     def action_update(self) -> None:
@@ -626,6 +653,7 @@ class ControlCentre(App):
         self.watching: str | None = None
         self.last_result = ""   # the last job's outcome and what to do next (the banner)
         self.gpu_asking = False  # a look at graphics memory is under way
+        self.mouse_swipe_sending = False   # a Magic Mouse swipe switch is under way
         self.omarchy_waiting: int | None = None   # package updates waiting (checkupdates)
 
     def on_mount(self) -> None:
@@ -880,16 +908,24 @@ class ControlCentre(App):
         if problem:
             self.notify(f"needs the Mac: {problem}", severity="warning")
             return
+        if self.mouse_swipe_sending:
+            return   # the last press is still on its way; the next one goes from its answer
+        self.mouse_swipe_sending = True
         self.send_mouse_swipe(S.next_fingers((self.c.mouse_swipe or {}).get("fingers")))
 
-    @work(thread=True, exclusive=True, group="mouse-swipe")
+    @work(thread=True, group="mouse-swipe")
     def send_mouse_swipe(self, fingers: int) -> None:
         try:
             self.c.set_mouse_swipe(fingers)
             self.call_from_thread(self.notify, f"Magic Mouse swipe: {fingers} fingers, from the next swipe")
         except BridgeError as e:
             self.call_from_thread(self.notify, f"Magic Mouse swipe: {e}", severity="warning")
-        self.call_from_thread(self.refresh_all)
+        finally:
+            self.call_from_thread(self.mouse_swipe_sent)
+
+    def mouse_swipe_sent(self) -> None:
+        self.mouse_swipe_sending = False
+        self.refresh_all()
 
     def choose_graphics(self) -> None:
         """Space on Graphics: the next choice, asked first (it applies at the

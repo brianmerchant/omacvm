@@ -334,6 +334,12 @@ def test_mouse_swipe_row_says_when_gestures_is_off():
     assert r.status is S.Status.OFF and r.note == "3 fingers (Trackpad gestures is off)"
 
 
+def test_mouse_swipe_row_stays_while_the_mac_is_away():
+    r = S.mouse_swipe_row({"magic_mouse": True, "fingers": 3}, offline=True)
+    assert r.status is S.Status.UNKNOWN and r.note == "3 fingers (needs the Mac)"
+    assert S.mouse_swipe_row(None, offline=True) is None
+
+
 def test_mouse_swipe_row_ignores_junk():
     for a in ({"magic_mouse": 1, "fingers": 3}, {"magic_mouse": True, "fingers": 5},
               {"magic_mouse": True, "fingers": True}, {"magic_mouse": True, "fingers": "3"}, {"magic_mouse": True}):

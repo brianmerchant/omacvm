@@ -104,7 +104,8 @@ OmacVM.app shows **Magic Mouse swipe** (in the setup and the VM window):
 *4 fingers* (the default; Omarchy switches workspaces with 4) or *3
 fingers*. It counts from the next swipe. The control centre in Omarchy has
 the same row on every route (space switches it), and on the Mac `defaults
-write org.omacvm.gestures MouseSwipeFingers -int 3` (or `4`) sets it.
+write org.omacvm.gestures MouseSwipeFingers -int 3` (or `4`) sets it. It is one
+setting for the whole Mac, all VMs included.
 
 Media keys while a VM is in front (OmacVM.app full screen or in a window;
 Parallels, UTM and Fusion full screen): volume and mute change the Mac's

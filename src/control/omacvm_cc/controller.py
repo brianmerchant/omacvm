@@ -69,6 +69,7 @@ class Controller:
         # The Mac's Magic Mouse swipe ({"magic_mouse", "fingers"}), never cached:
         # the row shows only while the Mac has a Magic Mouse.
         self.mouse_swipe: dict | None = None
+        self.mouse_swipe_sets = 0   # bumped around each switch: an older look is not kept
 
     # ---- the Mac ----
     @property
@@ -111,17 +112,29 @@ class Controller:
         return self.hello is not None and "settings/mouse-swipe" in self.hello.requests
 
     def refresh_mouse_swipe(self) -> None:
-        """The Mac's Magic Mouse swipe; a missed answer keeps the last one."""
-        if not self.linked or not self.mouse_swipe_supported():
+        """The Mac's Magic Mouse swipe. The Mac away or a missed answer keeps
+        the last one (the row stays, it says it needs the Mac); a Mac that
+        does not list the request has none. A look that started before a
+        switch ended is dropped: it may be the old value."""
+        if self.hello is not None and not self.mouse_swipe_supported():
             self.mouse_swipe = None
             return
+        if not self.linked:
+            return
+        sets = self.mouse_swipe_sets
         try:
-            self.mouse_swipe = self.bridge.mouse_swipe()
+            answer = self.bridge.mouse_swipe()
         except BridgeError:
-            pass
+            return
+        if sets == self.mouse_swipe_sets:
+            self.mouse_swipe = answer
 
     def set_mouse_swipe(self, fingers: int) -> None:
-        self.mouse_swipe = self.bridge.set_mouse_swipe(fingers)
+        self.mouse_swipe_sets += 1
+        try:
+            self.mouse_swipe = self.bridge.set_mouse_swipe(fingers)
+        finally:
+            self.mouse_swipe_sets += 1
 
     def gpu_memory_supported(self) -> bool | None:
         """The Mac answers gpu-memory (None: its hello is not in yet)."""
@@ -250,8 +263,8 @@ class Controller:
                            offline=self.mac_error is not None)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
                              offline=self.mac_error is not None)
-        # A Mac setting: shown while the Mac answers.
-        ms = S.mouse_swipe_row(self.mouse_swipe if self.linked else None, on.get("gestures", True))
+        # A Mac setting: the last answer stays while the Mac is away for a moment.
+        ms = S.mouse_swipe_row(self.mouse_swipe, on.get("gestures", True), offline=not self.linked)
         if ms is not None:
             # After Trackpad gestures and the features that need it.
             at = max((i + 1 for i, r in enumerate(rows) if "gestures" in (r.feature.name, r.feature.needs)), default=len(rows))
