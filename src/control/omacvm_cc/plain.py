@@ -49,8 +49,11 @@ def status(as_json: bool, fallback: bool = False) -> int:
     mac = f"the Mac: OmacVM {c.hello.omacvm}" if c.hello else f"the Mac: {c.mac_problem()}"
     print(f"OmacVM {c.local.version} · {c.local.vm_type or '?'} · {mac}\n")
     print(table(c, color))
-    print("\n  Switch, repair, update: the control centre (omacvm), or on the Mac:")
-    print("    omacvm enable FEATURE · omacvm disable FEATURE · omacvm update")
+    if c.local.vm_type == "app":   # OmacVM.app alone has no omacvm command on the Mac
+        print("\n  Switch, repair, update: the control centre (omacvm in a terminal, or the Omarchy menu).")
+    else:
+        print("\n  Switch, repair, update: the control centre (omacvm), or on the Mac:")
+        print("    omacvm enable FEATURE · omacvm disable FEATURE · omacvm update")
     if fallback:
         print("\n  " + textual_fix(c))
     bad = [r for r in rows if r.status in (Status.FAILING, Status.NEEDS_PERSON)]
