@@ -568,6 +568,17 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
   (with green and muted), the app panel's answer lines (never a yes from
   junk), the decider passing the app's panel on.
 - pytest: the guest sender with `success` and `muted`.
-- MacBook Air (Touch ID, no finger at night): the panel appears from QEMU,
-  Cancel and the timeout, and the password after them. The finger is for
-  the person.
+- MacBook Air (macOS 26.6.2, Touch ID, 2026-10-06 23:04-23:20; the test
+  app's QEMU and dylib, its test Bridge, the relay as Runner runs it, a
+  guest stand-in; no finger at night). The panel came from QEMU (its pid,
+  level 28, 280x280, centred) 3-4 s after the request, windowed and in full
+  screen with QEMU's full grab, dark and light (catppuccin-latte from the
+  Bridge's copy). macOS armed the sensor for it with no click: coreauthd
+  "will start matching user 501" for QEMU's context with the embedded UI,
+  biometrickitd `match:withOptions`. Escape (also under the full grab), a
+  Cancel click, the 30 s timeout, the caller going away and Finder to the
+  front each gave the signed no (`cancelled`, `timeout`, `not-front`) and
+  closed the panel. Without the panel (no dylib loaded) the app said
+  `error` and the Bridge showed macOS's dialog in the same request. The
+  first request after a Bridge start still gets `unknown-vm` once (the
+  Bridge's VM list is cold): the password that time.
