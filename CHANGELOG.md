@@ -15,7 +15,9 @@ itself. Details below.
 - A Magic Mouse works in the full-screen VM like the trackpad: two
   fingers sideways swipe Omarchy's workspaces (macOS no longer gets that
   swipe while the VM has the input), a one-finger flick sideways goes back
-  or forward. Scrolling stays as it was.
+  or forward. Scrolling stays as it was. The swipe counts as four fingers
+  on a trackpad; with a Magic Mouse connected, the app's **Magic Mouse
+  swipe** setting (setup and VM window) picks 3 or 4.
 - OmacVM.app's full screen always gets a Space of its own, on every
   display, the MacBook's too. Before, on a Mac with a notch, full screen
   was a window over the Space you were on: other windows could share it,

@@ -17,8 +17,8 @@
 // (the Omanotch strip, the Dock, menus, another display) it shows.
 // A Magic Mouse (any number, also one connected later) while capturing: two
 // fingers sliding sideways swipe Omarchy's workspaces (four virtual fingers on
-// the guest's touchpad, as the trackpad's swipes; macOS's Space swipe is
-// dropped as the trackpad's is), one finger flicked sideways is back/forward
+// the guest's touchpad, or three with MouseSwipeFingers 3, as the trackpad's
+// swipes; macOS's Space swipe is dropped as the trackpad's is), one finger flicked sideways is back/forward
 // in the VM (the Back/Forward keys on the guest's keyboard). Its scrolling
 // goes to the VM app as before (mouse-model.h).
 // Ctrl+Option+Esc in the full-screen VM hands everything back to macOS and
@@ -244,7 +244,7 @@ static int pinchSent;             // P sent for the current two-finger touch
 // a two-finger swipe is dropped until then (monoNow; it runs out by itself,
 // so a mouse gone mid-swipe never keeps scrolling from the VM).
 #define MAX_MICE 4
-static struct { MTDeviceRef dev; uint64_t id; int w, h, sent; MouseState st; } mice[MAX_MICE];
+static struct { MTDeviceRef dev; uint64_t id; int w, h, sent, fingers; MouseState st; } mice[MAX_MICE];
 static int nMice;
 static pthread_mutex_t mouseLock = PTHREAD_MUTEX_INITIALIZER;   // mice
 static volatile double mouseSwipeUntil;
@@ -449,6 +449,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
 // Its frames always go through the model (so a touch that began before the
 // capture is read right), but only a captured VM that wants gestures gets
 // anything.
+static int mouseSwipeFingers(void);
 static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int frame) {
   (void)ts; (void)frame;
   MouseTouch c[16]; int k = 0;
@@ -469,23 +470,28 @@ static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int
   int on = capturing && gesturesOn();
   char buf[256]; int len = 0;
   if (act == MOUSE_SWIPE && on) {
-    // Four fingers in the middle of the guest's touchpad, moved sideways as
-    // the two on the mouse (the guest scales by the trackpad's size, tpW).
-    // Four: OmacVM's guest swipes workspaces with 3 and 4 fingers, and users
-    // who give 3 fingers to something else (window snapping) keep 4 for it.
+    // Four fingers (or three, MouseSwipeFingers) in the middle of the guest's
+    // touchpad, moved sideways as the two on the mouse (the guest scales by
+    // the trackpad's size, tpW). Four by default: OmacVM's guest swipes
+    // workspaces with 3 and 4 fingers, and users who give 3 fingers to
+    // something else (window snapping) keep 4 for it. Read when a swipe
+    // starts, so a change in the app counts from the next swipe.
+    if (!mice[m].sent) mice[m].fingers = mouseSwipeFingers();
+    int nf = mice[m].fingers == 3 ? 3 : 4;
     float o = MOUSE_SWIPE_GAIN * dx * 100.0f / (float)(tpW > 0 ? tpW : 15600);
     if (o > 0.35f) o = 0.35f;
     if (o < -0.35f) o = -0.35f;
-    len = snprintf(buf, sizeof buf, "F 4");
-    for (int i = 0; i < 4; i++)
+    len = snprintf(buf, sizeof buf, "F %d", nf);
+    for (int i = 0; i < nf; i++)
       len += snprintf(buf + len, sizeof buf - (size_t)len, " %d %.5f %.5f %.3f", MOUSE_FINGER_ID + i,
-                      0.35f + 0.1f * (float)i + o, 0.5f, 0.5f);
+                      0.5f - 0.05f * (float)(nf - 1) + 0.1f * (float)i + o, 0.5f, 0.5f);
     buf[len++] = '\n';
     mice[m].sent = 1;
     mouseSwipeUntil = monoNow() + MOUSE_SWIPE_HOLD;
   } else if (act == MOUSE_SWIPE_END && mice[m].sent) {
     len = snprintf(buf, sizeof buf, "F 0\n");
-    logf_("Magic Mouse: two-finger swipe %s, %.0f mm -> workspace swipe in the VM", before >= 0 ? "right" : "left", fabsf(before));
+    logf_("Magic Mouse: two-finger swipe %s, %.0f mm -> %d-finger swipe in the VM", before >= 0 ? "right" : "left", fabsf(before),
+          mice[m].fingers == 3 ? 3 : 4);
     mice[m].sent = 0;
     mouseSwipeUntil = monoNow() + MOUSE_SWIPE_HOLD;
   } else if ((act == MOUSE_BACK || act == MOUSE_FORWARD) && on) {
@@ -1296,6 +1302,25 @@ static int escapeAll(void) {
   int all = v && CFGetTypeID(v) == CFStringGetTypeID() && CFStringCompare((CFStringRef)v, CFSTR("all"), kCFCompareCaseInsensitive) == kCFCompareEqualTo;
   if (v) CFRelease(v);
   return all;
+}
+
+// "MouseSwipeFingers": a Magic Mouse two-finger swipe is this many fingers on
+// the guest's touchpad, 3 or 4 (OmacVM.app's "Magic Mouse swipe", or defaults
+// write org.omacvm.gestures MouseSwipeFingers -int 3). Not set, or anything
+// else: 4 (Omarchy switches workspaces with 4).
+static int mouseFingersOf(CFPropertyListRef v) {
+  double n = 0;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberDoubleType, &n);
+  else if (v && CFGetTypeID(v) == CFStringGetTypeID() && CFStringCompare((CFStringRef)v, CFSTR("3"), 0) == kCFCompareEqualTo) n = 3;
+  return n == 3 ? 3 : 4;
+}
+
+static int mouseSwipeFingers(void) {
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("MouseSwipeFingers"), GESTURES_DOMAIN);
+  int n = mouseFingersOf(v);
+  if (v) CFRelease(v);
+  return n;
 }
 
 static void loadSwipeSign(void) {

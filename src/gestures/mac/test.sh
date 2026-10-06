@@ -27,7 +27,8 @@
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
 #    and trackpad frames through the real callbacks).
 # 7. A Magic Mouse in the captured VM: two fingers sideways = a workspace swipe
-#    (three virtual fingers), macOS's scroll for them dropped; one finger
+#    (four virtual fingers, or three with MouseSwipeFingers 3, read at each
+#    swipe's start; anything else four), macOS's scroll for them dropped; one finger
 #    flicked sideways = Back/Forward; a resting finger and scrolling = nothing
 #    extra (test-mouse.c, made-up Magic Mouse frames through the real callback).
 set -euo pipefail
@@ -35,7 +36,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
 # A process and what it started (the guest runs python3 in a subshell).
 killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done; }
-trap 'killtree ${PIDS:-}; rm -rf "$T"' EXIT
+trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete org.omacvm.test.mouse-fingers >/dev/null 2>&1 || true' EXIT
 trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
@@ -221,7 +222,7 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-scroll" > "$T/scroll" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/scroll"
-# 7. The Magic Mouse's gestures.
+# 7. The Magic Mouse's gestures (its setting in a throwaway domain, deleted after).
 clang -O1 -Wall -Wno-unused-function -o "$T/test-mouse" "$HERE/test-mouse.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
   -framework CoreFoundation -framework AppKit -framework IOKit

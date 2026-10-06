@@ -7,7 +7,11 @@
 //   one finger flicked sideways                                 -> Back / Forward key, once per touch
 //   two fingers sliding sideways                                -> four virtual fingers (workspace swipe),
 //                                                                  macOS's scroll for them dropped
+//   MouseSwipeFingers 3 (set while running)                     -> three from the next swipe; anything else: four
 //   not captured, or a VM without gestures                      -> nothing, scrolling passes
+// The setting is read from a throwaway domain (test.sh deletes it), never the
+// installed Gestures' own.
+#define GESTURES_DOMAIN CFSTR("org.omacvm.test.mouse-fingers")
 #define main helper_main
 #include "omacvm-gestures.c"
 #undef main
@@ -98,9 +102,10 @@ static void modelChecks(void) {
 
 // --- the helper's own callback and tap ---
 // What the guest got since the last call.
-typedef struct { int f3, f0, back, fwd, other; float firstX, lastX; } Got;
+// f3: finger lines (any count); nf: the count in them (-1: none, 0: mixed or malformed).
+typedef struct { int f3, f0, back, fwd, other, nf; float firstX, lastX; } Got;
 static Got drain(void) {
-  Got g = { 0, 0, 0, 0, 0, -1, -1 };
+  Got g = { 0, 0, 0, 0, 0, -1, -1, -1 };
   static char acc[1 << 16]; size_t n = 0;
   for (;;) {
     ssize_t r = read(peer, acc + n, sizeof acc - 1 - n);
@@ -110,8 +115,11 @@ static Got drain(void) {
   acc[n] = 0;
   for (char *l = acc; *l; ) {
     char *nl = strchr(l, '\n'); if (nl) *nl = 0;
-    int id; float x;
-    if (!strncmp(l, "F 4 ", 4) && sscanf(l + 4, "%d %f", &id, &x) == 2 && id == MOUSE_FINGER_ID) {
+    int id, nf, at; float x;
+    if (sscanf(l, "F %d %n", &nf, &at) == 1 && nf > 0 && sscanf(l + at, "%d %f", &id, &x) == 2 && id == MOUSE_FINGER_ID) {
+      int words = 0;
+      for (char *w = strtok(l + at, " "); w; w = strtok(NULL, " ")) words++;
+      g.nf = (g.nf == -1 || g.nf == nf) && words == 4 * nf ? nf : 0;
       g.f3++; if (g.firstX < 0) g.firstX = x; g.lastX = x;
     } else if (!strcmp(l, "F 0")) g.f0++;
     else if (!strcmp(l, "K 158 1") || !strcmp(l, "K 158 0")) g.back++;
@@ -171,8 +179,60 @@ static void addMouse(MTDeviceRef dev) {
   nMice++;
 }
 
+// MouseSwipeFingers as the app (or defaults write) stores it, changed while
+// the helper runs.
+static void setFingers(CFPropertyListRef v) {
+  CFPreferencesSetAppValue(CFSTR("MouseSwipeFingers"), v, GESTURES_DOMAIN);
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+}
+static int swipeFingers(MTDeviceRef dev) {
+  swipe(dev, 18);
+  Got g = drain();
+  usleep((useconds_t)((MOUSE_SWIPE_HOLD + 0.1) * 1e6));
+  return g.f3 >= 14 && g.f0 == 1 && g.lastX > g.firstX + 0.1f ? g.nf : -2;
+}
+static void fingerSettingChecks(MTDeviceRef dev) {
+  int three = 3, four = 4, five = 5, zero = 0; double half = 3.5;
+  CFNumberRef n3 = CFNumberCreate(NULL, kCFNumberIntType, &three), n4 = CFNumberCreate(NULL, kCFNumberIntType, &four),
+              n5 = CFNumberCreate(NULL, kCFNumberIntType, &five), n0 = CFNumberCreate(NULL, kCFNumberIntType, &zero),
+              nh = CFNumberCreate(NULL, kCFNumberDoubleType, &half);
+  check(mouseFingersOf(NULL) == 4 && mouseFingersOf(n3) == 3 && mouseFingersOf(n4) == 4 && mouseFingersOf(CFSTR("3")) == 3 &&
+        mouseFingersOf(CFSTR("4")) == 4, "setting: not set 4; 3 and 4 as numbers or text");
+  check(mouseFingersOf(n5) == 4 && mouseFingersOf(n0) == 4 && mouseFingersOf(nh) == 4 && mouseFingersOf(CFSTR("three")) == 4 &&
+        mouseFingersOf(CFSTR(" 3")) == 4 && mouseFingersOf(kCFBooleanTrue) == 4,
+        "setting: 5, 0, 3.5, \"three\", \" 3\", true: 4");
+
+  setFingers(n3);
+  check(swipeFingers(dev) == 3, "VM: MouseSwipeFingers set to 3 while running: the next swipe has three virtual fingers");
+  setFingers(CFSTR("3"));
+  check(swipeFingers(dev) == 3, "VM: MouseSwipeFingers \"3\" (defaults write without -int): three");
+  setFingers(n4);
+  check(swipeFingers(dev) == 4, "VM: back to 4: four");
+  setFingers(n5);
+  check(swipeFingers(dev) == 4, "VM: MouseSwipeFingers 5: four");
+  setFingers(CFSTR("three"));
+  check(swipeFingers(dev) == 4, "VM: MouseSwipeFingers \"three\": four");
+
+  // Changed in the middle of a swipe: that swipe keeps its count (the guest
+  // never sees fingers added or lifted), the next one takes the new one.
+  setFingers(n3);
+  for (int i = 0; i <= 10; i++) { float o = 18.0f * (float)i / 20.0f, xs[2] = { 15 + o, 32 + o }, ys[2] = { 40, 41 }; frame(dev, 2, xs, ys); }
+  setFingers(n4);
+  for (int i = 11; i <= 20; i++) { float o = 18.0f * (float)i / 20.0f, xs[2] = { 15 + o, 32 + o }, ys[2] = { 40, 41 }; frame(dev, 2, xs, ys); }
+  frame(dev, 0, NULL, NULL);
+  Got g = drain();
+  usleep((useconds_t)((MOUSE_SWIPE_HOLD + 0.1) * 1e6));
+  check(g.f3 >= 10 && g.f0 == 1 && g.nf == 3, "VM: set from 3 to 4 during a swipe: that swipe stays at three");
+  check(swipeFingers(dev) == 4, "... and the next swipe has four");
+
+  setFingers(NULL);
+  check(swipeFingers(dev) == 4, "VM: MouseSwipeFingers deleted: four");
+  CFRelease(n3); CFRelease(n4); CFRelease(n5); CFRelease(n0); CFRelease(nh);
+}
+
 int main(void) {
   modelChecks();
+  setFingers(NULL);   // a run that was stopped may have left it
 
   int sv[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) { perror("socketpair"); return 1; }
@@ -200,7 +260,8 @@ int main(void) {
 
   int passed = swipe(mouse, 18);
   g = drain();
-  check(g.f3 >= 14 && g.f0 == 1 && g.back + g.fwd == 0, "VM: two-finger swipe: three virtual fingers, then lifted (F 0)");
+  check(g.f3 >= 14 && g.f0 == 1 && g.back + g.fwd == 0 && g.nf == 4,
+        "VM: two-finger swipe, MouseSwipeFingers not set: four virtual fingers, then lifted (F 0)");
   check(g.lastX > g.firstX + 0.1f, "VM: the virtual fingers move the way the mouse fingers went (right)");
   check(passed <= 5, "VM: macOS's scrolling for the swipe is dropped (only before it was a swipe)");
   check(!scrollPasses(), "VM: macOS's scroll right after the swipe (its momentum) is dropped too");
@@ -210,6 +271,8 @@ int main(void) {
   g = drain();
   check(g.f3 >= 14 && g.lastX < g.firstX - 0.1f, "VM: two-finger swipe left: the virtual fingers move left");
   usleep((useconds_t)((MOUSE_SWIPE_HOLD + 0.1) * 1e6));
+
+  fingerSettingChecks(mouse);
 
   // A second Magic Mouse (connected later): its own touches.
   addMouse(mouse2);
