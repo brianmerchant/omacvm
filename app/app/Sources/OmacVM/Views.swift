@@ -284,7 +284,7 @@ struct BuildNowView: View {
                         Text(line).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     }
                 } else if !creator.detail.isEmpty {
-                    Text(creator.detail).lineLimit(2)
+                    Text(creator.detail.prefix(1).uppercased() + creator.detail.dropFirst()).lineLimit(2)
                 }
                 if creator.step > 0 {
                     Text(stepTime(at: ctx.date)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
@@ -326,7 +326,7 @@ struct BuildLogView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(creator.logName.isEmpty ? "No log yet." : "logs/\(creator.logName)")
+            Text(creator.logName.isEmpty ? "No log yet." : creator.logName)
                 .font(.caption).foregroundStyle(.secondary)
             ScrollView {
                 Text(creator.logTail.joined(separator: "\n"))

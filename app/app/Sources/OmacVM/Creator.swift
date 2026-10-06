@@ -220,13 +220,16 @@ final class Creator: ObservableObject {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]))?
             .filter { $0.pathExtension == "log" } ?? []
-        let dated = files.compactMap { u -> (URL, Date, Int)? in
+        func dated(_ u: URL) -> (URL, Date, Int)? {
             guard let v = try? u.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
                   let d = v.contentModificationDate, (v.fileSize ?? 0) > 0 else { return nil }
             return (u, d, v.fileSize ?? 0)
         }
-        // Only this build's logs (a failed earlier build may have left some).
-        guard let newest = dated.filter({ $0.1 >= buildStarted.addingTimeInterval(-2) }).max(by: { $0.1 < $1.1 }) else { return }
+        // The step's own log (written in this step), else the build's log
+        // (create.log: the steps and the Mac side's lines).
+        let stepLog = files.compactMap(dated).filter { $0.1 >= stepStarted.addingTimeInterval(-2) }.max { $0.1 < $1.1 }
+        let buildLog = dated(dir.deletingLastPathComponent().appendingPathComponent("create.log"))
+        guard let newest = stepLog ?? buildLog else { return }
         if newest.1 > lastOutput { lastOutput = min(newest.1, Date()) }
         guard let h = try? FileHandle(forReadingFrom: newest.0) else { return }
         defer { try? h.close() }
@@ -234,7 +237,7 @@ final class Creator: ObservableObject {
         try? h.seek(toOffset: size > 16384 ? size - 16384 : 0)
         let tail = BuildText.tail(h.readData(ofLength: 16384))
         if tail != logTail { logTail = tail }
-        let name = newest.0.lastPathComponent
+        let name = newest.0 == buildLog?.0 ? newest.0.lastPathComponent : "logs/" + newest.0.lastPathComponent
         if name != logName { logName = name }
     }
 }
