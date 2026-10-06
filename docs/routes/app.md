@@ -547,7 +547,9 @@ with the VM. From the VM's next start it is at `~/Mac` in Omarchy. **Turn
 Off** stops it from the next start.
 
 - The VM can read and change everything in that folder, as your Mac user,
-  and nothing outside it. Share a project folder, not your whole home folder.
+  and nothing outside it. Share a project folder: the app refuses your home
+  folder and the folders above it (your keys and every app's data would be
+  in the VM).
 - Your files show as your Omarchy user's in the VM; files the VM makes are
   yours on the Mac. `chown` in the VM fails (as root too): the Mac keeps the
   owner.
@@ -556,11 +558,16 @@ Off** stops it from the next start.
   (`omacvm-mac-folder`).
 - A change on either side shows on the other at once (tested: rewrite,
   grow, create, delete, rename on the Mac; write in the VM).
-- A folder that is not there at a start (a drive not connected) is left out
-  for that start, and the VM starts as usual. `omacvm check` says what the
-  start shared.
+- A folder that is not there at a start (a drive not connected), or that
+  OmacVM may not open (denied in System Settings > Privacy & Security >
+  Files and Folders, or no permission), is left out for that start, and the
+  VM starts as usual. `omacvm check` says what the start shared and why not.
 - A folder in Documents, Desktop, Downloads or iCloud Drive: macOS may ask
   once whether OmacVM may open it (not tested yet).
+- The Mac's disk ignores case by default: two files whose names differ only
+  in case (some git repos, such as the Linux kernel) are one file there.
+- File locks are not passed to the Mac: do not use one SQLite database or
+  lock file from the Mac and the VM at the same time.
 - VMs from before 3.0.1 need the VM side once: `omacvm apply` (or the
   control centre's update).
 - Git in one repo from both sides: each side's git re-reads every file once
@@ -590,9 +597,10 @@ would need a server program, a port and its own access control, so the Mac
 folder stays on 9p. virtio-fs needs a Linux host daemon; QEMU on macOS has
 none.
 
-Tested on the Mac mini (a throwaway copy of a test VM, `tests/share/rig.sh`):
-the VM's unit mounts `~/Mac` at boot and the desktop user can write there;
-without a share it does nothing (18 ms) and leaves no `~/Mac`.
+Tested on the Mac mini (M4, macOS 27; a throwaway copy of a test VM,
+`tests/share/rig.sh`): the VM's unit mounts `~/Mac` at boot and the desktop
+user can write there; without a share it does nothing (18 ms) and leaves no
+`~/Mac`. Not tested on macOS 15 or 26, nor on another Mac.
 
 ### Mac folder: not done yet
 
