@@ -130,6 +130,17 @@ echo "desktop up after $(( $(date +%s) - start )) s"
 gssh 'for u in omacvm-gestures omacvm-notchcast; do systemctl disable --now $u >/dev/null 2>&1; done; true'
 QPID=$(pgrep -f -- "$PAT" | head -1)
 
+# --hw-cursor: this tree's omacvm_app.lua (it reads host.env), then a config reload.
+if ((HWC)); then
+  gssh 'source /etc/omacvm/env 2>/dev/null; U=${OMACVM_USER:-$(id -nu 1000)}
+        install -o "$U" -g "$U" -m644 /dev/stdin "$(getent passwd "$U" | cut -d: -f6)/.config/hypr/omacvm_app.lua"
+        X=/run/user/$(id -u "$U"); SIG=$(ls "$X/hypr" | head -1)
+        grep -H . /run/omacvm/host.env
+        sudo -u "$U" env XDG_RUNTIME_DIR=$X HYPRLAND_INSTANCE_SIGNATURE=$SIG hyprctl reload >/dev/null' \
+    < "$R/src/app/guest/omacvm_app.lua"
+  sleep 2
+fi
+
 # A terminal that fills the workspace, its cursor not blinking (the only change is the typed text).
 gssh 'bash -s' <<'GUEST'
 source /etc/omacvm/env 2>/dev/null
@@ -205,4 +216,8 @@ for m in modes:
               "flush_to_screen_ms": med(present), "qemu_to_cursor_cmd_ms": med(cur)}
 print(json.dumps(res))
 PY
+if ((HWC)); then
+  echo "QEMU, hardware cursor: $(grep -c 'virtio_gpu_update_cursor' "$LOG") cursor commands;" \
+    "$(grep -oE "cocoa: the guest's pointer is the Mac's cursor now[^\"]*|omacvm-pointer: Mac cursor is [a-z' ()]*" "$LOG" | sort | uniq -c | tr '\n' ';')"
+fi
 echo "input-latency-vm: done (raw: $OUT)"
