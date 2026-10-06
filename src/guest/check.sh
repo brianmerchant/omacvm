@@ -164,6 +164,13 @@ if [[ $BRIDGE == on ]]; then
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/polkit-1; then bad "Touch ID" "not in /etc/pam.d/polkit-1 (omacvm apply)"
   elif [[ ! -f /etc/polkit-1/rules.d/00-omacvm-touchid.rules || ! -x /usr/lib/omacvm/omacvm-touchid-note ]]; then bad "Touch ID" "the polkit rule is missing (omacvm apply)"
   else ok "Touch ID" "sudo and polkit ask the Mac first; the password keeps working"; fi
+  # The Mac's Touch ID panel draws in the Omarchy theme this VM sends (omacvm-touchid-theme).
+  if [[ $TOUCH_ID == on ]]; then
+    if ! user_active omacvm-touchid-theme.path; then bad "Touch ID panel theme" "the watcher (omacvm-touchid-theme.path) stopped: omacvm apply starts it again"
+    elif [[ ! -s $H/.config/omacvm-bridge/vm-key ]]; then skip "Touch ID panel theme" "no control centre key in this VM: the Mac's panel stays Tokyo Night (omacvm apply with the VM by name)"
+    elif [[ -s $H/.local/state/omacvm/touchid-theme-sent ]]; then ok "Touch ID panel theme" "the Mac's panel uses this Omarchy theme"
+    else bad "Touch ID panel theme" "not sent to the Mac yet (journalctl --user -u omacvm-touchid-theme)"; fi
+  fi
   FEATURE=bridge
   # Right after the first login omacvm-plugins may still be enabling the widgets.
   for _ in $(seq 60); do

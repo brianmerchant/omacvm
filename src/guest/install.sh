@@ -394,9 +394,9 @@ fi
 # Touch ID for sudo, polkit and 1Password (ADR 0041): the keys come from omacvm apply.
 if want touch-id; then
   if [[ ${F[touch-id]} == on ]]; then
-    log "Touch ID (sudo, polkit, 1Password)"; "$R/bridge/guest/touchid.sh" on || not_set_up touch-id "Touch ID"
+    log "Touch ID (sudo, polkit, 1Password)"; "$R/bridge/guest/touchid.sh" on "$U" || not_set_up touch-id "Touch ID"
   elif [[ -e /usr/lib/omacvm/omacvm-touchid || -e /etc/omacvm/touchid-key ]]; then
-    log "Touch ID: off"; "$R/bridge/guest/touchid.sh" off
+    log "Touch ID: off"; "$R/bridge/guest/touchid.sh" off "$U"
   fi
 fi
 # The control centre (omacvm in Omarchy): on, or gone again.

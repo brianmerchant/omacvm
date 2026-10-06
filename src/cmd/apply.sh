@@ -294,7 +294,10 @@ if (( TOKEN && NAMED )) && on touch-id; then
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
   gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"
 else
-  if (( NAMED )); then rm -f "$(vm_key_file "$TYPE" "$VM").touchid"; fi
+  # The key, and the theme the VM sent for the Bridge's Touch ID panel.
+  if (( NAMED )); then
+    rm -f "$(vm_key_file "$TYPE" "$VM").touchid" "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+  fi
   # On without a key: the VM's PAM line gets 403 and the password comes.
   if on touch-id; then log "Touch ID: not set up (it needs the VM by name and the Bridge token: not --ip, not --no-token)"; fi
 fi
