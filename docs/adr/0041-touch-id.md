@@ -179,13 +179,18 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   none there). No 127.0.0.1 fallback as for the control centre: a Bridge
   with Touch ID always has the relay socket; without it the app logs
   "OmacVM Bridge does not answer" and the VM gets the password. Requests
-  closer than 0.5 s get status 0; a VM that stops reading its port is
+  closer than 0.2 s get status 0; a VM that stops reading its port is
   dropped after 2 s.
 - Lines, one JSON object each. VM to app: `{"op":"touchid","id":N,
   "auth":"1 T N SIG","proto":1,"body":"<base64>"}` (N the request's nonce),
   then `{"op":"ping","id":N}` every 0.5 s and `{"op":"cancel","id":N}` on
-  the way out. App to VM: `{"id":N,"status":S,"answer":"<X-OmacVM-Answer>",
-  "body":"<base64>"}`; status 0: the Bridge did not answer (the password).
+  the way out. App to VM: `{"ack":true,"id":N}` at once, then
+  `{"id":N,"status":S,"answer":"<X-OmacVM-Answer>","body":"<base64>"}`;
+  status 0: the Bridge did not answer (the password). The ack matters: a
+  virtio port takes the VM's writes even with nobody at the Mac end
+  (checked in a VM), so without an ack in 2 s the client says "OmacVM.app
+  does not answer" and the password comes. Lines already waiting when the
+  app connects are dropped (their clients gave up).
   Lines over 4 KB, bodies over 1 KB, an `auth` whose nonce is not the id:
   dropped.
 - QEMU's socket does not tell the app when the VM closes the port, so the

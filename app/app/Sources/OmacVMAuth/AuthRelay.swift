@@ -12,7 +12,8 @@ import Foundation
 ///   {"op":"ping","id":N}      every half second while it waits
 ///   {"op":"cancel","id":N}    it gave up (deadline, Ctrl+C on the way out)
 /// N is the request's nonce (32 hex digits), the same as in the signature.
-/// To the VM: {"id":N,"status":S,"answer":"<X-OmacVM-Answer>","body":"<base64>"}
+/// To the VM, at once: {"ack":true,"id":N} (the app relays: a virtio port
+/// takes writes even with nobody at the Mac end); then: {"id":N,"status":S,"answer":"<X-OmacVM-Answer>","body":"<base64>"}
 /// with the Bridge's body byte for byte (the answer's signature covers it);
 /// status 0: the Bridge did not answer.
 ///
@@ -123,8 +124,8 @@ public final class AuthRelay: @unchecked Sendable {
     public var pingTimeout: TimeInterval = 3
     /// The Bridge's dialog waits 30 s; the client gives up at 40 s.
     public var answerTimeout: TimeInterval = 45
-    /// Requests closer than this are refused (status 0).
-    public var minimumGap: TimeInterval = 0.5
+    /// Requests closer than this are refused (status 0): no person types that fast.
+    public var minimumGap: TimeInterval = 0.2
     private var lastRequest: Date?   // the read thread's alone
     private let lock = NSLock()
     private var current: (id: String, fd: Int32, lastPing: Date, cancelled: Bool)?
@@ -151,6 +152,12 @@ public final class AuthRelay: @unchecked Sendable {
         var line = Data(), skipping = false
         var chunk = [UInt8](repeating: 0, count: 4096)
         defer { drop(nil); closeGuest() }
+        // Lines already waiting were written while nobody relayed: their
+        // clients gave up (no ack), so they never reach the Bridge.
+        let flags = fcntl(guest, F_GETFL)
+        _ = fcntl(guest, F_SETFL, flags | O_NONBLOCK)
+        while chunk.withUnsafeMutableBytes({ Darwin.read(guest, $0.baseAddress, $0.count) }) > 0 {}
+        _ = fcntl(guest, F_SETFL, flags)
         while true {
             let count = chunk.withUnsafeMutableBytes { Darwin.read(guest, $0.baseAddress, $0.count) }
             if count > 0 {
@@ -218,6 +225,7 @@ public final class AuthRelay: @unchecked Sendable {
             }
             lastRequest = now
             drop(nil)   // one opener at a time: the client of the old one is gone
+            ack(r.id)   // the client knows at once that the app relays
             guard let h = headers() else {
                 return answer(r.id, nil, note: "OmacVM Bridge is not set up on this Mac (or is older)")
             }
@@ -232,9 +240,16 @@ public final class AuthRelay: @unchecked Sendable {
 
     private func answer(_ id: String, _ a: Answer?, note: String? = nil) {
         if let note { log(note) }
+        write(Self.answerLine(id: id, a))
+    }
+
+    private func ack(_ id: String) {
+        write(Data("{\"ack\":true,\"id\":\"\(id)\"}\n".utf8))   // id: 32 hex digits (parse)
+    }
+
+    private func write(_ d: Data) {
         writeLock.lock(); defer { writeLock.unlock() }
         guard !closed else { return }
-        let d = Self.answerLine(id: id, a)
         let wrote = d.withUnsafeBytes { b -> Bool in
             var off = 0
             while off < b.count {

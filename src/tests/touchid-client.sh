@@ -185,6 +185,10 @@ if (( took < 1500 )); then ok "app: ... at once (${took} ms)"; else bad "app: st
 echo close > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
 expect "app: the app hangs up: password" 1 "$rc"
 if (( took < 2000 )); then ok "app: ... at once (${took} ms)"; else bad "app: hang-up took ${took} ms"; fi
+echo noack > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
+expect "app: nobody relays (writes taken, no ack): password" 1 "$rc"
+expect "app: ... and says so" "Touch ID not available (OmacVM.app does not answer), use your password" "$(tail -1 "$T/out")"
+if (( took < 3000 )); then ok "app: ... after the ack wait (${took} ms)"; else bad "app: no ack took ${took} ms"; fi
 : > "$T/bridge/port-mode"
 OMACVM_TOUCHID_AUTH_PORT=$T/none run yes
 expect "app: no port (the VM started before touch-id was on): password" 1 "$rc"
