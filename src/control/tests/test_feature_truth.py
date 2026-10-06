@@ -129,8 +129,17 @@ def test_slow_is_never_bare(features):
     f = by(features, "thp-kernel")
     assert "slow" in f.tags
     note = S.tag_note(f)
-    assert note != "slow" and "10 min" in note
-    assert "10 minutes" in S.TAG_HINTS["slow"]
+    assert note != "slow" and "1 h+" in note
+    assert "over an hour" in S.TAG_HINTS["slow"] and "CPUs" in S.TAG_HINTS["slow"]
+
+
+def test_slow_says_nothing_when_on(features):
+    f = by(features, "thp-kernel")
+    assert S.tag_note(f, on=True) == ""
+    assert S.tag_hints(f, on=True) == []
+    assert S.tag_hints(f, on=False) == [S.TAG_HINTS["slow"]]
+    x = by(features, "x86-apps")
+    assert S.tag_note(x, on=True) == "experimental"
 
 
 def test_slow_words_match_the_cli():
