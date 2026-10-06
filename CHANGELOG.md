@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.1 (unreleased)
+## 3.0.1
 
 - OmacVM.app: the globe (fn) key pressed on its own goes to the VM, no
   longer to macOS's Emoji & Symbols over it, while the VM's window has the
