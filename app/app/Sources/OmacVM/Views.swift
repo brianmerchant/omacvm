@@ -328,6 +328,7 @@ struct BuildLogView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(creator.logName.isEmpty ? "No log yet." : creator.logName)
                 .font(.caption).foregroundStyle(.secondary)
+            // The newest line stays in view.
             ScrollView {
                 Text(creator.logTail.joined(separator: "\n"))
                     .font(.system(size: 10, design: .monospaced))
@@ -335,7 +336,8 @@ struct BuildLogView: View {
                     .textSelection(.enabled)
                     .padding(6)
             }
-            .frame(height: 180)
+            .defaultScrollAnchor(.bottom)
+            .frame(height: 220)
             .background(Color(nsColor: .textBackgroundColor).opacity(0.6))
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }

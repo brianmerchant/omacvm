@@ -76,7 +76,7 @@ qemu_headless system "${QEMU_UEFI[@]}" \
 wait_ssh 300 || die "the new system did not answer on SSH (log: $LOG/system-console.log)"
 
 # ---------- 4. Omarchy ----------
-step 4 "Installing Omarchy (omarchy-mac, 20-40 minutes)"
+step 4 "Installing Omarchy (omarchy-mac)"   # the window says how long it usually takes
 CHANNEL=$(omarchy_channel)
 run_logged "$LOG/omarchy-install.log" vssh "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < <(cat "$OMACVM_SRC/vm/progress.sh" "$OMACVM_SRC/vm/omarchy-install.sh") ||
   die "Omarchy did not install (log: $LOG/omarchy-install.log)"
