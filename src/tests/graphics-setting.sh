@@ -239,6 +239,11 @@ crow() { ( TYPE=app VM="Test VM"; app_dir() { echo "$cg"; }
            OMACVM_TEST_MACOS_MAJOR=27 OMACVM_TEST_KOSMICKRISP=1 source "$T/check-graphics.sh" ); }
 echo "OmacVM: graphics: $(wv record)" > "$cg/logs/qemu.log"
 expect "check: Vulkan running" "ok Graphics: Vulkan: $(wv record)" "$(crow)"
+printf 'OmacVM: graphics: %s\nOmacVM: Vulkan start: %s\n' "$(wv record)" "$(wv no-picture-m4 | sed 's/^note //')" > "$cg/logs/qemu.log"
+expect "check: a watch note after the record leaves the record" "ok Graphics: Vulkan: $(wv record)" "$(crow)"
+grep -q 'OmacVM: graphics: \\(line)\|OmacVM: graphics: \\(Graphics.didNotStart)' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  bad "the Vulkan start watch logs as \"OmacVM: graphics:\" (check reads that as the record)" ||
+  ok "the Vulkan start watch logs under its own prefix"
 echo "OmacVM: graphics: $(wv record-kept)" > "$cg/logs/qemu.log"; echo "the firmware found no devices" > "$cg/graphics-fallback"
 expect "check: Vulkan fell back (kept): warn, one pair of brackets" \
   "warn Graphics: Vulkan did not start on this Mac: using OpenGL (the firmware found no devices; choose the setting again to try Vulkan once more: omacvm graphics --vm \"Test VM\" vulkan)" "$(crow)"
