@@ -21,7 +21,9 @@ PACKAGER="OmacVM <omacvm@users.noreply.github.com>"
 # A 160-byte static x86_64 program: write(1, "x86_64\n"), exit(0).
 HELLO=f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOAABAAAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAoAAAAAAAAACgAAAAAAAAAAAQAAAAAAAAuAEAAAC/AQAAAEiNNRAAAAC6BwAAAA8FuDwAAAAx/w8FeDg2XzY0Cg==
 
-ours() { pacman -Qi box64 2>/dev/null | grep -q "^Packager *: $PACKAGER"; }
+# (pacman's output read whole first: grep -q could end the pipe early, and pipefail
+# would count pacman's SIGPIPE as "not ours")
+ours() { local i; i=$(pacman -Qi box64 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
 have() { pacman -Q box64 2>/dev/null | awk '{ print $2 }' || true; }
 registered() { [[ -f $BINFMT/box64 ]] && grep -q '^enabled' "$BINFMT/box64"; }
 x86_test() {
