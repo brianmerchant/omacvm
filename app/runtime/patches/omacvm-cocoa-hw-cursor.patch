@@ -125,7 +125,7 @@ index 26d2d12..2c7084e 100644
      with_bql(^{
          if (button >= 0) {
              qemu_input_queue_btn(dcl.con, button, down);
-@@ -3334,14 +3362,122 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl, int x, int y, bool on)
+@@ -3334,14 +3362,123 @@ static void cocoa_mouse_set(DisplayChangeListener *dcl, int x, int y, bool on)
  {
      dispatch_async(dispatch_get_main_queue(), ^{
          [cocoaView setMouseX:x y:y on:on];
@@ -191,6 +191,7 @@ index 26d2d12..2c7084e 100644
 +    }
 +    omacvm_hwc_define(&omacvm_hwc, o);
 +    [cocoaView omacvmUpdateMacCursor];
++    [cocoaView updateCursorLayout];     /* QEMU's layer hides now */
 +}
 +
 +/*
@@ -248,7 +249,7 @@ index 26d2d12..2c7084e 100644
      });
  }
  
-@@ -5911,6 +6047,23 @@ static bool omacvm_pointer_over_ours(void)
+@@ -5911,6 +6048,23 @@ static bool omacvm_pointer_over_ours(void)
      return false;
  }
  
@@ -272,7 +273,7 @@ index 26d2d12..2c7084e 100644
  static bool omacvm_main_full_screen(void)
  {
      return notchFull ||
-@@ -6281,8 +6434,43 @@ static void omacvm_head_scanout_flush(DisplayChangeListener *dcl,
+@@ -6281,8 +6435,43 @@ static void omacvm_head_scanout_flush(DisplayChangeListener *dcl,
      cocoa_refresh_activity();
  }
  
@@ -316,15 +317,18 @@ index 26d2d12..2c7084e 100644
      .dpy_gfx_update         = omacvm_head_gfx_update,
      .dpy_gfx_switch         = omacvm_head_gfx_switch,
      .dpy_gfx_check_format   = console_gl_check_format,
-@@ -7092,6 +7280,7 @@ static void omacvm_pointer_reset(void *opaque)
+@@ -7092,6 +7281,10 @@ static void omacvm_pointer_reset(void *opaque)
  {
      dispatch_async(dispatch_get_main_queue(), ^{
          omacvm_pointer_guest_reset(&omacvm_ptr);
 +        omacvm_hwc_reset(&omacvm_hwc);
++        if (omacvm_hwc.on) {
++            [cocoaView updateCursorLayout];
++        }
          [cocoaView omacvmUpdateMacCursor];
      });
  }
-@@ -7138,8 +7327,10 @@ static void omacvm_pointer_init(void)
+@@ -7138,8 +7331,10 @@ static void omacvm_pointer_init(void)
  {
      const char *v = getenv("OMACVM_POINTER_START");
      const char *test = getenv("OMACVM_TEST_POINTER");
@@ -335,7 +339,7 @@ index 26d2d12..2c7084e 100644
      omacvm_test_pointer = test && atoi(test) > 0 && omacvm_test_mode();
      omacvm_pointer_debug = omacvm_test_pointer ||
                             (getenv("OMACVM_POINTER_DEBUG") &&
-@@ -7148,6 +7339,10 @@ static void omacvm_pointer_init(void)
+@@ -7148,6 +7343,10 @@ static void omacvm_pointer_init(void)
      info_report("cocoa: pointer: %s", omacvm_ptr.off ?
                  "taken on enter or click (OMACVM_POINTER_START=0)" :
                  "taken without a click when it is on the VM");

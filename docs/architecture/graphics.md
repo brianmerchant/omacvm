@@ -888,7 +888,7 @@ window on the same display (`nativelat.swift`), the floor macOS itself sets.
 | native AppKit window, key | 16.0-19.0 (9-24) | - | - | - |
 | VM, key on an idle screen | 24.1-26.7 (18-36) | 0.7-1.0 | 5.2-8.1 | 16.2-17.5 |
 | VM, pointer move (software cursor, QMP) | 23.3-27.2 (16-33) | 1.4-1.6 (QMP) | 3.4-5.1 | 17.9-19.7 |
-| VM, key while the pointer moves | 34.8-44.7 (26-52) | 0.5-1.0 | 8.6-9.7 | 19.6-30.7 |
+| VM, key while the pointer moves | 34.3-44.7 (26-52) | 0.5-1.5 | 7.6-9.7 | 19.6-30.7 |
 
 - Where the VM's time goes: the present itself costs what macOS costs any
   app (flush to screen 16-18 ms on an idle screen = the native floor); the

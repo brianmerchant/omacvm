@@ -58,6 +58,8 @@ static void test_start_and_reset(void)
     CHECK(!omacvm_hwc_active(&c, true), "no image yet: not active");
     CHECK(mac_cursor(&c, true, true, true) == HIDDEN, "no image yet: hidden as before (guest draws)");
     CHECK(mac_cursor(&c, true, true, false) == ARROW, "no image yet: shown as before (booting)");
+    CHECK(!omacvm_hwc_layer_hidden(&c, true),
+          "no image yet (or refused): QEMU's layer as before, the pointer stays visible");
     /* Hyprland puts its pointer on the plane. */
     omacvm_hwc_define(&c, 0);
     omacvm_hwc_show(&c, 0, true);
@@ -69,6 +71,7 @@ static void test_start_and_reset(void)
     omacvm_hwc_reset(&c);
     CHECK(!omacvm_hwc_active(&c, true) && !omacvm_hwc_visible(&c), "reset: not active, nothing shown");
     CHECK(mac_cursor(&c, true, true, false) == ARROW, "reset: the old way while it boots");
+    CHECK(!omacvm_hwc_layer_hidden(&c, true), "reset: QEMU's layer as before");
     omacvm_hwc_define(&c, 0);
     omacvm_hwc_show(&c, 0, true);
     CHECK(mac_cursor(&c, true, true, true) == GUEST_IMAGE, "after reset: the image again");

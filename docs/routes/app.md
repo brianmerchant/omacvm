@@ -360,8 +360,9 @@ the VM's SSH on `127.0.0.1:<port>`.
   plane is hidden from atomic clients that do not ask for cursor hotspots
   (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT); the guest kernel has it (plane 36,
   unused) but Hyprland's aquamarine only sees the primary plane. Next:
-  aquamarine with that cap, or its legacy (non-atomic) path for this mode. Until the guest's first image after a reset and
-  with a relative pointer (games) QEMU keeps its own way anyway.
+  aquamarine with that cap, or its legacy (non-atomic) path for this
+  mode. Until the guest's first image after a reset and with a relative
+  pointer (games) QEMU keeps its own way anyway.
   `omacvm-cocoa-hw-cursor.patch`, rules in
   `omacvm-cocoa-hw-cursor-logic.patch` (unit test
   `app/runtime/Tests/display/test-hw-cursor.sh`); in a VM:

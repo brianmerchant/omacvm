@@ -110,11 +110,11 @@ index 0000000..cb10652
 +/*
 + * QEMU's own pointer layer (the image drawn where the guest says): not
 + * while the Mac's cursor carries the image (it would be a second pointer,
-+ * a frame behind); as before otherwise.
++ * a frame behind); as before otherwise (also when no image was taken).
 + */
 +static inline bool omacvm_hwc_layer_hidden(const OmacVMHwCursor *c, bool absolute)
 +{
-+    return c->on && absolute;
++    return omacvm_hwc_active(c, absolute);
 +}
 +
 +/* The guest's image as a Mac cursor: size and hot spot in points. */

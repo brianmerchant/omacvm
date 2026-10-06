@@ -47,6 +47,32 @@ QEMU=$RT/bin/qemu-system-aarch64
 [[ -x $QEMU && -f $VMD/disk.img && -f $VMD/efi-vars.fd && $PORT =~ ^[0-9]+$ && -f $FW &&
    $HZ =~ ^(60|120)$ && $COUNT =~ ^[0-9]+$ ]] || { sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 [[ -e $HOME/.omacvm-user-testing ]] && { echo "input-latency-vm: the user is testing: no VM (STANDARDS 18)" >&2; exit 1; }
+# The built-in panel's mode ("" without one): read before and after the virtual display (STANDARDS 32).
+panel_mode() {
+  swift -e 'import CoreGraphics
+var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
+CGGetOnlineDisplayList(16, &ids, &n)
+for d in ids[0..<Int(n)] where CGDisplayIsBuiltin(d) != 0 {
+  if let m = CGDisplayCopyDisplayMode(d) { print("\(m.width)x\(m.height) \(m.pixelWidth)x\(m.pixelHeight) \(m.refreshRate)") }
+}' 2>/dev/null
+}
+# Posted events and screen capture: never on a MacBook the user works on (STANDARDS 33/34).
+# OMACVM_LATENCY_ON_MACBOOK=1 overrides it (only when nobody uses that Mac).
+PANEL=$(panel_mode)
+if [[ ${OMACVM_LATENCY_ON_MACBOOK:-} != 1 ]] &&
+   { [[ -n $PANEL ]] || pmset -g batt 2>/dev/null | grep -q InternalBattery; }; then
+  echo "input-latency-vm: this Mac has a built-in panel or a battery: run it on the Mac mini" \
+       "(OMACVM_LATENCY_ON_MACBOOK=1 overrides, STANDARDS 33/34)" >&2
+  exit 1
+fi
+panel_same() {
+  local now
+  [[ -n $PANEL ]] || return 0
+  now=$(panel_mode)
+  [[ $now == "$PANEL" ]] && return 0
+  echo "input-latency-vm: the built-in panel changed ($PANEL -> $now) $1; not set back (STANDARDS 32)" >&2
+  return 1
+}
 lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 && { echo "input-latency-vm: port $PORT is in use" >&2; exit 1; }
 
 NAME="OmacVM T-input-latency"
@@ -60,7 +86,7 @@ cleanup() {
   pgrep -f -- "$PAT" >/dev/null && gssh "sync; systemctl poweroff" >/dev/null 2>&1
   for _ in $(seq 40); do pgrep -f -- "$PAT" >/dev/null || break; sleep 1; done
   pkill -f -- "$PAT" 2>/dev/null
-  [[ -n $VD_PID ]] && kill "$VD_PID" 2>/dev/null
+  [[ -n $VD_PID ]] && { kill "$VD_PID" 2>/dev/null; sleep 2; panel_same "after the virtual display went"; }
   [[ -n ${NPID:-} ]] && kill "$NPID" 2>/dev/null
   rm -rf "$W/run" "$W/inputlat" "$W/vdisplay" "$W/nativelat"
 }
@@ -84,6 +110,7 @@ for _ in $(seq 40); do grep -qE '^(id=|display )[0-9]+' "$W/vd.out" && break; sl
 VD=$(grep -oE '[0-9]+' <<<"$(grep -E '^(id=|display )' "$W/vd.out" | head -1)" | head -1)
 [[ -n $VD ]] || { echo "input-latency-vm: no virtual display: $(cat "$W/vd.out")" >&2; exit 1; }
 sleep 2
+panel_same "with the virtual display" || exit 1
 SKIP=$(swift -e 'import CoreGraphics
 var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
 CGGetActiveDisplayList(16, &ids, &n)
