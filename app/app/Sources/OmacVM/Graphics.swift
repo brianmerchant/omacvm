@@ -215,9 +215,16 @@ enum Graphics {
 
     /// This QEMU takes a small highmem-mmio-size: its binary has the patch's
     /// text. An unpatched QEMU refuses any size under 512 GB and does not start.
+    /// Tens of MB: call it off the main thread (RuntimeQEMU).
     static func qemuTakesSmallHighWindow(binary: URL) -> Bool {
         guard let d = try? Data(contentsOf: binary, options: .alwaysMapped) else { return false }
-        return d.range(of: Data(smallHighWindowMarker.utf8)) != nil
+        let marker = Array(smallHighWindowMarker.utf8)
+        return d.withUnsafeBytes { b in
+            marker.withUnsafeBytes { m in
+                guard let bp = b.baseAddress, let mp = m.baseAddress else { return false }
+                return memmem(bp, b.count, mp, m.count) != nil
+            }
+        }
     }
 
     /// The plan for one start. `forced`: the vulkan feature (the VM's
@@ -272,6 +279,12 @@ enum Graphics {
 /// layout can stop a start, and that repeats on every start on this Mac:
 /// that fallback is kept (graphics-fallback). Anything later (no picture)
 /// is for this start only; the next start tries Vulkan again.
+///
+/// No picture after the firmware ran falls back only on a Mac under 40
+/// address bits (M1/M2: the small PCI window is new there). On M3 and newer
+/// Vulkan's layout is the one that always worked, and a guest that is only
+/// slow to draw (fsck, a VM on an external drive) must not get the power
+/// button: there it is only logged.
 struct VenusStartWatch {
     /// The firmware maps the PCI devices within a few seconds of QEMU's
     /// start; none mapped this long after QMP first answered means it found
@@ -291,9 +304,13 @@ struct VenusStartWatch {
         var pciMapped: Bool?
         /// The VM's console log has something. It is hvc0 (virtconsole; QEMU
         /// runs with -serial none), so only Linux writes there, never the
-        /// firmware: output means the firmware is long done.
+        /// firmware: output means the firmware is long done. Counts only
+        /// when QMP answered: QEMU empties the file when it opens it, and
+        /// before that it still holds the last boot's text.
         var consoleOutput = false
-        /// qemu.log has the window's "no picture from the guest" line.
+        /// qemu.log has the window's "no picture from the guest" line: not
+        /// even the firmware drew in 90 s of the guest's running time (any
+        /// picture counts, so a slow fsck or disk does not).
         var noPicture = false
     }
 
@@ -307,6 +324,11 @@ struct VenusStartWatch {
         /// (graphics-fallback), else for the next start only.
         case fallBack(why: String, graceful: Bool, keep: Bool)
     }
+
+    /// The Mac gives VMs under 40 address bits (M1/M2).
+    let smallAddressSpace: Bool
+
+    init(smallAddressSpace: Bool = false) { self.smallAddressSpace = smallAddressSpace }
 
     private(set) var ran = 0.0
     /// Time since QMP first answered (the firmware rule's clock).
@@ -334,7 +356,7 @@ struct VenusStartWatch {
         }
         ran += dt
         if wasAnswered { sinceAnswer += dt }
-        if p.pciMapped == true || p.consoleOutput { firmwareSeen = true }
+        if p.answered && (p.pciMapped == true || p.consoleOutput) { firmwareSeen = true }
         if !firmwareSeen && sinceAnswer >= Self.firmwareSeconds {
             done = true
             let why = p.answered
@@ -348,6 +370,9 @@ struct VenusStartWatch {
         }
         if p.noPicture {
             done = true
+            if firmwareSeen && !smallAddressSpace {
+                return .note("no picture from the VM after 90 s, but the firmware ran: no fallback for that")
+            }
             return .fallBack(why: "no picture from the VM after 90 s", graceful: firmwareSeen, keep: false)
         }
         if ran >= Self.watchSeconds {

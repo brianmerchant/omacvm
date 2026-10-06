@@ -164,8 +164,8 @@ final class Runner {
     }
 
     /// The runtime's QEMU takes a small high PCI window (our patch; an app
-    /// with an older runtime keeps 256 MB on M1/M2). Read once per app run.
-    static let runtimeHasSmallHighWindow = Graphics.qemuTakesSmallHighWindow(binary: Paths.qemu)
+    /// with an older runtime keeps 256 MB on M1/M2).
+    static var runtimeHasSmallHighWindow: Bool { RuntimeQEMU.takesSmallHighWindow }
 
     /// The VM's Graphics setting on this Mac now: the macOS version, whether
     /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
@@ -204,6 +204,8 @@ final class Runner {
     /// wait; QMP off the main thread (it blocks up to 2 s per call).
     private func watchVenusStart() {
         let c = config
+        venusWatch = VenusStartWatch(smallAddressSpace:
+            (Mac.vmAddressBits ?? Graphics.highPCIWindowBits) < Graphics.highPCIWindowBits)
         let qmpPath = c.qmpSocket.path
         let console = c.folder.appendingPathComponent("logs/console.log").path
         let qemuLog = c.folder.appendingPathComponent("logs/qemu.log").path
@@ -228,14 +230,16 @@ final class Runner {
                 case .note(let line):
                     self.appendLog("OmacVM: graphics: \(line)")
                 case .fallBack(let why, let graceful, let keep):
+                    // The user stopped the VM already: no OpenGL start.
+                    if self.stopAsked { return }
                     self.venusFallback = (why, keep)
                     self.appendLog("OmacVM: graphics: \(Graphics.didNotStart): \(why); stopping this start and starting again on OpenGL")
                     if graceful {
-                        self.powerDown()
+                        self.powerDown(byApp: true)
                         try? await Task.sleep(nanoseconds: 60_000_000_000)
-                        if self.isRun(pid) { self.forceStop() }
+                        if self.isRun(pid) { self.forceStop(byApp: true) }
                     } else {
-                        self.forceStop()
+                        self.forceStop(byApp: true)
                     }
                     return
                 }
@@ -289,6 +293,9 @@ final class Runner {
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
         try? FileManager.default.removeItem(at: c.displaySocket)
+        // QEMU empties the console log only when it opens it: the last
+        // boot's text would tell the Vulkan start watch the firmware ran.
+        try? FileManager.default.removeItem(at: c.folder.appendingPathComponent("logs/console.log"))
         let p = Process()
         p.executableURL = Paths.qemu
         p.arguments = arguments()
@@ -579,9 +586,11 @@ final class Runner {
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
 
     /// Asks the guest to shut down: the power button, then the guest agent
-    /// if Omarchy is still up after 20 seconds.
-    func powerDown() {
+    /// if Omarchy is still up after 20 seconds. byApp: the Vulkan start
+    /// watch; else the user asked, and no OpenGL start follows.
+    func powerDown(byApp: Bool = false) {
         stopAsked = true
+        if !byApp { venusFallback = nil }
         let qmpPath = config.qmpSocket.path, agentPath = config.agentSocket.path
         Task.detached {
             if let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-power") {
@@ -600,9 +609,10 @@ final class Runner {
     /// Stops QEMU at once (the guest gets no chance to save anything):
     /// SIGTERM, then SIGKILL after 5 s if QEMU is still there (its main loop
     /// may hang, and only that loop handles SIGTERM).
-    func forceStop() {
+    func forceStop(byApp: Bool = false) {
         guard let p = process, p.isRunning else { return }
         stopAsked = true
+        if !byApp { venusFallback = nil }
         let pid = p.processIdentifier
         p.terminate()
         Task { [weak self] in
@@ -804,4 +814,11 @@ final class Runner {
         observers.removeAll()
         sleep.disconnect()
     }
+}
+
+/// The runtime's QEMU binary, read once per app run. Not on the main actor:
+/// the app reads it at launch on a background queue (M1/M2 only), so the
+/// window never waits for it.
+enum RuntimeQEMU {
+    static let takesSmallHighWindow = Graphics.qemuTakesSmallHighWindow(binary: Paths.qemu)
 }

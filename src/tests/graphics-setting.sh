@@ -96,7 +96,9 @@ expect "watch: QMP never reachable, console ok: no fallback" wait "$(wv no-qmp-c
 expect "watch: QMP never reachable: no firmware verdict" wait "$(wv no-qmp-nothing)"
 expect "watch: QMP late: 25 s from its first answer" wait "$(wv late-qmp)"
 expect "watch: QMP late, then no devices -> OpenGL" "fallback now keep the firmware found no devices in 25 s: no boot disk, no picture" "$(wv late-qmp-hang)"
-expect "watch: no picture after the firmware -> shut down first, this start only" "fallback graceful once no picture from the VM after 90 s" "$(wv no-picture)"
+expect "watch: no picture after the firmware on M1/M2 -> shut down first, this start only" "fallback graceful once no picture from the VM after 90 s" "$(wv no-picture)"
+expect "watch: no picture after the firmware on M3+ -> only a note" "note no picture from the VM after 90 s, but the firmware ran: no fallback for that" "$(wv no-picture-m4)"
+expect "watch: no picture before the firmware -> OpenGL at once, this start only" "fallback now once no picture from the VM after 90 s" "$(wv no-picture-early)"
 expect "watch: console output counts as firmware" wait "$(wv console-only)"
 expect "watch: the Mac's wake resets the silence" wait "$(wv woke)"
 expect "watch: info pci mapped / not mapped"    "true false" "$(wv pci-mapped)"
@@ -193,6 +195,11 @@ echo "QEMU stopped answering for 30 s while Vulkan started" > "$H/OmacVM/Test VM
 cli vulkan >/dev/null
 expect "omacvm graphics: vulkan after a fallback" vulkan "$(cli --json | j next_start)"
 expect "omacvm graphics: ... after a fallback (removed by the choice)" no "$([[ -e "$H/OmacVM/Test VM/graphics-fallback" ]] && echo yes || echo no)"
+echo "the firmware found no devices" > "$H/OmacVM/Test VM/graphics-fallback"
+expect "omacvm graphics: opengl after a fallback: no word of Vulkan" "from the VM's next start" "$(cli opengl --json | j note)"
+expect "omacvm graphics: ... fallback removed" no "$([[ -e "$H/OmacVM/Test VM/graphics-fallback" ]] && echo yes || echo no)"
+echo "the firmware found no devices" > "$H/OmacVM/Test VM/graphics-fallback"
+expect "omacvm graphics: vulkan after a fallback says Vulkan is tried again" "Vulkan is tried again from the VM's next start" "$(cli vulkan --json | j note)"
 grep -q 'watchVenusStart()' "$R/app/app/Sources/OmacVM/Runner.swift" && grep -q 'r?.venusFallback' "$R/app/app/Sources/OmacVM/main.swift" &&
   ok "the app watches Vulkan starts and starts again on OpenGL" || bad "no Vulkan start watch in the app"
 grep -q 'kill(pid, SIGKILL)' "$R/app/app/Sources/OmacVM/Runner.swift" &&
@@ -201,8 +208,18 @@ grep -q 'self?.noteEarlyExit(status: status, reason: reason)' "$R/app/app/Source
   grep -q 'r.openGLOnce = openGLOnce' "$R/app/app/Sources/OmacVM/main.swift" &&
   ok "a Vulkan start whose QEMU stops at once starts again on OpenGL" || bad "no OpenGL retry after an early QEMU exit"
 grep -q 'smallHighWindow: small' "$R/app/app/Sources/OmacVM/Runner.swift" &&
-  grep -q 'runtimeHasSmallHighWindow = Graphics.qemuTakesSmallHighWindow(binary: Paths.qemu)' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  grep -q 'static let takesSmallHighWindow = Graphics.qemuTakesSmallHighWindow(binary: Paths.qemu)' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   ok "highmem-mmio-size only with a QEMU that takes it" || bad "the small window is not gated on the runtime"
+grep -q 'DispatchQueue.global(qos: .utility).async { _ = RuntimeQEMU.takesSmallHighWindow }' "$R/app/app/Sources/OmacVM/main.swift" &&
+  ok "QEMU's binary is read at launch, off the main thread" || bad "the small window check runs on the main thread"
+grep -q 'removeItem(at: c.folder.appendingPathComponent("logs/console.log"))' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  ok "the last boot's console log never counts for the watch" || bad "console.log is not cleared before QEMU starts"
+awk '/case .fallBack\(let why, let graceful, let keep\):/ { on = 1 } on && /self.venusFallback = \(why, keep\)/ { print seen ? "ok" : "no"; exit } on && /if self.stopAsked \{ return \}/ { seen = 1 }' \
+  "$R/app/app/Sources/OmacVM/Runner.swift" | grep -q ok &&
+  grep -q 'if !byApp { venusFallback = nil }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  ok "a stop asked by the user never starts the VM again on OpenGL" || bad "the watch falls back after the user stopped the VM"
+grep -q 'self.tellFallback(fb.keep' "$R/app/app/Sources/OmacVM/main.swift" &&
+  ok "the app says why the VM started again on OpenGL" || bad "the fallback restart says nothing"
 
 # omacvm check's Graphics row (the block from src/cmd/check.sh, with stubs).
 awk '/^if \[\[ \$TYPE == app \]\] && gd=\$\(app_dir "\$VM" 2>\/dev\/null\); then$/ { on = 1 } on { print } on && /^fi$/ { exit }' \
@@ -216,7 +233,11 @@ echo "OmacVM: graphics: $(wv record)" > "$cg/logs/qemu.log"
 expect "check: Vulkan running" "ok Graphics: Vulkan: $(wv record)" "$(crow)"
 echo "OmacVM: graphics: $(wv record-kept)" > "$cg/logs/qemu.log"; echo "the firmware found no devices" > "$cg/graphics-fallback"
 expect "check: Vulkan fell back (kept): warn, one pair of brackets" \
-  "warn Graphics: Vulkan did not start on this Mac: using OpenGL (the firmware found no devices; choose Vulkan again to try once more: omacvm graphics --vm \"Test VM\" vulkan)" "$(crow)"
+  "warn Graphics: Vulkan did not start on this Mac: using OpenGL (the firmware found no devices; choose the setting again to try Vulkan once more: omacvm graphics --vm \"Test VM\" vulkan)" "$(crow)"
+echo opengl > "$cg/graphics"; : > "$cg/vulkan"
+expect "check: the vulkan feature fell back: re-choose the setting, not Vulkan" \
+  "warn Graphics: Vulkan did not start on this Mac: using OpenGL (the firmware found no devices; choose the setting again to try Vulkan once more: omacvm graphics --vm \"Test VM\" opengl)" "$(crow)"
+echo vulkan > "$cg/graphics"; rm -f "$cg/vulkan"
 rm -f "$cg/graphics-fallback"; echo "OmacVM: graphics: $(wv record-once)" > "$cg/logs/qemu.log"
 expect "check: Vulkan fell back for this start: warn" "warn Graphics: this start: $(wv record-once)" "$(crow)"
 cli metal >/dev/null 2>&1; expect "omacvm graphics: unknown value refused" 2 "$?"
