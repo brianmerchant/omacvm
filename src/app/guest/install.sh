@@ -6,6 +6,8 @@
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
 #  * the Mac folder at ~/Mac, when the app shares one (omacvm-mac-folder)
+#  * the desktop starts again by itself when the Mac lost its GPU context
+#    (omacvm-desktop-recover, run by the app; the new session says so)
 #  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 #  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
@@ -25,7 +27,7 @@ H=$(getent passwd "$U" | cut -d: -f6)
 # of a build or an update) would hold this step 60-90 s for the device.
 systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
 systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
-install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
+install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover /usr/local/bin/
 # HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
 # module's builder, and a pacman hook that rebuilds it for new kernels.
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-build /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-build
@@ -67,6 +69,8 @@ grep -qxF 'require("hypr.omacvm_app")' "$B" || {
   printf -- '-- OmacVM.app: the display follows the Mac window.\nrequire("hypr.omacvm_app")\n' >> "$B"; chown "$U:$U" "$B"; }
 A=$H/.config/hypr/autostart.lua
 grep -q omacvm-display-sync "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-display-sync")' >> "$A"; chown "$U:$U" "$A"; }
+# After the app restarted a desktop that lost its GPU context: say so, and which apps closed.
+grep -q omacvm-desktop-recover "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-desktop-recover notify")' >> "$A"; chown "$U:$U" "$A"; }
 # Video decoding on the Mac's media engine (the app's QEMU passes VA-API to
 # VideoToolbox): vainfo, the driver shim for Firefox, and Firefox's switch.
 ../../guest/pkg-add libva-utils || true

@@ -342,8 +342,12 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   lost=$(grep -o 'context error reported [0-9]* "[^"]*"' "$miclog" | sed 's/.*"\(.*\)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
   # Not a failure by itself: the app may have been restarted since (the VM's
   # "desktop" line says whether the shell draws now).
+  # The app restarts the desktop (and the shell) by itself (DesktopRecovery).
+  restarts=$(grep -ac "restarting the VM's desktop by itself" "$miclog")
+  again=""
+  (( restarts > 0 )) && again="; the app restarted the desktop by itself $restarts time(s), closing the apps open in it"
   if [[ -n $lost ]]; then
-    skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
+    skip "GPU contexts" "lost earlier in this run by: $lost$again (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
   # The VM's graphics memory on the Mac (on top of its VM memory): now and
   # the peak of this run from QEMU's status file (logs/gpu-memory, written

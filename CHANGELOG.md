@@ -70,6 +70,16 @@ in more words.
   Vulkan rebuild the driver once (a few minutes, in the background after
   the next start, or with `omacvm apply`). `omacvm check` has a "WebGPU in
   Chromium" row.
+- OmacVM.app: when the VM's desktop loses its graphics on the Mac (for
+  example when macOS runs short of memory), the desktop now starts again by
+  itself instead of staying black until you click *Restart the Desktop*.
+  Apps open in the VM close and what was not saved in them is lost; the new
+  session shows a notification naming them, and locks itself again if it
+  was locked. At most once in 10 minutes, then the app asks again. Only
+  the bar lost: only the bar restarts. Turn
+  it off with `defaults write org.omacvm.app desktopAutoRestart -bool false`.
+  VMs get it with `omacvm apply` (before that, the app restarts the login
+  manager directly, without the notification).
 - **x86 Linux apps** (experimental, off by default): `omacvm enable
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (on an M4: about 85 % of native speed for
