@@ -7,7 +7,7 @@ we found along the way. To set OmacVM up, start with the
 | Page | What it is for |
 |---|---|
 | [guide.md](guide.md) | Build and use a VM, step by step: every build question, the feature defaults, what to do after the build, switching features, update, check |
-| [features.md](features.md) | Every feature in detail, full screen and ⌃⌥⌘ Esc, the macOS-native scroll momentum |
+| [features.md](features.md) | Every feature in detail, full screen and ⌃⌥ Esc, the macOS-native scroll momentum |
 | [how-it-works.md](how-it-works.md) | How the Mac and the VM talk: Bridge, Gestures, camera, battery, Omanotch, displays, kernel, memory |
 | [compare.md](compare.md) | The four apps side by side: the full table, benchmark numbers and how we measured |
 | [routes/app.md](routes/app.md) | Everything about OmacVM.app |

@@ -11,17 +11,38 @@
 #                                        down (installed, not loaded) | missing
 #                                        (also: only for other Mac users) |
 #                                        stopped (vmnet failed too often: it no
-#                                        longer tries until a restart or install)
+#                                        longer tries until a restart or install);
+#                                        then "vpn-nat: IF..." while it does the
+#                                        NAT for networks macOS's sharing does not
+#                                        cover (a VPN connected later)
 #   src/net/mac/install.sh --remove      not for this Mac user any more; off this
 #                                        Mac when no other user has it (sudo)
+#   src/net/mac/install.sh --trust [--app APP]
+#                                        what an install would trust (no root):
+#                                        "team TEAM" or "exact build", and why;
+#                                        then where the daemon would come from:
+#                                        "daemon: app", "daemon: source" or
+#                                        "daemon: refused"
 # The daemon comes built and signed inside OmacVM.app (Contents/Library/
-# LaunchServices, Developer ID for published apps): no Xcode needed. Apps from
-# before that: built here from this source (needs Xcode's Command Line Tools).
+# LaunchServices, Developer ID for published apps): no Xcode needed. It is
+# used only when OmacVM's release key vouches for the app's team (below) or
+# this script is the app's own copy. Else (another app, nobody vouches for
+# it), and for apps without one: built here from this source (needs Xcode's
+# Command Line Tools); without them the install is refused: an app nobody
+# vouches for never gets its own file run as root.
 # Accepted callers: processes of the Mac users who installed it (each user who
-# runs this is added) that are QEMU signed with OmacVM's Developer ID (team
-# 722686Y34B), or, for an app signed ad hoc (built from source), exactly that
-# app's QEMU (its cdhash: install again after rebuilding the app).
-# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask for).
+# runs this is added) that are QEMU signed with the Developer ID team of the
+# app's own QEMU (the app the person installs it for; a later app of another
+# team asks again), when OmacVM's release key vouches for that team: the
+# signed update feed of the app's release lists it (src/release/keys.py, main
+# or spare key), or this script is the app's own copy (its Fast Network
+# button: the app vouches for itself). Else (an app signed ad hoc, built from
+# source, or a Developer ID no feed lists): exactly that app's QEMU (its
+# cdhash: install again after rebuilding the app).
+# OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
+# terminal (OmacVM.app's Fast Network button runs this script that way).
+# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask
+# for), 4 the person cancelled the password dialog.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 LABEL=org.omacvm.netd
@@ -30,8 +51,21 @@ PLIST=/Library/LaunchDaemons/$LABEL.plist
 SOCK=/var/run/$LABEL.sock
 LOG=/var/log/$LABEL.log
 STATE=/var/run/$LABEL.state   # the daemon's vmnet back-off (omacvm-netd.c)
-TEAM='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
-DEVID='anchor apple generic and identifier "org.omacvm.app.qemu" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
+NAT=/var/run/$LABEL.nat       # its VPN NAT: "boot pf-reference interface..." (omacvm-netd.c)
+# After launchctl bootout (as root): the daemon takes its VPN NAT out of pf when
+# launchd stops it; if it could not (killed), its own anchor is emptied and its
+# pf reference given back here. Nothing else in pf is touched.
+NAT_CLEAN='if [ -f '"$NAT"' ]; then
+    /sbin/pfctl -a com.apple/org.omacvm.netd -f /dev/null >/dev/null 2>&1 || true
+    read -r _ t _ < '"$NAT"' || true
+    case $t in ""|0|*[!0-9]*) ;; *) /sbin/pfctl -X "$t" >/dev/null 2>&1 || true ;; esac
+    rm -f '"$NAT"'
+  fi'
+# Developer ID Application of TEAM, issued by Apple, with the identifier ID
+# (the same text as before teams came from the app: installed daemons stay "ok").
+devid() {   # TEAM ID
+  printf 'anchor apple generic and identifier "%s" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "%s"' "$2" "$1"
+}
 
 MODE=install APP=""
 while (( $# )); do
@@ -39,23 +73,53 @@ while (( $# )); do
     --app) APP=$2; shift 2 ;;
     --status) MODE=status; shift ;;
     --remove) MODE=remove; shift ;;
-    -h|--help) sed -n '2,19s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --trust) MODE=trust; shift ;;
+    -h|--help) sed -n '2,32s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "net/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
 
-source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app
+source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app; app_version, APP_DOWNLOADS
+KEYS_PY=$HERE/../../release/keys.py
 
-# The code requirement for APP's QEMU: the team for a Developer ID build, else
-# that exact build.
-requirement() {
+# The Developer ID team APP's QEMU is signed with, if it is a Developer ID build.
+qemu_team() {
+  local q=$1/Contents/Resources/runtime/bin/OmacVM t
+  t=$(codesign -dv "$q" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+  [[ $t =~ ^[A-Z0-9]{10}$ ]] && codesign --verify -R="$(devid "$t" org.omacvm.app.qemu)" "$q" 2>/dev/null && echo "$t"
+}
+
+# The code requirement for exactly APP's QEMU (its cdhash).
+hash_req() {
   local q=$1/Contents/Resources/runtime/bin/OmacVM h
   [[ -x $q ]] || { echo "no QEMU in $1" >&2; return 1; }
-  if codesign --verify -R="$DEVID" "$q" 2>/dev/null; then echo "$DEVID"; return 0; fi
   codesign --verify "$q" 2>/dev/null || { echo "$q has no valid signature" >&2; return 1; }
   h=$(codesign -dvvv "$q" 2>&1 | sed -n 's/^CDHash=//p' | head -1)
   [[ $h =~ ^[0-9a-f]{40}$ ]] || { echo "no cdhash for $q" >&2; return 1; }
   echo "cdhash H\"$h\""
+}
+# The code requirement for the QEMU of any build of APP's team (Developer ID only).
+team_req() { local t; t=$(qemu_team "$1") && devid "$t" org.omacvm.app.qemu && echo; }
+
+# This script is APP's own copy (the app's Fast Network button runs that one).
+own_copy() {
+  local mine theirs
+  mine=$(cd "$HERE" && pwd -P) && theirs=$(cd "$1/Contents/Resources/omacvm/src/net/mac" 2>/dev/null && pwd -P) && [[ $mine == "$theirs" ]]
+}
+
+# APP TEAM: the signed update feed of APP's release lists TEAM (OmacVM's
+# release key, main or spare, vouches for it). Says why not on stderr.
+feed_lists() {
+  local v=$1 out t
+  v=$(app_version "$1") && [[ $v =~ ^[0-9]{1,4}(\.[0-9]{1,4}){1,3}$ ]] || { echo "$1 has no release version" >&2; return 1; }
+  if ! curl -fsL --max-time 30 -o "$T/feed.json" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json" ||
+     ! curl -fsL --max-time 30 -o "$T/feed.json.sig" "$APP_DOWNLOADS/v$v/OmacVM-appcast.json.sig"; then
+    echo "no signed update feed for OmacVM.app $v (offline, or not a published release)" >&2; return 1
+  fi
+  out=$(python3 "$KEYS_PY" app-feed "$T/feed.json" "$v" 2>&1) || { echo "the update feed of OmacVM.app $v does not check out (${out#keys.py: })" >&2; return 1; }
+  for t in ${out#* * }; do [[ $t == "$2" ]] && return 0; done
+  echo "the signed update feed of OmacVM.app $v does not list team $2" >&2
+  return 1
 }
 
 # What this source builds: the source's hash, compiled into the binary.
@@ -70,20 +134,23 @@ installed_req() {   # the requirement the installed daemon runs with
   /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST" 2>/dev/null
 }
 installed_users() {   # the uids it takes connections from, one per line
-  plutil -extract ProgramArguments json -o - "$PLIST" 2>/dev/null |
-    python3 -c 'import json, sys; a = json.load(sys.stdin); print("\n".join(a[i + 1] for i in range(len(a) - 1) if a[i] == "--user"))' 2>/dev/null
+  # (no python3: on a Mac without Xcode's tools it asks to install them)
+  /usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$PLIST" 2>/dev/null |
+    awk '{ sub(/^[ \t]+/, "") } u && /^[0-9]+$/ { print } { u = $0 == "--user" }'
 }
 
 status() {
   [[ -x $BIN && -f $PLIST ]] || { echo missing; return 0; }
-  local want h
+  local have h
   installed_users | grep -qx "$(id -u)" || { echo missing; return 0; }   # only for other Mac users
   if [[ -n $APP ]] || APP=$(app_bundle); then
-    want=$(requirement "$APP" 2>/dev/null) || { echo old; return 0; }
-    [[ $(installed_req) == "$want" ]] || { echo old; return 0; }
-    # The app's own daemon (its code); apps without one: this source's.
-    if h=$(bundled "$APP"); then [[ -n $(cdhash "$h") && $(cdhash "$h") == "$(cdhash "$BIN")" ]] || { echo old; return 0; }
-    elif [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
+    # Installed for the team of the app's QEMU (vouched for then), or for exactly this QEMU.
+    have=$(installed_req) && [[ -n $have ]] || { echo old; return 0; }
+    [[ $have == "$(team_req "$APP" 2>/dev/null)" || $have == "$(hash_req "$APP" 2>/dev/null)" ]] || { echo old; return 0; }
+    # The app's own daemon (its code), or one built from this source (an app
+    # nobody vouches for, or one without a daemon).
+    if ! { h=$(bundled "$APP") && [[ -n $(cdhash "$h") && $(cdhash "$h") == "$(cdhash "$BIN")" ]]; } &&
+       [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
   elif [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
   launchctl print "system/$LABEL" >/dev/null 2>&1 && [[ -S $SOCK ]] || { echo down; return 0; }
   if stopped; then echo stopped; return 0; fi
@@ -101,7 +168,27 @@ stopped() {
   [[ $b == "$boot" && $f =~ ^[0-9]+$ ]] && (( f >= MAX_FAILURES ))
 }
 
-as_root() {   # SCRIPT ARGS...: one sudo for all of it
+# One argument in single quotes for /bin/sh.
+shq() { local q="'\\''"; printf "'%s'" "${1//\'/$q}"; }
+# SCRIPT ARGS... as one /bin/sh command line: bash -c SCRIPT ARGS (test.sh runs it).
+root_cmd() { local cmd="/bin/bash -c" a; for a in "$@"; do cmd+=" $(shq "$a")"; done; printf '%s' "$cmd"; }
+as_root() {   # SCRIPT ARGS...: one sudo (or one password dialog) for all of it
+  if [[ ${OMACVM_ADMIN_PROMPT:-} == gui ]]; then
+    local out rc=0
+    # The command goes in as an argument, never into AppleScript's text.
+    out=$(/usr/bin/osascript - "$(root_cmd "$@")" 2>&1 <<'AS'
+on run argv
+  do shell script (item 1 of argv) with prompt "OmacVM wants to change its fast network service (omacvm-netd)." with administrator privileges
+end run
+AS
+) || rc=$?
+    if (( rc )); then
+      [[ $out == *"-128"* ]] && { echo "cancelled: the fast network was not changed" >&2; exit 4; }
+      printf '%s\n' "$out" >&2; exit 1
+    fi
+    [[ -z $out ]] || printf '%s\n' "$out" >&2
+    return 0
+  fi
   if ! sudo -n true 2>/dev/null; then
     { : < /dev/tty; } 2>/dev/null || { echo "the fast network needs an administrator's password (sudo), and there is no terminal to ask in" >&2; exit 3; }
     echo "==> the fast network is a system service: macOS asks for your password (sudo)" >&2
@@ -154,8 +241,56 @@ EOF
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 ME=$(id -u)
 
+# Its VPN NAT, this boot's only: "vpn-nat: IF..." (the networks it translates
+# the fast network's addresses on itself, as macOS's sharing does not), or nothing.
+nat_status() {
+  local boot b t ifs
+  boot=$(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ sec = \([0-9]*\),.*/\1/p')
+  [[ -r $NAT ]] && read -r b t ifs < "$NAT" || return 0
+  [[ $b == "$boot" && -n $ifs && $ifs =~ ^[a-z0-9\ ]+$ ]] && echo "vpn-nat: $ifs"
+  return 0
+}
+
+# What the QEMU (REQ) and the daemon (DREQ) must satisfy: for a Developer ID
+# app whose team OmacVM's release key vouches for, that team (and each one's
+# identifier); else exactly the files checked here, by their cdhash (an app
+# built from source, a daemon built here, or a team no signed feed lists: a
+# fake app signed by someone else's Developer ID gets no more than its own
+# exact files). Any file can be signed ad hoc, so "a valid signature" alone
+# would let a swapped file through. DREQ stays empty for the cdhash case
+# (set from the daemon file below).
+decide() {
+  REQ=$(hash_req "$APP") || exit 1
+  DREQ=""
+  if QTEAM=$(qemu_team "$APP"); then
+    if own_copy "$APP" || feed_lists "$APP" "$QTEAM"; then
+      REQ=$(team_req "$APP") && DREQ=$(devid "$QTEAM" "$LABEL")
+      return 0
+    fi
+    echo "==> not trusting all of team $QTEAM (above): the fast network takes only this exact build of $(basename "$APP")'s QEMU" >&2
+  fi
+  QTEAM=""
+}
+
+# Where the daemon comes from (after decide): "app" (the one inside APP) when
+# the release key vouches for APP's team or this is APP's own copy (the app
+# vouches for itself); else "source" (built here from this source) when
+# Xcode's Command Line Tools are there; else "refused".
+have_clang() { xcode-select -p >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; }
+daemon_from() {
+  if bundled "$APP" >/dev/null && { [[ -n $QTEAM ]] || own_copy "$APP"; }; then echo app
+  elif have_clang; then echo source
+  else echo refused; fi
+}
+
 case $MODE in
-  status) status; exit 0 ;;
+  status) status; nat_status; exit 0 ;;
+  trust)
+    [[ -n $APP ]] || APP=$(app_bundle) || { echo "no OmacVM.app installed (in /Applications or ~/Applications)" >&2; exit 1; }
+    decide
+    if [[ -n $QTEAM ]]; then echo "team $QTEAM"; else echo "exact build"; fi
+    echo "daemon: $(daemon_from)"
+    exit 0 ;;
   remove)
     [[ -e $BIN || -e $PLIST ]] || exit 0
     others=$(installed_users | grep -vx "$ME" || true)
@@ -167,18 +302,21 @@ case $MODE in
       make_plist "$T/$LABEL.plist" "$req" $others
       as_root 'set -e
         launchctl bootout system/'"$LABEL"' 2>/dev/null || true
+        '"$NAT_CLEAN"'
         install -o root -g wheel -m 644 "$1" '"$PLIST"'
         launchctl bootstrap system '"$PLIST" _ "$T/$LABEL.plist"
       echo "==> fast network: off for this Mac user (other users of this Mac still have it)"
       exit 0
     fi
-    as_root 'launchctl bootout system/'"$LABEL"' 2>/dev/null || true; rm -f '"$PLIST $BIN $SOCK $LOG $STATE"
+    as_root 'launchctl bootout system/'"$LABEL"' 2>/dev/null || true
+      '"$NAT_CLEAN"'
+      rm -f '"$PLIST $BIN $SOCK $LOG $STATE"
     echo "==> fast network removed"
     exit 0 ;;
 esac
 
 [[ -n $APP ]] || APP=$(app_bundle) || { echo "no OmacVM.app installed (in /Applications or ~/Applications)" >&2; exit 1; }
-REQ=$(requirement "$APP") || exit 1
+hash_req "$APP" > /dev/null || exit 1
 case $(status) in
   ok) exit 0 ;;
   stopped)
@@ -187,22 +325,23 @@ case $(status) in
     echo "==> fast network: vmnet is tried again"
     exit 0 ;;
 esac
-# What the daemon must satisfy: for a Developer ID app, OmacVM's team and the
-# daemon's identifier; else (ad hoc: an app built from source, or built here)
-# exactly the file checked here, by its cdhash. Any file can be signed ad hoc,
-# so "a valid signature" alone would let a swapped file through.
-DREQ=""
-[[ $REQ == "$DEVID" ]] && DREQ="$TEAM and identifier \"$LABEL\""
-if h=$(bundled "$APP"); then
+decide
+FROM=$(daemon_from)
+if [[ $FROM == refused ]] && bundled "$APP" >/dev/null; then
+  echo "the fast network service inside $(basename "$APP") is not run as root: OmacVM's release key does not vouch for this app (no signed update feed lists its team) and this is not the app's own copy of install.sh. Use the app's Fast Network button, or install Xcode's Command Line Tools (xcode-select --install) to build the service from this source" >&2
+  exit 3
+fi
+if [[ $FROM == app ]]; then
+  h=$(bundled "$APP")
   # The app's daemon, checked on a copy first (a clear message), and again
   # as root on the installed file before launchd may run it.
   cp "$h" "$T/omacvm-netd"
   codesign --verify --strict "$T/omacvm-netd" 2>/dev/null || { echo "$h has no valid signature" >&2; exit 1; }
   if [[ -n $DREQ ]] && ! codesign --verify -R="$DREQ" "$T/omacvm-netd" 2>/dev/null; then
-    echo "$h is not signed with OmacVM's Developer ID" >&2; exit 1
+    echo "$h is not signed with the Developer ID of team $QTEAM, as the app's QEMU is" >&2; exit 1
   fi
 else
-  xcrun -f clang >/dev/null 2>&1 || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }
+  [[ $FROM == source ]] || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }
   xcrun clang -O2 -Wall -mmacosx-version-min=14.0 -DNETD_VERSION="\"$VERSION\"" -o "$T/omacvm-netd" "$HERE/omacvm-netd.c" \
     -framework vmnet -framework Security -framework CoreFoundation -lbsm
 fi
@@ -220,6 +359,7 @@ make_plist "$T/$LABEL.plist" "$REQ" "$ME" $(installed_users | grep -vx "$ME" || 
 as_root 'set -e
   install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools
   launchctl bootout system/'"$LABEL"' 2>/dev/null || true
+  '"$NAT_CLEAN"'
   install -o root -g wheel -m 755 "$1" '"$BIN"'
   if ! /usr/bin/codesign --verify --strict ${3:+-R="$3"} '"$BIN"' 2>/dev/null; then
     rm -f '"$BIN"'; echo "the installed omacvm-netd failed its signature check: removed" >&2; exit 1

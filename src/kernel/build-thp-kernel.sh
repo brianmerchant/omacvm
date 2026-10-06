@@ -37,7 +37,7 @@ if [[ $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
   grub_default_thp
   exit 0
 fi
-pacman -S --needed --noconfirm xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel >/dev/null 2>&1
+"$here/../guest/pkg-add" xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel
 # Built in fresh folders of root's (root never follows a link the user put
 # there), under /home: root's snapshots (subvolume @) leave it out, so the
 # GBs of build files never end up in one. makepkg runs as the user; the

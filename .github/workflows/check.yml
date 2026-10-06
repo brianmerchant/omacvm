@@ -1,6 +1,6 @@
 # Quick checks on every pull request and on main: syntax, ShellCheck errors,
-# the app's and the Mac helpers' builds and Omanotch's offline tests. No
-# signing beyond ad hoc, no VMs.
+# the app's and the Mac helpers' builds and offline tests (the guest agents'
+# also on Linux) and the control centre's tests. No signing beyond ad hoc, no VMs.
 name: check
 
 on:
@@ -40,14 +40,46 @@ jobs:
           tr '\n' '\0' < "$RUNNER_TEMP/shell-files" | xargs -0 shellcheck -S error -s bash
 
       - name: Python compiles
-        run: git ls-files -z '*.py' | xargs -0 python3 -m py_compile
+        run: |
+          git ls-files -z '*.py' | xargs -0 python3 -m py_compile
+          python3 -m py_compile src/control/omacvm
+
+      - name: omacvm report runs on macOS's own python3
+        run: /usr/bin/python3 -c "import sys; sys.path.insert(0, 'src/control'); import omacvm_cc.report, omacvm_cc.collect, omacvm_cc.bridge, omacvm_cc.state"
+
+      - name: Control centre tests (state, redaction, Textual Pilot against a fake Mac)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
+          cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
+
+      - name: Bridge's control centre requests (allow-list, limits, manifest signatures)
+        run: src/bridge/mac/tests/run.sh
+
+      - name: Update parts cover src/
+        run: python3 src/release/manifest.py parts > /dev/null
+
+      - name: Boot splash and start animation (offline, from the patch)
+        run: app/runtime/Tests/display/check-boot-splash.sh
 
       - name: OmacVM.app builds
         working-directory: app/app
         run: swift build
 
+      - name: OmacVM.app network switch tests (fast network <-> user network)
+        working-directory: app/app
+        run: swift run net-tests
+
+      - name: OmacVM.app new VM features (Omanotch on with a notch)
+        working-directory: app/app
+        run: swift run features-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
+
+      - name: OmacVM.app update checks
+        working-directory: app/app
+        run: swift run update-tests
 
       - name: Mac helpers build (Gestures, Bridge)
         run: |
@@ -55,7 +87,9 @@ jobs:
           src/bridge/mac/build.sh
 
       - name: Omanotch offline tests
-        run: src/omanotch/mac/test.sh
+        run: |
+          src/omanotch/mac/test.sh
+          src/omanotch/guest/tests/test.sh
 
       - name: External display brightness offline tests (Bridge and VM side)
         run: |
@@ -65,11 +99,40 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: omacvm check's media keys line (normal Bridge log lines are not failures)
+        run: src/tests/media-keys-check.sh
+
+      - name: omacvm vms never waits on UTM's data
+        run: src/tests/vms-no-container.sh < /dev/null
+
+      - name: A Mac helper that does not build
+        run: src/tests/mac-install.sh
+
+      - name: Release keys on the command line (either key, Developer ID teams, a named spare)
+        run: src/tests/release-keys.sh
+
+      - name: Release script (KosmicKrisp from another Mac, bad arguments)
+        run: src/tests/release-script.sh
+
+      - name: Vulkan (Venus) driver step for app VMs (when it builds Mesa's vulkan-virtio)
+        run: src/tests/venus-driver.sh
+
+      - name: Guest packages never update one alone (no partial update), GBM guard undoes a broken install
+        run: src/tests/pkg-safe.sh
+
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 
+      - name: Prebuilt images for Parallels, UTM and Fusion are checked (untrusted input)
+        run: |
+          command -v zstd >/dev/null || brew install zstd
+          src/tests/prebuilt-routes.sh
+
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
+
+      - name: App battery bridge's notification thread ends on stop
+        run: src/tests/app-battery.sh
 
       - name: Gestures offline test (which VM gets them)
         run: src/gestures/mac/test.sh
@@ -86,20 +149,89 @@ jobs:
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
 
-      - name: Gestures off means no Gestures link from the VM
-        run: src/tests/gestures-off.sh
+      - name: Magic Mouse swipe setting (3 or 4 fingers) and its row, only with a Magic Mouse
+        run: src/tests/app-mouse-swipe.sh
+
+      - name: The note when macOS refuses the VM's keyboard tap
+        run: src/tests/app-key-access.sh
+
+      - name: The vulkan feature (VM folder file, guest Mesa step)
+        run: src/tests/vulkan-feature.sh
+
+      - name: Feature state truth (the record against the fast network and SDDM autologin)
+        run: src/tests/feature-truth.sh
+
+      - name: The vulkan feature's Mesa build (build tools come and go)
+        run: src/tests/venus-build-tools.sh
+
+      - name: Graphics setting (OpenGL, Vulkan, Automatic; app and omacvm agree)
+        run: src/tests/graphics-setting.sh
+
+      - name: App VMs skip routes of a card without a link (network moves without a gap)
+        run: src/tests/net-linkdown.sh
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
+      - name: Display sync (scales at 4K and 5K, nothing sent twice, the loop guard)
+        run: |
+          # The VM side runs on Arch's bash 5; macOS's own is 3.2.
+          [ -x /opt/homebrew/bin/bash ] || brew install bash
+          python3 src/app/guest/tests/test_display_sync.py
+
       - name: Full-screen pointer guard (motion maths)
         run: app/runtime/Tests/display/test-pointer-guard.sh
+
+      - name: App menu memory lines (VM memory, graphics memory)
+        run: app/runtime/Tests/display/test-gpu-memory-menu.sh
+
+      - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
+        run: app/runtime/Tests/display/test-pointer-start.sh
 
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 
-      - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
-        run: src/tests/app-notch.sh
+      - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
+        run: src/tests/app-fullscreen-space.sh
+
+      - name: Keyboard light steps (offline)
+        run: src/tests/keyboard-light.sh
+
+      - name: A feature that is off is off on every route (VM side, checks, Mac side)
+        run: src/tests/features-off.sh
+
+      - name: Guest check accepts NOTCH right above the built-in display (offline)
+        run: src/tests/notch-check.sh
+
+      - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
+        run: src/tests/app-storage.sh
 
       - name: Benchmark chart and the pages that quote it agree
         run: src/tests/bench-docs.sh
+
+      - name: OmacVM.app while the VM idles (guest agent connection, clipboard poll)
+        run: src/tests/app-idle.sh
+
+      - name: Guest agents offline tests (desktop check, idle waits)
+        run: |
+          python3 src/app/guest/tests/test_omacvm_displays.py
+          python3 src/app/guest/tests/test_idle_waits.py
+
+      - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
+        run: tests/bench/final-round/test.sh
+
+      - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
+        run: src/tests/audio-timing.sh
+
+  # The guest agents are Linux programs: their inotify and pidfd waits only
+  # run here (on the Mac those tests skip). Arm, like the guest.
+  guest:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guest agents tests on Linux (inotify, pidfd, idle waits)
+        run: |
+          python3 src/app/guest/tests/test_omacvm_displays.py -v
+          python3 src/app/guest/tests/test_idle_waits.py -v

@@ -97,7 +97,7 @@ reg = {"1": {"Package": {"Path": f"{t}/utm/A.utm"}, "Suspended": True},
        "2": {"Package": {"Path": f"{t}/utm/B.utm"}, "Suspended": False}}
 plistlib.dump({"Registry": reg}, open(f"{t}/utm.plist", "wb"))
 PY
-got=$(UTMCTL=/nonexistent; UTM_PREFS=$T/utm.plist; pgrep() { [[ "$*" == "-xq UTM" ]] && return 1; command pgrep "$@"; }; vms_list 2>/dev/null | awk -F'\t' '$2 == "utm" && $1 ~ /^Fixture/ { print $1 "=" $3 }' | sort | paste -sd' ' -)
+got=$(UTMCTL=/nonexistent; UTM_PREFS=$T/utm.plist; UTM_SEEN=$T/utm-vms; OMACVM_UTM=1; pgrep() { [[ "$*" == "-xq UTM" ]] && return 1; command pgrep "$@"; }; vms_list 2>/dev/null | awk -F'\t' '$2 == "utm" && $1 ~ /^Fixture/ { print $1 "=" $3 }' | sort | paste -sd' ' -)
 check "UTM closed: a suspended VM is listed suspended, not stopped" eq "$got" "Fixture A=suspended Fixture B=stopped"
 
 # Tiers as omacvm build gives them, for a few Macs (OmacVM.app's Mac.tier is the same rule).

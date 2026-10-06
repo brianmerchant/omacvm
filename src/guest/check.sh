@@ -4,8 +4,10 @@
 # the Mac does that over SSH):
 #   guest/check.sh --user NAME [--tsv]
 # One line per feature (ok / FAIL / skip); exits 1 if anything failed. --tsv:
-# "status<TAB>name<TAB>detail<TAB>human" lines (human = 1: only a person can fix
-# it) and "section<TAB>title", for omacvm check --json.
+# "status<TAB>name<TAB>detail<TAB>human<TAB>feature" lines (human = 1: only a
+# person can fix it; feature = the features.tsv name the line belongs to, empty
+# for the VM in general) and "section<TAB>title", for omacvm check --json and
+# the control centre.
 set -uo pipefail
 U=""; TSV=0
 while (( $# )); do
@@ -17,9 +19,9 @@ while (( $# )); do
 done
 id "$U" >/dev/null 2>&1 || { echo "guest/check.sh: --user must be the desktop user" >&2; exit 2; }
 H=$(getent passwd "$U" | cut -d: -f6); RUN=/run/user/$(id -u "$U")
-fails=0
+fails=0; FEATURE=""   # the feature the next lines belong to
 line() {   # STATUS LABEL NAME DETAIL [human]
-  if (( TSV )); then printf '%s\t%s\t%s\t%s\n' "$1" "$3" "$4" "${5:+1}"
+  if (( TSV )); then printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$3" "$4" "${5:+1}" "$FEATURE"
   else printf '  %-5s %-24s %s\n' "$2" "$3" "$4"; fi
 }
 ok()   { line ok ok "$1" "${2:-}"; }
@@ -60,6 +62,29 @@ default_gateway() {
 # OmacVM.app on its fast network (vmnet): the Mac is the gateway 192.168.77.1.
 GW=$(default_gateway)
 [[ $TYPE == app && $GW == 192.168.77.1 ]] && HOST=$GW
+# OmacVM.app gives the VM a feature's link to the Mac only when the VM starts
+# (its port, or the battery/camera port): one turned on while the VM ran waits
+# for the next start. "port": a port on the Mac's 127.0.0.1, which the fast
+# network does not gate.
+restart_hint() {
+  [[ $TYPE == app ]] || return 0
+  [[ ${1:-} == port && $HOST == 192.168.77.1 ]] && return 0
+  printf '; turned on while the VM was running? shut it down and start it again'
+}
+# Where Omanotch's hidden NOTCH output sits next to the built-in display $2,
+# from `hyprctl monitors all -j` ($1); $3 is the VM type. Prints "over" (on
+# the display's top edge: Parallels, UTM, Fusion, and the app's fallback),
+# "above" (right above it, touching its top edge: OmacVM.app, notchcast's
+# notch-place.h) or nothing when NOTCH is anywhere else.
+notch_spot() {
+  jq -r --arg b "$2" --arg t "$3" '
+    (.[] | select(.name == "NOTCH")) as $n | (.[] | select(.name == $b)) as $m
+    | ($n.y + $n.height / $n.scale - $m.y) as $gap
+    | if $n.x != $m.x or $n.width != $m.width then empty
+      elif $n.y == $m.y then "over"
+      elif $t == "app" and $gap > -1 and $gap < 1 then "above"
+      else empty end' <<<"$1" 2>/dev/null | head -1
+}
 FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
@@ -67,8 +92,10 @@ BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
+CONTROL=${OMACVM_FEATURE_control_centre:-off}
 MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
 EXT_BRIGHTNESS=${OMACVM_FEATURE_external_brightness:-off}
+CHROMIUM_VIDEO=${OMACVM_FEATURE_chromium_video:-on}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -88,6 +115,7 @@ if [[ $TYPE == app ]]; then
 fi
 
 section "The Mac in the bar (Bridge)"
+FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if [[ -s $H/.config/omacvm-bridge/token ]]; then ok "token" "~/.config/omacvm-bridge/token"
   else bad "token" "missing: run omacvm apply on the Mac"; fi
@@ -98,7 +126,7 @@ if [[ $BRIDGE == on ]]; then
     else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)" human; fi
     if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
     else skip "Wi-Fi password sharing" "not on a shareable network"; fi
-  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831 (or did not prove it is OmacVM's Bridge: omacvm update)"; fi
+  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831 (or did not prove it is OmacVM's Bridge: omacvm update$(restart_hint port))"; fi
   audio=$(as_user omacvm-bridge audio 2>/dev/null)
   if jq -e .devices >/dev/null 2>&1 <<<"$audio"; then
     ok "audio" "$(jq -r '(.devices[] | select(.default_output) | .name) // "no output"' <<<"$audio" | head -1)"
@@ -118,6 +146,7 @@ if [[ $BRIDGE == on ]]; then
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
   # Omarchy's brightness commands reach the external Mac display an output is on.
+  FEATURE=external-brightness
   if [[ $EXT_BRIGHTNESS != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
   elif ! grep -qs '^# omacvm-ddcutil' /usr/local/bin/ddcutil; then bad "external brightness" "/usr/local/bin/ddcutil is not OmacVM's (omacvm apply)"
   elif ex=$(as_user omacvm-bridge external 2>/dev/null) && jq -e .displays >/dev/null 2>&1 <<<"$ex"; then
@@ -125,6 +154,7 @@ if [[ $BRIDGE == on ]]; then
       elif (.displays | length) == 0 then "no external display on the Mac now"
       else [.displays[] | "\(.name): \(if .method == "ddc" then "DDC/CI" elif .method == "apple" then "its own control" else "not settable" end)"] | join(", ") end' <<<"$ex")"
   else bad "external brightness" "the Bridge does not answer /display/external (an older Bridge: omacvm update on the Mac)"; fi
+  FEATURE=bridge
   # Right after the first login omacvm-plugins may still be enabling the widgets.
   for _ in $(seq 60); do
     [[ -s $H/.local/state/omacvm/pending-plugins &&
@@ -150,13 +180,19 @@ if [[ $BRIDGE == on ]]; then
   if jq -e '[.bar.layout[]?[]? | select(.id == "omarchy.indicators") | (.items // ["NightLight"]) | index("NightLight")] | all(. == null)' "$H/.config/omarchy/shell.json" >/dev/null 2>&1 && ! pgrep -x hyprsunset >/dev/null; then
     ok "one night light" "the Mac's Night Shift; Omarchy's own is off"
   else bad "one night light" "Omarchy's night light (hyprsunset) is still reachable or running: omacvm apply"; fi
+  FEATURE=wallpaper
   if [[ $WALLPAPER == on ]]; then
     if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
     else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
+  elif user_active omacvm-wallpaper.path || user_active omacvm-wallpaper.service; then
+    bad "wallpaper" "off, but its watcher runs: omacvm apply"
   else skip "wallpaper" "off (chosen at setup)"; fi
+elif user_active omacvm-bridge-events.socket || user_active omacvm-bridge-osd.service || pgrep -u "$U" -f /usr/local/bin/omacvm-bridge >/dev/null; then
+  bad "Bridge" "off, but its services run and talk to the Mac: omacvm apply"
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Camera and microphone"
+FEATURE=camera
 if [[ $CAMERA == on && $TYPE == parallels ]]; then
   # Parallels' own camera sharing: a USB camera in the VM.
   cams=$(cat /sys/class/video4linux/video*/name 2>/dev/null | sort -u | paste -sd, -)
@@ -170,7 +206,7 @@ elif [[ $CAMERA == on ]]; then
   cs=$(as_user /usr/local/bin/omacvm-camera --status 2>/dev/null)
   if [[ $TYPE == app ]]; then
     if jq -e .port <<<"$cs" >/dev/null 2>&1; then ok "camera from the Mac" "OmacVM.app's camera port"
-    else bad "camera from the Mac" "no camera port: start the VM from an OmacVM.app with the camera (omacvm update)"; fi
+    else bad "camera from the Mac" "no camera port: start the VM from an OmacVM.app with the camera (omacvm update$(restart_hint))"; fi
   else
     case $(jq -r '.permission // empty' <<<"$cs" 2>/dev/null) in
       granted|test) ok "camera from the Mac" "OmacVM Bridge: $(jq -r '.camera // "no camera"' <<<"$cs"), $(jq -r 'if .on then "on, \(.readers) reading" else "off" end' <<<"$cs")" ;;
@@ -179,12 +215,15 @@ elif [[ $CAMERA == on ]]; then
       *) bad "camera from the Mac" "the Bridge does not answer /camera/status: $(jq -r '.error // "no answer"' <<<"$cs" 2>/dev/null) (omacvm update)" ;;
     esac
   fi
+elif user_active omacvm-camera.service; then bad "camera" "off, but omacvm-camera runs and asks the Mac: omacvm apply"
 else skip "camera" "off (chosen at setup)"; fi
+FEATURE=""
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
 else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
 
 section "The Mac's battery"
+FEATURE=battery
 if [[ $TYPE == parallels ]]; then
   if compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then skip "battery" "Parallels gives the VM the Mac's battery itself"
   else skip "battery" "none: this Mac has no battery (on a MacBook Parallels passes it itself)"; fi
@@ -206,29 +245,33 @@ elif [[ $BATTERY == on ]]; then
   up=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null)
   pct=$(awk '/percentage:/ { print $2; exit }' <<<"$up"); st=$(awk '/state:/ { print $2; exit }' <<<"$up")
   if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
-  elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update)"
-  else bad "battery in UPower" "no BAT0"; fi
+  elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update$(restart_hint))"
+  else bad "battery in UPower" "no BAT0$(restart_hint)"; fi
   if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
     ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
   else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
   if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "the VM never suspends for it"
   else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
+elif systemctl is-active -q omacvm-battery; then bad "battery" "off, but omacvm-battery runs and asks the Mac: omacvm apply"
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
 section "Trackpad and keyboard"
+FEATURE=gestures
 if [[ $GESTURES == on ]]; then
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
-    else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
+    else bad "gestures" "service runs but is not connected to $HOST:47830$(restart_hint port)"; fi
   else bad "gestures" "omacvm-gestures.service not running"; fi
 elif systemctl is-active -q omacvm-gestures; then
   bad "gestures" "off, but omacvm-gestures.service runs and talks to the Mac: omacvm apply"
 fi
+FEATURE=gestures
 if [[ $GESTURES == on ]]; then
   check "virtual trackpad" "Magic Trackpad (OmacVM)" ev_device "Apple Inc. Magic Trackpad (OmacVM)"
   if grep -rqs '^hl.gesture({ fingers = 3' "$H/.config/hypr/"; then ok "workspace swipes" "3/4-finger gestures configured"
   else bad "workspace swipes" "no hl.gesture lines in ~/.config/hypr"; fi
 else skip "trackpad gestures" "off (chosen at setup): macOS keeps its swipes"; fi
+FEATURE=scroll-momentum
 if [[ $GLIDE == on && $GESTURES == on ]]; then
   pid=$(systemctl show -p MainPID --value omacvm-gestures 2>/dev/null)
   # same rule as the daemon: the new key wins, a VM not yet updated may only have the old glide key
@@ -241,6 +284,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
 else skip "scroll momentum" "off (omacvm enable scroll-momentum turns it on: trackpads only)"; fi
+FEATURE=""
 if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   if [[ $GESTURES == on ]]; then
     check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
@@ -284,12 +328,35 @@ app)
   # Fast network (vmnet through omacvm-netd on the Mac), else QEMU's user network.
   if [[ $GW == 192.168.77.1 ]]; then
     a=$(ip -4 -o addr show scope global 2>/dev/null | awk '{ print $4; exit }')
-    if [[ $FAST_NET == on ]]; then ok "fast network" "vmnet, ${a%/*}"
-    else bad "fast network" "the VM is on vmnet, but the feature is off here: omacvm enable fast-network"; fi
+    # On here or turned on with the app's button (no apply since then).
+    ok "fast network" "vmnet, ${a%/*}"
   elif [[ $FAST_NET == on ]]; then
-    bad "fast network" "on, but the VM got QEMU's user network (the app says why: omacvm check on the Mac)"
+    # The app's button may have turned it off since; the Mac's check knows.
+    skip "fast network" "not this start: QEMU's user network (omacvm check on the Mac says why)"
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
+  FEATURE=vulkan
+  if [[ ${OMACVM_FEATURE_vulkan:-off} == on && ! -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
+    bad "Vulkan (OmacVM's Mesa)" "on, but OmacVM's Mesa is not installed: omacvm apply (its log says why)"
+  elif [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
+    if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
+      skip "Vulkan (OmacVM's Mesa)" "on from the VM's next start (shut it down in OmacVM.app, then start it again)" 1
+    else
+      check "Vulkan (OmacVM's Mesa)" "venus" bash -c 'VK_LOADER_DRIVERS_DISABLE=virtio_icd.json vulkaninfo --summary 2>/dev/null | grep -q "driverName *= venus"'
+      check "OpenCL (rusticl on Zink)" "a zink device" bash -c 'RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink'
+      check "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)" test -x /usr/local/bin/omacvm-chromium-webgpu
+    fi
+  elif [[ -f /etc/environment.d/90-omacvm-opencl.conf ]]; then
+    # Graphics Vulkan: the distro's rusticl on Zink on Venus (venus/opencl.sh).
+    if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
+      skip "OpenCL (rusticl on Zink)" "with Vulkan from the VM's next start"
+    elif RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink; then
+      ok "OpenCL (rusticl on Zink)" "$(RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | sed -n 's/.*Device #0: //p' | head -1)"
+    else
+      bad "OpenCL (rusticl on Zink)" "no device: on MoltenVK (macOS 15) Zink needs OmacVM's Mesa (omacvm enable vulkan)"
+    fi
+  else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
+  FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
   if [[ ! -e /dev/virtio-ports/org.omacvm.display ]]; then
@@ -313,6 +380,12 @@ app)
   if as_user hyprctl monitors -j 2>/dev/null | jq -e '.[0].refreshRate' >/dev/null 2>&1; then
     ok "display" "$(as_user hyprctl monitors -j | jq -r '.[0] | "\(.width)x\(.height) @\(.refreshRate | floor) Hz, scale \(.scale)"')"
   fi
+  # The display sync stops following an output that keeps changing (a loop)
+  # and writes why; nothing written: it never had to.
+  held=$RUN/omacvm/display-sync/held
+  if [[ -s $held ]]; then
+    bad "display sync" "held $(wc -l < "$held") time(s) this session, last: $(tail -1 "$held" | cut -d' ' -f2-)"
+  fi
   r=$(as_user glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p')
   [[ -z $r ]] && r=$(as_user eglinfo -B 2>/dev/null | sed -n 's/^OpenGL core profile renderer: //p;s/^OpenGL renderer: //p' | head -1)
   case $r in
@@ -320,6 +393,21 @@ app)
     "") skip "GPU" "no glxinfo/eglinfo to ask (mesa-utils)" ;;
     *) bad "GPU" "software rendering: $r" ;;
   esac
+  # Vulkan (Venus), with the app's Vulkan switch on: the driver must size GPU
+  # memory to the Mac's pages, or every Vulkan app fails to start.
+  FEATURE=graphics
+  # (OmacVM's Mesa above has its own Venus driver; the distro's is not used then.)
+  vk=$(/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh --status 2>/dev/null)
+  [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]] && vk=omacvm
+  case ${vk%% *} in
+    omacvm) ;;
+    ok) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* }"
+        else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
+    needed) bad "Vulkan (Venus)" "${vk#* }: omacvm apply" ;;
+    no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
+    *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
+  esac
+  FEATURE=""
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
   # The shim prints the Mac's per-VM limit (past it, players decode on the CPU).
@@ -330,6 +418,23 @@ app)
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
   else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
+  # Arch Linux ARM's Chromium decodes through V4L2 (omacvm-vdec + omacvm-vdecd).
+  FEATURE=chromium-video
+  if command -v chromium >/dev/null; then
+    s=$(cat /run/omacvm-vdec/status 2>/dev/null || true)
+    # A module built after it was loaded (an update while a video played): the old one serves until then.
+    pend=""; m=$(modinfo -F srcversion omacvm_vdec 2>/dev/null || true)
+    [[ -n $m && -e /sys/module/omacvm_vdec && $(cat /sys/module/omacvm_vdec/srcversion 2>/dev/null) != "$m" ]] &&
+      pend=" (an update waits: restart the VM)"
+    if [[ $CHROMIUM_VIDEO != on ]]; then skip "video decoding in Chromium" "off (omacvm enable chromium-video)"
+    elif [[ -z $v ]]; then skip "video decoding in Chromium" "no decoders on the Mac's side"
+    elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then bad "video decoding in Chromium" "not set up: omacvm apply"
+    elif [[ ! -e /dev/omacvm-vdec ]]; then bad "video decoding in Chromium" "no module for kernel $(uname -r) yet: omacvm apply, or reboot after an update"
+    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then bad "video decoding in Chromium" "omacvm-vdecd not running (journalctl -u omacvm-vdecd)$pend"
+    elif ! as_user /usr/local/lib/omacvm/chromium-flags.py check; then bad "video decoding in Chromium" "AcceleratedVideoDecoder missing in Chromium's flags: omacvm apply"
+    else ok "video decoding in Chromium" "V4L2 -> the Mac's media engine: $s$pend"; fi
+  fi
+  FEATURE=""
   if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
     check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
       grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf
@@ -369,6 +474,7 @@ fusion)
 esac
 
 section "Speed and safety"
+FEATURE=thp-kernel
 k=$(uname -r)
 [[ -n $THP_KERNEL ]] || { [[ $k == *thp* ]] && THP_KERNEL=on || THP_KERNEL=off; }
 if [[ $k == *thp* && $THP_KERNEL == off ]]; then bad "kernel" "$k: the memory-optimized kernel is off but still running (reboot)"
@@ -384,6 +490,7 @@ lru=$(cat /sys/kernel/mm/lru_gen/enabled 2>/dev/null)
 if [[ -n $lru && $lru != 0x0000 ]]; then ok "MGLRU" "$lru"
 elif [[ $k == *thp* ]]; then bad "MGLRU" "${lru:-unavailable}"
 else skip "MGLRU" "${lru:-not in this kernel} (part of the memory-optimized kernel)"; fi
+FEATURE=""
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
 [[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after omacvm apply?)"
 if command -v grub-mkconfig >/dev/null; then
@@ -396,38 +503,56 @@ if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH fro
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 
 section "Choices"
+FEATURE=idle-lock
 if [[ $IDLE_LOCK == off ]]; then
   if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock" "off: the Mac's lock protects the VM"
   else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
-[[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
+FEATURE=autologin
+# As SDDM does it, whoever wrote the file (the Mac's omacvm check fixes OmacVM's record to match).
+# Run with bash -s from the Mac: the VM's copy (an older one has OmacVM's own file only).
+if [[ -f /usr/local/share/omacvm/guest/autologin.sh ]]; then
+  source /usr/local/share/omacvm/guest/autologin.sh; al=$(sddm_autologin_user)
+else al=""; [[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && al=$U; fi
+if [[ -n $al ]]; then ok "autologin" "on: SDDM logs $al in"
+else ok "autologin" "off"; fi
+FEATURE=mac-clock
 if [[ $MAC_CLOCK == on ]]; then
   f=$(jq -r '.bar.layout.right[-1] | select(.id == "omarchy.clock") | .format' "$H/.config/omarchy/shell.json" 2>/dev/null)
   if [[ -n $f ]]; then ok "the Mac's clock" "far right, $f"
   elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
-fi
+else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
 
 section "Omanotch"
-if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
+FEATURE=omanotch
+if [[ $OMANOTCH == off ]]; then
+  if user_active notchcast.service || pgrep -u "$U" -x notchcast >/dev/null || connected_to "$HOST" 47811; then
+    bad "Omanotch" "off, but notchcast runs and talks to the Mac: omacvm apply"
+  elif [[ $(systemctl --global is-enabled omacvm-omanotch.service 2>/dev/null) == enabled ]]; then
+    bad "Omanotch" "off, but queued to install at the next login: omacvm apply"
+  else skip "Omanotch" "off (chosen at setup)"; fi
+elif [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
-  elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says)"
+  elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says$(restart_hint port))"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
-  # The hidden NOTCH output sits on the built-in display, and the bar parked
-  # under the strip is that display's (else the MacBook shows two bars).
-  # OmacVM.app with external displays says which output that is.
+  # The hidden NOTCH output sits on the built-in display (OmacVM.app: right
+  # above it), and the bar parked under the strip is that display's (else the
+  # MacBook shows two bars). OmacVM.app with external displays says which
+  # output that is.
   b=$(cat "$RUN/omacvm/builtin" 2>/dev/null || echo Virtual-1)
   mons=$(as_user hyprctl monitors all -j 2>/dev/null)
   at() { jq -r --arg n "$1" '.[] | select(.name == $n) | "\(.x),\(.y),\(.width)"' <<<"$mons" 2>/dev/null; }
   st=$(as_user omarchy-shell notchbar state 2>/dev/null)
   parked=$(jq -r '.parked' <<<"$st" 2>/dev/null); pscreen=$(jq -r '.screen' <<<"$st" 2>/dev/null)
   if [[ -z $(at NOTCH) || -z $(at "$b") ]]; then skip "notch display" "no NOTCH or $b output now"
-  elif [[ $(at NOTCH) != "$(at "$b")" ]]; then bad "notch display" "NOTCH is not on $b, the built-in display (journalctl --user -u notchcast)"
+  elif ! spot=$(notch_spot "$mons" "$b" "$TYPE") || [[ -z $spot ]]; then
+    bad "notch display" "NOTCH is not on $b, the built-in display, nor right above it (journalctl --user -u notchcast)"
   elif [[ $parked == true && $pscreen != "$b" ]]; then bad "notch display" "the bar on $pscreen is parked, not $b's: two bars on the MacBook"
-  elif beat=$(tr -cd 0-9 < "$H/.local/state/omanotch/beat" 2>/dev/null) &&
+  elif beat=$(tr -cd 0-9 2>/dev/null < "$H/.local/state/omanotch/beat") &&
        [[ $parked != true && -n $beat && $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
        (( $(date +%s%3N) - beat < 15000 )); then
     bad "notch display" "the strip shows the bar but $b's own bar is not parked: two bars on the MacBook (omarchy-restart-shell)"
@@ -438,8 +563,23 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
               and .y < $m.y + $m.height / $m.scale and .y + .h > $m.y)] | length' 2>/dev/null) -gt 0 ]]; then
     # What Hyprland composites, whatever the bar says about itself.
     bad "notch display" "the strip shows the bar and a bar is also on $b: two bars on the MacBook (omarchy-restart-shell)"
-  else ok "notch display" "$b$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
+  else ok "notch display" "$b$([[ $spot == above ]] && echo ", NOTCH right above it")$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
+
+section "Control centre"
+FEATURE=control-centre
+if [[ $CONTROL == on ]]; then
+  check "omacvm" "/usr/local/bin/omacvm opens the control centre" test -x /usr/local/bin/omacvm
+  if python3 -c 'import textual' >/dev/null 2>&1; then ok "Textual" "$(pacman -Q python-textual 2>/dev/null | cut -d' ' -f2)"
+  else bad "Textual" "python-textual missing: omacvm shows plain text and offers to install it from the Mac"; fi
+  check "checks for it" "omacvm-check.socket" systemctl is-active -q omacvm-check.socket
+  if grep -q '"omacvm": {' "$H/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null; then ok "Omarchy menu" "OmacVM row"
+  else bad "Omarchy menu" "no OmacVM row in ~/.config/omarchy/extensions/omarchy-menu.jsonc (omacvm apply)"; fi
+  layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
+  if [[ " $layout " == *" omacvm.control "* ]]; then ok "bar item" "omacvm.control"
+  elif grep -qx omacvm.control "$H/.local/state/omacvm/pending-plugins" 2>/dev/null; then bad "bar item" "queued, not enabled yet (log out and in)"
+  else skip "bar item" "omacvm.control is not in the bar (Omarchy's bar settings add it back)"; fi
+else skip "control centre" "off (on the Mac: omacvm enable control-centre)"; fi
 
 (( TSV )) && exit $(( fails ? 1 : 0 ))
 echo

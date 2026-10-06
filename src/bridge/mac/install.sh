@@ -29,6 +29,12 @@ cat > "$PL" <<PL
   <key>StandardErrorPath</key><string>$HOME/Library/Logs/omacvm-bridge.log</string>
 </dict></plist>
 PL
-launchctl bootstrap gui/$(id -u) "$PL"
+# The old one may still be exiting after bootout ("Bootstrap failed: 5"):
+# wait until launchd lets it go, and try once more if it still refuses.
+for _ in $(seq 20); do launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || break; sleep 0.5; done
+if ! launchctl bootstrap "gui/$(id -u)" "$PL"; then
+  sleep 3
+  launchctl bootstrap "gui/$(id -u)" "$PL" || { echo "the Bridge did not start (launchctl bootstrap failed twice)" >&2; exit 1; }
+fi
 echo "installed; log: ~/Library/Logs/omacvm-bridge.log"
 echo "token: ~/Library/Application Support/omacvm-bridge/token (omacvm apply copies it into the VM)"

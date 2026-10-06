@@ -38,8 +38,8 @@ pid_t ns_finder_pid(void) {
   }
 }
 
-// Hides the app (the escape combo's last way out: a VM app that kept the
-// front cannot keep the keyboard hidden); 1 if macOS took the request.
+// Hides the app (the escape combo in a VM window that kept the keyboard);
+// 1 if macOS took the request.
 int ns_hide(pid_t pid) {
   @autoreleasepool {
     NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
@@ -62,5 +62,14 @@ int ns_is_regular(pid_t pid) {
   @autoreleasepool {
     NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
     return app && app.activationPolicy == NSApplicationActivationPolicyRegular ? 1 : 0;
+  }
+}
+
+// Mission Control, as its app in /System/Applications opens it (the escape
+// combo's last way out when macOS's shortcut for it is off); 1 if macOS took it.
+int ns_open_mission_control(void) {
+  @autoreleasepool {
+    NSURL *app = [NSURL fileURLWithPath:@"/System/Applications/Mission Control.app"];
+    return [[NSWorkspace sharedWorkspace] openURL:app] ? 1 : 0;
   }
 }

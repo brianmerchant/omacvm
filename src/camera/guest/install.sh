@@ -14,7 +14,7 @@ FILES=(/etc/systemd/user/omacvm-camera.service /usr/local/bin/omacvm-camera /etc
        /etc/modules-load.d/90-omacvm-camera.conf /etc/udev/rules.d/70-omacvm-camera.rules)
 
 if [[ $ON != on || $TYPE == parallels ]]; then
-  [[ -e /usr/local/bin/omacvm-camera ]] || exit 0
+  [[ -e /usr/local/bin/omacvm-camera || -e /etc/systemd/user/omacvm-camera.service ]] || exit 0
   systemctl --global disable omacvm-camera.service >/dev/null 2>&1 || true
   user_ctl stop omacvm-camera.service 2>/dev/null || true
   systemctl --user -M root@ stop omacvm-camera.service >/dev/null 2>&1 || true
@@ -24,27 +24,13 @@ if [[ $ON != on || $TYPE == parallels ]]; then
   exit 0
 fi
 
-# v4l2loopback is built by DKMS against the headers of each installed kernel.
-# Arch Linux ARM's headers must be the kernel's own version: from the
-# repository when it has that version, else from pacman's cache (as
-# battery/guest/install.sh, from try-omarchy). The memory-optimized kernel
-# brings its own (kernel/build-thp-kernel.sh).
-pacman -S --needed --noconfirm python dkms >/dev/null 2>&1
-headers() {   # KERNEL_PACKAGE
-  local k=$1 have want f
-  have=$(pacman -Q "$k" 2>/dev/null | awk '{ print $2 }') || return 0
-  [[ -n $have ]] || return 0
-  [[ $(pacman -Q "$k-headers" 2>/dev/null | awk '{ print $2 }') == "$have" ]] && return 0
-  want=$(pacman -Si "$k-headers" 2>/dev/null | awk '/^Version/ { print $3; exit }') || true
-  if [[ $want == "$have" ]]; then
-    pacman -S --needed --noconfirm "$k-headers" >/dev/null 2>&1 && return 0
-  fi
-  f=$(ls /var/cache/pacman/pkg/"$k-headers-$have"-*.pkg.tar.* 2>/dev/null | grep -v '\.sig$' | head -1) || true
-  [[ -n $f ]] && pacman -U --noconfirm "$f" >/dev/null 2>&1 && return 0
-  echo "camera: no $k-headers $have to build v4l2loopback with (Arch Linux ARM has ${want:-none}): omarchy update, reboot, then omacvm apply" >&2
-}
-headers linux-aarch64
-pacman -S --needed --noconfirm v4l2loopback-dkms >/dev/null 2>&1
+# v4l2loopback is built by DKMS against the headers of each installed kernel
+# (guest/dkms.sh).
+say() { echo "camera: $*" >&2; }
+source ../../guest/dkms.sh
+../../guest/pkg-add python dkms
+kernel_headers linux-aarch64
+../../guest/pkg-add v4l2loopback-dkms
 # Headers that came after the module (or a new kernel): build it for them too.
 [[ -n $(modinfo -k "$(uname -r)" -F filename v4l2loopback 2>/dev/null) ]] ||
   dkms autoinstall -k "$(uname -r)" >/dev/null 2>&1 || true

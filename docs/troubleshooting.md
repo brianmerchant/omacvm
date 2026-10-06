@@ -22,16 +22,20 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Bluetooth); the panel says so too. A device that is off or out of range
   shows "Not in range?" after about 15 seconds.
 - **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
-  if ⌃⌥⌘ Esc left you in the VM without the trackpad, press it again. Check the
+  if ⌃⌥ Esc left you in the VM without the trackpad, press it again. Check the
   Accessibility and Input Monitoring permissions of *OmacVM Gestures*
   (`omacvm check` names a missing one; the helpers' logs say
   "permissions: ... MISSING").
-- **⌃⌥⌘ Esc does not swipe**: the swipe needs a Space beside the VM's on that
-  monitor (System Settings › Desktop & Dock › Mission Control: "Displays have
-  separate Spaces" decides whether each monitor has its own). Without one,
-  the app you were in before comes to the front instead; that needs "When
-  switching to an application, switch to a Space with open windows" (on by
-  default). The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
+- **⌃⌥ Esc does nothing at all**: on Parallels, UTM or Fusion the Mac's
+  OmacVM Gestures may be older than 3.0.0: `omacvm update` (OmacVM.app
+  brings its own). `omacvm check` names a missing permission.
+- **⌃⌥ Esc does not move to another Space**: the move needs a Space beside
+  the VM's on that monitor (System Settings › Desktop & Dock › Mission
+  Control: "Displays have separate Spaces" decides whether each monitor has
+  its own) and macOS's "Move left/right a space" shortcuts (System Settings ›
+  Keyboard › Keyboard Shortcuts › Mission Control). Without them, Omarchy
+  shows a notice ("No way to macOS: turn on ...") and nothing else happens.
+  The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
   "escape combo: ...") says which way it took.
 - **A macOS shortcut still does its macOS thing in the VM** (a screenshot,
   Mission Control): that is the default; sending them all to the VM is
@@ -56,10 +60,14 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
   Applications › Utilities). The shortcuts work again at once. From the
   Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
-- **⌃⌥⌘ Esc left the VM's window instead of swiping**: the swipe did not
-  land, so OmacVM took the VM out of full screen and hid it (never stuck).
-  ⌃⌥⌘ Esc in macOS brings it back in full screen. The Gestures log says
-  "escape combo: still in the VM (...)" for this case; please send it.
+- **⌃⌥ Esc showed "macOS did not switch the Space"**: neither macOS's "Move
+  left/right a space" shortcut nor the swipe after it moved the Space (the
+  VM stays full screen; Mission Control only opens when you press the combo
+  twice). Check that the shortcuts are
+  on in System Settings › Keyboard › Keyboard Shortcuts › Mission Control;
+  a trackpad swipe works meanwhile. The Gestures log
+  (`~/Library/Logs/omacvm-gestures.log`) says what happened ("escape combo:
+  ..."); please send those lines.
 - **Brightness keys do nothing with the VM in front**: OmacVM Bridge reads
   them from the keyboard and needs Input Monitoring (System Settings › Privacy
   & Security › Input Monitoring › OmacVM Bridge). Its log says
@@ -119,6 +127,9 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 | 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
 | 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
 | 23 | app | [Chrome hangs in Basemark Web 3.0, the screen flickers](#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers) |
+| 24 | app | [A scale like 1.6 on a 5K display turns the VM black and flickering](#24-app-a-scale-like-16-on-a-5k-display-turns-the-vm-black-and-flickering) |
+| 25 | app | [The sound crackles while the VM or the Mac is busy](#25-app-the-sound-crackles-while-the-vm-or-the-mac-is-busy) |
+| 26 | app | [The VM does not start (no window), or freezes when sound starts](#26-app-the-vm-does-not-start-no-window-or-freezes-when-sound-starts) |
 
 Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 [notes/findings.md](notes/findings.md).
@@ -353,7 +364,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Symptom:** the VM is gone after Cmd+W; the guest journal of that boot
   just ends, without a shutdown.
 - **Cause:** when OmacVM Gestures does not take the key (VM not full screen,
-  trackpad handed back with ⌃⌥⌘Esc, or a key posted by a script below the
+  trackpad handed back with ⌃⌥ Esc, or a key posted by a script below the
   keyboard, such as System Events' `keystroke`), UTM gets Cmd+W and closes
   the VM window. With UTM's "don't ask before quitting" setting
   (`NoQuitConfirmation`), closing the window stops the VM at once.
@@ -455,3 +466,163 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   VMs running on the Mac) and Aquarium still runs (19-21 fps).
 - **Where:** `app/runtime/patches/`, `app/runtime/build-qemu-gpu-runtime.sh`,
   `app/runtime/Tests/virgl/`, `app/scripts/gpu-check.sh`.
+
+## 24. app: a scale like 1.6 on a 5K display turns the VM black and flickering
+
+- **Symptom:** in OmacVM.app 2.9.0 on a Mac mini (16 GB) with an LG
+  UltraFine 5K, picking 1.6 in Omarchy's scale menu made the screen freeze
+  and flicker, then the VM stayed black. Setting the scale back did not bring
+  the picture back; restarting the VM did, and 1.6 then worked.
+- **Cause:** the VM's GPU memory on the Mac has a budget, so a runaway VM
+  cannot fill the Mac's memory. 2.9.0 set it to a quarter of the Mac's
+  memory: 4 GB on 16 GB. A 5K desktop takes about 1.2 GB, with a browser
+  open 1.6 to 1.9 GB, and more with more apps. A scale change makes every
+  screen-sized buffer again (Hyprland's and every app's, 56 to 90 MB each at
+  5K), so for a moment old and new ones both count. The VM reached the
+  budget, the Mac refused Hyprland's next buffer, and Hyprland's GPU context
+  was lost: `logs/qemu.log` says `guest GPU memory budget of 4096 MB
+  reached`, then `context ... (Hyprland) is lost`. It was not a loop and not
+  a leak: switching between 1.6 and 2 sixteen times leaves the same memory
+  in use each time, and a 35-minute session with 149 scale changes and 50
+  browser windows came back to where it started. The refused 8192-wide
+  buffer was most likely Omarchy's bar (quickshell): for one frame after
+  a scale change it draws the new size at the old scale (8192×4608 from
+  1.6 to 1 at 5K). A desktop with more apps open than in our tests (each
+  browser window at 5K holds a few buffers of 30 to 90 MB) plus that
+  moment explains the 3993 MB in use.
+- **Fix:** no fixed limit any more. The VM's graphics memory grows as
+  long as macOS has memory to give; new big buffers are refused only when
+  macOS says its memory is critical, or would be nearly used up while it
+  warns (`app/runtime/patches/virgl-darwin-memory-pressure.patch`). The one
+  fixed guard, three quarters of the Mac's memory, only stops a runaway VM.
+  If the desktop still loses its GPU context, the app says so and offers to
+  restart the desktop session instead of leaving the VM black.
+  `omacvm check` shows the graphics memory now and its peak ("graphics
+  memory"); the app shows it beside the VM memory
+  ([what the two are](routes/app.md#graphics-memory-and-vm-memory)). The display sync also sends a
+  mode only when Hyprland shows another, one call at a time, and stops
+  following an output that keeps changing (6 times in 10 s between two
+  states, or 12 times at all) for a minute; the VM's `omacvm check` says so
+  ("display sync"). On a 4K or larger display, Omarchy's display panel
+  says 2x is the sharp scale. What in-between scales cost:
+  [routes/app.md](routes/app.md#display-scale-on-4k-5k-and-larger-displays).
+- **Where:** `app/runtime/patches/virgl-resource-memory-budget.patch`,
+  `app/runtime/patches/virgl-darwin-memory-pressure.patch`,
+  `app/app/Sources/OmacVM/GPUMemory.swift`,
+  `src/app/guest/omacvm-display-sync` (tests:
+  `src/app/guest/tests/test_display_sync.py`),
+  `src/app/guest/monitor-widget/build.py`, `src/cmd/check.sh`,
+  `src/guest/check.sh`, `tests/graphics/fractional-scale.sh` (every scale in
+  a running VM).
+
+## 25. app: the sound crackles while the VM or the Mac is busy
+
+- **Symptom:** music in the VM (Spotify, a browser) crackles or drops out
+  for a moment while the VM works hard and you move around in it: opening
+  apps, scrolling, a compile. Seen on a Mac mini M4 (10 cores) with the VM
+  at 8 CPUs.
+- **Cause:** QEMU moves the sound in its main loop (the HDA's DMA timer and
+  the 1 ms audio timer), the same thread that runs the VM's GPU (virgl).
+  Up to 2.9.1 that thread ran at the default QoS, on equal terms with the
+  VM's CPUs and the Mac's own work; with the cores busy it ran 10-50 ms late
+  thousands of times in 10 minutes and up to 200 ms late now and then. New
+  shaders (an app's first frames) stop it for 50-80 ms by themselves. QEMU's
+  own buffer kept the Mac playing, but afterwards the sound card took the
+  whole missed time from the VM at once, so the VM's PipeWire ran out (an
+  xrun).
+- **Fix:** from 3.0.0 QEMU's main loop runs at user-interactive QoS
+  (`app/runtime/patches/qemu-darwin-main-loop-qos.patch`) and the sound card
+  no longer catches up after a stall (`qemu-hda-no-catch-up.patch`: the VM's
+  sound clock pauses instead). Measured on a MacBook Pro M4 Max, VM with 8
+  CPUs, a 30 Hz tone in the VM, 10 minutes each, breaks in the tone:
+  - the VM's GPU busy (glmark2, a new scene every 10 s), 8 busy threads on
+    the Mac: 12 (2.9.0) → 2;
+  - the VM's CPUs busy too: median 365 (2.9.0, 4 runs) → 120 (QoS only,
+    5 runs) → 50 (both, 4 runs); the main loop 10-49 ms late 2,261-4,752
+    times per run → 1-9.
+
+  The rest are the VM's own apps starved of CPU at 100 % load. The sound's
+  delay stays the same (round trip in the VM about 282 ms).
+  `omacvm check` shows both ("sound timing");
+  `defaults write org.omacvm.app audioClassic -bool true` goes back to
+  2.9.1's timing.
+- **For 2.9.0 and 2.9.1:** a bigger safety buffer in the VM. As root in
+  the VM (USER = your user):
+
+  ```
+  mkdir -p /etc/wireplumber/wireplumber.conf.d
+  printf '%s\n' 'monitor.alsa.rules = [ { matches = [ { node.name = "~alsa_output.*" } ] actions = { update-props = { api.alsa.headroom = 8192 } } } ]' \
+    > /etc/wireplumber/wireplumber.conf.d/90-omacvm-audio-headroom.conf
+  systemctl --user -M USER@ restart wireplumber
+  ```
+
+  Same test on 2.9.0: 337 → 15 breaks in 10 minutes, xruns 234 → 1. It adds
+  128 ms to the sound's delay (round trip in the VM 275 → 400 ms). Remove the
+  file and restart WirePlumber to undo; 3.0.0 does not need it. (2.9.1 has
+  the same sound path as 2.9.0.)
+- **Where:** `app/runtime/patches/qemu-darwin-main-loop-qos.patch`,
+  `app/runtime/patches/qemu-hda-no-catch-up.patch`,
+  `app/app/Sources/OmacVM/Runner.swift` (`audioClassic`), `src/cmd/check.sh`,
+  the measurement tools in `app/runtime/Tests/audio/`, ADR 0036.
+
+## 26. app: the VM does not start (no window), or freezes when sound starts
+
+- **Symptom:** OmacVM.app starts the VM but no window comes, the VM never
+  boots and the app cannot reach it; or a running VM freezes the moment it
+  plays a sound. Other apps on the Mac play no sound either, or `afplay`
+  hangs. Seen on a Mac mini M4 with a USB audio interface (Scarlett 2i2) as
+  the output, coreaudiod up for 7 days.
+- **Cause:** the Mac's audio device did not answer: every `AudioQueueStart`
+  blocked. Up to 2.9.1 QEMU opened the sound device in its main thread (at
+  the start, and again whenever the VM starts a sound), and SDL waits for
+  the device without a time limit, so QEMU waited for good.
+- **Fix:** from 3.0.0 QEMU opens and closes the Mac's sound device on a
+  thread of its own (`app/runtime/patches/qemu-sdl-audio-playback-thread.patch`).
+  If it has not opened within 3 s the VM runs without sound, `qemu.log` says
+  "the Mac's audio device does not answer" and `omacvm check` warns
+  ("sound"). Sound comes back by itself once the device answers. To get it
+  answering: pick another output in System Settings > Sound, replug the
+  device, or `sudo killall coreaudiod` (macOS restarts it).
+- **For 2.9.0 and 2.9.1:** the same fixes for the device, then start the VM
+  again (quit the app first if it hangs). To start without sound meanwhile:
+  `launchctl setenv SDL_AUDIO_DRIVER dummy`, reopen the app, and
+  `launchctl unsetenv SDL_AUDIO_DRIVER` afterwards.
+- **Where:** `app/runtime/patches/qemu-sdl-audio-playback-thread.patch`,
+  `src/cmd/check.sh`, the test stub
+  `app/runtime/Tests/audio/wedged-output-start.c`.
+
+## 27. All routes: black screen after an update or an OmacVM job
+
+- **Symptom:** the VM starts to a black screen (no login screen, no desktop);
+  over SSH, `journalctl -b | grep -i gbm` shows Hyprland's
+  `Couldn't open a GBM device` / `Cannot create a GBM Allocator` /
+  `Cannot open backend: no allocator available`.
+- **Cause:** a partial update. Mesa was updated on its own, without the
+  libraries it was built for. Arch Linux ARM's Mesa 26.2.4 needs LLVM 23
+  (`libLLVM.so.23.1`); next to LLVM 22 its GBM backend cannot load, so
+  Hyprland stops. Seen 2026-10-06: a `pacman -Sy` (a newer package list, no
+  update) and then OmacVM's `pacman -S --needed ... mesa` (Chromium video)
+  updated Mesa alone. Mesa 26.2.4 itself is fine: a full update (Mesa and
+  LLVM together) starts the desktop.
+- **Fix (3.0.0):** OmacVM installs only packages the VM does not have and
+  never updates one it has (`src/guest/pkg-add`); when an install would
+  update others, it stops and says to update the whole system first. It no
+  longer runs `pacman -Sy`. Every guest install checks at the end that GBM
+  still opens and, if this install broke it, puts the changed packages back
+  from pacman's cache (`src/guest/gbm-guard`). The Vulkan (Venus) driver
+  check runs only when the VM's Graphics gives it Vulkan.
+- **Recover a VM that already shows the black screen:** SSH in (or
+  Ctrl+Alt+F3 for a text console) as root, then either
+  1. update the whole system, which brings the matching LLVM:
+     `pacman -Syu` (Omarchy's `omarchy update` does the same and more), or
+  2. go back to the Mesa from before:
+     `pacman -U /var/cache/pacman/pkg/mesa-<old version>-aarch64.pkg.tar.*`
+     (`grep 'upgraded mesa' /var/log/pacman.log` names it).
+  Then `/usr/local/share/omacvm/guest/gbm-guard test` must say "GBM opens";
+  `systemctl restart sddm` (or restart the VM) brings the desktop back. Do
+  not pin Mesa with `IgnorePkg`: the next `omarchy update` then brings LLVM
+  23 and keeps the old Mesa, which needs LLVM 22 (`libLLVM.so.22.1`): the
+  same black screen. If you pinned it, remove the pin in the same sitting
+  as the full update.
+- **Where:** `src/guest/pkg-add`, `src/guest/gbm-guard`,
+  `src/guest/install.sh` (runs both), `src/tests/pkg-safe.sh`.

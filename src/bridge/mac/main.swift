@@ -36,6 +36,9 @@
 //                          while started (macOS asks for the camera permission the first time)
 //   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
 //                          (both camera paths: 403 from 127.0.0.1 and the Mac's own addresses)
+//   /omacvm/...            the control centre's requests (control.swift, docs/adr/0031): hello, status,
+//                          updates, updates/check, settings/update-checks, jobs, jobs/<id>; OmacVM.app
+//                          relays its VMs' ones on the Unix socket omacvm-bridge/relay.sock (owner only)
 //   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
@@ -71,7 +74,7 @@ func fusionHost() -> String? {
   }
   return nil
 }
-let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? 47831
+let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? (testIdentity ? 47931 : 47831)
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed
 let minorSeconds = 30.0      // Wi-Fi signal jitter alone: sent at most this often
@@ -86,11 +89,11 @@ func log(_ s: String) { print("\(logFormat.string(from: Date())) omacvm-bridge: 
 // ---- token ----
 // OMACVM_BRIDGE_SUPPORT_DIR: a test Bridge's own token and config (never the installed one's).
 let supportDir = ProcessInfo.processInfo.environment["OMACVM_BRIDGE_SUPPORT_DIR"] ?? FileManager.default.homeDirectoryForCurrentUser
-  .appendingPathComponent("Library/Application Support/omacvm-bridge").path
+  .appendingPathComponent(testIdentity ? "Library/Application Support/omacvm-test-bridge" : "Library/Application Support/omacvm-bridge").path
 let tokenPath = supportDir + "/token"
 
-func loadToken() -> String {
-  if let s = try? String(contentsOfFile: tokenPath, encoding: .utf8) {
+func loadSecret(_ path: String) -> String {
+  if let s = try? String(contentsOfFile: path, encoding: .utf8) {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
     if t.count >= 32 { return t }
   }
@@ -99,12 +102,17 @@ func loadToken() -> String {
   let t = bytes.map { String(format: "%02x", $0) }.joined()
   try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true,
                                            attributes: [.posixPermissions: 0o700])
-  guard FileManager.default.createFile(atPath: tokenPath, contents: Data((t + "\n").utf8),
-                                       attributes: [.posixPermissions: 0o600]) else { fatalError("cannot write \(tokenPath)") }
-  log("created token \(tokenPath)")
+  guard FileManager.default.createFile(atPath: path, contents: Data((t + "\n").utf8),
+                                       attributes: [.posixPermissions: 0o600]) else { fatalError("cannot write \(path)") }
+  log("created \(path)")
   return t
 }
-let token = Array(loadToken().utf8)
+let token = Array(loadSecret(tokenPath).utf8)
+// OmacVM.app relays requests from its VMs' control port (virtio-serial
+// org.omacvm.control) with this key; unlike the token, no VM ever gets it
+// (control.swift: the app names the VM, a guest cannot).
+let relayKeyPath = supportDir + "/relay-key"
+let relayKey = Array(loadSecret(relayKeyPath).utf8)
 
 // ---- JSON helpers ----
 func nn(_ v: Any?) -> Any { v ?? NSNull() }
@@ -137,6 +145,9 @@ let hub = Hub([
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
+// OmacVM.app's relay (server.swift). A second Bridge on this Mac (tests) sets
+// OMACVM_BRIDGE_RELAY_SOCKET: two Bridges on one path remove each other's socket.
+let relaySocket = RelaySocket(path: env["OMACVM_BRIDGE_RELAY_SOCKET"] ?? supportDir + "/relay.sock")
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
@@ -155,19 +166,21 @@ audio.start()
 location.start()
 bluetooth.start()
 hub.start()
+control.start()
 osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
+relaySocket.check()
 mediaKeys.start()
 externalBrightness.onKey = { value, name in osdEvents.externalBrightnessSet(value, display: name, source: "keys") }
 externalBrightness.start()
 config.onExternalBrightness = { externalBrightness.displaysChanged() }   // off: forget the displays; on: look at them
 if config.menuBarIcon { menuBar.show() }
-log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps) external_brightness=\(config.externalBrightness)")
+log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps) external_brightness=\(config.externalBrightness) brightness_steps=\(config.brightnessSteps)")
 // A Mac mini, iMac or Studio has no keyboard light: Shift + brightness stays macOS's.
 log("keyboard light: \(KeyboardLight.get() != nil ? "found" : "none on this Mac")")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
 listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds, leeway: .seconds(1))
-listenerTimer.setEventHandler { servers.forEach { $0.check() } }
+listenerTimer.setEventHandler { servers.forEach { $0.check() }; relaySocket.check() }
 listenerTimer.resume()
 
 let ws = NSWorkspace.shared.notificationCenter

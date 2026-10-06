@@ -1,7 +1,9 @@
 #!/bin/bash
 # Zip dist/OmacVM.app for a GitHub release: dist/OmacVM-<version>.zip and its
-# .sha256, the version from src/VERSION. Upload both to the release v<version>;
-# omacvm build --vm-type app and omacvm update download them from there.
+# .sha256, the version from src/VERSION, then the app's update feed
+# (scripts/appcast.sh: OmacVM-appcast.json and .sig) once a release key
+# exists. Upload them all to the release v<version>; omacvm build --vm-type
+# app and omacvm update download the zip from there, installed apps the feed.
 #   scripts/package-release.sh   (after scripts/build-app.sh --release)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,21 +20,36 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/d
 [[ $(plist OmacVMCommit) == "$(git -C "$REPO" rev-parse HEAD)" ]] ||
   die "the app was built from another commit: build it again (scripts/build-app.sh --release)"
 [[ -z $(git -C "$REPO" status --porcelain) ]] || die "uncommitted changes: a release comes from a clean tree"
+# Vulkan on macOS 26+ (Graphics: Automatic) needs KosmicKrisp in the app, with
+# its licence notice; OMACVM_RELEASE_NO_KOSMICKRISP=1 ships MoltenVK only.
+if [[ ${OMACVM_RELEASE_NO_KOSMICKRISP:-0} != 1 ]]; then
+  [[ -f $APP/Contents/Resources/runtime/lib/libvulkan_kosmickrisp.dylib &&
+     -s $APP/Contents/Resources/licenses/LICENSE.mesa-kosmickrisp.txt ]] ||
+    die "the app has no KosmicKrisp (or no licence notice for it): build-app.sh --release builds it (tools: runtime/build-kosmickrisp.sh --check)"
+fi
 # The runtime's build log holds local home paths. It once got into the
 # history (037fcf58, filtered out since); a branch made before that brings it
 # back until it is rebased onto the filtered history.
 [[ -z $(git -C "$REPO" rev-list --objects HEAD | grep '\.build-runtime\.log$') ]] ||
   die "runtime/.build-runtime.log is in this history: rebase the branches made from the old app-in first"
-# Releases are signed with OmacVM's Developer ID (team 722686Y34B), as
-# omacvm build --vm-type app and omacvm update check: no ad hoc build.
-TEAM=722686Y34B
-DEVID="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$TEAM\""
+# Releases are signed with OmacVM's Developer ID (the team goes into the
+# signed update feed, which omacvm build --vm-type app, omacvm update and the
+# app's own updates check): no ad hoc build.
 codesign --verify --deep --strict "$APP" || die "the app's signature does not verify"
-codesign --verify -R="$DEVID" "$APP" 2>/dev/null ||
-  die "the app is not signed with the Developer ID of team $TEAM: build it with OMACVM_SIGN_ID"
+TEAM=$("$REPO/src/release/release-key.sh" team "$APP") ||
+  die "the app is not signed with a Developer ID: build it with OMACVM_SIGN_ID"
+echo "==> signed with the Developer ID of team $TEAM"
 
 rm -f "$ZIP" "$ZIP.sha256"
 ditto -c -k --keepParent "$APP" "$ZIP"
 (cd "$ROOT/dist" && shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
 printf '==> %s (%s)\n' "$ZIP" "$(du -h "$ZIP" | cut -f1)"
 printf '==> %s\n' "$ZIP.sha256"
+
+# The update feed. Publish the release as a pre-release first and try its
+# zip; installed apps see it only once the release is marked latest.
+if [[ -f $REPO/src/lib/release-key.pub ]]; then
+  "$ROOT/scripts/appcast.sh"
+else
+  echo "==> no src/lib/release-key.pub yet: no update feed (apps do not check for updates until a release has one)"
+fi

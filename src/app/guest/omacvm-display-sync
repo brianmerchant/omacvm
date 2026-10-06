@@ -11,6 +11,7 @@ set -euo pipefail
 drm_root=${OMARCHY_DISPLAY_SYNC_DRM_ROOT:-/sys/class/drm}
 monitor_config=${OMARCHY_DISPLAY_SYNC_MONITOR_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/hypr/monitors.lua}
 layout_file=${OMACVM_DISPLAYS_LAYOUT:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm/displays.json}
+state_dir=${OMACVM_DISPLAY_SYNC_STATE:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm/display-sync}
 
 # preferred_mode_from_edid EDID [main|other]: Omarchy's scale setting is for
 # the main output; the other displays keep their own density.
@@ -299,6 +300,10 @@ user_rule() {
 # which differ when an output has its own scale (Omarchy's zoom on the main
 # one): displays beside the main one stay beside it, the rest keep their
 # offset, scaled. Without an arrangement: Virtual-1 at 0x0, the rest to its right.
+# The places never overlap (Hyprland warns "Monitor Virtual-2 overlaps with
+# other monitor(s)" and the pointer can get lost there): an output that would
+# overlap one placed before it moves away from the main one, on the axis it
+# sits beside it on the Mac, until it only touches.
 output_positions() {
   python3 - "$@" <<'PY'
 import json
@@ -336,6 +341,30 @@ for name, (lw, lh) in outputs.items():
         axis(box["x"], box["width"], lw, main["x"], main["width"], mw),
         axis(box["y"], box["height"], lh, main["y"], main["height"], mh),
     )
+
+
+def overlaps(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+settled = []
+for name in sorted(places, key=lambda n: (n != "Virtual-1", n)):
+    x, y = (round(v) for v in places[name])
+    w, h = outputs[name]
+    box = layout[name]
+    vertical = (box["y"] >= main["y"] + main["height"] or
+                box["y"] + box["height"] <= main["y"])
+    for _ in range(len(settled) + 1):
+        hit = next((r for r in settled if overlaps((x, y, w, h), r)), None)
+        if not hit:
+            break
+        if vertical:
+            y = hit[1] - h if box["y"] < main["y"] else hit[1] + hit[3]
+        else:
+            x = hit[0] - w if box["x"] < main["x"] else hit[0] + hit[2]
+        x, y = round(x), round(y)
+    places[name] = (x, y)
+    settled.append((x, y, w, h))
 minx = min(x for x, _ in places.values())
 miny = min(y for _, y in places.values())
 for name in outputs:
@@ -345,6 +374,202 @@ for name in outputs:
     else:
         print(name, "auto-right")
 PY
+}
+
+# apply_order SHOWN OUTPUT:WIDTH:HEIGHT:SCALE:POSITION ...: the outputs, one a
+# line, in an order where no rule puts its output over another one's current
+# place (SHOWN: Hyprland's j/monitors). Each rule is its own monitor reload in
+# Hyprland: moving the main output down under an external above it before the
+# external went up overlapped them for a moment, and Hyprland put up its
+# overlap warning. No such order (a swap): the given order.
+apply_order() {
+  python3 - "$@" <<'PY'
+import json
+import re
+import sys
+
+
+def overlaps(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+try:
+    shown = json.loads(sys.argv[1])
+except ValueError:
+    shown = []
+now = {}
+for m in shown if isinstance(shown, list) else []:
+    try:
+        if m.get("disabled"):
+            continue
+        s = float(m["scale"]) or 1.0
+        w, h = m["width"] / s, m["height"] / s
+        if int(m.get("transform", 0)) % 2:
+            w, h = h, w
+        now[m["name"]] = (m["x"], m["y"], w, h)
+    except (AttributeError, KeyError, TypeError, ValueError, ZeroDivisionError):
+        continue
+names, targets = [], {}
+for item in sys.argv[2:]:
+    name, w, h, scale, pos = item.split(":", 4)
+    names.append(name)
+    place = re.fullmatch(r"(-?\d+)x(-?\d+)", pos)
+    try:
+        s = float(scale) if scale not in ("", "auto") else 1.0
+        if place:
+            targets[name] = (int(place[1]), int(place[2]), int(w) / s, int(h) / s)
+    except (ValueError, ZeroDivisionError):
+        pass
+left = list(names)
+while left:
+    pick = next((n for n in left if n not in targets or
+                 not any(overlaps(targets[n], r) for k, r in now.items() if k != n)), left[0])
+    print(pick)
+    left.remove(pick)
+    if pick in targets:
+        now[pick] = targets[pick]
+PY
+}
+
+# follow_check OUTPUT HASH MODE SCALE POSITION HDR SHOWN: whether to send the
+# rule; SHOWN is Hyprland's j/monitors. Exit 0: send it (and it is
+# counted); 1: Hyprland already shows exactly that (mode, rate, scale, place),
+# so a modeset would only make the screen flash and its buffers be made
+# again; 2: held. With scale "auto" Hyprland picks the scale itself, so the
+# scale counts as shown when this same rule was the last one Hyprland took.
+# HDR is not in j/monitors: the HDR part counts as shown when the last rule
+# Hyprland took had it (sent_ok writes both after Hyprland said ok). The hold is the guard against a loop: an output that
+# changed 6 times in 10 s between only two states (ping-pong), or 12 times
+# in 10 s at all, keeps what it shows for 60 s and the reason is logged once
+# (journal, and the file "held" for omacvm check); then it looks once more
+# (the window may have changed meanwhile). A window being resized
+# changes it about once a second (QEMU waits a second), to new sizes each
+# time: that is never held.
+follow_check() {
+  python3 - "$state_dir" "$0" "$@" <<'PY'
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+
+state, self_path, output, digest, mode, scale, position, hdr, shown = sys.argv[1:10]
+WINDOW, PINGPONG, STORM, HOLD = 10.0, 6, 12, 60.0
+d = pathlib.Path(state)
+d.mkdir(parents=True, exist_ok=True)
+now = time.time()
+
+
+def log(message: str) -> None:
+    print(f"omacvm-display-sync: {message}", file=sys.stderr, flush=True)
+
+
+hold = d / f"{output}.hold"
+try:
+    until = float(hold.read_text().split()[0])
+except (OSError, ValueError, IndexError):
+    until = 0.0
+if now < until:
+    raise SystemExit(2)
+
+# Already shown? modeline CLOCK W HSS HSE HTOTAL H VSS VSE VTOTAL ...
+f = mode.split()
+try:
+    width, height = int(f[2]), int(f[6])
+    refresh = int(f[1]) * 1e6 / (int(f[5]) * int(f[9]))
+    want_scale = float(scale) if scale != "auto" else None
+except (IndexError, ValueError, ZeroDivisionError):
+    width = height = 0
+try:
+    shown_hdr = (d / f"{output}.hdr").read_text()
+except OSError:
+    shown_hdr = None
+try:
+    last_sent = (d / f"{output}.sent").read_text().strip()
+except OSError:
+    last_sent = None
+try:
+    monitors = json.loads(shown)
+except ValueError:
+    monitors = []
+for m in monitors if isinstance(monitors, list) else []:
+    if not isinstance(m, dict) or m.get("name") != output or m.get("disabled"):
+        continue
+    try:
+        same = (
+            width and m["width"] == width and m["height"] == height
+            and abs(float(m["refreshRate"]) - refresh) < 0.5
+            and (abs(float(m["scale"]) - want_scale) < 0.001 if want_scale is not None
+                 else last_sent == digest)
+            and shown_hdr == hdr
+        )
+        place = re.fullmatch(r"(-?\d+)x(-?\d+)", position)
+        if same and place:
+            same = (m["x"], m["y"]) == (int(place[1]), int(place[2]))
+    except (KeyError, TypeError, ValueError):
+        same = False
+    if same:
+        raise SystemExit(1)
+
+# Count it; hold the output if it keeps changing.
+history = d / f"{output}.history"
+events = []
+try:
+    for line in history.read_text().splitlines():
+        t, _, h = line.partition(" ")
+        if now - float(t) < WINDOW:
+            events.append((float(t), h))
+except (OSError, ValueError):
+    events = []
+events.append((now, digest))
+distinct = len({h for _, h in events})
+if len(events) >= STORM or (len(events) >= PINGPONG and distinct <= 2):
+    kind = "between two states" if distinct <= 2 else "to new states"
+    reason = (f"{output} changed {len(events)} times in {WINDOW:.0f} s ({kind}); "
+              f"keeping what it shows for {HOLD:.0f} s")
+    log(reason)
+    hold.write_text(f"{now + HOLD}\n")
+    history.unlink(missing_ok=True)
+    with open(d / "held", "a") as held:
+        held.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {reason}\n")
+    # One look when the hold ends, with what is current then.
+    subprocess.Popen(["sh", "-c", f'sleep {HOLD + 1:.0f}; exec "$0" --once', self_path],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    raise SystemExit(2)
+history.write_text("".join(f"{t} {h}\n" for t, h in events))
+PY
+}
+
+# sent_ok OUTPUT HASH HDR: Hyprland took the rule; what follow_check compares
+# with next time (only now, so a rule Hyprland refused is sent again).
+sent_ok() {
+  printf '%s' "$3" > "$state_dir/$1.hdr"
+  printf '%s\n' "$2" > "$state_dir/$1.sent"
+}
+
+# park_gone SHOWN OUTPUT...: an output this script placed that is gone now
+# (the Mac's other display left full screen) gets a rule with an automatic
+# place. Hyprland keeps the last rule per output: when the display comes back
+# (full screen again) the old place could overlap where the main output is
+# now, and Hyprland warned before this script could move anything.
+park_gone() {
+  local shown=$1 sent name
+  shift
+  local -A here=()
+  for name in "$@"; do here[$name]=1; done
+  for sent in "$state_dir"/Virtual-*.sent; do
+    [[ -f $sent ]] || continue
+    name=${sent##*/}; name=${name%.sent}
+    [[ -z ${here[$name]:-} && $name != Virtual-1 ]] || continue
+    # Still shown (its connector is not read yet): leave it.
+    grep -q "\"name\": *\"$name\"" <<<"$shown" && continue
+    if [[ $(hyprctl eval "hl.monitor({ output = \"$name\", mode = \"preferred\", position = \"auto-right\", scale = \"auto\" })" 2>&1) == ok ]]; then
+      rm -f "$sent" "$state_dir/$name.hdr"
+    fi
+  done
 }
 
 apply_preferred_modes() {
@@ -358,6 +583,7 @@ apply_preferred_modes() {
   local scale
   local position
   local i w h
+  local hdr digest
   local -a outputs=() modes=() scales=() sizes=()
   local -A placed=()
 
@@ -386,10 +612,34 @@ apply_preferred_modes() {
     [[ -n $output ]] && placed[$output]=$position
   done < <(output_positions "$layout_file" "${sizes[@]}" 2>/dev/null || true)
 
+  # One at a time: the watcher, the reload hook and omacvm-displays all call this.
+  mkdir -p "$state_dir"
+  local lock_fd
+  if command -v flock >/dev/null && exec {lock_fd}>"$state_dir/lock"; then
+    flock -w 20 "$lock_fd" || true
+  fi
+  local shown
+  shown=$(hyprctl -j monitors 2>/dev/null) || shown='[]'
+
+  local -a items=() order=()
+  local -A index=()
   for i in "${!outputs[@]}"; do
-    output=${outputs[$i]} mode=${modes[$i]} scale=${scales[$i]}
+    output=${outputs[$i]}
     position=${placed[$output]:-}
     [[ -n $position ]] || { [[ $output == Virtual-1 ]] && position=0x0 || position=auto-right; }
+    placed[$output]=$position
+    index[$output]=$i
+    items+=("${sizes[$i]}:$position")
+  done
+  mapfile -t order < <(apply_order "$shown" "${items[@]}" 2>/dev/null)
+  ((${#order[@]} == ${#outputs[@]})) || order=("${outputs[@]}")
+
+  park_gone "$shown" "${outputs[@]}"
+
+  for output in "${order[@]}"; do
+    i=${index[$output]}
+    mode=${modes[$i]} scale=${scales[$i]}
+    position=${placed[$output]}
 
     # Aquamarine 0.14 does not refresh its mode cache when an existing DRM
     # connector's EDID or physical size changes. A complete modeline bypasses
@@ -410,25 +660,33 @@ apply_preferred_modes() {
       fi
       continue
     fi
-    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"$position\", scale = \"$scale\"$(hdr_fields "$output") })"
+    hdr=$(hdr_fields "$output")
+    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"$position\", scale = \"$scale\"$hdr })"
+    # The notch strip is the main window's (full screen on the built-in display).
+    if [[ $output == Virtual-1 ]]; then
+      notch_bar "$mode" "$scale"
+    fi
+    digest=$(cksum <<<"$rule" | cut -d' ' -f1)
+    follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" ||
+      continue
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2
     elif [[ $response != ok ]]; then
       printf 'omacvm-display-sync: Hyprland rejected %s for %s: %s\n' \
         "$mode" "$output" "$response" >&2
-    fi
-    # The notch strip is the main window's (full screen on the built-in display).
-    if [[ $output == Virtual-1 ]]; then
-      notch_bar "$mode" "$scale"
+    else
+      sent_ok "$output" "$digest" "$hdr"
     fi
   done
+  [[ -z ${lock_fd:-} ]] || exec {lock_fd}>&-
 }
 
-# OmacVM.app: when the window covers the strip beside the notch (full screen
-# in notch mode), Omarchy's bar gets that strip's height, so nothing but the
+# OmacVM.app before 3.0.0: when the window covers the strip beside the notch
+# (full screen in notch mode), Omarchy's bar gets that strip's height, so nothing but the
 # bar sits beside the camera. Elsewhere the bar keeps its own size. Writes only
 # lines marked "omacvm-notch" in ~/.config/omarchy/shell.toml (watched live).
+# A 3.0.0 app sends no omacvm.notch: the marked lines are taken out.
 notch_bar() {
   local mode=$1 scale=$2 w h want="" f=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.toml
   read -r _ _ w _ _ _ h _ <<<"$mode"

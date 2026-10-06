@@ -14,7 +14,9 @@ commit 82927e9. Changes here:
   flags (`roms/edk2-build.py`, `roms/edk2-build.config`, build
   `armvirt.aa64`, DEBUG as QEMU ships it), clang 18 instead of GCC, and
   `patches/edk2-logo-omarchy.patch`: Omarchy's logo instead of TianoCore's
-  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`), and
+  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`, 10 pixels
+  a cell, 810 x 190: as big as the app's start animation draws it; on a
+  screen too small for it, the biggest whole cell that fits), and
   `patches/edk2-bootmanager-nvme-identify-align.patch`: with clang, edk2
   could not read the NVMe disk's name and renamed its boot entry to "UEFI
   Misc Device"; now it is "UEFI QEMU NVMe Ctrl omacvm 1" as with QEMU's
@@ -28,6 +30,39 @@ commit 82927e9. Changes here:
   firmware carries no user name (the build checks that). The flash layout and the
   boot variables are the same either way: a VM's `efi-vars.fd` works with
   both
+- `patches/omacvm-cocoa-boot-splash.patch`: when the window opens, OMACVM
+  turns into Omarchy's logo (Core Animation: OMACVM 0.6 s, the morph about
+  2.6 s, done at 3.56 s; the still logo with Reduce motion or
+  `OMACVM_SPLASH_ANIMATION=0`). The logo holds over the firmware, GRUB and
+  Linux's text until Omarchy's desktop is there (its display agent opens
+  `org.omacvm.display`, or the picture is lit almost everywhere), then
+  fades; also after a reboot. It gives way at once when the VM stops on an
+  error, and after 40 s of running time without a desktop
+  (`OMACVM_SPLASH_HOLD_SECONDS`). An output without a picture shows the logo
+  instead of QEMU's "Display output is not active.", black once the desktop
+  was there; after 90 s of the guest running with nothing of its own on the
+  screen (`OMACVM_SPLASH_HINT_SECONDS`), a line under the logo names the VM's
+  logs (`OMACVM_LOGS`) and qemu.log gets a warning. `OMACVM_BOOT_SPLASH=0`
+  shows QEMU's text again. The cells are the firmware's
+  (`boot-logo/make-logo-bmp.py logo.svg --rows`), the animation's table is
+  `boot-logo/make-splash-morph.py`'s; the build checks both, the
+  animation's core and its fade (`Tests/display/`, also `check-boot-splash.sh` in CI)
+- `patches/omacvm-cocoa-fullscreen-own-space.patch`: full screen is always
+  macOS's own, in a Space of its own on every display (beside a notch it sits
+  below the camera; Omanotch fills the strip). The borderless kind of
+  `omacvm-cocoa-notch.patch` is left for tests only.
+  `patches/omacvm-cocoa-head-key-same-space.patch`: another display's window
+  hands the keyboard back to the main window only while the main window's
+  Space shows, so the escape combo's move to macOS is not undone.
+  `Tests/display/test-fullscreen-space.sh` checks both in the patched
+  `ui/cocoa.m` at build time.
+- `patches/omacvm-cocoa-shutdown-events.patch`: once QEMU's thread has
+  cleaned up the display (Quit, guest shutdown), AppKit events and blocks no
+  longer reach QEMU (they crashed on the freed keyboard state).
+  `patches/omacvm-cocoa-fullscreen-start.patch`: a VM that starts in full
+  screen stays invisible until macOS has it there (no windowed frame, no
+  menu bar over it). `Tests/display/test-shutdown-events.sh` and
+  `test-fullscreen-start.sh` check them at build time.
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's
@@ -105,14 +140,41 @@ commit 82927e9. Changes here:
   memory too (ADR 0018). Checked in a test VM by
   `tests/graphics/scanout-churn.sh`
 - `patches/virgl-resource-memory-budget.patch`: guest resources are charged
-  their estimated size against a budget (`OMACVM_GPU_MEMORY_MB`, default a
-  quarter of the Mac's memory, 0 = off); past it, creation fails and the
-  QEMU log says so (ADR 0018). Screens and cursors may go 256 MB past it.
-  Checked by `Tests/virgl/test-resource-budget.c`
+  their estimated size against a budget (`OMACVM_GPU_MEMORY_MB`, default
+  three quarters of the Mac's memory, 0 = off: only a guard against a runaway
+  VM, ADR 0034); past it, creation fails and the QEMU log says so (ADR 0018).
+  Screens and cursors may go 256 MB past it. Checked by
+  `Tests/virgl/test-resource-budget.c`
+- `patches/virgl-darwin-memory-pressure.patch`: below that guard, a new big
+  resource is refused only when macOS's memory pressure says the Mac is
+  short; a status file (`OMACVM_GPU_MEMORY_STATUS`) for the app and
+  `omacvm check` (ADR 0034). Checked by `Tests/virgl/test-resource-budget.c`
 - `patches/qemu-virgl-2d-resource-scanout.patch`: QEMU makes 2D resources
   (the guest's dumb buffers: console, plymouth, dumb screens and cursors)
   with the SCANOUT bind, so the budget's screen reserve covers them; the
   build checks the patched source
+- `patches/virgl-resource-budget-context-loss.patch`: a resource the budget
+  refused loses the GL context that made it as soon as that context attaches
+  it, and the QEMU log says why. A guest Mesa with
+  `src/app/guest/mesa/mesa-virgl-reset-status.patch` is told
+  (`GL_GUILTY_CONTEXT_RESET` for robust contexts; other apps end at their next
+  flush). Stock guest Mesa has no channel for it: the app draws nothing.
+  Checked by `Tests/virgl/test-resource-budget.c`
+- `patches/virgl-venus-memory-budget.patch`: Venus device memory and shm blobs
+  count against the same budget (one per VM); past it `vkAllocateMemory`
+  fails with `VK_ERROR_OUT_OF_DEVICE_MEMORY` (guest Mesa allocates
+  asynchronously by default: then the app ends at its next use of the memory).
+  The charge goes with the storage: it lasts until the last holder is gone
+  (the memory, memory imported from it, the guest's blob), so a kept dma-buf
+  fd or mapping still counts. Checked by `Tests/virgl/test-venus-budget-storage.c`
+- `patches/qemu-cocoa-idle-refresh.patch`: QEMU's refresh tick (every 8 ms on
+  a 120 Hz display, for every output) slows to 500 ms after a second without
+  work for it (2D updates, new scanouts, the extra outputs' windows) and comes
+  back with the next. The main window's GL frames are pushed and never needed
+  it, so an idle desktop (or a blinking cursor) no longer wakes QEMU 60-120
+  times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. The build
+  tests the rate logic, taken from the patched `ui/cocoa.m`
+  (`Tests/display/test-idle-refresh.c`). Numbers: the idle-power PR
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

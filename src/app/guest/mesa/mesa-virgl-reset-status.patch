@@ -1,0 +1,312 @@
+Mesa (guest): report virgl context loss through GL robustness
+
+What: when the host offers VIRGL_CAP_V2_RESET_STATUS_BUFFER (OmacVM.app's runtime,
+virgl-context-loss-report.patch), each virgl screen (one host context per DRM fd)
+allocates a 64-byte guest-memory buffer (VIRGL_BIND_CUSTOM) and every pipe_context
+names it with VIRGL_CCMD_SET_RESET_STATUS_BUFFER. The host writes
+VIRGL_RESET_STATUS_GUILTY there when it loses the context. virgl then:
+  - implements get_device_reset_status (PIPE_GUILTY_CONTEXT_RESET) and
+    set_device_reset_callback (called after the next flush, so Mesa switches the
+    GL context to its lost dispatch at once);
+  - a context that asked for no reset notification (most apps, and ANGLE's own
+    context in Chrome) cannot learn about it, so the next flush ends the app with
+    abort(), as Mesa's venus does on a fatal ring status. Chrome then restarts its
+    GPU process and the page gets webglcontextlost/restored.
+    VIRGL_KEEP_LOST_CONTEXT=1 keeps such an app running (drawing nothing);
+  - sets device_reset_status_query, so EGL/GLX offer create_context_robustness;
+  - st/mesa: KHR_robustness (and EXT_robustness on GLES) also when the driver
+    reports resets but has no robust buffer access (Apple's GL 4.1 has no
+    ARB_robust_buffer_access_behavior). KHR_robustness allows undefined values for
+    out-of-bounds reads; robust buffer access itself stays off, so ANGLE keeps its
+    own bounds checks. On virgl/Apple this changes no GL or GLES version;
+  - dri: a context asking for robust buffer access (GLX_CONTEXT_ROBUST_ACCESS_BIT_ARB)
+    is refused unless the driver has robust_buffer_access_behavior, as EGL already
+    does (EGL_BAD_CONFIG/EGL_BAD_MATCH). Without this, offering reset notification
+    would hand GLX apps GL_CONTEXT_FLAG_ROBUST_ACCESS_BIT with no bounded reads.
+Why: without it a lost host context leaves the app drawing into nothing: Chrome's
+WebGL page freezes. With it, robust apps (gl-lost) see GL_GUILTY_CONTEXT_RESET
+and recreate their context; Chrome recovers through the GPU process restart.
+Applies to: Mesa 26.2.3 (Arch Linux ARM's version on 2026-10-04).
+Upstream: upstreamable together with the virglrenderer side; not sent.
+Tests: tests/graphics/guest/gl-lost.c (GL_GUILTY_CONTEXT_RESET on the frame the
+host lost the context), tests/graphics/context-loss.sh --expect recover --mesa
+/opt/omacvm-mesa (Chrome).
+diff --git a/src/gallium/drivers/virgl/virgl_context.c b/src/gallium/drivers/virgl/virgl_context.c
+index bfc9835..ba8b35b 100644
+--- a/src/gallium/drivers/virgl/virgl_context.c
++++ b/src/gallium/drivers/virgl/virgl_context.c
+@@ -46,6 +46,8 @@
+ #include "util/slab.h"
+ #include "util/u_upload_mgr.h"
+ #include "util/u_blitter.h"
++#include "util/log.h"
++#include "util/u_debug.h"
+ 
+ #include "virgl_encode.h"
+ #include "virgl_context.h"
+@@ -1083,6 +1085,54 @@ static void virgl_submit_cmd(struct virgl_winsys *vws,
+    }
+ }
+ 
++/* The host loses the whole context (every pipe_context of this screen) on a fatal
++ * error and writes VIRGL_RESET_STATUS_GUILTY into the screen's status buffer. */
++static enum pipe_reset_status
++virgl_get_device_reset_status(struct pipe_context *ctx)
++{
++   struct virgl_screen *rs = virgl_screen(ctx->screen);
++
++   if (rs->reset_status &&
++       p_atomic_read(rs->reset_status) == VIRGL_RESET_STATUS_GUILTY)
++      return PIPE_GUILTY_CONTEXT_RESET;
++   return PIPE_NO_RESET;
++}
++
++static void
++virgl_set_device_reset_callback(struct pipe_context *ctx,
++                                const struct pipe_device_reset_callback *cb)
++{
++   struct virgl_context *vctx = virgl_context(ctx);
++
++   if (cb)
++      vctx->reset_callback = *cb;
++   else
++      memset(&vctx->reset_callback, 0, sizeof(vctx->reset_callback));
++}
++
++static struct virgl_hw_res *
++virgl_get_reset_status_buffer(struct virgl_screen *rs)
++{
++   struct virgl_winsys *vws = rs->vws;
++
++   simple_mtx_lock(&rs->reset_status_lock);
++   if (!rs->reset_status_res) {
++      struct virgl_hw_res *res =
++         vws->resource_create(vws, PIPE_BUFFER, NULL, PIPE_FORMAT_R8_UNORM,
++                              VIRGL_BIND_CUSTOM, 64, 1, 1, 1, 0, 0, 0, 64);
++      uint32_t *map = res ? vws->resource_map(vws, res) : NULL;
++      if (map) {
++         p_atomic_set(map, 0);
++         rs->reset_status_res = res;
++         rs->reset_status = map;
++      } else if (res) {
++         vws->resource_reference(vws, &res, NULL);
++      }
++   }
++   simple_mtx_unlock(&rs->reset_status_lock);
++   return rs->reset_status_res;
++}
++
+ void virgl_flush_eq(struct virgl_context *ctx, void *closure,
+                     struct pipe_fence_handle **fence)
+ {
+@@ -1104,6 +1154,21 @@ void virgl_flush_eq(struct virgl_context *ctx, void *closure,
+ 
+    virgl_submit_cmd(rs->vws, ctx->cbuf, fence);
+ 
++   if (!ctx->reset_reported &&
++       virgl_get_device_reset_status(&ctx->base) != PIPE_NO_RESET) {
++      ctx->reset_reported = true;
++      if (ctx->reset_callback.reset) {
++         ctx->reset_callback.reset(ctx->reset_callback.data, PIPE_GUILTY_CONTEXT_RESET);
++      } else if (!debug_get_bool_option("VIRGL_KEEP_LOST_CONTEXT", false)) {
++         /* The app did not ask for reset notification, so it would draw into a dead
++          * context for good. End it like venus does on a fatal ring status: a
++          * browser then restarts its GPU process and the page gets its context back. */
++         mesa_loge("virgl: the host lost this GL context and the app asked for no reset "
++                   "notification; aborting (VIRGL_KEEP_LOST_CONTEXT=1 keeps it)");
++         abort();
++      }
++   }
++
+    /* Reserve some space for transfers. */
+    if (ctx->encoded_transfers)
+       ctx->cbuf->cdw = VIRGL_MAX_TBUF_DWORDS;
+@@ -1859,6 +1924,14 @@ struct pipe_context *virgl_context_create(struct pipe_screen *pscreen,
+    if (rs->caps.caps.v2.capability_bits & VIRGL_CAP_APP_TWEAK_SUPPORT)
+       virgl_send_tweaks(vctx, rs);
+ 
++   if (rs->caps.caps.v2.capability_bits_v2 & VIRGL_CAP_V2_RESET_STATUS_BUFFER) {
++      struct virgl_hw_res *status = virgl_get_reset_status_buffer(rs);
++      if (status)
++         virgl_encode_set_reset_status_buffer(vctx, status);
++      vctx->base.get_device_reset_status = virgl_get_device_reset_status;
++      vctx->base.set_device_reset_callback = virgl_set_device_reset_callback;
++   }
++
+    /* On Android, a virgl_screen is generally created first by the HWUI
+     * service, followed by the application's no-op attempt to do the same with
+     * eglInitialize(). To retain the ability for apps to set their own driver
+diff --git a/src/gallium/drivers/virgl/virgl_context.h b/src/gallium/drivers/virgl/virgl_context.h
+index 3ce8228..7cbf65a 100644
+--- a/src/gallium/drivers/virgl/virgl_context.h
++++ b/src/gallium/drivers/virgl/virgl_context.h
+@@ -113,6 +113,9 @@ struct virgl_context {
+ 
+    /* The total size of staging resources used in queued copy transfers. */
+    uint64_t queued_staging_res_size;
++
++   struct pipe_device_reset_callback reset_callback;
++   bool reset_reported;
+ };
+ 
+ struct virgl_vertex_elements_state {
+diff --git a/src/gallium/drivers/virgl/virgl_encode.c b/src/gallium/drivers/virgl/virgl_encode.c
+index 117ee96..95db094 100644
+--- a/src/gallium/drivers/virgl/virgl_encode.c
++++ b/src/gallium/drivers/virgl/virgl_encode.c
+@@ -1754,6 +1754,15 @@ void virgl_encode_get_memory_info(struct virgl_context *ctx, struct virgl_resour
+    virgl_encoder_write_res(ctx, res);
+ }
+ 
++void virgl_encode_set_reset_status_buffer(struct virgl_context *ctx, struct virgl_hw_res *res)
++{
++   struct virgl_winsys *vws = virgl_screen(ctx->base.screen)->vws;
++
++   virgl_encoder_write_cmd_dword(ctx, VIRGL_CMD0(VIRGL_CCMD_SET_RESET_STATUS_BUFFER, 0,
++                                                 VIRGL_SET_RESET_STATUS_BUFFER_SIZE));
++   vws->emit_res(vws, ctx->cbuf, res, true);
++}
++
+ void virgl_encode_emit_string_marker(struct virgl_context *ctx,
+                                      const char *message, int len)
+ {
+diff --git a/src/gallium/drivers/virgl/virgl_encode.h b/src/gallium/drivers/virgl/virgl_encode.h
+index 627ba44..94d89dc 100644
+--- a/src/gallium/drivers/virgl/virgl_encode.h
++++ b/src/gallium/drivers/virgl/virgl_encode.h
+@@ -299,6 +299,7 @@ void virgl_encode_end_transfers(struct virgl_cmd_buf *buf);
+ int virgl_encode_tweak(struct virgl_context *ctx, enum vrend_tweak_type tweak, uint32_t value);
+ 
+ void virgl_encode_get_memory_info(struct virgl_context *ctx, struct virgl_resource *res);
++void virgl_encode_set_reset_status_buffer(struct virgl_context *ctx, struct virgl_hw_res *res);
+ 
+ void virgl_encode_emit_string_marker(struct virgl_context *ctx, const char *message,
+                                        int len);
+diff --git a/src/gallium/drivers/virgl/virgl_screen.c b/src/gallium/drivers/virgl/virgl_screen.c
+index 66b3d3d..11215d8 100644
+--- a/src/gallium/drivers/virgl/virgl_screen.c
++++ b/src/gallium/drivers/virgl/virgl_screen.c
+@@ -416,6 +416,8 @@ virgl_init_screen_caps(struct virgl_screen *vscreen)
+       vscreen->caps.caps.v2.capability_bits & VIRGL_CAP_FB_NO_ATTACH;
+    caps->robust_buffer_access_behavior =
+       vscreen->caps.caps.v2.capability_bits & VIRGL_CAP_ROBUST_BUFFER_ACCESS;
++   caps->device_reset_status_query =
++      vscreen->caps.caps.v2.capability_bits_v2 & VIRGL_CAP_V2_RESET_STATUS_BUFFER;
+    caps->fbfetch =
+       (vscreen->caps.caps.v2.capability_bits & VIRGL_CAP_TGSI_FBFETCH) ? 1 : 0;
+    caps->blend_equation_advanced =
+@@ -822,6 +824,10 @@ virgl_destroy_screen(struct pipe_screen *screen)
+ 
+    slab_destroy_parent(&vscreen->transfer_pool);
+ 
++   if (vscreen->reset_status_res)
++      vws->resource_reference(vws, &vscreen->reset_status_res, NULL);
++   simple_mtx_destroy(&vscreen->reset_status_lock);
++
+    if (vws)
+       vws->destroy(vws);
+ 
+@@ -1013,6 +1019,7 @@ virgl_create_screen(struct virgl_winsys *vws, const struct pipe_screen_config *c
+       screen->base.nir_options[i] = &screen->compiler_options;
+ 
+    screen->vws = vws;
++   simple_mtx_init(&screen->reset_status_lock, mtx_plain);
+    screen->base.get_name = virgl_get_name;
+    screen->base.get_vendor = virgl_get_vendor;
+    screen->base.get_screen_fd = virgl_screen_get_fd;
+diff --git a/src/gallium/drivers/virgl/virgl_screen.h b/src/gallium/drivers/virgl/virgl_screen.h
+index d295725..dfeb52b 100644
+--- a/src/gallium/drivers/virgl/virgl_screen.h
++++ b/src/gallium/drivers/virgl/virgl_screen.h
+@@ -26,6 +26,7 @@
+ #include "pipe/p_screen.h"
+ #include "util/slab.h"
+ #include "util/disk_cache.h"
++#include "util/simple_mtx.h"
+ #include "virgl_winsys.h"
+ #include "compiler/nir/nir.h"
+ #include "virtio-gpu/virgl_protocol.h"
+@@ -71,6 +72,11 @@ struct virgl_screen {
+    nir_shader_compiler_options compiler_options;
+ 
+    struct disk_cache *disk_cache;
++
++   /* One host context per screen (fd): the host marks it lost here. */
++   simple_mtx_t reset_status_lock;
++   struct virgl_hw_res *reset_status_res;
++   const uint32_t *reset_status;
+ };
+ 
+ 
+diff --git a/src/gallium/frontends/dri/dri_context.c b/src/gallium/frontends/dri/dri_context.c
+index cfeb490..7461e88 100644
+--- a/src/gallium/frontends/dri/dri_context.c
++++ b/src/gallium/frontends/dri/dri_context.c
+@@ -69,7 +69,10 @@ dri_create_context(struct dri_screen *screen,
+     * available.
+     */
+    if (screen->has_reset_status_query) {
+-      allowed_flags |= __DRI_CTX_FLAG_ROBUST_BUFFER_ACCESS;
++      /* Like EGL (disp->RobustBufferAccess): a robust access context only where
++       * the driver bounds out-of-bounds accesses, not just reports resets. */
++      if (screen->base.screen->caps.robust_buffer_access_behavior)
++         allowed_flags |= __DRI_CTX_FLAG_ROBUST_BUFFER_ACCESS;
+       allowed_attribs |= __DRIVER_CONTEXT_ATTRIB_RESET_STRATEGY;
+    }
+ 
+diff --git a/src/mesa/state_tracker/st_extensions.c b/src/mesa/state_tracker/st_extensions.c
+index 577ca92..77177a9 100644
+--- a/src/mesa/state_tracker/st_extensions.c
++++ b/src/mesa/state_tracker/st_extensions.c
+@@ -1751,7 +1751,11 @@ void st_init_extensions(struct pipe_screen *screen,
+        screen->caps.max_texture_anisotropy >= 16.0)
+       extensions->ARB_texture_filter_anisotropic = GL_TRUE;
+ 
+-   extensions->KHR_robustness = extensions->ARB_robust_buffer_access_behavior;
++   /* A driver that reports context resets (virgl on an OmacVM host) gets the
++    * reset notification part of KHR/EXT_robustness even without robust buffer
++    * access: out-of-bounds reads stay undefined, which KHR_robustness allows. */
++   extensions->KHR_robustness = extensions->ARB_robust_buffer_access_behavior ||
++                                screen->caps.device_reset_status_query;
+ 
+    /* If we support ES 3.1, we support the ES3_1_compatibility ext. However
+     * there's no clean way of telling whether we would support ES 3.1 from
+diff --git a/src/virtio/virtio-gpu/virgl_hw.h b/src/virtio/virtio-gpu/virgl_hw.h
+index ec10bdd..3de8508 100644
+--- a/src/virtio/virtio-gpu/virgl_hw.h
++++ b/src/virtio/virtio-gpu/virgl_hw.h
+@@ -628,6 +628,8 @@ enum virgl_formats {
+ #define VIRGL_CAP_V2_MIRROR_CLAMP_TO_EDGE (1u << 16)
+ #define VIRGL_CAP_V2_MIRROR_CLAMP         (1u << 17)
+ #define VIRGL_CAP_V2_RESOURCE_LAYOUT      (1u << 18)
++/* VIRGL_CCMD_SET_RESET_STATUS_BUFFER is understood (OmacVM host). */
++#define VIRGL_CAP_V2_RESET_STATUS_BUFFER  (1u << 30)
+ 
+ /* virgl bind flags - these are compatible with mesa 10.5 gallium.
+  * but are fixed, no other should be passed to virgl either.
+diff --git a/src/virtio/virtio-gpu/virgl_protocol.h b/src/virtio/virtio-gpu/virgl_protocol.h
+index cb80403..23d8b2e 100644
+--- a/src/virtio/virtio-gpu/virgl_protocol.h
++++ b/src/virtio/virtio-gpu/virgl_protocol.h
+@@ -144,6 +144,7 @@ enum virgl_context_cmd {
+ 
+    VIRGL_CCMD_CLEAR_SURFACE,
+    VIRGL_CCMD_GET_PIPE_RESOURCE_LAYOUT,
++   VIRGL_CCMD_SET_RESET_STATUS_BUFFER,
+ 
+    VIRGL_MAX_COMMANDS
+ };
+@@ -799,4 +800,13 @@ enum vrend_tweak_type {
+ #define VIRGL_RESOURCE_LAYOUT_HANDLE_OUT     1
+ #define VIRGL_RESOURCE_LAYOUT_HANDLE_TARGET  2
+ 
++/* VIRGL_CCMD_SET_RESET_STATUS_BUFFER
++ * A guest-memory buffer (VIRGL_BIND_CUSTOM, at least 4 bytes) whose first
++ * dword the host sets to VIRGL_RESET_STATUS_GUILTY when the context is lost.
++ * Handle 0 forgets the buffer.
++ */
++#define VIRGL_SET_RESET_STATUS_BUFFER_SIZE   1
++#define VIRGL_SET_RESET_STATUS_BUFFER_HANDLE 1
++#define VIRGL_RESET_STATUS_GUILTY            1
++
+ #endif

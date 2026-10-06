@@ -15,10 +15,17 @@
 // While the VM is full screen, the macOS pointer is hidden wherever the VM window
 // is what lies under it (the guest draws its own pointer); over anything else
 // (the Omanotch strip, the Dock, menus, another display) it shows.
-// Ctrl+Option+Cmd+Esc in the full-screen VM hands everything back to macOS and
-// swipes the display under the pointer to the Space beside the VM's (macOS's
-// own animation); pressed there again in macOS, it swipes back into the VM
-// (escape section below).
+// A Magic Mouse (any number, also one connected later) while capturing: two
+// fingers sliding sideways swipe Omarchy's workspaces (four virtual fingers on
+// the guest's touchpad, or three with MouseSwipeFingers 3, as the trackpad's
+// swipes; macOS's Space swipe is dropped as the trackpad's is), one finger flicked sideways is back/forward
+// in the VM (the Back/Forward keys on the guest's keyboard). Its scrolling
+// goes to the VM app as before (mouse-model.h).
+// Ctrl+Option+Esc in the full-screen VM hands everything back to macOS and
+// moves the display under the pointer to the Space beside the VM's with
+// macOS's own "Move left/right a space" shortcut (macOS's own animation; the
+// VM stays full screen); pressed there again in macOS, it goes back into the
+// VM (escape section below).
 // Capture re-arms by itself when the VM is in front again. If this process
 // dies, the event tap goes with it and macOS gets its gestures back.
 // Each VM says on connect what it wants (the handshake below). Capture
@@ -42,13 +49,17 @@
 // Protocol (TCP, the guest connects to the Mac on port 47830: 10.211.55.2 on
 // Parallels, 192.168.64.1 on UTM, .1 of Fusion's NAT network), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
-//   S <on|off|esc>                    capture state changes
+//   S <on|off|esc> [<keys>]           capture state changes; after esc the combo pressed:
+//                                     ctrl-opt, or ctrl-opt-cmd (the old one, through 3.0.x).
+//                                     A guest reads no word as ctrl-opt-cmd (a helper
+//                                     from before 3.0.0 knows only that one)
 //   O <natural> <w> <h>               on connect (and when another trackpad touches): macOS's
 //                                     natural scrolling (1/0) and the trackpad's size in 1/100 mm
 //   A <dx> <dy>                       Glide: macOS's scroll while the fingers touch (points)
 //   W <dx> <dy>                       Glide: macOS's momentum after a trackpad's fingers lifted (points)
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
+//                                     (any app: a Magic Mouse flick as Back/Forward, 158/159)
 // and first, the handshake (any VM on these networks, and any Mac program on
 // 127.0.0.1, can connect; neither side ever sends the Bridge's token itself):
 //   C <guest nonce>                   from the guest: 32 hex digits
@@ -82,6 +93,8 @@
 #include <pthread.h>
 #include <time.h>
 #include "scroll-model.h"
+#include "mouse-model.h"
+#include <IOKit/IOKitLib.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -113,9 +126,14 @@ extern bool MTDeviceIsBuiltIn(MTDeviceRef);
 extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1/100 mm
 extern int MTDeviceGetDeviceID(MTDeviceRef, uint64_t *);
 extern bool MTDeviceIsRunning(MTDeviceRef);
+extern int MTDeviceGetFamilyID(MTDeviceRef, int *);
+extern io_service_t MTDeviceGetService(MTDeviceRef);
 
 #ifndef PORT
 #define PORT 47830
+#endif
+#ifndef BRIDGE_DIR
+#define BRIDGE_DIR "omacvm-bridge"   // the Bridge's token is in ~/Library/Application Support/BRIDGE_DIR
 #endif
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
@@ -156,6 +174,21 @@ static void readFusionHost(void) {
   fclose(f);
 }
 #define ESC_KEYCODE 53
+// The escape combo is Ctrl+Option+Esc (since 3.0.0). Ctrl+Option+Cmd+Esc, the
+// combo up to 2.9.x, still works through 3.0.x as a hidden fallback: the
+// guest then shows "New shortcut: ⌃⌥ Esc" once. TODO(after 3.0.x): remove
+// ESC_OLD (tracked in tracks/keys-escape.md, "old escape combo").
+// Only these two exact modifier sets count: with Shift added it is not the
+// combo and goes on as any other key.
+enum { ESC_NONE, ESC_NEW, ESC_OLD };
+static int escapeCombo(int kc, CGEventFlags f) {
+  if (kc != ESC_KEYCODE) return ESC_NONE;
+  const CGEventFlags ctrlOpt = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate;
+  CGEventFlags m = f & (ctrlOpt | kCGEventFlagMaskCommand | kCGEventFlagMaskShift);
+  return m == ctrlOpt ? ESC_NEW : m == (ctrlOpt | kCGEventFlagMaskCommand) ? ESC_OLD : ESC_NONE;
+}
+// The last combo pressed, for "S esc <keys>".
+static const char *escKeys = "ctrl-opt";
 #define PINCH_SPREAD 0.035f         // normalized change of finger distance that makes a pinch
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
 
@@ -166,13 +199,9 @@ static pid_t frontPid;   // the full-screen VM app in front, else 0
 static pid_t otherPid, vmPid, appPid;   // appPid: the app in front at the last check
 static CGWindowID otherWin, vmWin;
 // An OmacVM VM in front in a window, and the windowed VM the combo left (the
-// combo in macOS brings it back). restoreFull: the combo had to take the
-// full-screen VM out of full screen to get out; back in, it goes full screen
-// again. Main thread, and the event tap (also on it).
+// combo in macOS brings it back). Main thread, and the event tap (also on it).
 static pid_t winVMPid, leftWinPid;
 static CGWindowID winVMWin, leftWinWin;
-static int restoreFull;
-static double restoreAt, restoreGrace = 1.5;   // s: the hide lands meanwhile
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
@@ -210,6 +239,20 @@ static ScrollState scrollSt;
 static pthread_mutex_t padLock = PTHREAD_MUTEX_INITIALIZER;   // pads' fingers, activePad, scrollSt
 static double monoNow(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9; }
 static int pinchSent;             // P sent for the current two-finger touch
+// The Magic Mice (also ones connected later): their gestures go to the VM
+// while capturing (mouse-model.h). mouseSwipeUntil: macOS's own scrolling for
+// a two-finger swipe is dropped until then (monoNow; it runs out by itself,
+// so a mouse gone mid-swipe never keeps scrolling from the VM).
+#define MAX_MICE 4
+static struct { MTDeviceRef dev; uint64_t id; int w, h, sent, fingers; MouseState st; } mice[MAX_MICE];
+static int nMice;
+static pthread_mutex_t mouseLock = PTHREAD_MUTEX_INITIALIZER;   // mice
+static volatile double mouseSwipeUntil;
+#define MOUSE_SWIPE_HOLD 0.5        // s after a swipe frame or its end
+#define MOUSE_SWIPE_GAIN 1.5f       // mouse mm -> virtual trackpad mm (a mouse is small)
+#define MOUSE_FINGER_ID 900001      // the virtual fingers' ids (the trackpad's are small)
+#define LINUX_KEY_BACK 158
+#define LINUX_KEY_FORWARD 159
 
 static void logf_(const char *fmt, ...) {
   time_t t = time(NULL); char ts[16]; strftime(ts, sizeof ts, "%H:%M:%S", localtime(&t));
@@ -331,7 +374,7 @@ static void sendSize(void) {
 
 // "on"/"esc" concern the front VM; "off" goes to every VM.
 static void sendState(const char *s) {
-  char b[16]; int n = snprintf(b, sizeof b, "S %s\n", s);
+  char b[40]; int n = !strcmp(s, "esc") ? snprintf(b, sizeof b, "S esc %s\n", escKeys) : snprintf(b, sizeof b, "S %s\n", s);
   sendTo(!strcmp(s, "off"), b, (size_t)n);
 }
 
@@ -402,7 +445,71 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   return 0;
 }
 
+// ---- Magic Mouse ----
+// Its frames always go through the model (so a touch that began before the
+// capture is read right), but only a captured VM that wants gestures gets
+// anything.
+static int mouseSwipeFingers(void);
+static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int frame) {
+  (void)ts; (void)frame;
+  MouseTouch c[16]; int k = 0;
+  pthread_mutex_lock(&mouseLock);
+  int m = -1;
+  for (int i = 0; i < nMice; i++) if (mice[i].dev == dev) m = i;
+  if (m < 0) { pthread_mutex_unlock(&mouseLock); return 0; }
+  for (int i = 0; i < n && k < 16; i++) {
+    if (!touching(&touches[i])) continue;
+    c[k].id = touches[i].pathIndex;
+    c[k].x = touches[i].normalized.pos.x * (float)mice[m].w / 100.0f;
+    c[k].y = touches[i].normalized.pos.y * (float)mice[m].h / 100.0f;
+    k++;
+  }
+  float before = mice[m].st.dx;   // the swipe's travel up to now (its end resets it)
+  int act = mouseFrame(&mice[m].st, c, k, monoNow());
+  float dx = mice[m].st.dx;
+  int on = capturing && gesturesOn();
+  char buf[256]; int len = 0;
+  if (act == MOUSE_SWIPE && on) {
+    // Four fingers (or three, MouseSwipeFingers) in the middle of the guest's
+    // touchpad, moved sideways as the two on the mouse (the guest scales by
+    // the trackpad's size, tpW). Four by default: OmacVM's guest swipes
+    // workspaces with 3 and 4 fingers, and users who give 3 fingers to
+    // something else (window snapping) keep 4 for it. Read when a swipe
+    // starts, so a change in the app counts from the next swipe.
+    if (!mice[m].sent) mice[m].fingers = mouseSwipeFingers();
+    int nf = mice[m].fingers == 3 ? 3 : 4;
+    float o = MOUSE_SWIPE_GAIN * dx * 100.0f / (float)(tpW > 0 ? tpW : 15600);
+    if (o > 0.35f) o = 0.35f;
+    if (o < -0.35f) o = -0.35f;
+    len = snprintf(buf, sizeof buf, "F %d", nf);
+    for (int i = 0; i < nf; i++)
+      len += snprintf(buf + len, sizeof buf - (size_t)len, " %d %.5f %.5f %.3f", MOUSE_FINGER_ID + i,
+                      0.5f - 0.05f * (float)(nf - 1) + 0.1f * (float)i + o, 0.5f, 0.5f);
+    buf[len++] = '\n';
+    mice[m].sent = 1;
+    mouseSwipeUntil = monoNow() + MOUSE_SWIPE_HOLD;
+  } else if (act == MOUSE_SWIPE_END && mice[m].sent) {
+    len = snprintf(buf, sizeof buf, "F 0\n");
+    logf_("Magic Mouse: two-finger swipe %s, %.0f mm -> %d-finger swipe in the VM", before >= 0 ? "right" : "left", fabsf(before),
+          mice[m].fingers == 3 ? 3 : 4);
+    mice[m].sent = 0;
+    mouseSwipeUntil = monoNow() + MOUSE_SWIPE_HOLD;
+  } else if ((act == MOUSE_BACK || act == MOUSE_FORWARD) && on) {
+    int code = act == MOUSE_BACK ? LINUX_KEY_BACK : LINUX_KEY_FORWARD;
+    len = snprintf(buf, sizeof buf, "K %d 1\nK %d 0\n", code, code);
+    logf_("Magic Mouse: one-finger swipe %s -> %s in the VM", act == MOUSE_BACK ? "right" : "left",
+          act == MOUSE_BACK ? "back" : "forward");
+  }
+  pthread_mutex_unlock(&mouseLock);
+  if (len) sendLine(buf, (size_t)len);
+  return 0;
+}
+
 // ---- capture mode: frontmost app + full-screen VM window ----
+// A VM's full-screen window is a normal window (layer 0).
+static int isQemu(pid_t pid);
+static int (*isQemuFn)(pid_t) = isQemu;
+
 static int vmFullScreen(pid_t pid, CGWindowID *win) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
   if (!wins) return 0;
@@ -447,7 +554,11 @@ static CGWindowID frontWindow(pid_t pid) {
 
 // The capture check runs every 0.2 s while a VM app is in front (to see its
 // window go full screen), else every 2 s plus on every app switch. The pointer
-// check runs at 120 Hz only while a full-screen VM is in front.
+// check runs only while a full-screen VM is in front: at 120 Hz while the
+// pointer moves, at 20 Hz once it has rested a second (an idle desktop then
+// costs 20 wake-ups a second here, not 120).
+#define CURSOR_REST_AFTER 1.0
+#define CURSOR_REST_EVERY 0.05
 static CFRunLoopTimerRef captureTimer, cursorTimer;
 static void updateCursor(CFRunLoopTimerRef t, void *info);
 
@@ -487,8 +598,10 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
 // sends the escape combo to the guest and returns nothing, so we never saw it
 // after OmacVM.app was restarted (brianmerchant, PR #39). So the tap is
 // created again whenever a different OmacVM VM comes to the front full screen,
-// and when macOS has invalidated it. The new tap goes in before the old one
-// is removed: no gap without one.
+// and when macOS has invalidated it. Since 3.0.0 QEMU's tap lets the combo
+// through as well (omacvm-cocoa-escape-combo-tap.patch); the re-arm stays for
+// a QEMU from before that. The new tap goes in before the old one is removed:
+// no gap without one.
 static int installTap(void) {
   CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
   if (!newTap) return 0;
@@ -524,8 +637,7 @@ static void rearmTap(const char *why) {
 // its VM network (-1: not a VM app), whether its VM window covers a display,
 // that window's title, the window, and whether the app is one the escape
 // combo may go back to (other). Main thread.
-static int isQemu(pid_t pid);
-static int (*isQemuFn)(pid_t) = isQemu;
+static void noteCameFrom(int changed);
 static void frontChanged(pid_t pid, int net, int front, const char *title, CGWindowID win, int other) {
   // OmacVM.app's launcher has the VMs' process name too: only QEMU counts.
   int winVM = net == NET_APP && !front && pid > 0 && isQemuFn(pid);
@@ -552,8 +664,8 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
   winVMWin = winVM ? win : 0;
   // In that VM again, or a full-screen VM in front (the newer one to go back to).
   if (pid == leftWinPid || front) leftWinPid = 0;
-  // The VM taken out of full screen is back some other way (Dock, a click).
-  if (restoreFull && pid == vmPid && (winVM || front) && monoNow() - restoreAt > restoreGrace) restoreFull = 0;
+  // Where the way out of the next full-screen VM goes back to.
+  if (!front) noteCameFrom(pid != appPid);
   appPid = pid;
   frontPid = front ? pid : 0;
   cursorTimerOn(front);
@@ -602,7 +714,12 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   int other = isOther(pid, net, name, net < 0 && pid > 0 && ns_is_regular(pid));
   if (other || (net == NET_APP && !front)) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
-  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
+  if (t) {
+    // Every 0.2 s while a VM app is in front, else every 2 s; the slow look
+    // may come up to 0.5 s late so macOS can batch it with other wake-ups.
+    CFRunLoopTimerSetTolerance(t, net >= 0 ? 0.02 : 0.5);
+    CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
+  }
 }
 
 // ---- the macOS pointer over the full-screen VM ----
@@ -679,7 +796,7 @@ static int vmWindowAt(CGPoint p, pid_t pid) {
 static void updateCursor(CFRunLoopTimerRef t, void *info) {
   (void)t; (void)info;
   static CGPoint last = { -1, -1 };
-  static CFAbsoluteTime lastCheck;
+  static CFAbsoluteTime lastCheck, lastMove;
   if (cursorControl < 0) {
     cursorControl = enableCursorControl();
     if (!cursorControl) logf_("cannot hide the macOS pointer from the background");
@@ -690,9 +807,14 @@ static void updateCursor(CFRunLoopTimerRef t, void *info) {
   CGPoint p = CGEventGetLocation(e);
   CFRelease(e);
   CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+  int moved = p.x != last.x || p.y != last.y;
+  if (moved) lastMove = now;
+  // At rest: the next look in 50 ms instead of 8 (the timer goes back to
+  // 120 Hz by itself after the first look that sees it move).
+  if (t && now - lastMove > CURSOR_REST_AFTER) CFRunLoopTimerSetNextFireDate(t, now + CURSOR_REST_EVERY);
   // The window list only when the pointer moved, and every half second for
   // windows that appear under a pointer at rest (the Dock, a notification).
-  if (p.x == last.x && p.y == last.y && now - lastCheck < 0.5) return;
+  if (!moved && now - lastCheck < 0.5) return;
   last = p; lastCheck = now;
   int h = vmWindowAt(p, pid);
   if (verbose && h != cursorHidden)
@@ -740,24 +862,28 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
   if (val == 0) { sendKey(56, 0); sendKey(29, 0); sendKey(42, 0); sendKey(125, 0); }
 }
 
-// ---- the escape combo: swipe the monitor under the pointer, and back ----
-// Ctrl+Option+Cmd+Esc in the captured full-screen VM hands the trackpad and
-// keys back to macOS at once ("S esc", Omarchy lets go of held keys). Then
-// the display under the pointer swipes to the Space beside the VM's, with
-// macOS's own animation (a Dock swipe, as three or four fingers make it): only
-// that display changes, and the keyboard goes to what it shows. Pressed again
-// there in macOS, it swipes back to the VM. The setting "EscapeSwipe" = "all"
+// ---- the escape combo: out of the VM's Space with macOS's own shortcut, and back ----
+// Ctrl+Option+Esc (escapeCombo above) in the captured full-screen VM hands the
+// trackpad and keys back to macOS at once ("S esc <keys>", Omarchy lets go of
+// held keys). Then the display under the pointer moves one Space toward the
+// one it showed before the VM, with macOS's own "Move left/right a space" shortcut (System
+// Settings > Keyboard > Keyboard Shortcuts > Mission Control: Ctrl+Left and
+// Ctrl+Right unless the user changed them), so macOS animates it as its own
+// swipe; the keyboard goes to what that display shows. Pressed again there in
+// macOS, it moves back to the VM's Space. The setting "EscapeSwipe" = "all"
 // (OmacVM.app's "Escape combo", or defaults write org.omacvm.gestures
-// EscapeSwipe all) swipes every display that shows the VM instead.
-// Never a trap: no swipe possible (no Spaces information, the VM's Space has
-// no neighbour), or the Space did not change -> the app from before comes to
-// the front instead (its Space, RC8's switch); refused too -> the VM's app is
-// hidden, so macOS has the keyboard whatever happens.
-// Every way out ends with a check that the user is out (the app in front is
-// not the VM and its full screen no longer shows); if not, the VM's window
-// leaves full screen and its app is hidden (the Mac mini, 12:58: the swipe did
-// nothing and Finder came to the front without a window). The combo then
-// brings it back, in full screen again.
+// EscapeSwipe all) moves every display that shows the VM instead.
+// The VM stays full screen and is never hidden (user, 2026-10-05: "I want to
+// swipe away to macOS, not close its full screen").
+// Every move is checked. Out: the shortcut is off or the Space did not change
+// -> a Dock swipe (the events a three/four-finger swipe makes; on macOS 15
+// the shortcut does nothing from the notched built-in display's full-screen
+// Space, the swipe does) -> still in the VM's Space, or macOS gives no Spaces
+// information -> one log line and a short notice in Omarchy ("N <why>"),
+// nothing else: never Mission Control from one press (user, 2026-10-06:
+// "never"; only twice in a row, see missionControl). Back in:
+// the shortcut did not land -> the VM's window to the front (macOS shows its
+// Space).
 // An OmacVM VM in a window with the keyboard has no Space of its own: the
 // combo gives the keyboard back to macOS (the app from before, else Finder,
 // COMBO_WINDOW_OUT); pressed again in macOS, that window comes back with the
@@ -939,8 +1065,9 @@ static int spaceIndex(const DisplaySpaces *d, uint64_t id) {
   return -1;
 }
 
-// Out of the VM's Space: to the one on its left (where macOS puts the Space a
-// window went full screen from), else the one on its right. 0: no neighbour.
+// Out of the VM's Space without knowing where the user came from: to the one
+// on its left (macOS puts a full-screen Space right after the one its window
+// came from), else the one on its right. 0: no neighbour.
 static int stepOut(const DisplaySpaces *d) {
   int i = spaceIndex(d, d->current);
   if (i < 0) return 0;
@@ -954,7 +1081,107 @@ static int stepToward(const DisplaySpaces *d, uint64_t want) {
   return i < 0 || j < 0 || (j - i != 1 && i - j != 1) ? 0 : j - i;
 }
 
+// Out of the VM's Space: one Space toward the one this display showed before
+// the VM (cameFrom), else as stepOut. -1 left, +1 right, 0: no neighbour.
+static int leaveDir(const DisplaySpaces *d, uint64_t cameFrom) {
+  int i = spaceIndex(d, d->current), j = cameFrom ? spaceIndex(d, cameFrom) : -1;
+  if (i < 0) return 0;
+  if (j >= 0 && j != i) return j < i ? -1 : 1;
+  return stepOut(d);
+}
+
+// ---- macOS's own Space shortcuts (com.apple.symbolichotkeys) ----
+// AppleSymbolicHotKeys: { "79" = { enabled = 1; value = { parameters =
+// (65535, 123, 8650752); type = standard; }; }; ... }: the character (65535:
+// none), the key code and the modifiers (CGEventFlags bits; 8650752 =
+// Control + fn, as macOS keeps an arrow key). An entry not listed was never
+// changed: macOS's default, on.
+#define HOTKEY_SPACE_LEFT 79        // Ctrl+Left
+#define HOTKEY_SPACE_RIGHT 81       // Ctrl+Right
+// The marker on the keys this helper posts for macOS (the Bridge's value):
+// our tap and OmacVM.app's QEMU (omacvm-cocoa-keys-for-macos.patch) let them
+// through instead of taking them for the VM.
+#define OMACVM_KEY_MARKER 0x0BAC0E5C
+#define HOTKEY_MODS (kCGEventFlagMaskShift | kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | \
+                     kCGEventFlagMaskCommand | kCGEventFlagMaskSecondaryFn | kCGEventFlagMaskNumericPad)
+typedef struct { int enabled, keycode; CGEventFlags flags; } Hotkey;
+
+static int cfTrue(CFTypeRef v) {
+  if (v && CFGetTypeID(v) == CFBooleanGetTypeID()) return CFBooleanGetValue((CFBooleanRef)v);
+  int n = 0;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &n);
+  return n != 0;
+}
+
+static int64_t cfInt(CFArrayRef a, CFIndex i) {
+  CFTypeRef v = CFArrayGetValueAtIndex(a, i);
+  int64_t n = -1;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberSInt64Type, &n);
+  return n;
+}
+
+// One of them from that dictionary (NULL: none at all, every one the default).
+static Hotkey hotkeyFrom(CFDictionaryRef all, int id) {
+  Hotkey k = { 1, id == HOTKEY_SPACE_LEFT ? 123 : id == HOTKEY_SPACE_RIGHT ? 124 : 126,
+               kCGEventFlagMaskControl | kCGEventFlagMaskSecondaryFn };
+  char name[16];
+  snprintf(name, sizeof name, "%d", id);
+  CFStringRef key = CFStringCreateWithCString(NULL, name, kCFStringEncodingUTF8);
+  CFTypeRef e = all && key && CFGetTypeID(all) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(all, key) : NULL;
+  if (key) CFRelease(key);
+  if (!e || CFGetTypeID(e) != CFDictionaryGetTypeID()) return k;
+  CFTypeRef on = CFDictionaryGetValue(e, CFSTR("enabled"));
+  if (on) k.enabled = cfTrue(on);
+  CFTypeRef v = CFDictionaryGetValue(e, CFSTR("value"));
+  CFTypeRef p = v && CFGetTypeID(v) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(v, CFSTR("parameters")) : NULL;
+  if (p && CFGetTypeID(p) == CFArrayGetTypeID() && CFArrayGetCount(p) >= 3) {
+    int64_t code = cfInt(p, 1), mods = cfInt(p, 2);
+    if (code < 0 || code > 127 || mods < 0) k.enabled = 0;   // 65535: no key set
+    else { k.keycode = (int)code; k.flags = (CGEventFlags)mods & HOTKEY_MODS; }
+  }
+  return k;
+}
+
+static CFDictionaryRef readHotkeys(void) {
+  CFStringRef domain = CFSTR("com.apple.symbolichotkeys");
+  CFPreferencesAppSynchronize(domain);
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("AppleSymbolicHotKeys"), domain);
+  if (v && CFGetTypeID(v) != CFDictionaryGetTypeID()) { CFRelease(v); v = NULL; }
+  return v;
+}
+
+// The key event macOS would get from the keyboard for it: an arrow key
+// carries fn and the keypad flag. Marked as ours. NULL if CG made none.
+static CGEventRef hotkeyEvent(Hotkey k, int down) {
+  CGEventRef e = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)k.keycode, down);
+  if (!e) return NULL;
+  CGEventFlags f = k.flags;
+  if (k.keycode >= 123 && k.keycode <= 126) f |= kCGEventFlagMaskSecondaryFn | kCGEventFlagMaskNumericPad;
+  CGEventSetFlags(e, f);
+  CGEventSetIntegerValueField(e, kCGEventSourceUserData, OMACVM_KEY_MARKER);
+  return e;
+}
+
+// Down and up at the HID level, where the keyboard's own keys come in.
+static int postHotkey(Hotkey k) {
+  int ok = 1;
+  for (int down = 1; down >= 0; down--) {
+    CGEventRef e = hotkeyEvent(k, down);
+    if (!e) { ok = 0; continue; }
+    CGEventPost(kCGHIDEventTap, e);
+    CFRelease(e);
+  }
+  return ok;
+}
+
+static CGEventFlags heldNow(void) { return CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState); }
+
 // ---- the swipe: a Dock swipe, the events a three/four-finger swipe makes ----
+// Only for the escape combo when macOS's "Move left/right a space" did not
+// move the display (macOS 15 from the notched built-in display's full-screen
+// Space). Only after the late looks (checkLeave): the user's log of
+// 2026-10-06 10:13-10:18 was the shortcut landing late, so the swipe moved a
+// second Space. Never Mission Control.
 #define kCGSEventTypeField 55
 #define kCGEventGestureHIDType 110
 #define kCGEventGestureScrollY 119
@@ -975,7 +1202,6 @@ static int stepToward(const DisplaySpaces *d, uint64_t want) {
 // documented: a swipe seen going the other way flips it (learnSign), kept in
 // the settings domain for the next start.
 static int swipeSign = 1;
-#define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
 
 static int dockSwipe(CGPoint at, int phase, int right) {
   CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
@@ -1014,7 +1240,7 @@ static CGPoint pointerNow(void) {
 }
 
 // One swipe on that display (dir +1: to the Space on the right). The Dock
-// swipes the display the pointer is on (swipe() puts it there first); the
+// swipes the display the pointer is on (postMove puts it there first); the
 // events also carry it.
 static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
   (void)d;
@@ -1064,7 +1290,13 @@ static pid_t topAppOn(CGRect b, pid_t skip, CGWindowID *win) {
   return found;
 }
 
-// "EscapeSwipe": "all" swipes every display that shows the VM, anything else
+// The test identity (build.sh with OMACVM_HELPER_TEST=1) builds with its own
+// domain, port and Bridge folder, so it never meets the installed Gestures.
+#ifndef GESTURES_DOMAIN
+#define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
+#endif
+
+// "EscapeSwipe": "all" moves every display that shows the VM, anything else
 // (default) the display under the pointer only.
 static int escapeAll(void) {
   CFPreferencesAppSynchronize(GESTURES_DOMAIN);
@@ -1072,6 +1304,25 @@ static int escapeAll(void) {
   int all = v && CFGetTypeID(v) == CFStringGetTypeID() && CFStringCompare((CFStringRef)v, CFSTR("all"), kCFCompareCaseInsensitive) == kCFCompareEqualTo;
   if (v) CFRelease(v);
   return all;
+}
+
+// "MouseSwipeFingers": a Magic Mouse two-finger swipe is this many fingers on
+// the guest's touchpad, 3 or 4 (OmacVM.app's "Magic Mouse swipe", or defaults
+// write org.omacvm.gestures MouseSwipeFingers -int 3). Not set, or anything
+// else: 4 (Omarchy switches workspaces with 4).
+static int mouseFingersOf(CFPropertyListRef v) {
+  double n = 0;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberDoubleType, &n);
+  else if (v && CFGetTypeID(v) == CFStringGetTypeID() && CFStringCompare((CFStringRef)v, CFSTR("3"), 0) == kCFCompareEqualTo) n = 3;
+  return n == 3 ? 3 : 4;
+}
+
+static int mouseSwipeFingers(void) {
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("MouseSwipeFingers"), GESTURES_DOMAIN);
+  int n = mouseFingersOf(v);
+  if (v) CFRelease(v);
+  return n;
 }
 
 static void loadSwipeSign(void) {
@@ -1100,15 +1351,17 @@ static int (*swipeFn)(CGDirectDisplayID, CGRect, int) = postSwipe;
 static CGPoint (*pointerFn)(void) = pointerNow;
 static void warpPointer(CGPoint p) { CGWarpMouseCursorPosition(p); CGAssociateMouseAndMouseCursorPosition(true); }
 static void (*warpFn)(CGPoint) = warpPointer;
-static double warpSettle = 0.08;   // s: the Dock takes the swipe before the pointer goes back
+static double warpSettle = 0.08;   // s: macOS takes the move before the pointer goes back
 static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
 static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
-static int (*hideFn)(pid_t) = ns_hide;
-static int setFullScreen(pid_t pid, int on);
-static int (*fullScreenFn)(pid_t, int) = setFullScreen;
+static int (*hideFn)(pid_t) = ns_hide;   // a VM in a window only
 static int (*escapeAllFn)(void) = escapeAll;
 static void (*saveSignFn)(void) = saveSwipeSign;
-static double verifyAfter = 0.8;   // s: a swipe's animation is over by then
+static CFDictionaryRef (*hotkeysFn)(void) = readHotkeys;
+static int (*keyFn)(Hotkey) = postHotkey;
+static CGEventFlags (*heldFn)(void) = heldNow;
+static double verifyAfter = 0.8;   // s: a Space's animation is over by then
+static double cameFromEvery = 0.5; // s: the Spaces read at most this often for the same app
 
 // The escape combo's steps still to run (main thread): the offline test runs
 // the main queue until none is left.
@@ -1120,26 +1373,44 @@ static void after(void (^f)(void)) {
                  ^{ pendingSteps--; f(); });
 }
 
-// The Space each display showed the VM on when the combo left it (pressing
-// it again there swipes back to it), and the swipes of the last press.
-static struct { CGDirectDisplayID id; uint64_t space; } left[MAX_DISPLAYS];
-typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir; } Swipe;
-static Swipe swiped[MAX_DISPLAYS];
-static int nSwiped, signRetried;
+// Per display: the VM's Space when the combo left it (pressed again there,
+// it goes back to it), and the Space it showed before the VM (the way out
+// goes toward it).
+typedef struct { CGDirectDisplayID id; uint64_t space; } DisplaySpace;
+static DisplaySpace left[MAX_DISPLAYS], cameFrom[MAX_DISPLAYS];
 
-static void rememberLeft(CGDirectDisplayID id, uint64_t space) {
+static void rememberOn(DisplaySpace *m, CGDirectDisplayID id, uint64_t space) {
   for (int i = 0; i < MAX_DISPLAYS; i++)
-    if (left[i].id == id || !left[i].id) { left[i].id = id; left[i].space = space; return; }
+    if (m[i].id == id || !m[i].id) { m[i].id = id; m[i].space = space; return; }
 }
 
-static uint64_t leftOn(CGDirectDisplayID id) {
-  for (int i = 0; i < MAX_DISPLAYS && left[i].id; i++) if (left[i].id == id) return left[i].space;
+static uint64_t spaceOn(const DisplaySpace *m, CGDirectDisplayID id) {
+  for (int i = 0; i < MAX_DISPLAYS && m[i].id; i++) if (m[i].id == id) return m[i].space;
   return 0;
+}
+
+// While no full-screen VM is in front (the capture check): what each display
+// shows, except the last VM's Space. changed: another app came to the front.
+static void noteCameFrom(int changed) {
+  static double at = -1;
+  double now = monoNow();
+  if (!changed && at >= 0 && now - at < cameFromEvery) return;
+  at = now;
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
+  uint64_t vmSpace = nd && vmWin ? windowSpaceFn(vmWin) : 0;
+  for (int i = 0; i < nd; i++) if (ds[i].current != vmSpace) rememberOn(cameFrom, ds[i].id, ds[i].current);
 }
 
 static const DisplaySpaces *displayIn(const DisplaySpaces *ds, int n, CGDirectDisplayID id) {
   for (int i = 0; i < n; i++) if (ds[i].id == id) return &ds[i];
   return NULL;
+}
+
+static Hotkey hotkey(int id) {
+  CFDictionaryRef all = hotkeysFn();
+  Hotkey k = hotkeyFrom(all, id);
+  if (all) CFRelease(all);
+  return k;
 }
 
 // Brings an app to the front; after a moment it must be there, else the usual
@@ -1162,40 +1433,6 @@ static void goTo(pid_t pid, CGWindowID win, const char *what, void (^done)(int))
   });
 }
 
-// The last way out: the VM's app hidden, so it cannot keep the keyboard.
-static void hideVM(void) {
-  if (frontFn() != vmPid) return;
-  char name[64] = "";
-  proc_name(vmPid, name, sizeof name);
-  int ok = hideFn(vmPid);
-  logf_("escape combo: %s kept the front: hidden%s, macOS has the keyboard (the combo brings it back)", name, ok ? "" : " (refused!)");
-}
-
-// The VM's windows into or out of macOS's full screen (Accessibility:
-// AXFullScreen, as the green button). Out: each full-screen one; in: the
-// front one. 1: one changed.
-static int setFullScreen(pid_t pid, int on) {
-  AXUIElementRef app = AXUIElementCreateApplication(pid);
-  if (!app) return 0;
-  AXUIElementSetMessagingTimeout(app, 0.5f);
-  CFArrayRef wins = NULL;
-  int done = 0;
-  if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef *)&wins) == kAXErrorSuccess && wins) {
-    for (CFIndex i = 0; i < CFArrayGetCount(wins) && !(on && done); i++) {
-      AXUIElementRef w = (AXUIElementRef)CFArrayGetValueAtIndex(wins, i);
-      CFTypeRef fs = NULL;
-      if (AXUIElementCopyAttributeValue(w, CFSTR("AXFullScreen"), &fs) == kAXErrorSuccess &&
-          (fs == kCFBooleanTrue) != on &&
-          AXUIElementSetAttributeValue(w, CFSTR("AXFullScreen"), on ? kCFBooleanTrue : kCFBooleanFalse) == kAXErrorSuccess)
-        done = 1;
-      if (fs) CFRelease(fs);
-    }
-    CFRelease(wins);
-  }
-  CFRelease(app);
-  return done;
-}
-
 // A VM window covering this display (its full screen, either kind).
 static int fullOn(const DisplaySpaces *d, const CGRect *wins, int nw) {
   for (int i = 0; i < nw; i++)
@@ -1205,10 +1442,9 @@ static int fullOn(const DisplaySpaces *d, const CGRect *wins, int nw) {
 }
 
 // Still in the VM: it has the keyboard, or the pointer's display still shows
-// its full-screen window (Finder took the front without a window: the Space
-// stays, on the Mac mini, 12:58).
+// its full-screen window.
 static const char *stillIn(void) {
-  if (frontFn() == vmPid) return "it is in front";
+  if (frontFn() == vmPid) return "it has the keyboard";
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
@@ -1217,43 +1453,17 @@ static const char *stillIn(void) {
   return NULL;
 }
 
-// The end of every way out: the user must be out. If not: the VM's window
-// out of full screen (its Space closes), then its app hidden, so macOS has
-// the keyboard and the screen (never a trap). The combo brings it back in
-// full screen.
-static void verifyOut(void) {
+static void checkOut(void) {
   const char *why = stillIn();
-  if (!why) { logf_("escape combo: out of the VM (checked)"); return; }
-  pid_t vm = vmPid;
-  char name[64] = "";
-  proc_name(vm, name, sizeof name);
-  int un = fullScreenFn(vm, 0);
-  logf_("escape combo: still in the VM (%s): %s%s hidden", why, name, un ? " out of full screen and" : "");
-  after(^{
-    int ok = hideFn(vm);
-    if (un) { restoreFull = 1; restoreAt = monoNow(); }
-    after(^{
-      const char *still = stillIn();
-      if (still || !ok) logf_("escape combo: STILL in the VM after hiding it (%s)", still ? still : "macOS refused to hide it");
-      else logf_("escape combo: out of the VM (checked)");
-    });
-  });
+  if (!why) logf_("escape combo: out of the VM (checked)");
+  else logf_("escape combo: still in the VM (%s); it stays full screen", why);
 }
 
-// Out by switching apps (RC8): the app from before, else Finder; refused:
-// hide. Checked after (Finder has no window to switch Spaces with).
-static void leaveBySwitch(void) {
-  pid_t to = alive(otherPid) ? otherPid : finderFn();
-  CGWindowID w = to == otherPid ? otherWin : 0;
-  if (to <= 0) { logf_("escape combo: no app to go back to"); hideVM(); verifyOut(); return; }
-  goTo(to, w, to == otherPid ? "back to" : "back to (the app from before has quit)", ^(int ok) { if (!ok) hideVM(); verifyOut(); });
-}
-
-// After a swipe out: the keyboard follows the pointer's display. The VM may
-// still be in front (its window on another display, or macOS kept it there):
-// then the app on top of the pointer's display, else Finder.
+// Out of the VM's Space: the keyboard follows the pointer's display. The VM
+// may still be in front (its window on another display, or macOS kept it
+// there): then the app on top of the pointer's display, else Finder.
 static void focusPointerDisplay(void) {
-  if (frontFn() != vmPid) { verifyOut(); return; }
+  if (frontFn() != vmPid) { checkOut(); return; }
   CGPoint p = pointerFn();
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect b = CGRectNull;
@@ -1261,102 +1471,218 @@ static void focusPointerDisplay(void) {
   CGWindowID w = 0;
   pid_t to = CGRectIsNull(b) ? 0 : topAppFn(b, vmPid, &w);
   if (to <= 0) { to = finderFn(); w = 0; }
-  if (to <= 0) { hideVM(); verifyOut(); return; }
-  goTo(to, w, "keyboard to", ^(int ok) { if (!ok) hideVM(); verifyOut(); });
+  if (to <= 0) { checkOut(); return; }
+  goTo(to, w, "keyboard to", ^(int ok) { (void)ok; checkOut(); });
 }
 
-// Did each swipe of the last press land? A Space that moved the other way
-// teaches the sign (kept). *moved: some display's Space changed at all.
-static int learnedNow;   // swipesLanded just learned the sign from a swipe that went the other way
-static int swipesLanded(int *moved) {
-  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), landed = 0;
-  *moved = 0; learnedNow = 0;
-  for (int i = 0; i < nSwiped; i++) {
-    const DisplaySpaces *d = displayIn(ds, nd, swiped[i].id);
-    if (!d) continue;
-    if (d->current == swiped[i].to) { landed++; continue; }
-    int from = spaceIndex(d, swiped[i].from), now = spaceIndex(d, d->current);
-    if (now != from) *moved = 1;
-    if (from >= 0 && now == from - swiped[i].dir) {
-      swipeSign = -swipeSign;
-      saveSignFn();
-      learnedNow = 1;
-      logf_("escape combo: the swipe went the other way: direction learned");
-    }
+// ---- the combo pressed twice: Mission Control ----
+// User, 2026-10-06 10:31: "esc combo triggering mission control is rather
+// nerving.. disable it, maybe only do it when combo is clicked twice". A
+// single press only ever moves one Space (or does nothing); a second press
+// within doublePress stops what the first one has not posted yet and opens
+// Mission Control: macOS's own shortcut (as the user set it), else the app.
+static double doublePress = 0.4;     // s between the two presses (the offline test sets its own)
+#define HOTKEY_MISSION_CONTROL 32    // Ctrl+Up
+int ns_open_mission_control(void);
+static int (*missionAppFn)(void) = ns_open_mission_control;
+static int movesCancelled;           // the first press's steps not posted yet are dropped
+static double lastComboAt = -1;
+
+static void missionControl(void) {
+  Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
+  if (k.enabled && keyFn(k)) {
+    logf_("escape combo: pressed twice: Mission Control (macOS's shortcut)");
+    return;
   }
-  return landed;
+  int ok = missionAppFn();
+  logf_("escape combo: pressed twice: Mission Control (the app%s)", ok ? "" : ": macOS refused!");
 }
 
-static void postOn(CGDirectDisplayID id, CGRect b, int dir);
+// No way out to macOS (the Space shortcut is off, macOS did not move the
+// Space, not even with a Dock swipe, or it gives no Spaces information): one
+// log line and a short notice in Omarchy, nothing else. Never Mission
+// Control (user, 2026-10-06: "never"). The trackpad and keys stay macOS's, as after
+// any escape; the combo again takes them back.
+static void noWayOut(const char *why, const char *notice) {
+  logf_("escape combo: %s: nothing done", why);
+  char b[48]; int n = snprintf(b, sizeof b, "N %s\n", notice);
+  sendTo(0, b, (size_t)n);
+}
 
-// Nothing moved: with only two Spaces (a Mac mini: Desktop 1 and the VM's) a
-// swipe the wrong way just bounces at the edge, so nothing is learned. Try
-// the other direction once; if that lands, it is kept. 1: a retry is on.
-static int retryOtherWay(void (^then)(void)) {
-  if (signRetried || !nSwiped) return 0;
-  signRetried = 1;
-  swipeSign = -swipeSign;
-  logf_("escape combo: the swipe bounced: trying the other direction");
-  for (int i = 0; i < nSwiped; i++) postOn(swiped[i].id, swiped[i].b, swiped[i].dir);
-  after(then);
+// ---- the moves of the last press: per display, from its Space to the one beside it ----
+typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir, done; } Move;
+enum { BY_SHORTCUT, BY_DOCK };
+static Move moves[MAX_DISPLAYS];
+static int nMoves, leaving, signRetried, learnedNow, shortcutOff;
+
+static int addMove(const DisplaySpaces *d, int dir, uint64_t to) {
+  // "Displays have separate Spaces" off: one list for every display, moved once.
+  for (int i = 0; i < nMoves; i++) if (moves[i].from == d->current) return 0;
+  if (!dir || nMoves >= MAX_DISPLAYS) return 0;
+  moves[nMoves++] = (Move){ d->id, d->bounds, d->current, to, dir, 0 };
   return 1;
 }
 
-// After the retry: it landed (kept) or not (the sign as before).
-static int retryLanded(int landed) {
-  if (!signRetried) return landed;
-  if (landed) { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
-  else if (!learnedNow) swipeSign = -swipeSign;
-  return landed;
-}
-
-static void checkLeave(void) {
-  int moved, landed = swipesLanded(&moved);
-  if (!landed && !moved && retryOtherWay(^{ checkLeave(); })) return;
-  if (!retryLanded(landed)) {
-    logf_("escape combo: the Space did not change: switching apps instead");
-    leaveBySwitch();
-    return;
+// One move on its display. macOS moves the display the pointer is on: for
+// another display (the "all" setting) the pointer goes to its centre first,
+// then back. 0: not made (the shortcut is off). *k: the shortcut used.
+static int postMove(const Move *m, int by, Hotkey *k) {
+  if (by == BY_SHORTCUT) {
+    *k = hotkey(m->dir < 0 ? HOTKEY_SPACE_LEFT : HOTKEY_SPACE_RIGHT);
+    if (!k->enabled) return 0;
   }
-  focusPointerDisplay();
-}
-
-static void checkEnter(void) {
-  int moved, landed = swipesLanded(&moved);
-  if (!landed && !moved && retryOtherWay(^{ checkEnter(); })) return;
-  if (!retryLanded(landed)) {
-    logf_("escape combo: the Space did not change: switching to the VM instead");
-    goTo(vmPid, vmWin, "back into the VM:", NULL);
-    return;
-  }
-  // The keyboard to the VM now on the pointer's display (a full-screen Space
-  // usually brings its app; the notch's kind of full screen is a window).
-  if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
-}
-
-// The Dock swipes the display the pointer is on: for another display (the
-// "all" setting) the pointer goes to its centre for the swipe, then back.
-static int postWhere(CGDirectDisplayID id, CGRect b, int dir) {
   CGPoint p = pointerFn();
-  int away = !CGRectContainsPoint(b, p);
-  if (away) warpFn(CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b)));
-  int ok = swipeFn(id, b, dir);
+  int away = !CGRectContainsPoint(m->b, p);
+  if (away) warpFn(CGPointMake(CGRectGetMidX(m->b), CGRectGetMidY(m->b)));
+  int ok = by == BY_SHORTCUT ? keyFn(*k) : swipeFn(m->id, m->b, m->dir);
   if (away) {
     if (warpSettle > 0) usleep((useconds_t)(warpSettle * 1e6));
     warpFn(p);
   }
   return ok;
 }
-static void postOn(CGDirectDisplayID id, CGRect b, int dir) { postWhere(id, b, dir); }
 
-static int swipe(const DisplaySpaces *d, int dir, uint64_t to, const char *what) {
-  // "Displays have separate Spaces" off: one list for every display, swiped once.
-  for (int i = 0; i < nSwiped; i++) if (swiped[i].from == d->current) return 0;
-  if (!dir || nSwiped >= MAX_DISPLAYS || !postWhere(d->id, d->bounds, dir)) return 0;
-  swiped[nSwiped++] = (Swipe){ d->id, d->bounds, d->current, to, dir };
-  logf_("escape combo: display %u swiped %s (%s)", d->id, dir > 0 ? "right" : "left", what);
+// Every move not done yet, one way. Returns how many were made.
+static int runMoves(int by, const char *what) {
+  int made = 0;
+  if (movesCancelled) return 0;
+  for (int i = 0; i < nMoves; i++) {
+    Move *m = &moves[i];
+    if (m->done) continue;
+    const char *side = m->dir > 0 ? "right" : "left";
+    Hotkey k = { 0 };
+    if (!postMove(m, by, &k)) {
+      if (by == BY_SHORTCUT) logf_("escape combo: macOS's \"Move %s a space\" shortcut is off or has no key", side);
+      continue;
+    }
+    made++;
+    if (by == BY_SHORTCUT)
+      logf_("escape combo: display %u: macOS's \"Move %s a space\" (key %d, modifiers 0x%llx; %s)", m->id, side, k.keycode,
+            (unsigned long long)k.flags, what);
+    else logf_("escape combo: display %u swiped %s (%s)", m->id, side, what);
+  }
+  return made;
+}
+
+// Which moves landed: out, any Space but the VM's on that display; back in,
+// the VM's. A Dock swipe seen going the other way teaches its sign (kept).
+// *moved: some display's Space changed at all. Returns the moves not done.
+static int movesLeft(int by, int *moved) {
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), rest = 0;
+  *moved = 0; learnedNow = 0;
+  for (int i = 0; i < nMoves; i++) {
+    Move *m = &moves[i];
+    if (m->done) continue;
+    const DisplaySpaces *d = displayIn(ds, nd, m->id);
+    if (!d) { m->done = 1; continue; }   // the display is gone
+    int from = spaceIndex(d, m->from), now = spaceIndex(d, d->current);
+    if (d->current != m->from) *moved = 1;
+    if (by == BY_DOCK && from >= 0 && now == from - m->dir && !learnedNow) {
+      swipeSign = -swipeSign;
+      saveSignFn();
+      learnedNow = 1;
+      logf_("escape combo: the swipe went the other way: direction learned");
+    }
+    if (leaving ? d->current != m->from : d->current == m->to) m->done = 1;
+    else rest++;
+  }
+  return rest;
+}
+
+// Nothing moved: with only two Spaces (a Mac mini: Desktop 1 and the VM's) a
+// swipe the wrong way just bounces at the edge, so nothing is learned. Try
+// the other direction once; if that lands, it is kept. 1: a retry is on.
+static int retryOtherWay(void (^then)(void)) {
+  if (signRetried) return 0;
+  signRetried = 1;
+  swipeSign = -swipeSign;
+  logf_("escape combo: the swipe bounced: trying the other direction");
+  if (!runMoves(BY_DOCK, "the other direction")) { swipeSign = -swipeSign; return 0; }
+  after(then);
   return 1;
 }
+
+// Out: macOS's shortcut, then (it did not move: macOS 15 from the notched
+// display's full-screen Space) a Dock swipe, then the other direction once.
+// Nothing landed: noWayOut. Never Mission Control.
+// A Space change can land after verifyAfter (macOS still sliding or busy).
+// Before the next step (a swipe, the other direction) look again a few times:
+// a step after a late landing moves a second Space (the user's 10:13 log:
+// the shortcut, then the swipe, ended on Desktop 1 of 3 instead of the Space
+// beside the VM).
+#define LATE_LOOKS 2
+static int lateLooks;
+// The extra looks come quicker than the first one (half of verifyAfter).
+static void afterLook(void (^f)(void)) {
+  pendingSteps++;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * 0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(),
+                 ^{ pendingSteps--; f(); });
+}
+static void landedLate(int rest, int moved) {
+  if (lateLooks && (moved || !rest))
+    logf_("escape combo: macOS's Space change landed late (%.1f s after the key): no further step", verifyAfter * (1 + 0.5 * lateLooks));
+}
+static void checkLeave(int by) {
+  if (movesCancelled) return;
+  int moved, rest = movesLeft(by, &moved);
+  if (rest && !moved && lateLooks < LATE_LOOKS) {
+    lateLooks++;
+    afterLook(^{ checkLeave(by); });
+    return;
+  }
+  landedLate(rest, moved);
+  lateLooks = 0;
+  if (by == BY_DOCK && signRetried && !learnedNow) {
+    if (rest) swipeSign = -swipeSign;   // the retry did not land either: as before
+    else { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
+  }
+  if (!rest) {
+    logf_("escape combo: out of the VM's Space (%s)", by == BY_SHORTCUT ? "macOS's shortcut" : "a Dock swipe");
+    focusPointerDisplay();
+    return;
+  }
+  if (by == BY_SHORTCUT) {
+    logf_("escape combo: still in the VM's Space: trying a Dock swipe");
+    if (runMoves(BY_DOCK, "out of the VM")) { after(^{ checkLeave(BY_DOCK); }); return; }
+  } else if (!moved && retryOtherWay(^{ checkLeave(BY_DOCK); })) {
+    return;
+  }
+  if (shortcutOff) noWayOut("macOS's \"Move left/right a space\" shortcut is off and the swipe did not move", "space-shortcut-off");
+  else noWayOut("the Space did not change", "space-unchanged");
+}
+
+static void checkEnter(void) {
+  if (movesCancelled) return;
+  int moved, rest = movesLeft(BY_SHORTCUT, &moved);
+  if (rest && !moved && lateLooks < LATE_LOOKS) {
+    lateLooks++;
+    afterLook(^{ checkEnter(); });
+    return;
+  }
+  landedLate(rest, moved);
+  lateLooks = 0;
+  if (rest) {
+    logf_("escape combo: not in the VM's Space: its window to the front instead");
+    goTo(vmPid, vmWin, "back into the VM:", NULL);
+    return;
+  }
+  // The keyboard to the VM now on the pointer's display (a full-screen Space
+  // usually brings its app).
+  if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
+}
+
+// The combo's Ctrl, Option and Cmd are most likely still down when its steps
+// run: macOS's shortcut goes once they are up (at most 1 s), so macOS reads
+// it as the shortcut and not as one with more keys.
+static void whenKeysUp(void (^f)(void), int tries) {
+  CGEventFlags combo = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift;
+  if (tries <= 0 || !(heldFn() & combo)) { f(); return; }
+  pendingSteps++;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * (int64_t)NSEC_PER_MSEC), dispatch_get_main_queue(),
+                 ^{ pendingSteps--; whenKeysUp(f, tries - 1); });
+}
+
+static void missionControlWhenKeysUp(void) { whenKeysUp(^{ missionControl(); }, 50); }
 
 static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
   for (int i = 0; i < nw; i++)
@@ -1365,54 +1691,56 @@ static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
 }
 
 // Out of the VM: the pointer's display (or, with "all", each display that
-// shows the VM) swipes to the Space beside the VM's.
+// shows the VM) moves one Space toward the one it showed before.
 static void leaveVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
-  nSwiped = 0; signRetried = 0;
+  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0;
   int pointerOnVM = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     int under = CGRectContainsPoint(d->bounds, p), vm = showsVM(d, wins, nw);
     pointerOnVM |= under && vm;
     if (!vm || !(all || under)) continue;
-    int dir = stepOut(d);
-    if (dir) { rememberLeft(d->id, d->current); swipe(d, dir, d->spaces[spaceIndex(d, d->current) + dir], "out of the VM"); }
+    int dir = leaveDir(d, spaceOn(cameFrom, d->id));
+    if (dir && addMove(d, dir, d->spaces[spaceIndex(d, d->current) + dir])) rememberOn(left, d->id, d->current);
   }
-  if (nSwiped) { after(^{ checkLeave(); }); return; }
-  // The pointer is on a display without the VM: nothing to swipe there, the
+  if (nMoves) {
+    whenKeysUp(^{
+      if (runMoves(BY_SHORTCUT, "out of the VM")) after(^{ checkLeave(BY_SHORTCUT); });
+      else { shortcutOff = 1; checkLeave(BY_SHORTCUT); }   // the shortcut is off: on to the Dock swipe
+    }, 50);
+    return;
+  }
+  // The pointer is on a display without the VM: nothing to move there, the
   // keyboard goes to what it shows.
   if (nd && nw && !pointerOnVM && !all) { focusPointerDisplay(); return; }
-  logf_("escape combo: no swipe possible here (%s): switching apps", !nd ? "no Spaces information" : "the VM's Space has no neighbour");
-  leaveBySwitch();
+  if (!nd) noWayOut("macOS gives no Spaces information", "no-spaces");
+  else noWayOut("the VM's Space has no neighbour", "space-unchanged");
 }
 
 // Into the VM again: the pointer's display (or, with "all", each display the
-// combo left) swipes back to the VM's Space when it is right beside it. Taken
-// out of full screen on the way out: to the front, full screen again.
+// combo left) moves back to the VM's Space when it is right beside it; else,
+// or if that does not land, the VM's window comes to the front (macOS shows
+// its Space).
 static void enterVM(void) {
-  if (restoreFull) {
-    restoreFull = 0;
-    pid_t vm = vmPid;
-    goTo(vm, vmWin, "back into the VM (full screen again):", ^(int ok) {
-      if (ok && !fullScreenFn(vm, 1)) logf_("escape combo: the VM window did not go full screen again (it stays a window)");
-    });
-    return;
-  }
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
   uint64_t vmSpace = windowSpaceFn(vmWin);
-  nSwiped = 0; signRetried = 0;
+  nMoves = 0; leaving = 0; lateLooks = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     if (!all && !CGRectContainsPoint(d->bounds, p)) continue;
-    uint64_t want = leftOn(d->id);
+    uint64_t want = spaceOn(left, d->id);
     if (!want || spaceIndex(d, want) < 0) want = all ? 0 : vmSpace;
-    if (want && d->current != want) swipe(d, stepToward(d, want), want, "back into the VM");
+    if (want && d->current != want) addMove(d, stepToward(d, want), want);
   }
-  if (nSwiped) { after(^{ checkEnter(); }); return; }
-  goTo(vmPid, vmWin, "back into the VM:", NULL);
+  if (!nMoves) { goTo(vmPid, vmWin, "back into the VM:", NULL); return; }
+  whenKeysUp(^{
+    if (runMoves(BY_SHORTCUT, "back into the VM")) after(^{ checkEnter(); });
+    else checkEnter();
+  }, 50);
 }
 
 // A windowed VM with the keyboard: the app from before (else Finder) gets
@@ -1450,11 +1778,17 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     CGEventTapEnable(tapPort, true); return e;
   }
   if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
+    // Ours for macOS (the combo's Space shortcut): never the VM's.
+    if (CGEventGetIntegerValueField(e, kCGEventSourceUserData) == OMACVM_KEY_MARKER) return e;
     int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
-    int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
+    int combo = escapeCombo(kc, f);
+    // A plain Esc going down: the combo's Esc up we meant to eat went elsewhere
+    // (QEMU's tap ahead of ours takes it when Ctrl or Option comes up first),
+    // so this press keeps its own up.
+    if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo) swallowEscUp = 0;
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
-    int act = kc == ESC_KEYCODE && combo
+    int act = combo
               ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin),
                             winVMPid > 0 && winVMPid == appPid,
                             alive(leftWinPid) && leftWinPid != appPid && vmWindowFn(leftWinPid, leftWinWin))
@@ -1486,6 +1820,23 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       logf_("escape combo ignored: posted by pid %lld (%s), state %lld", srcPid, who, srcState);
       return e;
     }
+    escKeys = combo == ESC_OLD ? "ctrl-opt-cmd" : "ctrl-opt";
+    if (combo == ESC_OLD) logf_("escape combo: the old Ctrl+Option+Cmd+Esc (works through 3.0.x; the new one is Ctrl+Option+Esc)");
+    // Twice in a row (the first press's state stays: out of the VM, capture
+    // off): Mission Control, and nothing more of the first press.
+    double nowCombo = monoNow();
+    if (lastComboAt >= 0 && nowCombo - lastComboAt < doublePress) {
+      lastComboAt = -1;
+      movesCancelled = 1;
+      if (capturing) { capturing = 0; escaped = 1; logf_("escape combo: capture off"); sendState("esc"); }
+      // Ctrl+Up once Ctrl and Option are up, like the Space shortcut: with
+      // them still held macOS reads it as Ctrl+Option+Up (no Mission Control).
+      later(missionControlWhenKeysUp);
+      swallowEscUp = 1;
+      return NULL;
+    }
+    lastComboAt = nowCombo;
+    movesCancelled = 0;   // this press's steps run (a second press may drop them)
     if (act == COMBO_ENTER) {
       later(enterVM);
     } else if (act == COMBO_WINDOW_BACK) {
@@ -1511,6 +1862,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
             CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1),
             CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous), capturing);
   if (type == kCGEventScrollWheel) {
+    // A Magic Mouse's two-finger swipe is the guest's workspace swipe: macOS's
+    // scrolling for the same fingers would also scroll the VM sideways.
+    if (capturing && monoNow() < mouseSwipeUntil && gesturesOn()) return NULL;
     // Glide: a trackpad's scrolling, as macOS shaped it, goes to the guest;
     // everything else (wheel mice, smooth-scrolling mice, a Magic Mouse)
     // passes to the VM app as it is (scroll-model.h).
@@ -1567,7 +1921,7 @@ static void base64Name(const char *in, char *out, size_t cap) {
 static size_t readToken(char tok[160]) {
   char path[1024];
   tok[0] = 0;
-  snprintf(path, sizeof path, "%s/Library/Application Support/omacvm-bridge/token", getenv("HOME"));
+  snprintf(path, sizeof path, "%s/Library/Application Support/" BRIDGE_DIR "/token", getenv("HOME"));
   FILE *f = fopen(path, "r");
   if (!f) return 0;
   if (!fgets(tok, 160, f)) tok[0] = 0;
@@ -1781,12 +2135,51 @@ static void *serverThread(void *arg) {
   return NULL;
 }
 
-// ---- the trackpads: the built-in one and every Magic Trackpad ----
+// ---- the trackpads (the built-in one, every Magic Trackpad) and Magic Mice ----
 // MultitouchSupport lists every multi-touch surface, the Magic Mouse's too; a
 // trackpad is told apart by its size (a Magic Trackpad is 160 x 115 mm, a Magic
-// Mouse's surface well under 100 mm wide). Looked for again every 10 s, so a
-// Magic Trackpad connected later (or again) is taken too.
+// Mouse's surface well under 100 mm wide), a Magic Mouse by its family id or
+// HID product (isMagicMouseKind). Looked for again every 10 s, so a Magic
+// Trackpad or Magic Mouse connected later (or again) is taken too.
 static int trackpadStarted;
+
+// The HID product id of the device behind a multi-touch surface (0: unknown).
+static int mtProduct(MTDeviceRef d) {
+  io_service_t svc = MTDeviceGetService(d);
+  if (!svc) return 0;
+  int product = 0;
+  CFTypeRef v = IORegistryEntrySearchCFProperty(svc, kIOServicePlane, CFSTR("ProductID"), NULL,
+                                                kIORegistryIterateRecursively | kIORegistryIterateParents);
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &product);
+  if (v) CFRelease(v);
+  return product;
+}
+
+// A Magic Mouse not taken yet: 1 if it was added (its frames now come).
+static int startMouse(MTDeviceRef d, int w, int h, int family, int product) {
+  uint64_t id = 0;
+  MTDeviceGetDeviceID(d, &id);
+  int slot = -1, known = 0;
+  pthread_mutex_lock(&mouseLock);
+  for (int k = 0; k < nMice; k++) {
+    if (mice[k].id != id) continue;
+    // The same mouse connected again comes as a new device: take that one.
+    if (mice[k].dev == d || MTDeviceIsRunning(mice[k].dev)) known = 1; else slot = k;
+  }
+  if (!known && slot < 0 && nMice < MAX_MICE) slot = nMice++;
+  if (!known && slot >= 0) {
+    mice[slot].dev = d; mice[slot].id = id; mice[slot].sent = 0;
+    mice[slot].w = w > 0 ? w : 5150; mice[slot].h = h > 0 ? h : 9050;
+    mouseStateInit(&mice[slot].st);
+  }
+  pthread_mutex_unlock(&mouseLock);
+  if (known || slot < 0) return 0;
+  MTRegisterContactFrameCallback(d, mouseFrameCb);
+  MTDeviceStart(d, 0);
+  logf_("Magic Mouse: family %d, product 0x%04x, %d x %d mm (in the VM: two-finger swipe = workspaces, "
+        "one-finger flick = back/forward; scrolling as before)", family, product, mice[slot].w / 100, mice[slot].h / 100);
+  return 1;
+}
 
 static int isTrackpad(MTDeviceRef d, int *w, int *h) {
   if (MTDeviceGetSensorSurfaceDimensions(d, w, h) != 0) *w = *h = 0;
@@ -1800,7 +2193,13 @@ static void startTrackpads(void) {
     MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
     int w = 0, h = 0;
     uint64_t id = 0;
-    if (!isTrackpad(d, &w, &h)) continue;
+    if (!isTrackpad(d, &w, &h)) {
+      int family = 0;
+      if (MTDeviceGetFamilyID(d, &family) != 0) family = 0;
+      int product = mtProduct(d);
+      if (isMagicMouseKind(MTDeviceIsBuiltIn(d), family, product, w, h)) added += startMouse(d, w, h, family, product);
+      continue;
+    }
     MTDeviceGetDeviceID(d, &id);
     int slot = -1, known = 0;
     pthread_mutex_lock(&padLock);
@@ -1886,7 +2285,7 @@ int main(int argc, char **argv) {
     // Magic Trackpad connected yet: keys only until one is, instead of
     // exiting into a launchd restart loop. Mice scroll as they are.
     if (!trackpadStarted) logf_("no trackpad found: keys only until a Magic Trackpad connects; mice scroll as they are");
-    // Every 10 s: a Magic Trackpad connected later, or again.
+    // Every 10 s: a Magic Trackpad or Magic Mouse connected later, or again.
     CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
     CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
   }
@@ -1908,7 +2307,7 @@ int main(int argc, char **argv) {
     if (!listenAddrs[i][0] && i != NET_FUSION) continue;
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
-  logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
+  logf_(trackpad ? "running (escape: Ctrl+Option+Esc)" : "running, keys only: trackpad gestures stay with macOS");
   CFRunLoopRun();
   return 0;
 }

@@ -2,7 +2,11 @@
 """Prebuilt image manifests.
 
   manifest.py write OUT.json --route R --omacvm V --omarchy V --bundle NAME
-                    --unpacked KB --disk-gb N PART...
+                    --unpacked KB --disk-gb N --teams JSON-LIST [--next-spare-key KEY]
+                    [--revoked-keys "KEY..."] PART...
+                                           unsigned: make-image.sh signs it (OUT.json.sig);
+                                           the keys: OMACVM_NEXT_SPARE_KEY and
+                                           OMACVM_REVOKED_KEYS (docs/release-keys.md)
   manifest.py get MANIFEST KEY             one value (route, omacvm, omarchy, bundle,
                                            size, unpacked_kb, disk_gb, created); the
                                            manifest is checked first, exit 1 if it is bad
@@ -13,6 +17,11 @@
                                            major version, up to VERSION
   manifest.py local DIR VERSION ROUTE      the same from a folder: NAME IMAGE_VERSION
   manifest.py asset RELEASES.json TAG NAME the download URL of one asset
+
+get and parts read nothing before MANIFEST.sig checks out: signed by one of
+OmacVM's release keys (src/release/keys.py), "kind": "prebuilt-manifest",
+"devid_teams" listed. The parts' SHA-256 sums then come from that signed
+manifest.
 """
 import datetime
 import hashlib
@@ -20,6 +29,9 @@ import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "release"))
+import keys  # noqa: E402
 
 
 def sha256(path):
@@ -43,6 +55,7 @@ def write(a):
             i += 1
     m = {
         "format": 1,
+        "kind": "prebuilt-manifest",
         "route": opts["route"],
         "omacvm": opts["omacvm"],
         "omarchy": opts["omarchy"],
@@ -52,7 +65,17 @@ def write(a):
         "compression": "tar + zstd --long=27",
         "created": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "parts": [{"name": os.path.basename(p), "size": os.path.getsize(p), "sha256": sha256(p)} for p in sorted(parts)],
+        "devid_teams": keys.teams(json.loads(opts["teams"])),
     }
+    if opts.get("next-spare-key"):
+        if not keys.key(opts["next-spare-key"]):
+            sys.exit("manifest.py: --next-spare-key is not a public key")
+        m["next_spare_key"] = opts["next-spare-key"]
+    revoked = list(dict.fromkeys(opts.get("revoked-keys", "").split()))
+    if revoked:
+        if not keys.revoked_keys(revoked):
+            sys.exit("manifest.py: --revoked-keys: 1 to %d public keys" % keys.MAX_REVOKED)
+        m["revoked_keys"] = revoked
     m["size"] = sum(p["size"] for p in m["parts"])
     json.dump(m, open(out, "w"), indent=2)
     print(out)
@@ -78,12 +101,14 @@ def plain_int(m, key):
     return v
 
 
+def signed(path):
+    """The manifest once PATH.sig checks out (keys.Refused, a ValueError, if not)."""
+    return keys.load(path, "prebuilt-manifest")
+
+
 def checked(path):
     """The manifest with every value we use checked; ValueError if not."""
-    with open(path) as f:
-        m = json.load(f)
-    if not isinstance(m, dict):
-        raise ValueError("not a JSON object")
+    m = signed(path)
     out = {}
     for key, rx in (("route", ROUTE), ("omacvm", VERSION), ("omarchy", TEXT), ("bundle", NAME), ("created", CREATED)):
         v = m.get(key)
@@ -134,9 +159,12 @@ def main(a):
             sys.exit("manifest.py: unknown key %r" % a[3])
         print(m[a[3]])
     elif cmd == "parts":
-        m = json.load(open(a[2]))
+        try:
+            m = signed(a[2])
+        except (ValueError, OSError) as e:
+            sys.exit("manifest.py: %s: %s" % (a[2], e))
         # The names become file paths on the Mac: only our own part names.
-        ok = re.compile(r"^omacvm-prebuilt-[0-9]+\.[0-9]+\.[0-9]+-(parallels|utm|fusion)\.tar\.zst\.part-[a-z]{2,4}$")
+        ok = re.compile(r"^omacvm-prebuilt-[0-9]+\.[0-9]+\.[0-9]+-(parallels|utm|fusion|app)\.tar\.zst\.part-[a-z]{2,4}$")
         for p in m["parts"]:
             size = p.get("size")
             if (not ok.match(str(p.get("name"))) or not re.fullmatch(r"[0-9a-f]{64}", str(p.get("sha256")))

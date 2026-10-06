@@ -1,5 +1,5 @@
 # Finding and reaching VMs from the Mac (sourced after mac.sh; bash 3.2).
-#   vms_list                 one line per VM: NAME<TAB>parallels|utm|fusion|app<TAB>running|stopped|...
+#   vms_list [no-utm]        one line per VM: NAME<TAB>parallels|utm|fusion|app<TAB>running|stopped|...
 #                            (Parallels' and UTM's other states as they name them;
 #                            unknown: UTM runs but does not answer this terminal)
 #   vm_find_ip NAME TYPE [s] the VM's address (waits up to s seconds)
@@ -8,7 +8,7 @@
 #                            /etc/omacvm/env (OMACVM_VM_TYPE, OMACVM_FEATURE_*)
 #   vm_boot NAME TYPE        start a stopped VM and wait for its address
 
-UTM_PREFS=$HOME/Library/Containers/com.utmapp.UTM/Data/Library/Preferences/com.utmapp.UTM.plist
+UTM_PREFS=$UTM_DATA/Library/Preferences/com.utmapp.UTM.plist   # read only through utm_data (mac.sh)
 source "$(dirname "${BASH_SOURCE[0]}")/app.sh"
 
 # utm_ctl_list: utmctl list, given 15 seconds. utmctl talks to UTM through
@@ -18,20 +18,40 @@ utm_ctl_list() { perl -e 'alarm shift; exec @ARGV' 15 "$UTMCTL" list 2>/dev/null
 UTM_NO_ANSWER="UTM did not answer: run omacvm in a terminal app on the Mac and allow it to control UTM"
 
 vms_list() {
-  local u=""
+  # The test identity ("OmacVM Test") has only its own app's VMs: the user's
+  # Parallels, UTM and Fusion VMs are not its to list or ask over SSH.
+  if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then app_list; return; fi
   if [[ -x $PRLCTL ]]; then
     "$PRLCTL" list -a -o status,name 2>/dev/null | awk 'NR > 1 { s = $1; $1 = ""; sub(/^ /, ""); print $0 "\tparallels\t" s }'
   fi
-  if [[ -x $UTMCTL ]] && pgrep -xq UTM && u=$(utm_ctl_list); then
-    awk 'NR > 1 { s = $2; $1 = ""; $2 = ""; sub(/^  /, ""); print $0 "\tutm\t" (s == "started" ? "running" : s) }' <<<"$u"
-  elif [[ -f $UTM_PREFS ]]; then
-    # UTM not running (utmctl would start it), or not answering: its VMs,
-    # wherever they are, from UTM's registry; stopped, suspended when UTM saved
-    # their state (UTM itself calls those "paused" once it runs), or unknown
-    # while UTM runs.
-    python3 - "$UTM_PREFS" "$(pgrep -xq UTM && echo unknown || echo stopped)" <<'PY' 2>/dev/null
+  # no-utm: the caller named a VM of another app (resolve_vm): UTM's data is not read.
+  [[ ${1:-} == no-utm ]] || { utm_used && utm_list; }
+  local n x
+  while IFS=$'\t' read -r n x; do
+    [[ -n $n ]] && printf '%s\tfusion\t%s\n' "$n" "$(fusion_state "$n")"
+  done < <(fusion_list)
+  app_list
+}
+
+# utm_list: vms_list's UTM lines. UTM runs: utmctl (AppleEvents, not its
+# files). Else, or when it does not answer: UTM's registry, only through
+# utm_data; stopped, suspended when UTM saved their state (UTM itself calls
+# those "paused" once it runs), or unknown while UTM runs. Neither: the names
+# OmacVM saw before, "unknown" with a 4th field saying why.
+utm_list() {
+  local u="" up=stopped out="" n
+  pgrep -xq UTM && up=unknown
+  if [[ $up == unknown && -x $UTMCTL ]] && u=$(utm_ctl_list); then
+    out=$(awk 'NR > 1 { s = $2; $1 = ""; $2 = ""; sub(/^  /, ""); print $0 "\tutm\t" (s == "started" ? "running" : s) }' <<<"$u")
+  else
+    # only a whole answer counts (a read cut off after 2 s is none)
+    out=$(utm_data python3 - "$UTM_PREFS" "$up" <<'PY' 2>/dev/null
 import os, plistlib, sys
-for entry in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values():
+try:
+    registry = plistlib.load(open(sys.argv[1], "rb")).get("Registry", {})
+except FileNotFoundError:   # UTM never ran: no VMs
+    registry = {}
+for entry in registry.values():
     path = (entry.get("Package") or {}).get("Path", "")
     if not os.path.isdir(path):
         continue
@@ -41,13 +61,20 @@ for entry in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values()
         name = os.path.basename(path)[:-4]
     state = sys.argv[2] if sys.argv[2] == "unknown" else ("suspended" if entry.get("Suspended") else "stopped")
     print(f"{name}\tutm\t{state}")
+print("#done")
 PY
+) || out=""
+    if [[ $out != *"#done" ]]; then
+      while IFS= read -r n; do
+        [[ -n $n ]] && printf '%s\tutm\tunknown\t%s\n' "$n" "$UTM_UNREADABLE"
+      done < <(utm_seen)
+      return 0
+    fi
+    out=$(sed '$d' <<<"$out")
   fi
-  local n x
-  while IFS=$'\t' read -r n x; do
-    [[ -n $n ]] && printf '%s\tfusion\t%s\n' "$n" "$(fusion_state "$n")"
-  done < <(fusion_list)
-  app_list
+  [[ -n $out ]] && echo "$out"
+  cut -f1 <<<"$out" | utm_seen_set
+  return 0
 }
 
 # vm_pin NAME TYPE: gssh checks that VM's remembered SSH host key from now on
@@ -67,15 +94,15 @@ vm_marked() {
   case $2 in
     parallels) b=$(vm_bundle "$1")
                grep -q "built by OmacVM" "$b/config.pvs" 2>/dev/null ;;
-    utm) b=$(utm_bundle "$1") && { grep -q "built by OmacVM" "$b/config.plist" || [[ -f $b/Data/omacvm.png ]]; } ;;
+    utm) b=$(utm_bundle "$1") && { utm_data grep -q "built by OmacVM" "$b/config.plist" || utm_data test -f "$b/Data/omacvm.png"; } ;;
     fusion) x=$(fusion_vmx "$1") && grep -q "built by OmacVM" "$x" ;;
     *) return 1 ;;
   esac
 }
 
-utm_bundle() {   # NAME -> its .utm (UTM's registry also knows VMs outside UTM's folder)
+utm_bundle() {   # NAME -> its .utm (UTM's registry also knows VMs outside UTM's folder); utm_data only
   local b
-  b=$(python3 - "$UTM_PREFS" "$1" <<'PY' 2>/dev/null
+  b=$(utm_data python3 - "$UTM_PREFS" "$1" <<'PY' 2>/dev/null
 import os, plistlib, sys
 for e in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values():
     p = (e.get("Package") or {}).get("Path", "")
@@ -86,8 +113,8 @@ for e in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values():
         pass
 PY
 )
-  [[ -n $b ]] || b="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm"
-  [[ -f $b/config.plist ]] && echo "$b"
+  [[ -n $b ]] || b="$UTM_DATA/Documents/$1.utm"
+  utm_data test -f "$b/config.plist" && echo "$b"
 }
 
 vm_find_ip() {   # NAME TYPE [seconds]
@@ -109,6 +136,12 @@ vm_probe() {
     grep -q "^OMACVM_FEATURE_omanotch=" /etc/omacvm/env 2>/dev/null || { [ -x "$H/.local/bin/notchcast" ] && echo OMACVM_FEATURE_omanotch=on; }
     grep -q "^OMACVM_FEATURE_autologin=" /etc/omacvm/env 2>/dev/null || { [ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ] && echo OMACVM_FEATURE_autologin=on; }
     grep -q "^OMACVM_FEATURE_thp_kernel=" /etc/omacvm/env 2>/dev/null || { pacman -Q linux-aarch64-thp >/dev/null 2>&1 && echo OMACVM_FEATURE_thp_kernel=on; }
+    # Autologin as SDDM does it, whoever wrote the file (src/guest/autologin.sh: the same rule).
+    if [ -d /etc/sddm.conf.d ] || [ -f /etc/sddm.conf ]; then
+      u=$(cat /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf 2>/dev/null |
+        awk "/^[[:space:]]*\\[/ { s = (\$0 ~ /^[[:space:]]*\\[Autologin\\]/) } s && /^[[:space:]]*User[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, \"\"); sub(/[[:space:]]+\$/, \"\"); u = \$0 } END { print u }")
+      [ -n "$u" ] && echo OMACVM_REAL_autologin=on || echo OMACVM_REAL_autologin=off
+    fi
     true' < /dev/null 2>/dev/null
 }
 
@@ -132,7 +165,7 @@ ssh_setup_command() {
     fusion) h=$(fusion_host) || return 1; net=${h%.*}.0/24 ;;
     app) net=10.0.2.0/24 ;;
   esac
-  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && pacman -S --needed --noconfirm openssh >/dev/null && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
+  printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && { pacman -Q openssh >/dev/null 2>&1 || pacman -S --noconfirm openssh >/dev/null; } && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
     "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"
 }
 
@@ -141,7 +174,9 @@ ssh_setup_command() {
 # empty for it. Exits 2 when it cannot tell which VM ("soft": returns 1).
 resolve_vm() {
   local running list state
-  list=$(vms_list)   # once: it can take 15 s while UTM does not answer
+  # once: it can take 15 s while UTM does not answer. A named VM of another
+  # app (--vm NAME --vm-type app): UTM is left out, its data never read.
+  if [[ -n ${VM:-} && -n ${TYPE:-} && $TYPE != utm ]]; then list=$(vms_list no-utm); else list=$(vms_list); fi
   if [[ -z ${VM:-} ]]; then
     if cut -f1 <<<"$list" | grep -qxF Omarchy; then VM=Omarchy
     else
@@ -162,7 +197,11 @@ resolve_vm() {
   IP=""
   state=$(awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && $2 == t { print $3; exit }' <<<"$list")
   # UTM does not answer: the VM may well run, so never start it
-  [[ $state == unknown ]] && { echo "omacvm: '$VM': $UTM_NO_ANSWER" >&2; exit 3; }
+  if [[ $state == unknown ]]; then
+    awk -F'\t' -v n="$VM" -v t="$TYPE" -v w="$UTM_UNREADABLE" '$1 == n && $2 == t && $4 == w { f = 1 } END { exit !f }' <<<"$list" \
+      && echo "omacvm: '$VM': $UTM_UNREADABLE_HINT" >&2 || echo "omacvm: '$VM': $UTM_NO_ANSWER" >&2
+    exit 3
+  fi
   # DHCP leases outlive a stopped VM: only a running one has an address.
   if [[ $state == running ]]; then
     IP=$(vm_find_ip "$VM" "$TYPE" 30 2>/dev/null) || IP=""

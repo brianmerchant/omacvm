@@ -2,7 +2,8 @@
 # Build a new OmacVM VM from nothing: Arch Linux ARM + Omarchy (omarchy-mac) on
 # one raw disk that boots through UEFI and GRUB. 10-30 minutes, mostly downloads.
 #
-#   create-vm.sh VM_DIR        (OMACVM_CREATE_NO_MAC=1: without the Mac helpers)
+#   create-vm.sh VM_DIR        (OMACVM_CREATE_NO_MAC=1: without the Mac helpers;
+#                               OMACVM_CREATE_IMAGE=1: for a prebuilt image, nothing of this Mac)
 #
 # VM_DIR/vm.env must exist (the app writes it): NAME CPUS MEM_MB DISK_GB SSH_PORT
 #   VM_USER VM_FULLNAME VM_HOSTNAME VM_TZ VM_LANG KEYBOARD [FEATURES="bridge=on ..."]
@@ -26,6 +27,9 @@ STEPS=7
 step() { echo "STEP $1/$STEPS $2"; }
 LOG=$VM_DIR/logs
 mkdir -p "$LOG"
+# Time Machine leaves the VM out: its disk changes all the time (the sticky
+# flag, no admin needed; it moves with the folder).
+tmutil addexclusion "$VM_DIR" >/dev/null 2>&1 || true
 trap 'qemu_running && qemu_quit; rm -f "$VM_DIR/live.img"' EXIT
 
 # ---------- 1. the live system ----------
@@ -80,14 +84,15 @@ vssh "rm -f /root/omacvm.env"   # it holds the password hash
 # ---------- 5. OmacVM in the VM ----------
 step 5 "Adding OmacVM to the VM"
 # A new system: forget the host key of an earlier VM of the same name.
-OMA_PIN_RESET=1 run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" --no-mac ||
+apply_mode=--no-mac; [[ ${OMACVM_CREATE_IMAGE:-} == 1 ]] && apply_mode=--image
+OMA_PIN_RESET=1 run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" "$apply_mode" ||
   die "OmacVM did not install (log: $LOG/omacvm-install.log)"
 touch "$VM_DIR/ready"   # the VM works from here on, Mac helpers or not
 
 # ---------- 6. OmacVM on the Mac ----------
 step 6 "Adding OmacVM's helpers on the Mac"
 # OMACVM_CREATE_NO_MAC=1 (test VMs): leave the Mac's helpers as they are.
-if [[ ${OMACVM_CREATE_NO_MAC:-} == 1 ]]; then
+if [[ ${OMACVM_CREATE_NO_MAC:-} == 1 || ${OMACVM_CREATE_IMAGE:-} == 1 ]]; then
   echo "==> Mac helpers skipped (OMACVM_CREATE_NO_MAC=1)"
 else
   run_logged "$LOG/omacvm-mac.log" "$HERE/apply-vm.sh" "$VM_DIR" ||

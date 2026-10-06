@@ -1,6 +1,6 @@
 import Foundation
 
-/// "Escape combo" (Ctrl+Option+Cmd+Esc in a full-screen VM): swipe only the
+/// "Escape combo" (Ctrl+Option+Esc in a full-screen VM): move only the
 /// monitor under the pointer between the VM and macOS (the default), or all
 /// monitors that show the VM. OmacVM Gestures does the swipe and reads this
 /// from its own settings domain, so `defaults write org.omacvm.gestures
@@ -10,14 +10,17 @@ import Foundation
 /// compiles and tests them without the app.
 enum EscapeSetting {
     static let domain = "org.omacvm.gestures"
+    /// The test identity's app talks to its own Gestures (Info.plist
+    /// OmacVMGesturesDomain, app/scripts/build-app.sh --test-identity).
+    static let appDomain = Bundle.main.object(forInfoDictionaryKey: "OmacVMGesturesDomain") as? String ?? domain
     static let key = "EscapeSwipe"
 
     enum Choice: String, CaseIterable {
         case pointer, all
         var title: String {
             switch self {
-            case .pointer: "Swipe the monitor under the pointer"
-            case .all: "Swipe all monitors"
+            case .pointer: "This monitor"
+            case .all: "All monitors"
             }
         }
     }
@@ -28,11 +31,11 @@ enum EscapeSetting {
         (stored as? String)?.lowercased() == Choice.all.rawValue ? .all : .pointer
     }
 
-    static func current(_ d: UserDefaults? = UserDefaults(suiteName: domain)) -> Choice {
+    static func current(_ d: UserDefaults? = UserDefaults(suiteName: appDomain)) -> Choice {
         choice(stored: d?.object(forKey: key))
     }
 
-    static func set(_ c: Choice, _ d: UserDefaults? = UserDefaults(suiteName: domain)) {
+    static func set(_ c: Choice, _ d: UserDefaults? = UserDefaults(suiteName: appDomain)) {
         d?.set(c.rawValue, forKey: key)
     }
 }

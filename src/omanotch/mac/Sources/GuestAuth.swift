@@ -11,8 +11,9 @@ import Foundation
 ///                                "omanotch mac <addr> <guest nonce> <mac nonce>"), hex;
 ///                                <addr>: the Mac address it accepted on
 ///   proof <proof>                the guest, the same with "vm"
-/// The guest wants <addr> to be 127.0.0.1, so a proof that a listener there
-/// fetched from Omanotch on another address fails.
+/// The guest wants <addr> to be the address it connected to (127.0.0.1 for
+/// QEMU's 10.0.2.2, 192.168.77.1 on the app's fast network), so a proof that a
+/// listener fetched from Omanotch on another address fails.
 enum GuestAuth {
     /// The Bridge's token, or nil when there is none (or it is too short).
     static func token() -> [UInt8]? {

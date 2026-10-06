@@ -44,13 +44,22 @@ func fromThisMac(_ fd: Int32, peer: String) -> Bool {
   return false
 }
 
+func sameSecret(_ given: [UInt8], _ want: [UInt8]) -> Bool {
+  guard given.count == want.count, !want.isEmpty else { return false }
+  var diff: UInt8 = 0
+  for i in 0..<given.count { diff |= given[i] ^ want[i] }   // constant time
+  return diff == 0
+}
+
 func authorized(_ header: String?) -> Bool {
   guard let h = header, h.hasPrefix("Bearer ") else { return false }
-  let given = Array(h.dropFirst(7).trimmingCharacters(in: .whitespaces).utf8)
-  guard given.count == token.count else { return false }
-  var diff: UInt8 = 0
-  for i in 0..<given.count { diff |= given[i] ^ token[i] }   // constant time
-  return diff == 0
+  return sameSecret(Array(h.dropFirst(7).trimmingCharacters(in: .whitespaces).utf8), token)
+}
+
+/// OmacVM.app relaying a VM's control port request (X-OmacVM-Relay).
+func relayAuthorized(_ header: String?) -> Bool {
+  guard let h = header else { return false }
+  return sameSecret(Array(h.trimmingCharacters(in: .whitespaces).utf8), relayKey)
 }
 
 // ---- sockets ----
@@ -71,25 +80,31 @@ func setTimeout(_ fd: Int32, _ opt: Int32, _ seconds: Int) {
   setsockopt(fd, SOL_SOCKET, opt, &tv, socklen_t(MemoryLayout<timeval>.size))
 }
 
-/// Requests being handled: at most 32, 16 per peer, so slow or stuck peers
-/// cannot hold every worker thread.
+/// Requests being handled (ConnectionGate in control_policy.swift): limits
+/// per VM where the VM list knows the address, so slow or stuck peers cannot
+/// hold every worker thread, and addresses a guest adds cannot take the known
+/// VMs' places. Called from the listeners' queue and worker threads.
 final class Gate {
   private let lock = NSLock()
-  private var total = 0, perPeer: [String: Int] = [:]
-  func enter(_ peer: String) -> Bool {
-    lock.lock(); defer { lock.unlock() }
-    guard total < 32, perPeer[peer, default: 0] < 16 else { return false }
-    total += 1; perPeer[peer, default: 0] += 1
-    return true
-  }
-  func leave(_ peer: String) {
-    lock.lock(); defer { lock.unlock() }
-    total -= 1
-    let n = perPeer[peer, default: 1] - 1
-    perPeer[peer] = n > 0 ? n : nil
-  }
+  private var g = ConnectionGate()
+  func enter(_ key: String, known: Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return g.enter(key, known: known) }
+  func leave(_ key: String, known: Bool) { lock.lock(); defer { lock.unlock() }; g.leave(key, known: known) }
+  func enterSlow(_ key: String) -> Bool { lock.lock(); defer { lock.unlock() }; return g.enterSlow(key) }
+  func leaveSlow(_ key: String) { lock.lock(); defer { lock.unlock() }; g.leaveSlow(key) }
 }
 let gate = Gate()
+
+/// Refusals in the log once a minute per key (LogLimiter): a peer that
+/// floods must not fill the log the problem report reads.
+private let refusalLock = NSLock()
+private var refusals = LogLimiter()
+func logRefusal(_ key: String, _ line: String) {
+  refusalLock.lock()
+  let skipped = refusals.admit(key, now: Date())
+  refusalLock.unlock()
+  guard let skipped else { return }
+  log(skipped > 0 ? "\(line) (and \(skipped) more like it in the last minute)" : line)
+}
 
 func ipv4String(_ a: in_addr) -> String {
   var a = a, buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
@@ -344,6 +359,10 @@ func handle(_ fd: Int32, peer: String) {
   let method = String(parts[0]), url = URLComponents(string: String(parts[1]))
   let path = url?.path ?? "", query = url?.queryItems ?? []
 
+  // The relay socket carries the control centre's requests only.
+  if peer == relayPeer, !path.hasPrefix("/omacvm/") {
+    respond(fd, 404, ["error": "only the control centre's requests come here"]); return
+  }
   if method == "GET", path == "/proof" {   // no token: it is how the VM checks this is the Bridge
     guard let n = query.first(where: { $0.name == "nonce" })?.value, n.count == 32,
           n.allSatisfy({ "0123456789abcdef".contains($0) }) else {
@@ -354,7 +373,7 @@ func handle(_ fd: Int32, peer: String) {
     return
   }
   guard authorized(headers["authorization"]) else {
-    log("401 \(method) \(path) from \(peer)")
+    logRefusal("401 \(peer)", "401 \(logSafe(method)) \(logSafe(path)) from \(peer)")
     respond(fd, 401, ["error": "missing or wrong bearer token"], extra: "WWW-Authenticate: Bearer\r\n")
     return
   }
@@ -362,11 +381,28 @@ func handle(_ fd: Int32, peer: String) {
   guard let wanted = Int(headers["content-length"] ?? "0"), wanted >= 0 else {
     respond(fd, 400, ["error": "bad Content-Length"]); return
   }
-  let limit = path == "/wallpaper" ? 48 << 20 : 65536
+  let limit = path == "/wallpaper" ? 48 << 20 : path.hasPrefix("/omacvm/") ? controlBodyMax : 65536
   guard wanted <= limit else { respond(fd, 413, ["error": "body too large"]); return }
+  // Long requests (a big body, a password dialog) at most two at once per VM:
+  // they must not hold all its places (ConnectionGate).
+  var slowKey: String?
+  defer { if let k = slowKey { gate.leaveSlow(k) } }
+  if (method == "POST" && path == "/wallpaper") || (method == "GET" && path == "/wifi/password") {
+    let key = control.connectionKey(peer).key
+    guard gate.enterSlow(key) else {
+      logRefusal("slow \(key)", "busy: \(logSafe(path)) from \(peer) while two of its own run")
+      respond(fd, 429, ["error": "busy: wait for this VM's last \(path == "/wallpaper" ? "wallpaper" : "Wi-Fi password") request"])
+      return
+    }
+    slowKey = key
+  }
   deadline = Date().addingTimeInterval(path == "/wallpaper" ? 120 : 5)
   while buf.count - headEnd.upperBound < wanted, readMore() {}
   let body = buf[headEnd.upperBound...].prefix(wanted)
+  if path.hasPrefix("/omacvm/") {   // the control centre's fixed list (control.swift)
+    control.handle(fd: fd, peer: peer, method: method, path: path, headers: headers, body: Data(body))
+    return
+  }
   switch (method, path) {
   case ("GET", "/state"):
     respond(fd, 200, hub.current("wifi"))
@@ -400,10 +436,10 @@ func handle(_ fd: Int32, peer: String) {
       respond(fd, 400, ["error": "body must be a JSON object"]); return
     }
     do {
-      log("\(p) from \(peer): \(try bluetooth.control(p, obj))")
+      log("\(logSafe(p)) from \(peer): \(try bluetooth.control(p, obj))")
       respond(fd, 200, hub.current("bluetooth"))   // also pushes the change to /events clients
     } catch let e as APIError {
-      log("\(p) from \(peer) failed: \(e.message)")
+      log("\(logSafe(p)) from \(peer) failed: \(e.message)")
       respond(fd, e.status, ["error": e.message])
     } catch {
       respond(fd, 500, ["error": "\(error)"])
@@ -421,10 +457,10 @@ func handle(_ fd: Int32, peer: String) {
     }
     do {
       let audioPath = p.hasPrefix("/audio/")
-      log("\(p) from \(peer): \(try audioPath ? audioControl(p, obj) : displayControl(p, obj))")
+      log("\(logSafe(p)) from \(peer): \(try audioPath ? audioControl(p, obj) : displayControl(p, obj))")
       respond(fd, 200, hub.current(audioPath ? "audio" : "display"))   // also pushes the change to /events clients
     } catch let e as APIError {
-      log("\(p) from \(peer) failed: \(e.message)")
+      log("\(logSafe(p)) from \(peer) failed: \(e.message)")
       respond(fd, e.status, ["error": e.message])
     } catch {
       respond(fd, 500, ["error": "\(error)"])
@@ -444,7 +480,7 @@ func handle(_ fd: Int32, peer: String) {
   // would get frames under the Bridge's camera permission, without asking
   // macOS itself. OmacVM.app's VMs use their virtio port, not 127.0.0.1.
   case ("GET", let p) where (p == "/camera" || p == "/camera/status") && fromThisMac(fd, peer: peer):
-    log("403 \(path) from \(peer): the camera is only for VMs")
+    log("403 \(logSafe(path)) from \(peer): the camera is only for VMs")
     respond(fd, 403, ["error": "the camera is only for VMs, not for programs on this Mac"])
   case ("GET", "/camera/status"):
     respond(fd, 200, camera.status())
@@ -523,7 +559,7 @@ final class Server {
     inet_pton(AF_INET, listenAddr, &sin.sin_addr)
     let ok = withUnsafePointer(to: &sin) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
-    } == 0 && listen(fd, 16) == 0
+    } == 0 && listen(fd, SOMAXCONN) == 0   // a burst from one guest must not drop the others' connections
     guard ok else {
       log("listener: cannot listen on \(listenAddr):\(listenPort): \(String(cString: strerror(errno)))")
       close(fd); return
@@ -538,13 +574,108 @@ final class Server {
         }
         if c < 0 { break }
         let who = ipv4String(peer.sin_addr)
-        guard gate.enter(who) else { close(c); continue }
-        DispatchQueue.global(qos: .utility).async { onConnection(c, who); gate.leave(who) }
+        let (key, known) = control.connectionKey(who)
+        guard gate.enter(key, known: known) else {
+          close(c)
+          if !known { control.unknownTurnedAway() }   // never waits: a run goes in the background
+          logRefusal("busy \(key)", "busy: turned away a connection from \(who) (\(known ? "too many from this VM" : "too many from unknown addresses"))")
+          continue
+        }
+        DispatchQueue.global(qos: .utility).async { onConnection(c, who); gate.leave(key, known: known) }
       }
     }
     src.setCancelHandler { close(fd) }
     src.resume()
     source = src; boundInterface = owner; waitingLogged = false
     log("listener: http://\(listenAddr):\(listenPort) on \(owner)")
+  }
+}
+
+// OmacVM.app's relay (its NativeControlBridge.swift) on a channel of its own:
+// a Unix socket only this Mac user can open (mode 0600 in the 0700 support
+// folder, and the peer's user checked on every connection). The app's guests
+// reach the Bridge from 127.0.0.1 like every program on this Mac, so on
+// 127.0.0.1 they could use up the relay's places; here they cannot
+// (ConnectionGate key "relay"). Only /omacvm/... is served on it.
+let relayPeer = "relay"
+
+final class RelaySocket {
+  private let q = DispatchQueue(label: "omacvm-bridge.relay")
+  private var source: DispatchSourceRead?
+  private var bound: (dev: dev_t, ino: ino_t)?
+  private var lastProblem: String?
+  let path: String
+
+  init(path: String) { self.path = path }
+
+  /// Listens, or listens again when the socket file was removed or replaced.
+  func check() { q.async { self.checkLocked() } }
+
+  private func problem(_ s: String) {
+    if s != lastProblem { log("relay socket: \(s)") }
+    lastProblem = s
+  }
+
+  private func checkLocked() {
+    if source != nil {
+      var st = stat()
+      if lstat(path, &st) == 0, (st.st_mode & S_IFMT) == S_IFSOCK, let b = bound, st.st_dev == b.dev, st.st_ino == b.ino { return }
+      log("relay socket: \(path) was removed or replaced: listening again")
+      source?.cancel(); source = nil; bound = nil
+    }
+    guard relaySocketPathOK(path) else {
+      return problem("\(path) is too long for a Unix socket (\(relaySocketPathMax) bytes): OmacVM.app relays on 127.0.0.1")
+    }
+    // The folder: ours and private (connectSecure in the app checks the same).
+    let dir = (path as NSString).deletingLastPathComponent
+    var ds = stat()
+    guard lstat(dir, &ds) == 0, (ds.st_mode & S_IFMT) == S_IFDIR, ds.st_uid == getuid() else {
+      return problem("\(dir) is not a folder of this Mac user")
+    }
+    if ds.st_mode & 0o077 != 0 { chmod(dir, 0o700) }
+    // An old socket (a Bridge that stopped) goes; anything else stays and we give up.
+    var st = stat()
+    if lstat(path, &st) == 0 {
+      guard (st.st_mode & S_IFMT) == S_IFSOCK else { return problem("\(path) exists and is not a socket") }
+      unlink(path)
+    }
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return problem("no socket: \(String(cString: strerror(errno)))") }
+    var addr = sockaddr_un()
+    addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+    addr.sun_family = sa_family_t(AF_UNIX)
+    withUnsafeMutableBytes(of: &addr.sun_path) { $0.copyBytes(from: Array(path.utf8)) }
+    let ok = withUnsafePointer(to: &addr) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    } == 0 && chmod(path, 0o600) == 0 && listen(fd, 64) == 0
+    guard ok, lstat(path, &st) == 0 else {
+      let e = String(cString: strerror(errno))
+      close(fd)
+      return problem("cannot listen on \(path): \(e)")
+    }
+    _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+    let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: q)
+    src.setEventHandler {
+      while true {
+        let c = accept(fd, nil, nil)
+        if c < 0 { break }
+        var uid: uid_t = 0, gid: gid_t = 0
+        guard getpeereid(c, &uid, &gid) == 0, uid == getuid() else {
+          close(c)
+          logRefusal("relay uid", "relay socket: refused a connection from another user (uid \(uid))")
+          continue
+        }
+        guard gate.enter(relayPeer, known: true) else {
+          close(c)
+          logRefusal("busy relay", "busy: turned away a relay connection (too many at once)")
+          continue
+        }
+        DispatchQueue.global(qos: .utility).async { handle(c, peer: relayPeer); gate.leave(relayPeer, known: true) }
+      }
+    }
+    src.setCancelHandler { close(fd) }
+    src.resume()
+    source = src; bound = (st.st_dev, st.st_ino); lastProblem = nil
+    log("relay socket: \(path)")
   }
 }

@@ -271,17 +271,43 @@ final class NativeClipboardBridge {
     }
 
     /// NSPasteboard has no change notification; a quarter-second poll of the
-    /// integer change count is the documented approach and costs nothing
-    /// until something is actually copied.
+    /// integer change count is the documented approach. Only while the VM's
+    /// window is the active app: then the Mac clipboard can be pasted in the
+    /// VM. Otherwise every 5 seconds (in case an activation was missed), and
+    /// once right away when the VM becomes active (setVMActive), so a copy
+    /// on the Mac is in the VM before anything can be pasted there.
+    private var vmActive = true
+
     private func startPolling() {
         let timer = DispatchSource.makeTimerSource(queue: stateQueue)
-        timer.schedule(deadline: .now() + 0.25, repeating: 0.25, leeway: .milliseconds(50))
         timer.setEventHandler { [weak self] in
             guard let self, !self.hasStopped() else { return }
             self.pollPasteboard()
         }
-        timer.resume()
-        poller = timer
+        stateQueue.sync {
+            schedule(timer)
+            timer.resume()
+            poller = timer
+        }
+    }
+
+    /// On stateQueue.
+    private func schedule(_ timer: DispatchSourceTimer) {
+        if vmActive {
+            timer.schedule(deadline: .now() + 0.25, repeating: 0.25, leeway: .milliseconds(50))
+        } else {
+            timer.schedule(deadline: .now() + 5, repeating: 5, leeway: .seconds(1))
+        }
+    }
+
+    /// The VM's window became the active app, or stopped being it.
+    func setVMActive(_ active: Bool) {
+        stateQueue.async { [weak self] in
+            guard let self, !self.hasStopped(), active != self.vmActive else { return }
+            self.vmActive = active
+            if let timer = self.poller { self.schedule(timer) }
+            if active { self.pollPasteboard() }
+        }
     }
 
     private func pollPasteboard() {

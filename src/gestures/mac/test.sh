@@ -12,25 +12,35 @@
 # 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
 #    own tap sits ahead of ours) comes to the front, and when macOS invalidated
 #    it; a failed re-creation keeps the old tap and is logged once (test-tap.c).
-# 5. Ctrl+Option+Cmd+Esc: in the VM the display under the pointer swipes out
-#    (or every display with "all"), in macOS back in; a swipe that does not
-#    land falls back to the app switch, then to hiding the VM's app; the
-#    keyboard follows the pointer's display (test-escape.c, a made-up world
-#    of displays and Spaces: nothing swiped or activated).
+# 5. Ctrl+Option+Esc (and the old Ctrl+Option+Cmd+Esc, exact modifiers only): in the VM the display under the pointer moves out
+#    with macOS's own Space shortcut as the user set it (or every display
+#    with "all"), toward the Space it came from; in macOS back in; not moved
+#    or the shortcut off -> a Dock swipe; still not moved, or no Spaces
+#    information -> a notice in Omarchy, nothing else (never Mission
+#    Control); never out of full screen, never hidden; the keyboard follows the pointer's display; the posted key's
+#    shape and marker (test-escape.c, a made-up world of displays and Spaces:
+#    nothing posted, swiped or activated). The marker is the same in
+#    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,
+#    and after the old one the new one, once per VM, and the no-way-out notice (test-escape-notice.py).
 # 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
 #    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
 #    and trackpad frames through the real callbacks).
+# 7. A Magic Mouse in the captured VM: two fingers sideways = a workspace swipe
+#    (four virtual fingers, or three with MouseSwipeFingers 3, read at each
+#    swipe's start; anything else four), macOS's scroll for them dropped; one finger
+#    flicked sideways = Back/Forward; a resting finger and scrolling = nothing
+#    extra (test-mouse.c, made-up Magic Mouse frames through the real callback).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
 # A process and what it started (the guest runs python3 in a subshell).
 killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done; }
-trap 'killtree ${PIDS:-}; rm -rf "$T"' EXIT
+trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete org.omacvm.test.mouse-fingers >/dev/null 2>&1 || true' EXIT
 trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 # One token, as the Mac's Bridge and the guests share it.
 TOKEN=$(openssl rand -hex 24)
 mkdir -p "$T/mac/Library/Application Support/omacvm-bridge" "$T/vm"
@@ -183,7 +193,7 @@ reject "$T/out2" "live App VM 192.168.77.2"
 # 4. The event tap after a VM app (re)starts.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-tap" > "$T/tap" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/tap"
 n=$(grep -c "cannot create the event tap again" "$T/tap" || true)
@@ -191,13 +201,31 @@ if [[ $n == 1 ]]; then echo "ok   a failed re-creation is logged once (two tries
 # 5. The escape combo's way out and back.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-escape" "$HERE/test-escape.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-escape" > "$T/escape" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/escape"
+REPO=$(cd "$HERE/../../.." && pwd)
+m_gest=$(sed -n 's/^#define OMACVM_KEY_MARKER \(0x[0-9A-Fa-f]*\).*/\1/p' "$HERE/omacvm-gestures.c")
+m_bridge=$(sed -n 's/.*static let marker: Int64 = \(0x[0-9A-Fa-f_]*\).*/\1/p' "$REPO/src/bridge/mac/vm-keys.swift" | tr -d _)
+m_qemu=$(sed -n 's/^+#define OMACVM_MAC_KEY_MARKER \(0x[0-9A-Fa-f]*\).*/\1/p' "$REPO/app/runtime/patches/omacvm-cocoa-keys-for-macos.patch")
+if [[ -n $m_gest && $(( m_gest )) == $(( m_bridge )) && $(( m_gest )) == $(( m_qemu )) ]]; then
+  echo "ok   one key marker in Gestures, the Bridge and QEMU's patch ($m_gest)"
+else
+  echo "FAIL key markers differ: Gestures '$m_gest', Bridge '$m_bridge', QEMU '$m_qemu'" >&2; fail=1
+fi
+# The guest's notice for "S esc <keys>": the old combo names the new one once per VM.
+python3 "$HERE/../guest/test-escape-notice.py" "$HERE/../guest/omacvm-gestures" > "$T/notice" 2>&1 || fail=1
+grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-scroll" > "$T/scroll" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/scroll"
+# 7. The Magic Mouse's gestures (its setting in a throwaway domain, deleted after).
+clang -O1 -Wall -Wno-unused-function -o "$T/test-mouse" "$HERE/test-mouse.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-mouse" > "$T/mouse" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/mouse"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }

@@ -24,6 +24,14 @@ struct VMInterface: Hashable {
     /// OmacVM.app's VMs reach the Mac's 127.0.0.1 (QEMU's user network).
     static let omacvmApp = VMInterface(name: "lo0", address: 0x7F00_0001, netmask: 0xFF00_0000)
 
+    /// The Mac's address on OmacVM.app's fast network (vmnet through
+    /// omacvm-netd, src/net/mac): 192.168.77.1 on a bridgeN.
+    static let omacvmFastAddress: UInt32 = 0xC0A8_4D01
+
+    /// A network of OmacVM.app's VMs: the loopback or its fast network. Its
+    /// guests prove the Bridge's token and are told apart by their VM name.
+    var isOmacVMApp: Bool { self == Self.omacvmApp || address == Self.omacvmFastAddress }
+
     static func parse(_ s: String) -> UInt32? {
         var a = in_addr()
         guard inet_pton(AF_INET, s, &a) == 1 else { return nil }
@@ -74,7 +82,9 @@ struct VMInterface: Hashable {
 /// share one address, so there each connection is a guest of its own, once it
 /// has proved it knows the Bridge's token (GuestAuth); until then it is kept
 /// apart and takes no guest's slot. One that says the name of a connected
-/// guest replaces that one.
+/// guest replaces that one. The app's fast network (192.168.77.1 on a
+/// bridgeN) is handled the same way, and a VM the app moves from one to the
+/// other replaces itself by its name.
 ///
 /// It listens only on the Mac's side of VM shared networks (never on Wi-Fi,
 /// Ethernet, Internet Sharing or Thunderbolt bridges) and accepts a connection
@@ -94,7 +104,7 @@ final class GuestLink {
         var connection: NWConnection
         let stream = GuestStream()
         var isConnected = false
-        /// Its "vmname" as sent (127.0.0.1 only).
+        /// Its "vmname" as sent (OmacVM.app's VMs only).
         var vmName: String?
         let since = Date()
 
@@ -106,16 +116,18 @@ final class GuestLink {
         }
     }
 
-    /// A connection on 127.0.0.1 that has not proved the token yet.
+    /// A connection on 127.0.0.1 (or the fast network) that has not proved the token yet.
     private final class Pending {
         let peer: UInt32
+        let iface: VMInterface
         let connection: NWConnection
         var buffer = Data()
         /// The Mac address it came in on and the nonces, after "challenge".
         var addr = "", guestNonce = "", macNonce = ""
 
-        init(peer: UInt32, connection: NWConnection) {
+        init(peer: UInt32, iface: VMInterface, connection: NWConnection) {
             self.peer = peer
+            self.iface = iface
             self.connection = connection
         }
     }
@@ -155,8 +167,8 @@ final class GuestLink {
 
     func isConnected(_ id: Int) -> Bool { guests[id]?.isConnected == true }
 
-    /// Guest `id` runs in OmacVM.app (came in on 127.0.0.1).
-    func viaOmacVMApp(_ id: Int) -> Bool { guests[id]?.iface == VMInterface.omacvmApp }
+    /// Guest `id` runs in OmacVM.app (came in on 127.0.0.1 or on its fast network).
+    func viaOmacVMApp(_ id: Int) -> Bool { guests[id]?.iface.isOmacVMApp == true }
 
     /// The bar image as last sent by guest `id`.
     func stream(for id: Int) -> GuestStream? { guests[id]?.stream }
@@ -164,11 +176,17 @@ final class GuestLink {
     func start() {
         rescan()
         scanTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.rescan() }
+        scanTimer?.tolerance = 1   // lets macOS batch it with other wake-ups
     }
 
     private func rescan() {
         var now = listenNowhere ? [] : Set(VMInterface.scan(prefixes: prefixes, subnets: subnets, onlyAddress: onlyAddress))
-        if !listenNowhere && onlyAddress == nil && omacvmApp { now.insert(VMInterface.omacvmApp) }
+        if !listenNowhere && onlyAddress == nil && omacvmApp {
+            now.insert(VMInterface.omacvmApp)
+            // OmacVM.app's fast network, while one of its VMs is on it.
+            now.formUnion(VMInterface.scan(prefixes: prefixes, subnets: [], onlyAddress: VMInterface.omacvmFastAddress)
+                .filter { $0.name.hasPrefix("bridge") })
+        }
         for (iface, l) in listeners where !now.contains(iface) {
             Log.info("VM network gone: \(iface.name) \(iface.addressString)")
             l.cancel()
@@ -191,6 +209,9 @@ final class GuestLink {
         // Keepalive finds a guest that vanished without closing (a VM that was
         // suspended or force-stopped) within about ten seconds.
         let tcp = NWProtocolTCP.Options()
+        // The strip's "cursor 0/1" lines must not wait for the guest's ACK of
+        // the line before (Nagle): they hand the pointer over at the edge.
+        tcp.noDelay = true
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 5
         tcp.keepaliveInterval = 2
@@ -230,9 +251,11 @@ final class GuestLink {
             return
         }
         // 127.0.0.1: any VM of OmacVM.app, or any Mac program. It proves the
-        // token first and replaces no one by its address.
-        if iface == VMInterface.omacvmApp {
-            startPending(c, peer: ip)
+        // token first and replaces no one by its address. The same on the
+        // app's fast network (a VM there may come from the loopback a moment
+        // ago, when the app switched its network).
+        if iface.isOmacVMApp {
+            startPending(c, peer: ip, iface: iface)
             return
         }
         // The same address again takes over at once (a restarted notchcast or
@@ -284,13 +307,13 @@ final class GuestLink {
 
     /// Kept apart from the guests until it proves the token: it takes no
     /// guest's slot and replaces no one; at most `maxPending` at once.
-    private func startPending(_ c: NWConnection, peer: UInt32) {
+    private func startPending(_ c: NWConnection, peer: UInt32, iface: VMInterface) {
         guard pending.count < Self.maxPending else {
-            Log.info("\(pending.count) connections on 127.0.0.1 have not proved the token yet; turning away \(c.endpoint)")
+            Log.info("\(pending.count) connections of OmacVM.app have not proved the token yet; turning away \(c.endpoint)")
             c.cancel()
             return
         }
-        let p = Pending(peer: peer, connection: c)
+        let p = Pending(peer: peer, iface: iface, connection: c)
         let key = ObjectIdentifier(c)
         pending[key] = p
         c.stateUpdateHandler = { [weak self, weak p] state in
@@ -342,7 +365,7 @@ final class GuestLink {
         if p.macNonce.isEmpty, parts[0] == "auth" {
             // notchcast from before the proof says the token itself.
             guard GuestAuth.legacyTokenMatches(String(parts[1])) else { return .refused("wrong token") }
-            Log.info("a VM on 127.0.0.1 sent the token itself: run guest/install.sh in it again for the proof")
+            Log.info("a VM of OmacVM.app sent the token itself: run guest/install.sh in it again for the proof")
             return .proved
         }
         guard let token = GuestAuth.token() else { return .refused("no Bridge token on this Mac") }
@@ -371,7 +394,7 @@ final class GuestLink {
     /// A refused VM retries every few seconds: the same reason is logged once a minute.
     private func refuse(_ p: Pending, _ why: String?) {
         if let why, why != lastRefusal.0 || Date().timeIntervalSince(lastRefusal.1) >= 60 {
-            Log.info("refused a connection on 127.0.0.1: \(why)")
+            Log.info("refused a connection on \(p.iface.addressString): \(why)")
             lastRefusal = (why, Date())
         }
         pending[ObjectIdentifier(p.connection)] = nil
@@ -387,11 +410,12 @@ final class GuestLink {
             c.cancel()
             return
         }
-        let g = Guest(id: nextID, peer: p.peer, iface: .omacvmApp, connection: c)
+        let g = Guest(id: nextID, peer: p.peer, iface: p.iface, connection: c)
         nextID += 1
         guests[g.id] = g
         watch(c, for: g, takeover: false)   // ready already: only its end counts
-        Log.info("guest \(g.id) connected: \(c.endpoint)")
+        Log.info("guest \(g.id) connected: \(c.endpoint)"
+                 + (p.iface == VMInterface.omacvmApp ? "" : " on OmacVM.app's fast network"))
         setConnected(g, true)
         if !p.buffer.isEmpty, !deliver(p.buffer, on: c, for: g) { return }
         receive(on: c, for: g)
@@ -403,7 +427,7 @@ final class GuestLink {
     private func deliver(_ data: Data, on c: NWConnection, for g: Guest) -> Bool {
         do {
             let messages = try g.stream.feed(data)
-            if g.iface == VMInterface.omacvmApp { replaceSameName(g, messages) }
+            if g.iface.isOmacVMApp { replaceSameName(g, messages) }
             if !messages.isEmpty { onMessages?(g.id, messages) }
             return true
         } catch {
@@ -426,15 +450,16 @@ final class GuestLink {
     }
 
     /// An OmacVM.app guest that says the name of another one is that VM again
-    /// (a rebooted VM whose old connection never closed): the old one goes.
-    /// Not when the old one connected in the last 10 s: a reboot takes longer,
-    /// so that is a second VM with the same name (a copied disk), and the two
-    /// would keep replacing each other.
+    /// (a rebooted VM whose old connection never closed, or the same VM after
+    /// the app moved it between 127.0.0.1 and the fast network): the old one
+    /// goes. Not when the old one connected in the last 10 s: a reboot takes
+    /// longer, so that is a second VM with the same name (a copied disk), and
+    /// the two would keep replacing each other.
     private func replaceSameName(_ g: Guest, _ messages: [GuestMessage]) {
         for case let .text(t) in messages where t.hasPrefix("vmname ") {
             let name = String(t.dropFirst("vmname ".count))
             g.vmName = name
-            for o in guests.values where o !== g && o.iface == g.iface && o.vmName == name
+            for o in guests.values where o !== g && o.iface.isOmacVMApp && o.vmName == name
                 && Date().timeIntervalSince(o.since) > 10 {
                 Log.info("guest \(g.id) is VM \(o.id) again; dropping \(o.id)")
                 let oc = o.connection

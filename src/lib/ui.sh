@@ -135,7 +135,7 @@ ui_checklist() {
       else mark="[ ]"; fi
       tag=""
       [[ ${UI_TAG[$i]} == experimental ]] && tag=" ${UEXP}experimental$UR"
-      [[ ${UI_TAG[$i]} == slow ]] && tag=" ${UD}slow to build$UR"
+      [[ ${UI_TAG[$i]} == slow ]] && tag=" ${UD}adds about 10 minutes to the build$UR"
       [[ -n ${UI_OFF_REASON[$i]} ]] && tag=" $UD${UI_OFF_REASON[$i]}$UR"
       line="${UI_LABELS[$i]}"
       if (( i == cur )); then printf '\r\033[2K  %s❯%s %s %s%s%s%s\n' "$UACC" "$UR" "$mark" "$UB" "$(ui_fit "$line")" "$UR" "$tag" > "$TTY"
@@ -176,7 +176,10 @@ ui_step() { printf '\n\033[1;36m[%s/%s]\033[0m \033[1m%s\033[0m\n' "$1" "$2" "$3
 # time, its output kept aside (and in the build log, if any); a ✓ when done,
 # or ✗ and the output's last lines when it fails. Returns the command's status.
 # ui_spin_val VAR "Message" command...: the same, the command's output into VAR.
+# ui_spin_stop: stops the command ui_spin is running, and all it started (for
+# an EXIT trap: a script's background jobs ignore Ctrl-C and would go on).
 UI_FRAMES='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+UI_SPIN_PID=""
 ui_spin() {
   local msg=$1; shift
   local out rc pid i=0 t0=$SECONDS e
@@ -186,10 +189,11 @@ ui_spin() {
     # In the background and waited for, as in the spinner branch: set -e
     # still stops the step, and a die inside still shows its reason.
     ( "$@" ) > "$out" 2>&1 &
+    UI_SPIN_PID=$!
     wait $! && rc=0 || rc=$?
   else
     "$@" > "$out" 2>&1 &
-    pid=$!
+    pid=$!; UI_SPIN_PID=$pid
     printf '\033[?25l' > "$TTY"
     while kill -0 "$pid" 2>/dev/null; do
       e=$(( SECONDS - t0 ))
@@ -199,12 +203,26 @@ ui_spin() {
     wait "$pid" && rc=0 || rc=$?
     printf '\r\033[2K\033[?25h' > "$TTY"
   fi
+  UI_SPIN_PID=""
   e=$(( SECONDS - t0 ))
   if (( rc == 0 )); then printf '  %s✓%s %s %s(%dm %02ds)%s\n' "$UOK" "$UR" "$msg" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR"
   else printf '  \033[31m✗\033[0m %s\n' "$msg"; tail -15 "$out" | sed 's/^/    /'; fi
   [[ -n ${UI_LOG:-} ]] && cat "$out" >> "$UI_LOG" 2>/dev/null
   UI_SPIN_OUT=$(cat "$out"); rm -f "$out"
   return $rc
+}
+ui_tree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do ui_tree "$c"; done; echo "$1"; }
+ui_spin_stop() {
+  local pids p i
+  [[ -n $UI_SPIN_PID ]] || return 0
+  pids=$(ui_tree "$UI_SPIN_PID"); UI_SPIN_PID=""
+  kill -TERM $pids 2>/dev/null || true
+  for i in $(seq 1 50); do   # gone before the caller deletes what they wrote (5 s at most)
+    for p in $pids; do kill -0 "$p" 2>/dev/null && break; p=""; done
+    [[ -z $p ]] && break
+    sleep 0.1
+  done
+  return 0
 }
 ui_spin_val() {
   local var=$1 rc; shift

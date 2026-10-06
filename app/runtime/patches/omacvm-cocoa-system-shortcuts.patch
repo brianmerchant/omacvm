@@ -24,7 +24,8 @@ a process that switched them off and was killed leaves them on); another
 process cannot keep them off. A watchdog thread turns them on when the
 window's thread has not answered for 2 s, so a hung VM window never keeps
 them. OMACVM_MAC_SHORTCUTS=1 leaves them with macOS. The escape combo
-(Ctrl+Option+Cmd+Esc) is OmacVM Gestures'; when Gestures is not running the
+(Ctrl+Option+Esc; the old Ctrl+Option+Cmd+Esc through 3.0.x) is OmacVM
+Gestures'; when Gestures is not running the
 VM sees it, and in full screen it then hands the keyboard back to macOS
 (shortcuts on, app hidden). Media keys are not shortcuts: the Bridge routes
 them as before.
@@ -216,7 +217,7 @@ index 3995639..d76c36a 100644
  static VMChangeStateEntry *pinch_vm_change;
  
  /* OmacVM: one window per Mac display (the code is further down). */
-@@ -1470,6 +1618,26 @@ - (bool) handleEventLocked:(NSEvent *)event
+@@ -1470,6 +1618,27 @@ - (bool) handleEventLocked:(NSEvent *)event
              }
              return true;
          case NSEventTypeKeyDown:
@@ -229,7 +230,8 @@ index 3995639..d76c36a 100644
 +            if (omacvm_is_escape_combo([event keyCode],
 +                                       modifiers & NSEventModifierFlagControl,
 +                                       modifiers & NSEventModifierFlagOption,
-+                                       modifiers & NSEventModifierFlagCommand) &&
++                                       modifiers & NSEventModifierFlagCommand,
++                                       modifiers & NSEventModifierFlagShift) &&
 +                [self isKeyboardCaptured] &&
 +                omacvm_window_full_screen([self window])) {
 +                if (![event isARepeat]) {
