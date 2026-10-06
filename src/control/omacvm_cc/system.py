@@ -14,7 +14,8 @@ from .local import share
 
 OK = "graphics OK, restart when it suits"
 BROKEN = ("graphics would not start: do not restart. Fix it first: "
-          "docs/troubleshooting.md, \"Black screen after an update\"")
+          "https://github.com/gillesgoetsch/omacvm/blob/main/docs/troubleshooting.md"
+          "#27-all-routes-black-screen-after-an-update-or-an-omacvm-job")
 WHAT = ("This updates the VM's own system (Omarchy and its Arch packages) with omarchy update. "
         "It is not the OmacVM update.")
 
