@@ -10,6 +10,8 @@ in more words.
   about 10 minutes). The control centre and `omacvm features` say it only
   while it is off. A control centre job may now run 4 hours (it was 1 hour,
   which could stop a kernel build on a 4-CPU VM).
+- OmacVM.app: a VM build, and each apply in a VM without a window, is about
+  a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer
@@ -22,6 +24,11 @@ in more words.
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
   `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- OmacVM.app: **Mac folder** (off by default). One folder of the Mac at
+  `~/Mac` in the VM (virtio-9p; big files fast, many small files slow). A
+  folder that is not there or that OmacVM may not open is left out for that
+  start and the VM starts as usual; the home folder and the folders above it
+  are refused. VMs from before 3.0.1: `omacvm apply` once.
 - USB devices (experimental, OmacVM.app, off by default): give a VM a USB
   device macOS does not use itself (debug probes, SDR sticks, boards in DFU
   mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
@@ -47,6 +54,14 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- Graphics Vulkan: WebGPU in Chromium on the Mac's GPU, without the
+  experimental vulkan feature. The VM's Venus driver (OmacVM's build of
+  Mesa 26.2.4) now shares the semaphores Chrome asks for before it offers
+  pages a WebGPU adapter (before: "no adapter"), and a "Chromium (WebGPU)"
+  menu entry starts Chromium with its compositor on Vulkan. VMs set to
+  Vulkan rebuild the driver once (a few minutes, in the background after
+  the next start, or with `omacvm apply`). `omacvm check` has a "WebGPU in
+  Chromium" row.
 - **x86 Linux apps** (experimental, off by default): `omacvm enable
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (on an M4: about 85 % of native speed for
@@ -54,6 +69,10 @@ in more words.
   tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
   Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
   ([details](docs/features.md#x86-linux-apps))
+- OmacVM.app's own window (start, options, setup) opens centred on the
+  MacBook's built-in display, not somewhere on an external monitor. With
+  the lid closed or on a Mac without a built-in display, it opens centred
+  on the main display. The VM's window still opens where you are.
 
 ## 3.0.0
 
