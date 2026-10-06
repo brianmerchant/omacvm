@@ -15,22 +15,26 @@
 # the guest's display agent (OmacVM.app VM), and the VM lock of the Mac it
 # runs on. Not on a Mac someone is working at: it shows the VM and moves the
 # pointer for a moment.
-#   src/tests/fullscreen-space-vm.sh --runtime DIR --firmware FD --vm DIR --ssh-port N
+#   src/tests/fullscreen-space-vm.sh --runtime DIR --firmware FD --vm DIR --ssh-port N [--qemu PATH]
+# --qemu: start QEMU by this path, e.g. an app's Contents/MacOS/OmacVM-VM, as
+# OmacVM.app starts it since 3.0.1 (QEMU then counts as the app, one Dock icon).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-RT=""; VMD=""; PORT=""; FW=""
+RT=""; VMD=""; PORT=""; FW=""; QEXE=""
 while (( $# )); do
   case $1 in
     --runtime) RT=$2; shift 2 ;;
     --firmware) FW=$2; shift 2 ;;
     --vm) VMD=$2; shift 2 ;;
     --ssh-port) PORT=$2; shift 2 ;;
-    *) sed -n '19s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    --qemu) QEXE=$2; shift 2 ;;
+    *) sed -n '18,20s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
 QEMU=$RT/bin/qemu-system-aarch64; [[ -x $QEMU ]] || QEMU=$RT/bin/OmacVM
+[[ -n $QEXE ]] && QEMU=$QEXE
 [[ -x $QEMU && -f $VMD/disk.img && -f $VMD/efi-vars.fd && $PORT =~ ^[0-9]+$ && -f $FW ]] ||
-  { sed -n '19s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+  { sed -n '18,20s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 [[ -e $HOME/.omacvm-user-testing ]] && { echo "fullscreen-space-vm: the user is testing: no VM (STANDARDS 18)" >&2; exit 1; }
 
 NAME="OmacVM T-fullscreen-space"
