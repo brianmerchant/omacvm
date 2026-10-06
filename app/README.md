@@ -40,12 +40,20 @@ scripts/build-app.sh --release      # stops unless the whole repo is committed
 scripts/package-release.sh          # dist/OmacVM-<version>.zip and .sha256
 ```
 
+A release build has KosmicKrisp (Vulkan on macOS 26 and newer; Graphics'
+Automatic uses it): it needs Xcode 26 and Homebrew's `llvm`, `bison`,
+`spirv-llvm-translator` and `spirv-tools` on the release Mac
+(`runtime/build-kosmickrisp.sh --check` lists what is missing), about 13 MB
+in the app, its licence notice in `Contents/Resources/licenses`.
+`OMACVM_RUNTIME_KOSMICKRISP=0` and `OMACVM_RELEASE_NO_KOSMICKRISP=1` leave
+it out (MoltenVK only).
+
 With `OMACVM_SIGN_ID` the app, its QEMU and QEMU's libraries are signed with
 that Developer ID, the hardened runtime and a timestamp; QEMU gets
 `runtime/qemu-hvf.entitlements` (Hypervisor, microphone), the app
 `app/OmacVM.entitlements` (microphone). Without it the build is signed ad hoc,
-and `package-release.sh` refuses it: a release needs the Developer ID of team
-722686Y34B.
+and `package-release.sh` refuses it: a release needs a Developer ID (its team
+goes into the signed update feed, see [docs/release-keys.md](../docs/release-keys.md)).
 It also refuses a history that holds `runtime/.build-runtime.log` (local home
 paths, filtered out of the history): rebase a branch made before that onto
 the filtered history first.
@@ -58,7 +66,50 @@ dist/OmacVM-<version>.zip --keychain-profile <profile> --wait`, then
 
 The version is OmacVM's (`../src/VERSION`). Upload both files to the GitHub
 release `v<version>`: `omacvm build --vm-type app` and `omacvm update`
-download them from there.
+download them from there. `package-release.sh` also writes the update feed
+`OmacVM-appcast.json` and its `.sig` (`scripts/appcast.sh`, signed with the
+release key from the Keychain: [docs/release-keys.md](../docs/release-keys.md));
+upload them too. Publish as a pre-release
+first and try its zip; installed apps see it once the release is marked
+latest. (Release builds ignore `OMACVM_APPCAST_URL`; the update itself is
+tested with `scripts/dev/self-update-test.sh`.)
+
+## Updates
+
+The app updates itself ([ADR 0033](../docs/adr/0033-app-self-update.md)):
+
+- Once a week it looks at the latest release's update feed (signed with
+  OmacVM's main or spare release key). A newer version is downloaded and
+  checked: size and SHA-256 from the feed, then the app and its QEMU signed
+  with a Developer ID of a team the feed names. The window then offers it: What's New,
+  Skip This Version, Update and Relaunch. *OmacVM › Check for Updates…* asks
+  right away.
+- Nothing is replaced while a VM runs from the app: the update waits until
+  nothing runs from it any more (after a shutdown or a crash, or at the next
+  start of the app).
+- The new version must start (its QEMU too) within 90 s, or the old one
+  comes back by itself and that version is skipped. The previous version is
+  kept for one step back: *OmacVM › Go Back to <version>…*.
+- A copy installed under its own name keeps it.
+- *Check for updates once a week* in the window switches it off: no checks,
+  no messages. It is the same switch as in OmacVM's control centre
+  (`update_checks` in `~/Library/Application Support/omacvm/settings.json`).
+- When the update goes in because you quit or shut the VM down, the new
+  version starts in the background only to check itself: no window pops up.
+  The next start says it updated.
+- Files and log, per copy of the app:
+  `~/Library/Application Support/OmacVM/Updates/org.omacvm.app/<name>-<hash>/`
+  (`update.log`, `previous/`, `staged/`). An app on another disk keeps
+  `previous/` next to itself in `.omacvm-updates/`, so the swap never copies
+  across disks.
+- Not notarized yet: the app downloads without a quarantine flag, so macOS
+  does not ask; the feed signature and the Developer ID check stand in for it.
+
+Tests: `cd app && swift run update-tests` (CI), and on a Mac
+`scripts/dev/self-update-test.sh` with a test build
+(`scripts/build-app.sh --name "OmacVM SU-test" --id org.omacvm.sutest`): its
+own bundle id, settings and VMs folder, a local feed with a test key,
+nothing in /Applications.
 
 ## Status
 
@@ -104,6 +155,9 @@ The VM is a normal install: `omarchy update` and snapshots work.
 | `scripts/create-vm.sh` | builds a VM, headless |
 | `scripts/build-app.sh` | builds the app |
 | `scripts/package-release.sh` | zips the built app for a release |
+| `scripts/appcast.sh` | the release's signed update feed |
+| `scripts/update-swap.sh` | swaps in an update, puts the old app back if the new one does not start |
+| `app/Sources/OmacVMUpdate` | the update's checks (feed, signatures, schedule), tested by `update-tests` |
 | `../src` | OmacVM: the installers and the VM side, `app` route |
 
 Licences: `THIRD_PARTY_NOTICES.md`. QEMU is GPL-2.0: its build scripts and

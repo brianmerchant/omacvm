@@ -66,7 +66,7 @@ on CGL, not on ANGLE.
  virtio-gpu: ctrl queue, blob resources, hostmem window, 16 KiB blob alignment,
              up to 5 outputs (Virtual-1..5)
    |
- QEMU virtio-gpu-gl-pci (blob=true, venus=true, hostmem=4G when Venus is on)
+ QEMU virtio-gpu-gl-pci (blob=true, venus=true, hostmem=<memory plan> when the Graphics setting gives Vulkan, ADR 0035)
    |  ctrl queue decoded on the main loop today; async (kick -> render
    |  thread) planned
    v
@@ -102,8 +102,9 @@ on CGL, not on ANGLE.
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
-| KosmicKrisp on macOS 26 | planned | ICD choice already in `virgl-darwin-vulkan-beside.patch` |
-| Zink, rusticl, ANGLE-on-Vulkan in Chrome | planned, blocked on MoltenVK (no `nullDescriptor`) | - |
+| KosmicKrisp on macOS 26 | built, in release builds (3.0.0, ADR 0035) | `virgl-darwin-vulkan-beside.patch` + `virgl-darwin-kosmickrisp-fallback.patch` |
+| OpenCL (rusticl on Zink), WebGPU in Firefox and Chromium | built: `webgpu-compute`; feature `vulkan` (`gpu-next`, opt-in) | section 6, ADR 0022 |
+| Zink as GL driver, ANGLE-on-Vulkan in Chrome | blocked on MoltenVK (GL 2.1, no `VK_EXT_provoking_vertex`) | - |
 | VideoToolbox decode | built: `video-decode` | `virgl-videotoolbox-decode.patch` |
 | One window per display | built: `app-displays` | `omacvm-cocoa-displays.patch` |
 | Async ctrl queue (guest keeps encoding while the host runs) | planned | finding from `browser-gpu` |
@@ -248,6 +249,20 @@ back to back (the spin counts from the last sleep, not per fence). With the benc
 QEMU's CPU during glmark2 195% -> 165%, Aquarium 194% -> 176%, frame rates
 the same (ADR 0017).
 
+Fence tests and the render thread (`virgl-darwin-fence-wait-busy.patch`,
+ADR 0026): every `glClientWaitSync` takes Apple GL's share-group lock, which
+the render thread's GL calls take too, and a collision parks the render
+thread in the kernel. Where the render thread is the bottleneck (WebGL
+Aquarium) the sync thread's back-to-back tests after each new fence cost
+about 5 %. So while the render thread runs a guest command buffer,
+`vrend-sync` waits for the end of the submit (the render thread wakes it,
+at most 1 ms) instead of testing on a timer; an idle render thread gets the
+spin and naps above. `OMACVM_VIRGL_FENCE_BUSY=0` turns it off. Bench lock,
+2.8.0 / 2.9.0 / this part alone: Aquarium 20.2 / 19.0 / 20.15-20.6 fps
+(one session for the last); with the present queue's backoff too (not
+shipped, ADR 0026) 19.9 fps, glmark2 short set 1160 / 2986 / 3168, testufo
+unchanged.
+
 ### Where the time goes
 
 - Light frames (glmark2, the desktop): the fence round trip. Fixed above.
@@ -347,6 +362,19 @@ Rules:
   `qemu-hvf-virgl-blob-subregion.patch` maps a memory subregion instead.
 - Metal heaps are pointers in one process, which is why the Venus server
   runs in process (ADR 0012).
+- Classic resources count against a budget (all levels, layers and
+  samples; `virgl-resource-memory-budget.patch`): three quarters of the
+  Mac's memory, so only a runaway VM reaches it (ADR 0034). Below it,
+  `virgl-darwin-memory-pressure.patch` follows macOS's memory pressure (a
+  dispatch source; its handler only stores the level, the renderer thread
+  acts in `virgl_renderer_poll` and also reads the level once a second,
+  because macOS tells only some processes about a warning): big new resources (16 MB+, not screens or
+  cursors) are refused only at "critical", or at "warn" when they are bigger
+  than all macOS has left, after a glFinish and three more looks. It writes
+  `logs/gpu-memory` for the app and `omacvm check`. A desktop takes
+  1.1 GB at 4K to 3.1 GB at 8K, up to 6.2 GB for a moment while the scale
+  changes (every screen-sized buffer is made again). QEMU's log notes each
+  new peak in 512 MB steps.
 
 ## 6. Vulkan: Venus (built: `gpu-venus`)
 
@@ -354,7 +382,7 @@ Rules:
  guest Vulkan app -> Mesa venus (vulkan-virtio) -> virtio-gpu ring in a blob
    -> QEMU -> virglrenderer proxy -> render server THREAD (in process)
    -> vkr (venus renderer) -> libvulkan.1.dylib (in the runtime)
-   -> ICD: MoltenVK 1.4.2 (macOS 15) | KosmicKrisp (macOS 26+, planned)
+   -> ICD: MoltenVK 1.4.2 (macOS 15) | KosmicKrisp (macOS 26+, release builds)
    -> Metal
 ```
 
@@ -373,18 +401,93 @@ Patches (all in `app/runtime/patches`, one per concern):
   pages (it was 4 KiB-aligned), so every blob the guest maps is the
   allocation's own memory.
 - `qemu-hvf-virgl-blob-subregion.patch`, `qemu-virtio-gpu-blob-alignment.patch`.
+- `virgl-set-type-without-egl.patch`: Vulkan windows. Hyprland imports a
+  Venus image (a Metal heap) as a dma-buf (`PIPE_RESOURCE_SET_TYPE` in its
+  virgl context). macOS OpenGL cannot import it, and the old EINVAL ended
+  Hyprland's whole context (black desktop). Now the resource gets a plain GL
+  texture, filled from the heap when a draw samples it (Metal blit into a
+  shared buffer, then `glTexSubImage2D`, once per command buffer); memory
+  that cannot be read leaves it blank. The app says so at start (OEM string
+  `omacvm.vkwindows=1`, only with MoltenVK: KosmicKrisp's exported memory is
+  not tested yet); the guest then keeps Mesa's normal WSI, otherwise (older
+  app, KosmicKrisp) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
 
-Switch: `defaults write org.omacvm.app venus -bool true` adds
-`blob=true,venus=true,hostmem=4G` to the GPU device. Off by default: the
-guest needs Mesa with blob rounding.
+Switch: the VM's Graphics setting (ADR 0035; up to 2.9 the hidden `venus`
+default, moved into it at the first 3.0.0 launch) adds
+`blob=true,venus=true,hostmem=<plan>G` to the GPU device, once the VM has a
+Venus driver with blob rounding (`venus-ready`). Automatic is OpenGL in 3.0.0.
 
 Limits: MoltenVK has no `nullDescriptor`, no geometry shaders, no logicOp,
-no float64. So Zink (GL on Vulkan) and ANGLE-on-Vulkan in Chrome do not
-work; they wait for KosmicKrisp, which needs Metal 4 (macOS 26). See
-ADR 0013. With fences polled every 1 ms each vkmark frame waited about
-1.3 ms: vkmark ~730-800 was latency, not GPU. With the sync thread's fences
-(`gpu-native`) the same runtime gives about 5,200 (bench lock, 800x600
-headless, median of 3: 5195 vs 732 polled).
+no float64, no `VK_EXT_provoking_vertex`. So Zink as a GL driver and
+ANGLE-on-Vulkan in Chrome do not work; they wait for KosmicKrisp, which
+needs Metal 4 (macOS 26). See ADR 0013. Zink for compute (rusticl) works
+with patches: next section, ADR 0022. With fences polled every 1 ms each
+vkmark frame waited about 1.3 ms: vkmark ~730-800 was latency, not GPU.
+With the sync thread's fences (`gpu-native`) the same runtime gives about
+5,200 (bench lock, 800x600 headless, median of 3: 5195 vs 732 polled).
+
+### WebGPU and OpenCL on Venus (built: `webgpu-compute`)
+
+```
+ Firefox (WebGPU, wgpu)   Chromium (WebGPU, Dawn)     OpenCL app (Geekbench, ffmpeg, clpeak)
+        |                 launcher: Skia Graphite          |
+        |                 on Dawn-Vulkan, X11         rusticl (Mesa OpenCL 3.0) -> Zink
+        |                        |                         |
+ /opt/omacvm-mesa: Mesa 26.2.4 venus + zink + rusticl with OmacVM's patches, built in the guest
+        \________________________|_________________________/
+                                 |  Venus ring, as in the chain above
+                                 v
+                    vkr -> MoltenVK -> Metal
+```
+
+- The feature `vulkan` (`omacvm enable vulkan --vm NAME`, off by default,
+  experimental): apply writes the VM folder's `vulkan` file, and the app
+  starts that VM with `blob=true,venus=true,hostmem=4G`; the guest install
+  runs `src/app/guest/venus/install.sh --force` (`--remove` when the
+  feature goes off). Run by hand without `--force` the script does nothing
+  without Venus (it reads the capset count and the host visible region
+  from virtio-gpu's debugfs). It builds the pinned Mesa once (stamp: version + patch hash), registers
+  `/etc/vulkan/icd.d/omacvm_venus_icd.json` and
+  `/etc/OpenCL/vendors/omacvm-rusticl.icd`, writes
+  `/etc/environment.d/90-omacvm-venus.conf` (`RUSTICL_ENABLE=zink`,
+  `VK_LOADER_DRIVERS_DISABLE=virtio_icd.json`: the distro's venus, Mesa
+  26.2.3, fails on 16 KiB blob pages), Firefox's `dom.webgpu.enabled`, and
+  the `omacvm-chromium-webgpu` launcher with a "Chromium (WebGPU)" menu entry.
+- Patches (guest Mesa, `src/app/guest/venus/patches`):
+  - `mesa-zink-moltenvk-no-push-descriptors.patch`: SPIRV-Cross can alias
+    zink's typed bo arrays only in argument buffers, which MoltenVK never
+    uses for push sets (every kernel failed);
+  - `mesa-zink-moltenvk-null-descriptor.patch`: start without
+    `nullDescriptor`; unbound slots are undefined on MoltenVK;
+  - `mesa-zink-moltenvk-global-loads.patch`: MoltenVK 1.4.2's SPIRV-Cross
+    forwards loads through buffer addresses past stores to the same memory,
+    so swaps lost elements (Geekbench's Feature Matching failed); zink reads
+    each global address back from a variable, which keeps the load in place;
+  - `mesa-venus-opaque-fd-semaphores.patch`: OPAQUE_FD binary semaphores on
+    the DRM syncobj Venus already has, the one thing Dawn was missing;
+  - `mesa-venus-incremental-present.patch` (from the `kosmickrisp` track).
+- Host (`app/runtime/patches`): `virgl-darwin-venus-moltenvk-zero-init.patch`
+  reports `shaderZeroInitializeWorkgroupMemory` off on MoltenVK, for every
+  guest instance version (Dawn uses 1.1): MoltenVK's SPIRV-Cross cannot
+  compile zero-initialized workgroup memory, and such a WebGPU shader lost
+  the whole Vulkan context.
+- GL stays on virgl. Zink as a GL driver is not installed (GL 2.1 only on
+  MoltenVK).
+- Chrome's two gates (ADR 0022): a Vulkan compositor, and Dawn's
+  `SupportsExternalImages()` (OPAQUE_FD semaphores). The launcher passes
+  `--ozone-platform=x11 --enable-skia-graphite
+  --skia-graphite-dawn-backend=vulkan` with `MESA_VK_WSI_DEBUG=sw`: Chrome
+  refuses Vulkan on Wayland, and Venus' DRI3 present to Xwayland is half as
+  fast as its software path. WebGL stays on virgl and is copied into the
+  compositor (about a fifth slower), so the default Chromium is unchanged.
+- Copying a WebGPU canvas into a 2D canvas returns zeros in every Chrome
+  mode in the VM (also the default): open.
+- Kernel launches cross the Venus ring like draw calls: launch-heavy
+  OpenCL work pays Venus's latency (see vkmark above).
+- On KosmicKrisp (Mac mini M4, macOS 27) the same guest Mesa passes the
+  same checks; the Zink patches and the host zero-init patch act on
+  MoltenVK's driver ID only, so they stay off there. Results tables:
+  [../benchmarks/README.md](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04).
 
 ## 7. Video decode (built: `video-decode`)
 
@@ -446,11 +549,14 @@ falls back and logs once.
 | `OMACVM_GL_VSYNC=0` | on | show frames when drawn instead of on the display's refresh | built (`pacing-hdr`) |
 | `OMACVM_GL_LEAD_MS` | 3 | how long before the vsync a frame goes on the layer | built (`pacing-hdr`) |
 | `OMACVM_GL_REFRESH=fixed` | follows the guest | display link at the screen's full rate while frames come | built (`pacing-hdr`) |
+| `OMACVM_IDLE_REFRESH=0` | on | QEMU's refresh tick stays at the display's rate; by default it slows to 500 ms while it has nothing to do | built (`idle-power`) |
 | `OMACVM_GL_COLOR=native` | sRGB | untagged surfaces (old colours, oversaturated on P3) | built (`pacing-hdr`) |
 | `OMACVM_GL_HDR=1` | off (the app sets it only with an EDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
 | `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
-| `defaults write org.omacvm.app venus -bool true` | false | Venus device options | built (`gpu-venus`) |
+| `omacvm enable vulkan` (feature, per VM) | off | the VM folder's `vulkan` file: Venus device options for that VM; OmacVM's Mesa in the VM | built (`gpu-next`) |
+| Graphics setting (`graphics` file per VM) | auto (= OpenGL in 3.0.0) | Venus device options for that VM once `venus-ready`; replaces the hidden `venus` default (moved once, removed) | built (`vk300`, `vk-review-fixes`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
+| Guest: `src/app/guest/venus/install.sh` (`--force`, `--remove`) | with the feature `vulkan` | OmacVM's Mesa for Vulkan, OpenCL (rusticl), Firefox WebGPU | built (`webgpu-compute`, `gpu-next`) |
 | `OMACVM_VIDEO_DECODE=0` | on | no video caps offered; guest decodes in software | built (`video-decode`) |
 | `OMACVM_VIDEO_AV1=1` | set by the app when the VM has the shim | offer AV1 | built |
 | `OMACVM_VIDEO_NO_VP9`, `OMACVM_VIDEO_NO_HEVC` | off | hide one codec | built |
@@ -463,6 +569,8 @@ falls back and logs once.
 | `OMACVM_DISPLAYS_DEBUG=1` | off | log the display port | built |
 | `OMACVM_BACKGROUND=1`, `OMACVM_COCOA_HIDDEN=1` | off | test only: window behind / no window | built |
 | `OMACVM_TEST_SKIP_DISPLAYS`, `OMACVM_TEST_MAIN_DISPLAY` | off | test only: virtual displays | built |
+| `OMACVM_POINTER_START=0` (app: `pointerStart` false) | on | pointer taken only on enter or a click (QEMU's way) | built |
+| `OMACVM_POINTER_DEBUG=1`, `OMACVM_TEST_POINTER=<s>` | off | log pointer takes / test only: made-up motion | built |
 
 What the app records: QEMU's log (`qemu.log` in the VM folder) has the
 paths taken (fence mode, present mode, Venus ICD, video caps). `omacvm check`
@@ -513,7 +621,10 @@ What crosses and who checks it:
   arrays, 1e300, 101 flips).
 - **no host pointers** reach the guest; no guest-controlled allocation
   without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
-  IOSurfaces 3 per window, each at most the largest display).
+  IOSurfaces 3 per window, each at most the largest display, classic
+  resources three quarters of the Mac's memory and, below that, macOS's
+  memory pressure). The lost context's name in `logs/gpu-memory` is the
+  guest's: only letters, digits and `. _ -` are written.
 - **scanout size and format**: the present surfaces follow the guest's
   scanout, capped at the largest display. `pacing-hdr` keeps five of them
   with vsync (queue for the display's refresh; three with
@@ -532,6 +643,7 @@ What crosses and who checks it:
 | Conformance | dEQP GLES2/3 (virgl), Vulkan CTS smoke (Venus), WebGL 1 and 2 conformance in Chrome; `compare.py` diffs two runtimes case by case | `tests/graphics` (`conformance-runs`) |
 | Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs a capture of the window (`screencapture -l`): upright, right colours | per track |
 | Video | `ffmpeg -hwaccel vaapi` framemd5 equal to software (H.264, VP9, real content) | `video-decode` |
+| Compute | `src/app/guest/venus/cltest.c` (saxpy, reduction, atomics, in-place sort vs CPU), `semtest.c` (OPAQUE_FD semaphores shared by two devices; prints Dawn's adapter check), Geekbench 7 GPU OpenCL validation, WebGPU matmul vs CPU sample (`webgpu-compute` tools) | `webgpu-compute` |
 | GPU check | `app/scripts/gpu-check.sh VM_DIR 3`: Aquarium + Basemark finish, no refused shaders in `qemu.log` | `gpu-hang` |
 | Performance | glmark2, vkmark, Aquarium, Basemark, video-bench.py; same window size, median of 3, JSON, with `~/.omacvm-bench.lock` and other test VMs paused | `src/bench`, `docs/benchmarks` |
 | Stability | 30 min soak per path (browser + video + glmark2 loop), sleep/wake, display plug/unplug | per track |
@@ -556,6 +668,14 @@ bench lock and are indications only):
 | dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate, also c293) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
 | Vulkan CTS smoke (Venus, 1958 cases), c293 | - | 546 pass, 1402 not supported, 5 fail, 5 timeout: the same cases as the combo runtime |
 | 30-minute soaks, c293 | - | GL + WebGL + VA-API video: pass, 3.2 million fences; Venus (vkmark + vkcube, 11 rounds): pass, no refused blob |
+| WebGPU matmul f32 2048, Chromium in the VM (launcher) vs Chrome on the Mac, same locked batch | - | 5071 vs 6038 GFLOPS (84 %) |
+| WebGPU matmul f32 2048, Firefox, VM vs Mac, same locked batch | - | 665 vs 319 GFLOPS |
+| OpenCL clpeak fp32 (VM, 40-CU shim / as reported) vs Mac OpenCL | - | 8.9 / 1.5 vs 15.6-16.1 TFLOPS |
+| Geekbench 7 GPU OpenCL, VM vs Mac, same locked batch | - | 42486 vs 95380 (45 %); before the global-loads fix 10673, Feature Matching failed |
+| ffmpeg 4K nlmeans in the VM, OpenCL vs 8 vCPUs | - | 1.07 vs 0.33 fps |
+| WebGPU matmul f32 2048 on KosmicKrisp (Mac mini M4, unlocked), Chromium launcher / Firefox in the VM vs Chrome on the mini | - | 1148 / 167 vs 1614 GFLOPS |
+| Geekbench 7 GPU OpenCL on KosmicKrisp (Mac mini M4), VM vs the mini's OpenCL | - | 18973 vs 35240 (54 %), all workloads valid |
+| Compute soak (OpenCL, Firefox and Chromium WebGPU, ffmpeg OpenCL), M4 Max / mini on KosmicKrisp | - | 63 rounds in 36 min / 24 in 15 min, 0 failures |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Frame pacing, colour and HDR (built: `pacing-hdr`)
@@ -601,6 +721,13 @@ bench lock and are indications only):
   itself stays at the EDID rate: virtio-gpu has no adaptive-sync property,
   so Hyprland's VRR stays off. `OMACVM_GL_REFRESH=fixed` keeps the full
   rate. ADR 0023.
+- **Idle**: QEMU's own refresh tick (`gui_update`, every listener's
+  `dpy_refresh`) runs at the display's rate too. The main window's GL frames
+  never need it (they are pushed) and virtio-gpu's `gfx_update` does
+  nothing; only 2D updates, new scanouts, the extra outputs' windows (drawn
+  on the tick) and a frame not shown yet do. A second without those and it
+  slows to 500 ms; the next one re-arms it at once
+  (`qemu-cocoa-idle-refresh.patch`, `OMACVM_IDLE_REFRESH=0` to keep it).
 - **Latency**: Core Animation shows a commit at the next vsync if it lands
   about 3 ms before it; committing earlier does not show it sooner. So the
   delay from a finished guest frame to the glass is set by the guest's vblank

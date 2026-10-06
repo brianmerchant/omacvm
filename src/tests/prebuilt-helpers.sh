@@ -75,4 +75,19 @@ expect "install.sh without the app: built here" "bridge/mac " "$(grep ^bridge <<
 rm -f "$T/calls"
 HOME=$T/home PATH=$T/bin:$PATH OMACVM_HELPERS=$H "$S/mac/install.sh" --keys-only --skip-clip --quiet >/dev/null 2>&1
 expect "install.sh --keys-only: the app's Gestures, keys only" "gestures/mac --prebuilt $H/OmacVMGestures.app --keys-only" "$(grep ^gestures "$T/calls")"
+
+# The Bridge runs from ~/Applications, never from the app's Helpers: macOS
+# charges Bluetooth, the camera and the microphone of a helper inside an app
+# to that app, and killed a Bridge started in place right after it asked for
+# Bluetooth (OS_REASON_TCC: the app had no NSBluetoothAlwaysUsageDescription).
+b=$R/src/bridge/mac/install.sh
+expect "the Bridge is installed as a copy in ~/Applications" "1" \
+  "$(grep -c '^ditto "$APP" "$HOME/Applications/OmacVMBridge.app"$' "$b")"
+expect "its LaunchAgent runs that copy" "1" \
+  "$(grep -c '<string>$HOME/Applications/OmacVMBridge.app/Contents/MacOS/omacvm-bridge</string>' "$b")"
+# And should one run in place, the app has a reason for each of those the Bridge uses.
+for k in NSBluetoothAlwaysUsageDescription NSCameraUsageDescription NSMicrophoneUsageDescription; do
+  grep -q "<key>$k</key>" "$R/src/bridge/mac/build.sh" || continue
+  expect "the app's Info.plist has $k (the Bridge uses it)" "1" "$(grep -c "<key>$k</key>" "$R/app/scripts/build-app.sh")"
+done
 exit $fail

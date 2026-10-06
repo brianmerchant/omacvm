@@ -2,15 +2,17 @@
 # omacvm features / enable / disable: a VM's OmacVM features.
 #   omacvm features [--vm NAME] [--json]     list them; in a terminal, switch them
 #   (--vm-type parallels|utm|fusion|app when two apps have a VM of that name)
-#   omacvm enable FEATURE... [--vm NAME] [--yes]
-#   omacvm disable FEATURE... [--vm NAME] [--yes]
+#   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
+#   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery external-brightness idle-lock autologin thp-kernel. A feature that needs another one brings it
+# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
-# they need, then the VM. A stopped VM is started.
+# they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
+# started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
-# "default", "experimental", "available", "needs", "title", "summary"}]}.
+# "default", "experimental", "available", "reason", "needs", "title", "summary"}]};
+# reason: why this Mac or VM cannot have it ("" when available).
 # Without --vm it starts nothing: the state of the VM it would pick if that
 # one runs, else the defaults ("vm": null).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
@@ -22,7 +24,7 @@ source "$R/src/lib/setup.sh"
 source "$R/src/lib/features.sh"
 features_load
 MODE=$1; shift
-VM=""; TYPE=""; JSON=0; YES=0; WANT=()
+VM=""; TYPE=""; JSON=0; YES=0; WANT=(); APPLY_ARGS=()
 usage() { echo "omacvm $MODE: $*" >&2; exit 2; }
 while (( $# )); do
   case $1 in
@@ -30,7 +32,8 @@ while (( $# )); do
     --vm-type) TYPE=$2; shift 2 ;;
     --json) JSON=1; shift ;;
     --yes|-y) YES=1; shift ;;
-    -h|--help) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --transaction) APPLY_ARGS+=(--transaction); shift ;;
+    -h|--help) sed -n '2,18s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
        WANT+=("$1"); shift ;;
@@ -77,10 +80,10 @@ if (( JSON )); then
     "$( [[ -n $version ]] && json_str "$version" || echo null)"
   for ((i = 0; i < ${#FN[@]}; i++)); do
     available "$i" && av=true || av=false
-    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "needs": %s, "title": %s, "summary": %s}' \
+    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s}' \
       "$( ((i)) && echo ,)" "${FN[$i]}" "$( [[ ${FV[$i]} == on ]] && echo true || echo false)" \
       "$( [[ $(feature_default "$i") == on ]] && echo true || echo false)" \
-      "$(feature_has_tag "$i" experimental && echo true || echo false)" "$av" \
+      "$(feature_has_tag "$i" experimental && echo true || echo false)" "$av" "$(json_str "$REASON")" \
       "$( [[ ${FNEEDS[$i]} == - ]] && echo null || json_str "${FNEEDS[$i]}")" \
       "$(json_str "${FTITLE[$i]}")" "$(json_str "${FSUM[$i]}")"
   done
@@ -96,6 +99,8 @@ label() {   # INDEX -> one line for the list
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
   feature_has_tag "$i" slow && tag=" $dim(slow to build)$off"
   available "$i" || tag=" $dim($REASON)$off"
+  # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
+  [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"
   printf '%s%s' "${FTITLE[$i]}" "$tag"
 }
 
@@ -162,4 +167,6 @@ printf '\n  On %s:\n%s' "$VM" "$summary"
 if (( ! YES )) && (( interactive )); then
   ask_yn "Apply?" y || exit 1
 fi
-exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}"
+# --yes: apply asks nothing either (its control centre question).
+(( YES )) && APPLY_ARGS+=(--yes)
+exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}" ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}

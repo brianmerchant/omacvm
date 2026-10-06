@@ -354,13 +354,26 @@ final class ExternalBrightness {
     io.async {
       guard self.enabled() else { return }
       var d = self.entry(id)
-      guard d.method.works, let now = self.level(id, &d, maxAge: Self.fresh) else { return }
+      guard d.method.works else { return }
+      guard let now = self.level(id, &d, maxAge: Self.fresh) else {
+        self.keyFailed(d.name, "it did not answer (asleep, or the read failed)"); return
+      }
       let to = BrightnessStep.next(now, up: up, fine: fine)
-      guard self.write(id, &d, to, fromVM: false) else { return }
+      guard self.write(id, &d, to, fromVM: false) else {
+        self.keyFailed(d.name, "it did not take the new level"); return
+      }
+      self.failedSaid.remove(d.name)
       self.store(id, d)
       self.onKey?(BrightnessStep.percent(to), d.name)
       log("media key brightness on \(d.name)\(fine ? " (fine)" : "") -> \(BrightnessStep.percent(to)) %")
     }
+  }
+
+  /// A brightness key the display did not take: said once per display (until
+  /// one works again), so a held key is not a log line per press.
+  private var failedSaid: Set<String> = []
+  private func keyFailed(_ name: String, _ why: String) {
+    if failedSaid.insert(name).inserted { log("media key brightness on \(name): failed, \(why)") }
   }
 
   /// The guest's request: the level now (percent), fresh (1 s) for a read.

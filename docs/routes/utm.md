@@ -51,6 +51,14 @@ Run the build in Terminal on the Mac, not over SSH: OmacVM drives UTM
 through AppleScript, and macOS asks once whether Terminal may control UTM.
 Allow it.
 
+UTM keeps its VMs in its own data folder, and macOS (14 and later) asks
+before another app reads there. OmacVM reads it only when you run omacvm in
+a terminal (or act on a UTM VM), never from the Bridge or a script, and
+gives up after 2 seconds. If macOS asks whether Terminal may access data
+from other apps, allow it; until then a stopped UTM VM shows as
+"unknown (UTM data not readable)". OmacVM lists UTM VMs only once you use
+UTM with it on this Mac (`OMACVM_UTM=1` lists them anyway).
+
 ## Keep UTM in the foreground
 
 Start UTM from the Dock or Spotlight, so it is in the foreground app list.

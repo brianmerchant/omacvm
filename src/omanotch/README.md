@@ -167,7 +167,10 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   prove to each other that they know OmacVM's Bridge token (HMAC-SHA256 over
   two nonces and 127.0.0.1, the Mac first), so the token itself is never
   sent; a connection that has not proved it yet does not get in the way of a
-  connected VM. VMs on Parallels, UTM and VMware Fusion skip this: their VM
+  connected VM. The same on the app's fast network (vmnet, the Mac at
+  192.168.77.1; the proof then names that address): `notchcast` takes it when
+  it is the VM's gateway, and connects again when the app moves the VM between
+  the two networks. VMs on Parallels, UTM and VMware Fusion skip this: their VM
   network is the check. The protocol is in `mac/Sources/GuestAuth.swift`.
 - Keep UTM's library window and Parallels' Control Center out of full screen on
   the built-in display while a VM is connected: from the outside they look just
@@ -196,7 +199,7 @@ up by itself.
 | UTM: the pointer never reaches the strip | UTM's automatic input capture is on (see Requirements), or press ⌃⌥ to release the mouse |
 | UTM: with capture off the VM's cursor does not move | a SPICE agent (`spice-vdagentd`) takes UTM's absolute mouse positions: it must run with a real uinput device (not `-f`) and a session agent that reports the screen size — or not at all, then QEMU's USB tablet is used |
 | Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` and `screen` the built-in display · `~/.local/state/omanotch/park` is what notchcast asked for (`1 <output>`); the bar follows it within 3 s, also after a shell restart |
-| OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …") · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
+| OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …", or on 192.168.77.1 on the fast network) · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
 | Strip shows another VM's bar | two VMs of one app are connected: Omanotch tells apps apart, not VMs of one app (`~/Library/Logs/omanotch.log`: "strip serves guest …"); stop the other VM or restart its `notchcast` |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
 | Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display (OmacVM.app: `$XDG_RUNTIME_DIR/omacvm/builtin` does, `omacvm check` → "notch display") |

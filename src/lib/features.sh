@@ -34,6 +34,7 @@ mac_battery() { pmset -g batt 2>/dev/null | grep -q InternalBattery && echo yes 
 # The default of feature INDEX on this Mac (NOTCH = notch|none) for a VM of
 # TYPE (empty: not known yet).
 feature_default() {
+  if feature_has_tag "$1" app-only && [[ -n ${TYPE:-} && $TYPE != app ]]; then echo off; return; fi
   case ${FDEF[$1]} in
     on) echo on ;;
     notch) [[ ${NOTCH:-none} == notch ]] && echo on || echo off ;;

@@ -25,7 +25,11 @@ CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/omacvm}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 source "$OMACVM_SRC/vm/live/release.sh"
 # The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Omanotch, Gestures, Bridge.
-HOST_PORTS=47811,47830,47831
+# OMACVM_HOST_PORTS= (empty): none (image builds and test VMs leave the Mac's helpers alone).
+# The test identity (OMACVM_TEST_IDENTITY=1, from "OmacVM Test"): its own Gestures and
+# Bridge on 47930/47931 (libslirp maps the guest's ports), never Omanotch.
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then HOST_PORTS=${OMACVM_HOST_PORTS-47830>47930,47831>47931}
+else HOST_PORTS=${OMACVM_HOST_PORTS-47811,47830,47831}; fi
 
 vm_load() {
   VM_DIR=$(cd "$1" && pwd)
@@ -142,11 +146,19 @@ wait_ssh() {   # [seconds]
   return 1
 }
 
+# Text from the VM on its way to the app or a terminal: colour codes out, then
+# only printable ASCII and tabs (no other escape sequences: a guest could set
+# the window title or the Mac's clipboard), lines cut at 240 characters.
+# Line by line, so progress still shows as it comes.
+printable() {
+  LC_ALL=C sed -l -e $'s/\x1b\\[[0-9;]*m//g' -e 's/[^[:print:][:blank:]]//g' -e 's/^\(.\{240\}\).*/\1/'
+}
+
 # run_logged LOGFILE CMD...: CMD's output to LOGFILE, its "==>" lines to us.
 run_logged() {
   local f=$1 rc; shift
   set +e
-  "$@" 2>&1 | tee "$f" | sed -l 's/\x1b\[[0-9;]*m//g' | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
+  "$@" 2>&1 | tee "$f" | printable | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
   rc=${PIPESTATUS[0]}
   set -e
   return "$rc"

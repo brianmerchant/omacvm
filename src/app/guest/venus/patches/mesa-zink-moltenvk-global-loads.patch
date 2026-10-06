@@ -1,0 +1,91 @@
+From: OmacVM
+Subject: [PATCH] zink: keep global loads in place on MoltenVK
+
+What: on MoltenVK, zink reads the address of every non-atomic global load
+(load_global, i.e. OpenCL __global memory through buffer device addresses)
+back from a function variable before it makes the pointer.
+
+Why: MoltenVK 1.4.2 converts SPIR-V with a SPIRV-Cross that is older than
+its fix 090bb6b7 ("Never forward synthesized BDA loads", 2026-07-31). That
+SPIRV-Cross takes a pointer computed from a value it thinks is immutable
+(zink's kernel-input UBO) for immutable memory and forwards the load into
+each use, also past stores through other pointers to the same memory. A
+swap "x = a[i]; y = a[j]; a[i] = y; a[j] = x;" became
+"a[i] = a[j]; a[j] = a[i];" in MSL and lost an element. That broke every
+in-place sort, e.g. Geekbench 7's Feature Matching (GPU 0 matches vs CPU
+180, failed validation). An address loaded from a variable is not
+immutable to SPIRV-Cross, so the load stays a temporary. KosmicKrisp
+compiles NIR to MSL itself and is not affected.
+
+Upstream: workaround for a MoltenVK/SPIRV-Cross bug fixed upstream in
+SPIRV-Cross; drop once the pinned MoltenVK carries 090bb6b7 or later.
+Test: barriertest.c (one work-group bitonic sort in global memory: elements
+lost before, sorted after) and Geekbench 7 GPU OpenCL Feature Matching.
+
+diff --git a/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c b/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c
+index 8394f04..8cc8d20 100644
+--- a/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c
++++ b/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c
+@@ -92,6 +92,7 @@ struct ntv_context {
+    SpvId loop_break, loop_cont;
+ 
+    SpvId shared_block_var[5]; //8, 16, 32, unused, 64
++   SpvId global_addr_var; // see ntv_info::global_loads_via_local
+    SpvId shared_block_arr_type[5]; //8, 16, 32, unused, 64
+    SpvId scratch_block_var[5]; //8, 16, 32, unused, 64
+    SpvId task_block_arr_type[5]; //8, 16, 32, unused, 64
+@@ -2675,7 +2676,27 @@ emit_load_global(struct ntv_context *ctx, nir_intrinsic_instr *intr)
+                                                    SpvStorageClassPhysicalStorageBuffer,
+                                                    dest_type);
+    nir_alu_type atype;
+-   SpvId ptr = emit_bitcast(ctx, pointer_type, get_src(ctx, &intr->src[0], &atype));
++   SpvId addr = get_src(ctx, &intr->src[0], &atype);
++   if (ctx->sinfo->global_loads_via_local && !(nir_intrinsic_access(intr) & ACCESS_ATOMIC)) {
++      /* SPIRV-Cross before 090bb6b7 (MoltenVK <= 1.4.2) treats a pointer made
++       * from a value it considers immutable as immutable memory: it forwards
++       * the load to every use, past stores through other pointers to the same
++       * memory (a swap of a[i] and a[j] then loses an element). An address
++       * read back from a variable is not immutable, so the load stays where
++       * it is.
++       */
++      SpvId addr_type = spirv_builder_type_uint(&ctx->builder, 64);
++      if (!ctx->global_addr_var) {
++         SpvId var_type = spirv_builder_type_pointer(&ctx->builder,
++                                                     SpvStorageClassFunction,
++                                                     addr_type);
++         ctx->global_addr_var = spirv_builder_emit_var(&ctx->builder, var_type,
++                                                       SpvStorageClassFunction);
++      }
++      spirv_builder_emit_store(&ctx->builder, ctx->global_addr_var, addr, false);
++      addr = spirv_builder_emit_load(&ctx->builder, addr_type, ctx->global_addr_var, false);
++   }
++   SpvId ptr = emit_bitcast(ctx, pointer_type, addr);
+    SpvId result;
+    if (nir_intrinsic_access(intr) & ACCESS_ATOMIC)
+       result = emit_atomic(ctx, SpvOpAtomicLoad, dest_type, ptr, 0, 0);
+diff --git a/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.h b/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.h
+index 4171f72..78b997c 100644
+--- a/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.h
++++ b/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.h
+@@ -54,6 +54,9 @@ struct ntv_info {
+    bool is_native_vulkan; //ignore zink-isms
+    bool have_shader_viewport_index_layer;
+    bool have_shader_output_layer;
++   /* read global addresses through a function variable before each load
++    * (works around SPIRV-Cross forwarding BDA loads past aliasing stores) */
++   bool global_loads_via_local;
+    struct {
+       uint8_t flush_denorms:3; // 16, 32, 64
+       uint8_t preserve_denorms:3; // 16, 32, 64
+diff --git a/src/gallium/drivers/zink/zink_compiler.c b/src/gallium/drivers/zink/zink_compiler.c
+index 0f7a28a..3c68849 100644
+--- a/src/gallium/drivers/zink/zink_compiler.c
++++ b/src/gallium/drivers/zink/zink_compiler.c
+@@ -1367,6 +1367,7 @@ zink_screen_init_compiler(struct zink_screen *screen)
+    screen->ntv_info.broken_arbitary_type_const = screen->driver_compiler_workarounds.broken_const;
+    screen->ntv_info.have_shader_viewport_index_layer = screen->info.have_EXT_shader_viewport_index_layer;
+    screen->ntv_info.have_shader_output_layer = screen->info.feats12.shaderOutputLayer;
++   screen->ntv_info.global_loads_via_local = zink_driverid(screen) == VK_DRIVER_ID_MOLTENVK;
+    screen->ntv_info.spirv_version = screen->spirv_version;
+    if (screen->info.have_KHR_shader_float_controls) {
+       if (screen->info.props12.shaderDenormFlushToZeroFloat16)

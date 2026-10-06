@@ -11,6 +11,7 @@ set -euo pipefail
 drm_root=${OMARCHY_DISPLAY_SYNC_DRM_ROOT:-/sys/class/drm}
 monitor_config=${OMARCHY_DISPLAY_SYNC_MONITOR_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/hypr/monitors.lua}
 layout_file=${OMACVM_DISPLAYS_LAYOUT:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm/displays.json}
+state_dir=${OMACVM_DISPLAY_SYNC_STATE:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm/display-sync}
 
 # preferred_mode_from_edid EDID [main|other]: Omarchy's scale setting is for
 # the main output; the other displays keep their own density.
@@ -347,6 +348,125 @@ for name in outputs:
 PY
 }
 
+# follow_check OUTPUT HASH MODE SCALE POSITION HDR SHOWN: whether to send the
+# rule; SHOWN is Hyprland's j/monitors. Exit 0: send it (and it is
+# counted); 1: Hyprland already shows exactly that (mode, rate, scale, place),
+# so a modeset would only make the screen flash and its buffers be made
+# again; 2: held. With scale "auto" Hyprland picks the scale itself, so the
+# scale counts as shown when this same rule was the last one Hyprland took.
+# HDR is not in j/monitors: the HDR part counts as shown when the last rule
+# Hyprland took had it (sent_ok writes both after Hyprland said ok). The hold is the guard against a loop: an output that
+# changed 6 times in 10 s between only two states (ping-pong), or 12 times
+# in 10 s at all, keeps what it shows for 60 s and the reason is logged once
+# (journal, and the file "held" for omacvm check); then it looks once more
+# (the window may have changed meanwhile). A window being resized
+# changes it about once a second (QEMU waits a second), to new sizes each
+# time: that is never held.
+follow_check() {
+  python3 - "$state_dir" "$0" "$@" <<'PY'
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+
+state, self_path, output, digest, mode, scale, position, hdr, shown = sys.argv[1:10]
+WINDOW, PINGPONG, STORM, HOLD = 10.0, 6, 12, 60.0
+d = pathlib.Path(state)
+d.mkdir(parents=True, exist_ok=True)
+now = time.time()
+
+
+def log(message: str) -> None:
+    print(f"omacvm-display-sync: {message}", file=sys.stderr, flush=True)
+
+
+hold = d / f"{output}.hold"
+try:
+    until = float(hold.read_text().split()[0])
+except (OSError, ValueError, IndexError):
+    until = 0.0
+if now < until:
+    raise SystemExit(2)
+
+# Already shown? modeline CLOCK W HSS HSE HTOTAL H VSS VSE VTOTAL ...
+f = mode.split()
+try:
+    width, height = int(f[2]), int(f[6])
+    refresh = int(f[1]) * 1e6 / (int(f[5]) * int(f[9]))
+    want_scale = float(scale) if scale != "auto" else None
+except (IndexError, ValueError, ZeroDivisionError):
+    width = height = 0
+try:
+    shown_hdr = (d / f"{output}.hdr").read_text()
+except OSError:
+    shown_hdr = None
+try:
+    last_sent = (d / f"{output}.sent").read_text().strip()
+except OSError:
+    last_sent = None
+try:
+    monitors = json.loads(shown)
+except ValueError:
+    monitors = []
+for m in monitors if isinstance(monitors, list) else []:
+    if not isinstance(m, dict) or m.get("name") != output or m.get("disabled"):
+        continue
+    try:
+        same = (
+            width and m["width"] == width and m["height"] == height
+            and abs(float(m["refreshRate"]) - refresh) < 0.5
+            and (abs(float(m["scale"]) - want_scale) < 0.001 if want_scale is not None
+                 else last_sent == digest)
+            and shown_hdr == hdr
+        )
+        place = re.fullmatch(r"(-?\d+)x(-?\d+)", position)
+        if same and place:
+            same = (m["x"], m["y"]) == (int(place[1]), int(place[2]))
+    except (KeyError, TypeError, ValueError):
+        same = False
+    if same:
+        raise SystemExit(1)
+
+# Count it; hold the output if it keeps changing.
+history = d / f"{output}.history"
+events = []
+try:
+    for line in history.read_text().splitlines():
+        t, _, h = line.partition(" ")
+        if now - float(t) < WINDOW:
+            events.append((float(t), h))
+except (OSError, ValueError):
+    events = []
+events.append((now, digest))
+distinct = len({h for _, h in events})
+if len(events) >= STORM or (len(events) >= PINGPONG and distinct <= 2):
+    kind = "between two states" if distinct <= 2 else "to new states"
+    reason = (f"{output} changed {len(events)} times in {WINDOW:.0f} s ({kind}); "
+              f"keeping what it shows for {HOLD:.0f} s")
+    log(reason)
+    hold.write_text(f"{now + HOLD}\n")
+    history.unlink(missing_ok=True)
+    with open(d / "held", "a") as held:
+        held.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {reason}\n")
+    # One look when the hold ends, with what is current then.
+    subprocess.Popen(["sh", "-c", f'sleep {HOLD + 1:.0f}; exec "$0" --once', self_path],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    raise SystemExit(2)
+history.write_text("".join(f"{t} {h}\n" for t, h in events))
+PY
+}
+
+# sent_ok OUTPUT HASH HDR: Hyprland took the rule; what follow_check compares
+# with next time (only now, so a rule Hyprland refused is sent again).
+sent_ok() {
+  printf '%s' "$3" > "$state_dir/$1.hdr"
+  printf '%s\n' "$2" > "$state_dir/$1.sent"
+}
+
 apply_preferred_modes() {
   local connector
   local connector_name
@@ -358,6 +478,7 @@ apply_preferred_modes() {
   local scale
   local position
   local i w h
+  local hdr digest
   local -a outputs=() modes=() scales=() sizes=()
   local -A placed=()
 
@@ -386,6 +507,15 @@ apply_preferred_modes() {
     [[ -n $output ]] && placed[$output]=$position
   done < <(output_positions "$layout_file" "${sizes[@]}" 2>/dev/null || true)
 
+  # One at a time: the watcher, the reload hook and omacvm-displays all call this.
+  mkdir -p "$state_dir"
+  local lock_fd
+  if command -v flock >/dev/null && exec {lock_fd}>"$state_dir/lock"; then
+    flock -w 20 "$lock_fd" || true
+  fi
+  local shown
+  shown=$(hyprctl -j monitors 2>/dev/null) || shown='[]'
+
   for i in "${!outputs[@]}"; do
     output=${outputs[$i]} mode=${modes[$i]} scale=${scales[$i]}
     position=${placed[$output]:-}
@@ -410,19 +540,26 @@ apply_preferred_modes() {
       fi
       continue
     fi
-    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"$position\", scale = \"$scale\"$(hdr_fields "$output") })"
+    hdr=$(hdr_fields "$output")
+    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"$position\", scale = \"$scale\"$hdr })"
+    # The notch strip is the main window's (full screen on the built-in display).
+    if [[ $output == Virtual-1 ]]; then
+      notch_bar "$mode" "$scale"
+    fi
+    digest=$(cksum <<<"$rule" | cut -d' ' -f1)
+    follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" ||
+      continue
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2
     elif [[ $response != ok ]]; then
       printf 'omacvm-display-sync: Hyprland rejected %s for %s: %s\n' \
         "$mode" "$output" "$response" >&2
-    fi
-    # The notch strip is the main window's (full screen on the built-in display).
-    if [[ $output == Virtual-1 ]]; then
-      notch_bar "$mode" "$scale"
+    else
+      sent_ok "$output" "$digest" "$hdr"
     fi
   done
+  [[ -z ${lock_fd:-} ]] || exec {lock_fd}>&-
 }
 
 # OmacVM.app: when the window covers the strip beside the notch (full screen

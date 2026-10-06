@@ -71,7 +71,8 @@ gpu_device() {   # OpenCL|Vulkan -> prints the device; exit 1 with the reason on
 if want gpu; then
   # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where the VM has a GPU
   # device for them (OmacVM.app with Venus and rusticl); the other VMs have none.
-  apis=$([[ $OS == Darwin ]] && echo "Metal OpenCL" || echo "Vulkan OpenCL")
+  # GEEKBENCH_GPU_APIS: only these (e.g. "OpenCL" when Metal is not compared).
+  apis=${GEEKBENCH_GPU_APIS:-$([[ $OS == Darwin ]] && echo "Metal OpenCL" || echo "Vulkan OpenCL")}
   for api in $apis; do
     dev=
     if [[ $OS != Darwin ]]; then

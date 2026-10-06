@@ -64,9 +64,15 @@ native_dir=$(cd "$(dirname "$0")" && pwd -P)
 # OMACVM_RUNTIME_KOSMICKRISP=1. Its build needs Homebrew LLVM and SPIR-V tools,
 # so check the build machine before the long QEMU build. Without it the
 # runtime has MoltenVK only.
+# OMACVM_KOSMICKRISP_FROM=DIR: one built on another Mac (import-kosmickrisp.sh).
 case ${OMACVM_RUNTIME_KOSMICKRISP:-0} in
   0) with_kosmickrisp=0 ;;
-  1) "$native_dir/build-kosmickrisp.sh" --check; with_kosmickrisp=1 ;;
+  1) if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+       "$native_dir/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM" --stamp >/dev/null
+     else
+       "$native_dir/build-kosmickrisp.sh" --check
+     fi
+     with_kosmickrisp=1 ;;
   *) echo 'qemu-source-build: OMACVM_RUNTIME_KOSMICKRISP must be 0 or 1' >&2; exit 64 ;;
 esac
 texture_patch="$native_dir/patches/qemu-texture-borrowing-11.1.patch"
@@ -126,6 +132,8 @@ virgl_blitter_core_glsl_version_patch="$native_dir/patches/virgl-blitter-core-gl
 virgl_blitter_integer_msaa_patch="$native_dir/patches/virgl-blitter-integer-msaa.patch"
 virgl_framebuffer_no_attachments_patch="$native_dir/patches/virgl-framebuffer-no-attachments.patch"
 virgl_caps_sampler_limit_patch="$native_dir/patches/virgl-caps-sampler-limit.patch"
+virgl_budget_loss_patch="$native_dir/patches/virgl-resource-budget-context-loss.patch"
+virgl_venus_budget_patch="$native_dir/patches/virgl-venus-memory-budget.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -155,7 +163,7 @@ mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a67
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
-virgl_videotoolbox_patch_sha256=3ebb7b1b2046dce6d205081206f9d5c3ea049c6883309a2272ba3a1e4eea33bc
+virgl_videotoolbox_patch_sha256=de2061490594e835cec37a181995d9a0289bc763fee72e7d5fb35d60dcf29392
 virgl_row_size_patch_sha256=c1994d82562625ba8211d1443423b23763b8932fbfe610a416ae6f556010da9f
 virgl_vt_encode_patch_sha256=7c92879d7b06a4e06af1c47054d38d2f102bd94f8c264d75ba16eece59625fc7
 hidden_window_patch_sha256=22d61f49590966a65f44cb5dd74e2e6254e80e6045f1686e5f379c617745d303
@@ -177,9 +185,11 @@ virgl_ubo_align_patch_sha256=0087f49d9f64e497580bbb6174b92ef0990c85eea73afbc18ff
 virgl_block_array_patch_sha256=8b9fb4870fbd4ee629d2802d10672406c7ad43bdf54ae558bd6427e6f5a4011c
 virgl_draw_error_patch_sha256=9243046f78aa8eaa1c22591a3afeafe6a51ea092170ac8370d26ffa57e92c363
 virgl_vertex_unused_patch_sha256=1c424509f19ebcd23c17a8fdb1984ddaa64e90e682959d5621236444aa1a2cc6
-virgl_memory_budget_patch_sha256=c8068ca79738984e8c1205fc4eea73956de44ce92a98148bca50ee19e304c868
+virgl_memory_budget_patch_sha256=3609979e8b4cb1b0ac14474e30d4ff063d63aebbeef83aba9ef6497bad5ae6ae
 virgl_queue_flush_patch_sha256=7f468d955d47cfbf9df75578efddfab0f36256b9b092c8e992f6b78faf67991b
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
+virgl_budget_loss_patch_sha256=32fca5ea3b3c76d147138935678bc5ca7ded2d17a5922993ba9f9a232caef2a4
+virgl_venus_budget_patch_sha256=fdfc1667e0e9b267104fff8113e6754979d1f4d94c32776f29daab17147cf842
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
 virgl_shader_core_glsl_version_patch_sha256=aa6a6c0055d3b5cdca09e26fba7f2b97a635696e60d9c00835e8edab09cb25c7
 virgl_shader_shadow_lod_patch_sha256=c56fb4fa4637f5c634bce74be2a750b9ba321a7ed79cc16787dd579a71da1d92
@@ -523,6 +533,9 @@ verify_file_sha "IPv4 UDP reply translation patch" "$udp_patch" "$udp_patch_sha2
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$udp_patch"
 # OmacVM: the guest reaches the Mac's 127.0.0.1 only on the ports it may use.
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$native_dir/patches/omacvm-libslirp-host-ports.patch"
+# Non-blocking UDP/ICMP sockets: a send the Mac cannot take at once is dropped
+# instead of freezing the VM (Tests/net/test-slirp-udp-stall.sh).
+patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$native_dir/patches/libslirp-nonblocking-datagram-sockets.patch"
 tar -xzf "$qemu_archive" -C "$source_parent"
 tar -xzf "$virgl_archive" -C "$source_parent"
 tar -xzf "$virgl_tap_archive" -C "$source_parent"
@@ -596,6 +609,9 @@ verify_file_sha "Try Omarchy HDA full-ring recovery patch" \
   "$audio_recovery_patch" "$audio_recovery_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$audio_device_patch"
 patch -d "$source_dir" -p1 -f -i "$audio_recovery_patch"
+# OmacVM: no catch-up after a stalled main loop (the guest's sound clock pauses;
+# QEMU's ring covers the stall instead of the guest under-running).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hda-no-catch-up.patch"
 patch -d "$source_dir" -p1 -f -i "$shared_folder_patch"
 patch -d "$source_dir" -p1 -f -i "$strchrnul_patch"
 patch -d "$source_dir" -p1 -f -i "$memory_reclaim_patch"
@@ -606,6 +622,8 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+# OmacVM: a main loop stall > 2 s is logged with its place.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
 # full screen beside the notch; the window keeps its size; full screen at the
 # window's real size; modifiers only from input events; the recording device
@@ -617,6 +635,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input-only.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
+# OmacVM: the playback device opens and closes off the BQL too: a Mac audio
+# device that does not answer no longer hangs the VM, it runs without sound.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-playback-thread.patch"
+# OmacVM: the main loop (sound card timers, virgl) at user-interactive QoS, so a
+# busy guest on a busy Mac no longer delays it and the sound stays clean.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-darwin-main-loop-qos.patch"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 # OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window
@@ -677,6 +701,60 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subreg
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-vsync.patch"
 # Colour-space tagged frames; 10-bit scanouts in half float; HDR (PQ) with EDR.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-color.patch"
+# macOS's own shortcuts go to the VM while it has the keyboard (and its logic's test).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shortcuts-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-system-shortcuts.patch"
+"$native_dir/Tests/keys/test-shortcuts.sh"
+# Keys OmacVM's helpers post for macOS (the escape combo's Space shortcut) skip the guest.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-keys-for-macos.patch"
+grep -q 'if (omacvm_key_for_macos(event))' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not pass OmacVM's marked keys to macOS (keys-for-macos patch)"
+# The escape combo passes QEMU's full-grab tap, so OmacVM Gestures gets it in any tap order.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-escape-combo-tap.patch"
+grep -q 'flags & kCGEventFlagMaskCommand, flags & kCGEventFlagMaskShift)) {' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m's event tap does not let the escape combo through (escape-combo-tap patch)"
+# The VM's window takes the pointer without a click; the Mac's cursor hides only
+# once the guest draws its own (and the logic's test).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-start-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-start.patch"
+"$native_dir/Tests/display/test-pointer-start.sh"
+grep -q 'omacvmTakePointer:event why:"motion over the VM"' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not take the pointer on motion (pointer-start patch)"
+# Idle power: the refresh tick slows to 500 ms while it has nothing to do.
+# Its rate logic, taken from the patched ui/cocoa.m, is tested on its own.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-idle-refresh.patch"
+awk '/^#define COCOA_REFRESH_SLOW_MS/{f=1} f{print}
+     f&&/^static void cocoa_refresh_tick\(bool pending\)$/{t=1} t&&/^}$/{exit}' \
+  "$source_dir/ui/cocoa.m" > "$display_tests/idle-refresh.inc"
+grep -q '^static void cocoa_refresh_tick(bool pending)$' "$display_tests/idle-refresh.inc" || \
+  die "ui/cocoa.m has no cocoa_refresh_tick() (idle refresh patch)"
+cc -Wall -Werror -I"$display_tests" "$native_dir/Tests/display/test-idle-refresh.c" \
+  -o "$display_tests/test-idle-refresh"
+"$display_tests/test-idle-refresh"
+OMACVM_IDLE_REFRESH=0 "$display_tests/test-idle-refresh" off
+# OmacVM: VM memory and graphics memory in the app menu (read when it opens).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-graphics-memory.patch"
+"$native_dir/Tests/display/test-gpu-memory-menu.sh"
+# OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
+# logo until the guest's desktop, and instead of "Display output is not
+# active."; the cells must be the firmware's logo, the animation's table the
+# generator's, and its core must keep its timeline and tell the desktop apart.
+# After the GPU present patches: it draws the still logo in their IOSurfaces too.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-boot-splash.patch"
+python3 "$native_dir/Tests/display/test-boot-splash-cells.py" "$source_dir/ui/omacvm-splash.h" || \
+  die "the boot splash's logo is not the firmware's (test-boot-splash-cells.py)"
+python3 "$native_dir/boot-logo/make-splash-morph.py" --check "$source_dir/ui/omacvm-splash.h" || \
+  die "the start animation's table is not make-splash-morph.py's"
+cc -Wall -Wextra -Werror -I"$source_dir/ui" "$native_dir/Tests/display/test-boot-splash-morph.c" \
+  -o "$display_tests/test-boot-splash-morph"
+"$display_tests/test-boot-splash-morph"
+# The logo layer's fade into the desktop runs once ("opacity" in its no-action list).
+awk '/NSDictionary \*none = @\{/ { on = 1 } on { print } on && /\};$/ { exit }' "$source_dir/ui/cocoa.m" |
+  sed -e 's/.*NSDictionary \*none = //' -e 's/};$/}/' > "$display_tests/intro-actions.inc"
+cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tests" \
+  "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
+  -framework OpenGL -o "$display_tests/test-boot-splash-fade"
+"$display_tests/test-boot-splash-fade"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -861,7 +939,8 @@ verify_file_sha "Draw GL error check" "$virgl_draw_error_patch" "$virgl_draw_err
 patch -d "$virgl_source" -p1 -f -i "$virgl_draw_error_patch"
 verify_file_sha "Unused first vertex input" "$virgl_vertex_unused_patch" "$virgl_vertex_unused_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_unused_patch"
-# OmacVM: guest resources have a memory budget (OMACVM_GPU_MEMORY_MB, default a quarter of the Mac's memory).
+# OmacVM: guest resources have a memory budget against a runaway guest (OMACVM_GPU_MEMORY_MB, default
+# three quarters of the Mac's memory); below it virgl-darwin-memory-pressure.patch asks macOS.
 verify_file_sha "Resource memory budget" "$virgl_memory_budget_patch" "$virgl_memory_budget_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_memory_budget_patch"
 # OmacVM: QEMU's resource and transfer commands are flushed (Apple's GL keeps unflushed texture memory).
@@ -870,6 +949,12 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_queue_flush_patch"
 # OmacVM: Venus devices always get robust buffer access where the host device has it.
 verify_file_sha "Venus robust buffer access" "$virgl_venus_robust_patch" "$virgl_venus_robust_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_venus_robust_patch"
+# OmacVM: a resource the budget refused loses (and tells) the context that made it.
+verify_file_sha "Budget context loss" "$virgl_budget_loss_patch" "$virgl_budget_loss_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_budget_loss_patch"
+# OmacVM: Venus device memory and shm blobs count against the same budget.
+verify_file_sha "Venus memory budget" "$virgl_venus_budget_patch" "$virgl_venus_budget_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_venus_budget_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
@@ -908,6 +993,14 @@ verify_file_sha "Framebuffer without attachments patch" "$virgl_framebuffer_no_a
 patch -d "$virgl_source" -p1 -f -i "$virgl_framebuffer_no_attachments_patch"
 verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_caps_sampler_limit_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
+# OmacVM GPU: the sync thread does not test fences while the render thread runs commands.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
+# OmacVM GPU: guest GPU memory follows the Mac's memory pressure; status file for the app.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-memory-pressure.patch"
+# OmacVM Venus: MoltenVK cannot compile zero-initialized workgroup memory.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
+# OmacVM: a compositor's dma-buf import (a Vulkan window) no longer ends its context on macOS OpenGL.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-set-type-without-egl.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -1070,7 +1163,11 @@ fi
 
 kosmickrisp_args=()
 if ((with_kosmickrisp)); then
-  "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  if [[ -n ${OMACVM_KOSMICKRISP_FROM:-} ]]; then
+    "$native_dir/import-kosmickrisp.sh" "$OMACVM_KOSMICKRISP_FROM"
+  else
+    "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  fi
   kosmickrisp_args=(--source-kosmickrisp "$native_dir/.build/kosmickrisp/libvulkan_kosmickrisp.dylib")
 fi
 
@@ -1081,6 +1178,12 @@ log "Relocating, capability-gating, signing, and publishing the runtime"
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
   ${kosmickrisp_args[@]+"${kosmickrisp_args[@]}"} \
   --archive-dir "$archive_dir"
+
+# A stalled UDP send on the Mac must not freeze the VM, and the stall
+# watchdog must name the place (an idle QEMU without guest, a few seconds).
+"$native_dir/Tests/net/test-slirp-udp-stall.sh" \
+  "$native_dir/.build/qemu-gpu-runtime/bin/qemu-system-aarch64" || \
+  die "the slirp UDP stall test failed"
 
 # The firmware must show the logo and name the disk's boot entry as QEMU's
 # does, with the QEMU it ships with (Tests/firmware/test-firmware.py).

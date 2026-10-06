@@ -1,0 +1,2 @@
+# The decoder's control device belongs to its daemon only.
+KERNEL=="omacvm-vdec", OWNER="omacvm-vdec", GROUP="omacvm-vdec", MODE="0600"

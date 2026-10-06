@@ -16,9 +16,12 @@
 // list) sets the Mac's address explicitly. Each
 // change is sent as the bounding box of changed pixels, LZ4-compressed. A full
 // frame is sent after every (re)connect.
-// OmacVM.app's VMs (OMACVM_VM_TYPE=app) reach the Mac's 127.0.0.1, where any
-// Mac program could listen: there both sides first prove they know OmacVM's
-// Bridge token (see handshake), and the token itself is never sent.
+// OmacVM.app's VMs (OMACVM_VM_TYPE=app) reach the Mac's 127.0.0.1 (QEMU's
+// user network, 10.0.2.2), where any Mac program could listen, or on the app's
+// fast network (vmnet) the Mac's 192.168.77.1: there both sides first prove
+// they know OmacVM's Bridge token (see handshake), and the token itself is
+// never sent. The app may switch a running VM between the two networks, so
+// such a VM connects again when its default gateway changes.
 //
 // Input/control: the helper sends text lines; they are validated and passed to
 // the bar's "notchbar" IPC target (`qs ipc call`), never through a shell.
@@ -630,7 +633,8 @@ static int vm_name_b64(char *out, size_t size) {
 //                                "omanotch mac <addr> <guest nonce> <mac nonce>"), hex;
 //                                <addr>: the Mac address it accepted on
 //   proof <proof>                from here, the same with "vm"
-// <addr> must be 127.0.0.1, so a proof that a listener there fetched from a
+// <addr> must be the address this side connected to (127.0.0.1 for 10.0.2.2,
+// 192.168.77.1 on the fast network), so a proof that a listener fetched from a
 // helper on another address fails. Other VMs skip this: there the VM network
 // is the check.
 
@@ -756,7 +760,7 @@ static int proof_ok(const char *a, const char *b) {  // constant time, 64 hex di
 }
 
 // The handshake above on a fresh connection; 0 once both proofs are through.
-static int handshake(int fd, const char *tok) {
+static int handshake(int fd, const char *tok, const char *addr) {
     uint8_t r[16];
     char gn[33], mn[33], got[65], want[65], mine[65], msg[160], line[256];
     if (getrandom(r, sizeof r, 0) != (ssize_t)sizeof r) return -1;
@@ -781,13 +785,13 @@ static int handshake(int fd, const char *tok) {
         LOG("the helper answered no proof: not talking to it");
         return -1;
     }
-    snprintf(msg, sizeof msg, "omanotch mac 127.0.0.1 %s %s", gn, mn);
+    snprintf(msg, sizeof msg, "omanotch mac %s %s %s", addr, gn, mn);
     hmac_sha256_hex(tok, msg, want);
     if (!proof_ok(got, want)) {
         LOG("the helper did not prove it knows the Bridge's token: not talking to it");
         return -1;
     }
-    snprintf(msg, sizeof msg, "omanotch vm 127.0.0.1 %s %s", gn, mn);
+    snprintf(msg, sizeof msg, "omanotch vm %s %s %s", addr, gn, mn);
     hmac_sha256_hex(tok, msg, mine);
     snprintf(msg, sizeof msg, "proof %s", mine);
     tv.tv_sec = 0;
@@ -1059,9 +1063,60 @@ static int on_vm_network(uint32_t addr_be) {
     return 0;
 }
 
+// The default gateway (network byte order), 0 if none: the lowest metric
+// among the default routes whose card has a link. When OmacVM.app takes the
+// fast network's card down, its route stays listed (first) for a while.
+static uint32_t default_gateway(void) {
+    FILE *f = fopen("/proc/net/route", "r");
+    if (!f) return 0;
+    char line[256];
+    uint32_t gw = 0;
+    long best = -1;
+    // "Iface Destination Gateway Flags RefCnt Use Metric ...", hex in network byte order.
+    while (fgets(line, sizeof line, f)) {
+        char iface[64], path[128], c = '1';
+        unsigned int dest, g, flags, refcnt, use;
+        long metric;
+        if (sscanf(line, "%63s %x %x %x %u %u %ld", iface, &dest, &g, &flags, &refcnt, &use, &metric) != 7 ||
+            dest || !g || !(flags & 1) || strchr(iface, '/'))
+            continue;
+        snprintf(path, sizeof path, "/sys/class/net/%s/carrier", iface);
+        FILE *cf = fopen(path, "r");
+        if (cf) {
+            if (fread(&c, 1, 1, cf) != 1) c = '0';
+            fclose(cf);
+        }
+        if (c != '1') continue;
+        if (best < 0 || metric < best) {
+            best = metric;
+            gw = g;
+        }
+    }
+    fclose(f);
+    return gw;
+}
+
+// OmacVM.app's fast network (vmnet): the Mac is its gateway, 192.168.77.1.
+#define FAST_NET_MAC 0xC0A84D01u  // 192.168.77.1, host byte order
+
+static int on_fast_network(void) { return default_gateway() == htonl(FAST_NET_MAC); }
+
+// The app moved the VM to the other network: a default route again, through
+// the other gateway (none for a moment, as while DHCP renews, is no move).
+static int moved_network(int fast) {
+    uint32_t gw = default_gateway();
+    return gw && (gw == htonl(FAST_NET_MAC)) != fast;
+}
+
 // Candidate addresses of the Mac, in the order they are tried.
-static int host_candidates(struct in_addr *out, int max) {
+static int host_candidates(struct in_addr *out, int max, int app) {
     int n = 0;
+    // OmacVM.app on its fast network: the gateway is the Mac. Else QEMU's
+    // user network, where NOTCHBAR_HOST (10.0.2.2) is the Mac's 127.0.0.1.
+    if (app && max > 0 && on_fast_network()) {
+        out[n++].s_addr = htonl(FAST_NET_MAC);
+        return n;
+    }
     if (cfg_host && *cfg_host) {
         char buf[256];
         snprintf(buf, sizeof buf, "%s", cfg_host);
@@ -1069,21 +1124,7 @@ static int host_candidates(struct in_addr *out, int max) {
             if (inet_pton(AF_INET, tok, &out[n]) == 1) n++;
         return n;
     }
-    // Default route from /proc/net/route: "Iface Destination Gateway ..." in
-    // network byte order, printed as hex.
-    FILE *f = fopen("/proc/net/route", "r");
-    if (!f) return 0;
-    char line[256];
-    unsigned int gw = 0;
-    while (fgets(line, sizeof line, f)) {
-        char iface[64];
-        unsigned int dest, g, flags;
-        if (sscanf(line, "%63s %x %x %x", iface, &dest, &g, &flags) == 4 && dest == 0 && g) {
-            gw = g;
-            break;
-        }
-    }
-    fclose(f);
+    uint32_t gw = default_gateway();
     if (!gw) return 0;
     // VMware Fusion: the gateway (.2) is Fusion's NAT, the Mac is .1, and the
     // subnet is picked when Fusion is installed (any private network).
@@ -1132,15 +1173,15 @@ static void *net_thread(void *unused) {
     int backoff_ms = 250;
     unsigned attempt = 0;
     for (;;) {
+        char type[16] = "", tok[160] = "";
+        int app = omacvm_env("OMACVM_VM_TYPE", type, sizeof type) && !strcmp(type, "app");
         struct in_addr hosts[8];
-        int nh = host_candidates(hosts, 8);
+        int nh = host_candidates(hosts, 8, app);
         if (!nh) {
             usleep(2000 * 1000);
             continue;
         }
         // OmacVM.app: the handshake needs the Bridge's token.
-        char type[16] = "", tok[160] = "";
-        int app = omacvm_env("OMACVM_VM_TYPE", type, sizeof type) && !strcmp(type, "app");
         if (app && !bridge_token(tok, sizeof tok)) {
             static int warned;
             if (!warned++) LOG("no Bridge token yet (~/.config/omacvm-bridge/token): waiting for it");
@@ -1161,14 +1202,21 @@ static void *net_thread(void *unused) {
         }
         backoff_ms = 250;
         attempt--;  // keep this address first for the next reconnect
-        int one = 1;
+        int one = 1, idle = 5, intvl = 2, cnt = 3;
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+        // Keepalive finds a Mac that is gone without closing (the path went
+        // away: a network switch, the Mac asleep) in about ten seconds.
         setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt);
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &sa.sin_addr, ip, sizeof ip);
         LOG("connected to %s:%d", ip, cfg_port);
         double connected_at = now_ms();
-        int refused = app && handshake(fd, tok);
+        // The proof names the Mac address the helper sees: 10.0.2.2 is its 127.0.0.1.
+        int fast = sa.sin_addr.s_addr == htonl(FAST_NET_MAC);
+        int refused = app && handshake(fd, tok, fast ? "192.168.77.1" : "127.0.0.1");
         explicit_bzero(tok, sizeof tok);
         if (refused) {
             close(fd);
@@ -1183,11 +1231,24 @@ static void *net_thread(void *unused) {
         pthread_mutex_unlock(&lock);
         send_hello();
         send_cursors();
+        // OmacVM.app: wake every 2 s to see whether the app moved the VM to
+        // the other network (the old path may stay silent, not closed).
+        if (app) {
+            struct timeval tv = {.tv_sec = 2};
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        }
 
         char buf[4096];
         size_t len = 0;
         for (;;) {
             ssize_t n = recv(fd, buf + len, sizeof buf - 1 - len, 0);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                if (moved_network(fast)) {
+                    LOG("the VM moved to %s: connecting again", fast ? "QEMU's user network" : "the fast network");
+                    break;
+                }
+                continue;
+            }
             if (n <= 0) {
                 if (n < 0 && errno == EINTR) continue;
                 break;

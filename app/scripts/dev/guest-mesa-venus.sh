@@ -3,7 +3,7 @@
 # Mesa 26.2.4, into /opt/mesa-venus. Arch Linux ARM's Mesa 26.2.3 does not round GPU memory to the Mac's
 # 16 KiB pages, so Vulkan apps there get no memory; 26.2.4 does. OpenGL stays on the system Mesa.
 # Use it per app:  VK_DRIVER_FILES=/opt/mesa-venus/share/vulkan/icd.d/virtio_icd.aarch64.json vkcube
-# Needs the app's hidden Venus switch: defaults write org.omacvm.app venus -bool true (then restart the VM).
+# Needs Venus in the VM: Graphics Vulkan (omacvm graphics --vm NAME vulkan, then restart the VM).
 set -euo pipefail
 V=26.2.4
 SHA=bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9

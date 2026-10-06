@@ -7,7 +7,7 @@
 #   guest.sh check MIN_WIDTH           the VM is as prepared (Mesa and the rest unchanged), wide enough
 #   guest.sh info                      facts about the VM (one JSON line)
 #   guest.sh viewport                  Chrome's page size in full screen (one JSON line)
-#   guest.sh throughput|vkpeak|geekbench|vkmark|glmark2|browser|webgpu RUNS
+#   guest.sh throughput|vkpeak|geekbench|cpu|speedometer|vkmark|glmark2|browser|webgpu RUNS
 #   guest.sh desktop [SHA256]          the idle desktop: notifications dismissed, Chrome closed, the wallpaper's
 #                                      hash checked against the Mac's (one JSON line)
 #   guest.sh wallpaper FILE            FILE (the Mac's own wallpaper, copied in) as Omarchy's background
@@ -134,6 +134,14 @@ geekbench)   # Geekbench GPU, Vulkan and OpenCL, only on a real GPU device (benc
   # sudo keeps root's (/root, not readable): every workload after Super Resolution then fails.
   out=$(mktemp); chmod 666 "$out"
   (cd "/home/$U" && as_user env RUSTICL_ENABLE="${RUSTICL_ENABLE:-zink}" bash "$B/src/bench/bench.sh" --runs "$RUNS" --only gpu "$out" >/dev/null 2>&1)
+  cat "$out"; rm -f "$out" ;;
+cpu)   # Geekbench CPU (bench.sh: the link to each result; the scores are read on the Mac)
+  out=$(mktemp); chmod 666 "$out"
+  (cd "/home/$U" && as_user bash "$B/src/bench/bench.sh" --runs "$RUNS" --only geekbench "$out" >/dev/null 2>&1)
+  cat "$out"; rm -f "$out" ;;
+speedometer)   # Speedometer 3.1 in full-screen Chrome, bench.sh's way
+  out=$(mktemp); chmod 666 "$out"
+  (cd "/home/$U" && as_user bash "$B/src/bench/bench.sh" --runs "$RUNS" --only speedometer "$out" >/dev/null 2>&1)
   cat "$out"; rm -f "$out" ;;
 vkmark)
   v=$(pkgver vkmark)

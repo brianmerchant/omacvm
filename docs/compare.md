@@ -70,9 +70,10 @@ The difference for video is decoding: macOS decodes YouTube's 4K in hardware,
 and Parallels, UTM and Fusion give Linux no hardware video decoding. OmacVM.app
 does since 2.7.0: Google Chrome, Brave, Firefox (H.264 and VP9; AV1 in Chrome,
 not yet in Firefox), mpv, FFmpeg and GStreamer apps decode on the Mac's media
-engine. Omarchy's default Chromium (Arch Linux ARM) is built without VA-API,
-so it still decodes on the CPU; a route for it (V4L2) is planned. OmacVM.app's
-YouTube 4K power number above is from before, with the CPU decoding.
+engine. Omarchy's default Chromium (Arch Linux ARM) is built without VA-API;
+it decodes H.264 and VP9 (YouTube) on the media engine through a V4L2 decoder
+OmacVM adds to the VM (not in a release yet). OmacVM.app's YouTube 4K power
+number above is from before, with the CPU decoding.
 [How video decoding works](video-decode.md).
 
 ## How we measured

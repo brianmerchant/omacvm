@@ -5,7 +5,18 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM"),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet"]),
+        // The self-update's checks, apart from the UI so they can be tested
+        // without Xcode: `swift run update-tests`.
+        .target(name: "OmacVMUpdate"),
+        .executableTarget(name: "update-tests", dependencies: ["OmacVMUpdate"]),
+        // A release's feed and zip, checked as an installed app checks them
+        // (src/release/release.sh verify).
+        .executableTarget(name: "feed-check", dependencies: ["OmacVMUpdate"]),
+        // When a running VM changes network (fast network <-> user network),
+        // apart from QMP so it can be tested without a VM: `swift run net-tests`.
+        .target(name: "OmacVMNet"),
+        .executableTarget(name: "net-tests", dependencies: ["OmacVMNet"]),
     ],
     swiftLanguageModes: [.v5]
 )

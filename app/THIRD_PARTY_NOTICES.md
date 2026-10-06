@@ -52,3 +52,6 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   part of), MIT: the VM side, the base and Omarchy installers, the icon.
 - In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come
   from their own servers during the setup, each package under its own licence.
+  On Venus VMs `src/app/guest/venus/install.sh` downloads Mesa 26.2.4 (MIT,
+  archive.mesa3d.org) and builds it in the VM with OmacVM's patches (MIT, in
+  `src/app/guest/venus/patches`).

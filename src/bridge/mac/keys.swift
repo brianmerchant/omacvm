@@ -15,7 +15,7 @@ final class Config {
   let path = supportDir + "/config.json"
   var captureKeys = true       // media keys go to the VM while it is full screen
   var menuBarIcon = true
-  var keyboardLowSteps = true  // keyboard light: KeyboardLight.lowSteps below macOS's lowest step
+  var keyboardLowSteps = true  // keyboard light: KeyboardSteps.low below macOS's lowest step (keylight.swift)
   var externalBrightness = true  // brightness keys set the external display a VM is on (external-brightness.swift)
   var onExternalBrightness: (() -> Void)?   // external_brightness switched in the file
   private var stamp: Date?
@@ -92,7 +92,14 @@ enum Brightness {
   }
 
   static func get() -> Float? {
-    guard let getFn, let d = display else { return nil }
+    guard let d = display else { return nil }
+    return level(d)
+  }
+
+  /// Any display macOS dims itself (built-in, Apple's and LG UltraFine
+  /// displays); nil for the others (DDC/CI monitors).
+  static func level(_ d: CGDirectDisplayID) -> Float? {
+    guard let getFn else { return nil }
     var v: Float = 0
     return getFn(d, &v) == 0 ? v : nil
   }
@@ -101,55 +108,6 @@ enum Brightness {
     guard let setFn, let d = display else { return false }
     return setFn(d, max(0, min(1, v))) == 0
   }
-}
-
-// ---- keyboard backlight (CoreBrightness KeyboardBrightnessClient, private) ----
-enum KeyboardLight {
-  private typealias Get = @convention(c) (AnyObject, Selector, UInt64) -> Float
-  private typealias Set = @convention(c) (AnyObject, Selector, Float, UInt64) -> Bool
-  private typealias IsBuiltIn = @convention(c) (AnyObject, Selector, UInt64) -> Bool
-  private static let getSel = NSSelectorFromString("brightnessForKeyboard:")
-  private static let setSel = NSSelectorFromString("setBrightness:forKeyboard:")
-  private static let client: NSObject? = {
-    guard dlopen("/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness", RTLD_LAZY) != nil,
-          let cls = NSClassFromString("KeyboardBrightnessClient") as? NSObject.Type else { return nil }
-    let c = cls.init()
-    return c.responds(to: getSel) && c.responds(to: setSel) ? c : nil
-  }()
-  private static let keyboard: UInt64? = {
-    guard let c = client,
-          let ids = c.perform(NSSelectorFromString("copyKeyboardBacklightIDs"))?.takeRetainedValue() as? [NSNumber] else { return nil }
-    let sel = NSSelectorFromString("isKeyboardBuiltIn:")
-    let builtIn = c.responds(to: sel) ? unsafeBitCast(c.method(for: sel), to: IsBuiltIn.self) : nil
-    return (ids.first { builtIn?(c, sel, $0.uint64Value) ?? true } ?? ids.first)?.uint64Value
-  }()
-  private static var lastOn: Float = 0.5   // for the toggle key
-  /// Below macOS's lowest step (1/16). Measured on a MacBook Pro M4 Max
-  /// (macOS 15.7): each value is kept and lights the keys at its own level
-  /// (backlightLevelForKeyboard: 0.25, 0.39, 0.68 against 1.01 at 1/16).
-  /// Whether the LEDs flicker that low only a person can see:
-  /// "keyboard_low_steps": false in config.json switches them off.
-  static let lowSteps: [Float] = [0.01, 0.02, 0.04]
-
-  /// The next level up or down: 0, lowSteps, then macOS's 16 steps.
-  static func step(_ v: Float, up: Bool, low: Bool) -> Float {
-    let levels = [0] + (low ? lowSteps : []) + (1...16).map { Float($0) / 16 }
-    return up ? levels.first { $0 > v + 0.001 } ?? 1 : levels.last { $0 < v - 0.001 } ?? 0
-  }
-
-  static func get() -> Float? {
-    guard let c = client, let k = keyboard else { return nil }
-    let v = unsafeBitCast(c.method(for: getSel), to: Get.self)(c, getSel, k)
-    return v < 0 ? nil : v
-  }
-
-  static func set(_ v: Float) -> Bool {
-    guard let c = client, let k = keyboard else { return false }
-    if let now = get(), now > 0 { lastOn = now }
-    return unsafeBitCast(c.method(for: setSel), to: Set.self)(c, setSel, max(0, min(1, v)), k)
-  }
-
-  static func toggle() -> Bool { guard let now = get() else { return false }; return set(now > 0 ? 0 : lastOn) }
 }
 
 // ---- "osd" events: {type, kind, value 0-100, muted, source, device} ----
@@ -225,7 +183,7 @@ final class OSDEvents {
 
   func keyboardSet(source: String) {
     q.async { [self] in
-      emit("keyboard", value: KeyboardLight.get().map(percent), muted: false, source: source, device: "Keyboard")
+      emit("keyboard", value: KeyboardLight.get().map(KeyboardSteps.osdPercent), muted: false, source: source, device: "Keyboard")
     }
   }
 
@@ -253,6 +211,9 @@ final class MediaKeys {
   private let vmKeys = VMKeys()
   private var once = OnceLog()          // main thread
   private var permissions: String?      // main thread: the last "permissions:" line
+  private let brightnessKeys = BrightnessKeys()
+  private var brightnessOnce = BrightnessOnce()   // main thread
+  private var ownSteps = OwnSteps()               // main thread
 
   var status: String {
     if !config.captureKeys { return "Media keys: off (macOS handles them)" }
@@ -271,6 +232,7 @@ final class MediaKeys {
   }
 
   func start() {
+    brightnessKeys.onKey = { [weak self] key in self?.keyboardBrightness(key) }
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
     t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
@@ -287,9 +249,11 @@ final class MediaKeys {
     config.reloadIfChanged()
     logPermissions()
     let front = NSWorkspace.shared.frontmostApplication
-    let vm = front?.executableURL?.lastPathComponent == "OmacVM" ? front?.processIdentifier : nil
+    // An OmacVM.app VM, also when LaunchServices names no executable for QEMU.
+    let vm = VMApp.of(front) == .omacvm ? front?.processIdentifier : nil
     let again = rearm.front(vm)
     guard config.captureKeys else { return }
+    brightnessKeys.ensure()
     if let tap {
       if !CFMachPortIsValid(tap) { install(again: "macOS invalidated it") }
       else if again { install(again: "an OmacVM VM came to the front") }
@@ -342,20 +306,17 @@ final class MediaKeys {
                    vmKeys: omacvm && vmKeys.socket(for: app.processIdentifier) != nil)
   }
 
-  /// Runs in the tap callback (main thread): true = swallow the event. Where
-  /// each key goes: MediaRoute (keys-model.swift).
-  func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-    guard config.captureKeys, type.rawValue == 14, event.getIntegerValueField(.eventSourceUserData) != VMKeys.marker,
-          let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
-    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
-    guard var key = MediaKey(rawValue: code) else { return false }
-    let front = FrontWindows()   // one copy of the window list for every question below
+  /// The VM in front, the key after Shift (as in Omarchy: Shift + brightness
+  /// keys = keyboard backlight, a MacBook has no keys of its own for it;
+  /// Option + brightness keys = small steps) and where it goes (MediaRoute,
+  /// keys-model.swift). nil: no VM in front.
+  private func decide(_ pressed: MediaKey, _ flags: CGEventFlags, _ front: FrontWindows)
+    -> (vm: FrontVM, key: MediaKey, route: KeyRoute, fine: Bool)? {
     let vm = frontVM(front)
     vmInFront = vm != nil
-    guard let vm else { return false }   // no VM in front: macOS's keys
-    // As in Omarchy: Shift + brightness keys = keyboard backlight (a MacBook has
-    // no keys of its own for it), Option + brightness keys = small steps.
-    let shift = event.flags.contains(.maskShift), option = event.flags.contains(.maskAlternate)
+    guard let vm else { return nil }
+    var key = pressed
+    let shift = flags.contains(.maskShift), option = flags.contains(.maskAlternate)
     if shift && !option {
       if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
     }
@@ -367,15 +328,34 @@ final class MediaKeys {
                                  macBrightness: brightness ? Brightness.displayID : nil,
                                  external: brightness ? externalState(vm) : .unknown,
                                  keyboardLight: [.keyboardUp, .keyboardDown, .keyboardToggle].contains(key) && KeyboardLight.get() != nil)
+    return (vm, key, route, option)
+  }
+
+  /// Runs in the tap callback (main thread): true = swallow the event. Where
+  /// each key goes: MediaRoute (keys-model.swift).
+  func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+    guard config.captureKeys, type.rawValue == 14, event.getIntegerValueField(.eventSourceUserData) != VMKeys.marker,
+          let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
+    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
+    guard let pressed = MediaKey(rawValue: code) else { return false }
+    let front = FrontWindows()   // one copy of the window list for every question below
+    guard let d = decide(pressed, event.flags, front) else { return false }   // no VM: macOS's keys
+    let (vm, key, route, option) = d
     switch route {
     case .macOS(let why):
       // Never swallowed without a word: macOS gets it, and the log says why once.
       if let why, down, once.first("\(key) \(vm.display) \(why)") { log("media key \(key): to macOS: \(why)") }
       return false
-    case .external(let id):
-      if down { externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
-    case .mac:
-      if down { work.async { self.apply(key, fine: option) } }   // key-up is swallowed too
+    case .external, .mac:
+      // The same press read from the keyboard already acted (BrightnessKeys): swallowed only.
+      let brightness = pressed == .brightnessUp || pressed == .brightnessDown
+      if down, brightness, !brightnessOnce.take(.tap, pressed, at: ProcessInfo.processInfo.systemUptime) { return true }
+      if case .external(let id) = route {
+        if down { ownSteps.stepped(id, at: ProcessInfo.processInfo.systemUptime); externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
+      } else if down {
+        if brightness, let id = Brightness.displayID { ownSteps.stepped(id, at: ProcessInfo.processInfo.systemUptime) }
+        work.async { self.apply(key, fine: option) }   // key-up is swallowed too
+      }
     case .vm(let qcode):
       guard down else { return true }
       guard let pid = front.app?.processIdentifier, let path = vmKeys.socket(for: pid) else { return false }
@@ -385,6 +365,44 @@ final class MediaKeys {
       }
     }
     return true
+  }
+
+  /// A brightness key read from the keyboard (main thread). Only while an
+  /// OmacVM VM is in front, to the display the rule picks (MediaRoute);
+  /// anything else is macOS's, which handles these keys itself.
+  private func keyboardBrightness(_ pressed: MediaKey) {
+    guard config.captureKeys, let d = decide(pressed, CGEventSource.flagsState(.combinedSessionState), FrontWindows()),
+          d.vm.omacvm else { return }
+    let (vm, key, route, fine) = d
+    let display: CGDirectDisplayID?
+    switch route {
+    case .macOS(let why):
+      if let why, once.first("keyboard \(key) \(vm.display) \(why)") { log("brightness key \(key) (from the keyboard): left to macOS: \(why)") }
+      return
+    case .vm: return
+    case .external(let id): display = id
+    case .mac: display = key == .keyboardUp || key == .keyboardDown ? nil : Brightness.displayID
+    }
+    guard brightnessOnce.take(.keyboard, pressed, at: ProcessInfo.processInfo.systemUptime) else { return }
+    if once.first("keyboard brightness") { log("brightness keys: read from the keyboard while an OmacVM VM is in front (macOS gives no key event for them)") }
+    let act = { [self] in
+      if case .external(let id) = route { externalBrightness.step(id, up: key == .brightnessUp, fine: fine) }
+      else { work.async { self.apply(key, fine: fine) } }
+    }
+    // macOS may still handle the key itself (it reaches no tap, so it cannot be
+    // swallowed): a moment later, a display macOS dims that already changed is
+    // not stepped again, unless the Bridge stepped it itself meanwhile (quick
+    // presses, a held key: OwnSteps), so every press steps once.
+    guard let display, let before = Brightness.level(display) else { act(); return }
+    let at = ProcessInfo.processInfo.systemUptime
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
+      if ownSteps.macOSDidIt(display, pressAt: at, before: before, after: Brightness.level(display)) {
+        if once.first("macOS brightness \(display)") { log("brightness key \(key): macOS changed display \(display) itself: not stepped again") }
+        return
+      }
+      ownSteps.stepped(display, at: ProcessInfo.processInfo.systemUptime)
+      act()
+    }
   }
 
   /// After a key went to the VM (main thread): the first one per VM is
@@ -428,9 +446,11 @@ final class MediaKeys {
       }
     case .keyboardUp, .keyboardDown:
       // Option: 1/64 steps as before; else macOS's 1/16 steps and the low ones below.
-      if let v = KeyboardLight.get() {
-        let to = fine ? step(v, key == .keyboardUp) : KeyboardLight.step(v, up: key == .keyboardUp, low: config.keyboardLowSteps)
-        if KeyboardLight.set(to) { osdEvents.keyboardSet(source: "keys"); result = "\(to)" }
+      let up = key == .keyboardUp
+      if fine, let v = KeyboardLight.get(), KeyboardLight.set(step(v, up)) {
+        osdEvents.keyboardSet(source: "keys"); result = "\(step(v, up))"
+      } else if !fine, let to = KeyboardLight.step(up: up, low: config.keyboardLowSteps) {
+        osdEvents.keyboardSet(source: "keys"); result = "\(to)"
       }
     case .keyboardToggle:
       if KeyboardLight.toggle() { osdEvents.keyboardSet(source: "keys"); result = "toggled" }

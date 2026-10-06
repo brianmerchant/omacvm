@@ -12,6 +12,9 @@
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
 #  * HDR's 10-bit virtio-gpu module builder (not built until the user asks)
+#  * Vulkan (Venus), when the VM's Graphics setting gives it Vulkan: a Venus
+#    driver for the Mac's 16 KiB pages while Arch Linux ARM's is too old
+#    (venus/), now and at each boot (the setting can change between starts)
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
@@ -72,6 +75,29 @@ else
 fi
 rm -rf "$T"
 install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-video.js
+# Vulkan (Venus): a Venus driver that sizes GPU memory to the Mac's 16 KiB
+# pages (venus/vulkan-virtio.sh says why). Built now when the Mac says this VM
+# gets Vulkan (OMACVM_GRAPHICS, from omacvm apply), and after each boot (a
+# timer, after the desktop) when the VM has Venus and still lacks it.
+graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+want=""; [[ $graphics == vulkan ]] && want=--want
+venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
+# OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
+if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
+elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
+# Vulkan windows: on the GPU when the Mac's app can show them, else through a
+# CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
+# environment.d file.
+rm -f /etc/environment.d/90-omacvm-vulkan.conf
+install -Dm755 omacvm-vulkan-present /usr/lib/systemd/user-environment-generators/90-omacvm-vulkan-present
+# Up to 3.0.0 RC2 the service itself was wanted by multi-user.target, after
+# network-online.target: the boot (and the desktop) waited for a build.
+# Now a timer starts it after the desktop is up.
+rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service
+install -Dm644 venus/omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service
+install -Dm644 venus/omacvm-venus-driver.timer /etc/systemd/system/omacvm-venus-driver.timer
+systemctl daemon-reload
+systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then

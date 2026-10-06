@@ -1,0 +1,21 @@
+# Update parts (docs/adr/0032): which files under src/ belong to which part.
+# One part per line: name, then path patterns (relative to src/, * within a
+# folder, ** across folders). The first line that matches a file wins; core
+# takes the rest. A part named like a feature (src/features.tsv) shows as an
+# update on that feature's row in the control centre.
+#   part	patterns
+scroll-momentum	gestures/guest/glide.sh
+gestures	gestures/**
+external-brightness	bridge/guest/omacvm-ddcutil
+bridge	bridge/**
+wallpaper	wallpaper/**
+omanotch	omanotch/** guest/omacvm-omanotch.service guest/omanotch-notifications.sh
+mac-clock	clock/**
+camera	camera/**
+battery	battery/**
+thp-kernel	kernel/build-thp-kernel.sh kernel/thp-pkgbuild.py
+control-centre	control/**
+fast-network	net/**
+chromium-video	vdec/**
+vulkan	app/guest/venus/**
+core	**
