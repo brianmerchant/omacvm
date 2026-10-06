@@ -132,12 +132,19 @@ app_list() {
   done < <(app_vm_dirs)
 }
 
-# app_features_write DIR "bridge=on gestures=off ...": the VM's features for
-# the app, which reads them at each start of the VM (MacLinks.swift: a
-# feature that is off gets nothing of the Mac). Status 0 if they changed.
+# app_features_write DIR "bridge=on gestures=off ...": the VM's features, its
+# record (src/lib/features.sh), which the app reads at each start of the VM
+# (MacLinks.swift: a feature that is off gets nothing of the Mac). vm.env's
+# FEATURES (the setup's choice, for the first apply) goes once the record is
+# there: a second list would only go stale. Status 0 if they changed.
 app_features_write() {
-  [[ $(cat "$1/features" 2>/dev/null) != "$2" ]] || return 1
-  printf '%s\n' "$2" > "$1/features"
+  local same=0
+  if [[ $(cat "$1/features" 2>/dev/null) == "$2" ]]; then same=1
+  else printf '%s\n' "$2" > "$1/features.tmp" && mv -f "$1/features.tmp" "$1/features" || return 1; fi
+  if [[ -f $1/vm.env ]] && grep -q '^FEATURES=' "$1/vm.env"; then
+    grep -v '^FEATURES=' "$1/vm.env" > "$1/vm.env.tmp" && mv -f "$1/vm.env.tmp" "$1/vm.env"
+  fi
+  return $same
 }
 
 # app_links_stale DIR "bridge=on gestures=off ..." on|off: the Mac links the

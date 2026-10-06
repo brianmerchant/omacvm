@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OmacVMFeatures
 
 enum HelperError: LocalizedError, Equatable {
     case io(String)
@@ -116,9 +117,10 @@ struct VMConfig: Equatable {
     var timeZone = "UTC"
     var language = "en_US.UTF-8"
     var keyboard = "us"
-    // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
-    // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on chromium-video=on idle-lock=on autologin=off thp-kernel=off"
+    // A new VM gets its own from the setup screen (SetupView). This one is
+    // for a vm.env without FEATURES: no screens asked here (VMConfig is
+    // also made off the main thread), so Omanotch only with a notch then.
+    var features = NewVMFeatures.string(hasBattery: Mac.hasBattery, hasNotch: false)
 
     /// The folder of a VM that exists (it may be in an older VMs folder);
     /// nil for a new one, which goes into the VMs folder under its name.
@@ -401,6 +403,11 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// Seconds the firmware waits for a key (its boot manager) before it boots.
+    /// 0, the default: it boots at once (the boot logo covers the firmware, so
+    /// the wait only cost time: 5 s on every start up to 3.0.0).
+    /// Hidden: defaults write org.omacvm.app firmwareWait -int 5 (the old wait)
+    static var firmwareWait: Int { min(max(UserDefaults.standard.integer(forKey: "firmwareWait"), 0), 60) }
     /// The hidden Vulkan switch up to 2.9 (`venus`): moved once into each
     /// VM's Graphics setting at the first 3.0.0 launch, then removed
     /// (Graphics.migrateVenusSwitch).
@@ -439,16 +446,6 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// "Use the notch for the menu bar" (see NotchSetting): on unless the
-    /// user switched it off.
-    static var useNotch: Bool {
-        get { NotchSetting.choice(stored: UserDefaults.standard.object(forKey: NotchSetting.key)) }
-        set { UserDefaults.standard.set(newValue, forKey: NotchSetting.key) }
-    }
-    /// What a VM start gets: off on a Mac without a notch.
-    static var notchActive: Bool {
-        NotchSetting.active(choice: useNotch, hasNotch: Mac.hasNotch)
-    }
     /// Full screen hides the Dock and the menu bar on every display and keeps
     /// the Mac's cursor off the screen corners and the Dock's edge, so neither
     /// the Dock nor a hot corner comes up from inside the VM (QEMU's
@@ -460,17 +457,17 @@ enum Settings {
 }
 
 extension Mac {
-    /// The built-in display, when it has a camera notch. Asked at run time
-    /// from the display itself (no model list); nil with the lid closed, on a
-    /// Mac without a notch, or at a resolution that ends below the notch.
-    static var notchScreen: NSScreen? {
-        NSScreen.screens.first { s in
+    /// The built-in display has a camera notch. Asked at run time from the
+    /// display itself (no model list); false with the lid closed, on a Mac
+    /// without a notch, or at a resolution that ends below the notch.
+    /// Main thread (NSScreen).
+    static var hasNotch: Bool {
+        NSScreen.screens.contains { s in
             guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
                   CGDisplayIsBuiltin(id) != 0 else { return false }
             return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
         }
     }
-    static var hasNotch: Bool { notchScreen != nil }
 
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs

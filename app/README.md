@@ -115,7 +115,7 @@ nothing in /Applications.
 
 Works: setup, VM build (10 to 30 minutes, 8 on an M4 Max, plus a 1.4 GB
 download the first time), window that Omarchy follows (native resolution,
-120 Hz), full screen with the bar beside the notch (on by default, a switch in the app), clipboard both ways, sound and the microphone,
+120 Hz), full screen in its own Space with the bar beside the notch (Omanotch), clipboard both ways, sound and the microphone,
 the Mac's camera (on only while a Linux app reads it), WebGL in Chromium,
 Chrome, Brave and Firefox, video decoding on the Mac's media engine (Google
 Chrome, Brave, Firefox, mpv, FFmpeg, GStreamer apps; [docs](../docs/video-decode.md)), clean shutdown on Quit, pause on Mac sleep,

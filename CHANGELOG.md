@@ -3,15 +3,114 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.0 (unreleased)
+## 3.0.1 (unreleased)
 
-In short: OmacVM.app updates itself, the control centre in Omarchy, a
-prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
-26 and newer), Chromium video on the Mac's media engine, VMs on any drive,
-a boot splash, any Omarchy scale on 5K and larger displays, less power
+- OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
+  desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
+  key before it boots (the wait was hidden under the boot logo).
+  `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- USB devices (experimental, OmacVM.app, off by default): give a VM a USB
+  device macOS does not use itself (debug probes, SDR sticks, boards in DFU
+  mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
+- Building a VM behind a proxy (Vocllum, #122). The build takes the Mac's
+  proxy (http_proxy/https_proxy/all_proxy in the terminal, else the fixed
+  proxies in macOS's network settings) into the VM: pacman, git and the
+  Omarchy installer use it, through sudo and the installer's systemd unit
+  too. A proxy on the Mac's 127.0.0.1 (Clash and the like) is reached as
+  10.0.2.2 in OmacVM.app: its port gets through at the build and at every
+  VM start. pacman and git clone try a failed download again (3 tries)
+  while Omarchy installs. PAC files are not read. Details: docs/guide.md,
+  "Behind a proxy".
+- In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
+  which gives them real-time priority, took a VM that had been stopped for
+  a runaway thread and put them back to normal priority for the rest of the
+  session; after that the sound could break while the VM and the Mac were
+  busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
+  0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
+  watchdog, and `omacvm check` shows "sound priority".
+
+## 3.0.0
+
+In short: OmacVM.app updates itself, the control centre in Omarchy (a
+floating window, also on a Mac with only the app), a prebuilt VM for the
+app, Vulkan (a Graphics setting; KosmicKrisp on macOS 26 and newer),
+Chromium video on the Mac's media engine, VMs on any drive (Storage shows
+their sizes), a boot splash, any Omarchy scale on 5K and larger displays,
+sound that holds on a busy Mac, the fast network with a VPN. Full screen
+with a Space of its own on every display, no crash when the VM shuts down,
+Magic Mouse swipes (3 or 4 fingers), ⌃⌥ Esc twice for Mission Control,
+Omanotch on by default on a Mac with a notch, finer brightness steps, ⌘ +
+F10/F11/F12 for Omarchy's screenshots, features that show their real
+state, no black desktop after a partial Mesa update. And less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
+- The display brightness keys step twice as fine while a VM is in front:
+  32 steps instead of macOS's 16 (Option: 64), on the MacBook's display,
+  Apple displays and DDC/CI monitors alike. Bigger jumps on a DDC/CI
+  monitor ramp over a few writes instead of jumping. `"brightness_steps"`
+  in the Bridge's `config.json` changes it.
+- ⌘ + F10/F11/F12 (⌘ with mute, volume down, volume up) take Omarchy's
+  screenshots again on a Mac whose speakers have a volume (a MacBook): the
+  Bridge set the Mac's volume and Omarchy never got the key. On a Mac mini
+  with an audio interface it already worked.
+- The control centre updates the VM's own system too: `o` on the Updates
+  screen (or `omacvm update-system`) runs Omarchy's full update in its own
+  window, then checks that the graphics still start and says whether a
+  restart is safe. It shows how many package updates wait. Never a
+  `pacman -Sy` on its own: that partial update gave the black screen.
+- OmacVM.app tells you when macOS does not let it read the keyboard (the
+  VM's ⌘ Tab, ⌘ Space and screenshot keys then went to macOS without a word):
+  a note with an Allow… button in the VM's window, a line in the VM's log,
+  and a warning in `omacvm check`.
+- A Magic Mouse works in the full-screen VM like the trackpad: two
+  fingers sideways swipe Omarchy's workspaces (macOS no longer gets that
+  swipe while the VM has the input), a one-finger flick sideways goes back
+  or forward. Scrolling stays as it was. The swipe counts as four fingers
+  on a trackpad; with a Magic Mouse connected, the app's **Magic Mouse
+  swipe** setting (setup and VM window) picks 3 or 4.
+- OmacVM.app's full screen always gets a Space of its own, on every
+  display, the MacBook's too. Before, on a Mac with a notch, full screen
+  was a window over the Space you were on: other windows could share it,
+  and the escape combo opened Mission Control instead of moving to macOS.
+  macOS keeps a full-screen window below the camera, and Omanotch fills
+  the strip beside the notch (as with Parallels and UTM): it is on by
+  default for new app VMs on a Mac with a notch. A VM made by an earlier
+  app has it off, and the strip stays black until `omacvm enable
+  omanotch`. The switch "Use the notch for the menu bar" is gone. With two
+  displays the escape combo no longer jumps back into the VM a moment
+  after leaving it.
+- The escape combo moves one Space, to the one beside the VM, also when
+  macOS's slide lands late (it could end two Spaces over, on Desktop 1).
+  Pressed twice quickly it opens Mission Control; once, never.
+- Omanotch under OmacVM.app: the hidden NOTCH output sits above the
+  built-in display, where the strip is, so Hyprland no longer warns
+  "Monitor NOTCH overlaps" at start; the pointer's hand-over between the
+  VM and the strip beside the notch is quicker.
+- OmacVM.app no longer quits with "OmacVM quit unexpectedly" when the VM
+  shuts down: a key or mouse event that came in while QEMU was closing
+  read its freed keyboard state. A VM that starts in full screen now shows
+  nothing until it is there (no windowed frame, no macOS menu bar over the
+  splash). Hyprland no longer warns "Monitor Virtual-2 overlaps with other
+  monitor(s)" when an external display comes back into the VM's full
+  screen.
+- A feature switched outside OmacVM shows as it is: the fast network
+  turned on with OmacVM.app's button, and autologin set up by an Omarchy
+  install or a migration (any SDDM autologin file). `omacvm features`,
+  `omacvm check`, `omacvm apply` and the control centre read the real state
+  and fix OmacVM's record ("fixed the record"); before, they showed it off.
+  Autologin off now also sets such a file aside (`NAME.omacvm-off`). An
+  OmacVM.app VM's `features` file is the one record; `vm.env`'s `FEATURES`
+  goes after the first apply. The control centre says what "slow" meant
+  (about 10 minutes to switch on) and what WebGPU and GPU compute needs on
+  this Mac (KosmicKrisp on macOS 26, MoltenVK on 15).
+- Fixed: a black screen after an OmacVM job. With a refreshed package list,
+  OmacVM's installs could update Mesa on its own (Mesa 26.2.4 next to LLVM
+  22), and the desktop could not open its graphics (GBM). OmacVM now only
+  installs packages the VM lacks, never updates one alone, never runs
+  `pacman -Sy`, and checks after every install that the graphics still
+  open (and puts packages back if not). The Vulkan driver check runs only
+  with Graphics Vulkan. Recovery: docs/troubleshooting.md, 27.
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy
@@ -154,6 +253,18 @@ itself. Details below.
   updates for your features (from the release's signed manifest) and
   installs them when you ask (as `omacvm update` does). Feature `control-centre`, on by
   default; an older VM is asked once at its next apply.
+- The control centre opens as a floating window in the middle of the
+  screen (65 % of the display), from the menu, the bar, or `omacvm` typed
+  in a terminal on the desktop (`omacvm --here` stays in the terminal).
+  Escape closes it.
+- The control centre works on a Mac with only OmacVM.app (no `omacvm`
+  command installed). The app carries the whole `omacvm` and points OmacVM
+  Bridge at it at every start; before, every Mac row said "not checked".
+  Changes run from a copy, so nothing is written inside the signed app.
+  Without Textual in the VM, the control centre installs it from the Mac
+  instead of asking you to run `sudo pacman`.
+- `omacvm check` no longer calls the Bridge failing when it sets up its
+  media keys again as a VM comes to the front.
 - OmacVM.app can update itself (weekly check, waits until the VM is shut
   down, goes back to the old version if the new one does not start; "Go
   Back" in the app menu). The feed is signed with OmacVM's release key;
@@ -171,8 +282,8 @@ itself. Details below.
   › Keyboard › Keyboard Shortcuts, ⌃← and ⌃→ by default), with macOS's own
   animation; pressed again in macOS, it moves back into the VM. On macOS 27
   the swipe OmacVM made before did nothing on a Mac mini. If the shortcut
-  is off or does not move, a Dock swipe is tried, then Mission Control
-  opens so you pick a Space. The VM is never hidden.
+  is off or does not move, Omarchy says so and nothing else happens (never
+  Mission Control). The VM is never hidden.
 - OmacVM.app: when a VM's window opens, OMACVM turns into Omarchy's logo
   (about 3.5 s; just the logo with Reduce motion). The logo then stays until
   Omarchy's desktop (or its login or lock screen) is there, over the

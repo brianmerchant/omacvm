@@ -87,26 +87,21 @@ window_rule() {
 }
 
 # Textual from pacman: waits for another pacman (Omarchy's first-boot setup or
-# an update holds the lock), refreshes a stale package list (a prebuilt image's
-# names files the mirrors no longer have), tries three times, and says which
-# of these it was. Python comes along so it matches the new packages.
+# an update holds the lock), tries three times, and says why when it could
+# not. Never `pacman -Sy`: a fresh package list without the update makes the
+# next install a partial update (guest/pkg-add says why).
 textual() {
   local i out
   python3 -c 'import textual' >/dev/null 2>&1 && return 0
   for i in 1 2 3; do
     for _ in $(seq 60); do [[ -e /var/lib/pacman/db.lck ]] || break; sleep 1; done
-    if out=$(pacman -S --needed --noconfirm python python-textual 2>&1) && python3 -c 'import textual' >/dev/null 2>&1; then
+    if out=$(../../guest/pkg-add python python-textual 2>&1) && python3 -c 'import textual' >/dev/null 2>&1; then
       return 0
     fi
-    # Not found or a 404: the package list is stale (or was never fetched).
-    pacman -Sy --noconfirm >/dev/null 2>&1 || true
+    [[ $out == *"partial update"* || $out == *"does not find"* ]] && break
     sleep $((i * 2))
   done
-  if grep -qiE 'could not resolve|failed to connect|connection timed out|network is unreachable' <<<"$out"; then
-    echo "  python-textual not installed: the VM has no internet now. omacvm shows a plain table; a repair of the control centre installs it later"
-  else
-    echo "  python-textual not installed: pacman says: $(tail -n1 <<<"$out" | cut -c1-160)"
-  fi
+  echo "  python-textual not installed (omacvm shows a plain table; a repair of the control centre installs it later): $(tail -n1 <<<"$out" | sed 's/^OmacVM: //' | cut -c1-200)"
 }
 
 if [[ $WANT == on ]]; then

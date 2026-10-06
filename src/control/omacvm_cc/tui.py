@@ -21,7 +21,7 @@ from textual.screen import ModalScreen, Screen
 from textual.theme import Theme
 from textual.widgets import DataTable, Static, TextArea
 
-from . import collect, look, report
+from . import collect, look, report, system
 from . import state as S
 from .bridge import BridgeError
 from .controller import ACTION_FOR, Controller, local_time
@@ -185,8 +185,7 @@ class FeaturesScreen(Screen):
                 t.add_row(status_cell(r, app.tick), "", r.feature.title, "", key=r.feature.name)
         for r in rows:
             dim = r.status in (S.Status.UNAVAILABLE, S.Status.OFF)
-            tags = [t for t in r.feature.tags if t in ("experimental", "slow")]
-            note = r.note or ", ".join(tags)
+            note = r.note or S.tag_note(r.feature)
             if len(note) > width:
                 note = note[: width - 1] + "…"
             style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan"}.get(r.status, "bright_black")
@@ -291,6 +290,9 @@ class DetailsScreen(Screen):
         box.border_subtitle = look.WORD[r.status] if r.status in (S.Status.OFF, S.Status.UNAVAILABLE) else f"on · {look.WORD[r.status]}"
         t = Text()
         t.append(f.summary + "\n\n")
+        about = S.feature_about(f, app.c.hello.macos if app.c.hello else "")
+        if about:
+            t.append(about + "\n\n")
 
         def field(k: str, v: str) -> None:
             t.append(f"{k:<9}", style="bright_black")
@@ -300,8 +302,11 @@ class DetailsScreen(Screen):
         t.append("     ")
         field("Needs", f.needs or "–")
         t.append("     ")
-        field("Tags", ", ".join(f.tags) or "–")
+        hints = [S.TAG_HINTS[x] for x in f.tags if x in S.TAG_HINTS]
         t.append("\n")
+        for h in hints:
+            field("Note", h)
+            t.append("\n")
         inst = app.c.local.installed_parts().get(f.name, {})
         offer = app.c.offer().get(f.name, {})
         version = inst.get("release") or app.c.local.version
@@ -311,6 +316,11 @@ class DetailsScreen(Screen):
         else:
             field("Version", version)
         t.append("\n")
+        fixed = app.c.fixed_of(f.name)
+        if fixed:
+            t.append("\n")
+            field("Record", fixed)
+            t.append("\n")
         if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY) or f.name == "gpu-memory") and r.note:
             t.append("\n")
             field("Now", r.note)
@@ -356,17 +366,30 @@ class DetailsScreen(Screen):
 # ---- 3. updates ----
 class UpdatesScreen(Screen):
     BINDINGS = [Binding("escape,q", "app.pop_screen", "back"), Binding("i", "install", "install now"),
-                Binding("c", "check", "check again"), Binding("s", "setting", "checks on/off")]
+                Binding("c", "check", "check again"), Binding("s", "setting", "checks on/off"),
+                Binding("o", "omarchy", "update Omarchy")]
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(classes="box") as box:
             box.border_title = "Updates"
             yield Static("", id="body")
-        yield Static(keys_line(("i", "install now"), ("c", "check again"), ("s", "weekly checks on/off"), ("esc", "back")),
-                     classes="keys")
+        yield Static(keys_line(("i", "install now"), ("c", "check again"), ("s", "weekly checks on/off"),
+                               ("o", "update Omarchy"), ("esc", "back")), classes="keys")
 
     def on_mount(self) -> None:
         self.redraw()
+        if self.app.omarchy_waiting is None:
+            self.count_omarchy()
+
+    @work(thread=True, exclusive=True, group="omarchy")
+    def count_omarchy(self) -> None:
+        n = system.waiting()
+        self.app.call_from_thread(self.counted, n)
+
+    def counted(self, n: int | None) -> None:
+        self.app.omarchy_waiting = n
+        if self in self.app.screen_stack:   # not after esc
+            self.redraw()
 
     def redraw(self) -> None:
         app: ControlCentre = self.app  # type: ignore[assignment]
@@ -423,15 +446,36 @@ class UpdatesScreen(Screen):
         t.append("\n  Update checks  ", style="bright_black")
         t.append("[x] weekly" if on_ else "[ ] off", style="bold" if on_ else "yellow")
         t.append("     (off: no checks, no prompts; c still checks when you ask)\n", style="bright_black")
+        # The VM's own system: Omarchy's update, apart from OmacVM's.
+        t.append("\nThe VM's system", style="bold")
+        t.append("  (Omarchy and its Arch packages, not OmacVM)\n")
+        line = system.waiting_line(app.omarchy_waiting)
+        if line:
+            t.append(f"  {line}\n")
+        t.append("  o runs omarchy update in its own window, then checks the graphics before a restart.\n",
+                 style="bright_black")
         self.query_one("#body", Static).update(t)
 
     def action_install(self) -> None:
         self.app.install_update()
 
+    def action_omarchy(self) -> None:
+        def go(yes: bool | None) -> None:
+            if not yes:
+                return
+            if system.open_window():
+                self.app.notify("omarchy update opens in its own window")
+            else:
+                self.app.notify("no desktop window here: run omacvm update-system in a terminal", severity="warning")
+        self.app.push_screen(ConfirmScreen("Update Omarchy (the VM's system)",
+                                           system.WHAT + "\n\nIt runs in its own window and asks for your password. "
+                                           "At the end it checks the graphics and says whether a restart is safe."), go)
+
     @work(thread=True, exclusive=True, group="updates")
     def action_check(self) -> None:
         app: ControlCentre = self.app  # type: ignore[assignment]
         app.call_from_thread(app.notify, "checking for updates ...", timeout=2)
+        app.call_from_thread(self.count_omarchy)
         try:
             app.c.refresh_updates(check=True)
         except BridgeError as e:
@@ -576,6 +620,7 @@ class ControlCentre(App):
         self.watching: str | None = None
         self.last_result = ""   # the last job's outcome and what to do next (the banner)
         self.gpu_asking = False  # a look at graphics memory is under way
+        self.omarchy_waiting: int | None = None   # package updates waiting (checkupdates)
 
     def on_mount(self) -> None:
         self.register_theme(THEME)

@@ -622,10 +622,14 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+# OmacVM: usb-host leaves a device the Mac uses alone (no reset: on macOS that
+# re-enumerates it); the app's USB devices (docs/usb.md).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-usb-host-busy-device.patch"
 # OmacVM: a main loop stall > 2 s is logged with its place.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
-# full screen beside the notch; the window keeps its size; full screen at the
+# a borderless full screen (tests only: see omacvm-cocoa-fullscreen-own-space);
+# the window keeps its size; full screen at the
 # window's real size; modifiers only from input events; the recording device
 # opens off the BQL.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patch"
@@ -755,6 +759,21 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tes
   "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
   -framework OpenGL -o "$display_tests/test-boot-splash-fade"
 "$display_tests/test-boot-splash-fade"
+# OmacVM: full screen is always macOS's own, in a Space of its own (beside the
+# notch too: Omanotch fills the strip); a display the escape combo moved off
+# the VM's Space is not pulled back by the VM's other window.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-own-space.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-head-key-same-space.patch"
+"$native_dir/Tests/display/test-fullscreen-space.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: full screen without a Space of its own (test-fullscreen-space.sh)"
+# OmacVM: no events into QEMU once the display is cleaned up (the crash on
+# Quit/shutdown); a full-screen start shows nothing until it is there.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-events.patch"
+"$native_dir/Tests/display/test-shutdown-events.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: events into QEMU after the display's cleanup (test-shutdown-events.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-start.patch"
+"$native_dir/Tests/display/test-fullscreen-start.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

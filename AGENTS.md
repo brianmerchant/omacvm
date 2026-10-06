@@ -42,8 +42,9 @@ Mac's hardware to the VM over its private network, with a token.
 - No VM needed: the CI steps ([CONTRIBUTING.md](CONTRIBUTING.md#test-your-change)),
   `./omacvm build --plan --json --vm-type ROUTE`, `src/omanotch/mac/test.sh`.
 - Use your own VM, named for the test (`--vm-name "OmacVM Test-<topic>"`), never
-  the person's. Check it with `./omacvm check --vm NAME --json` (read-only;
-  without `--vm` it picks the person's VM). `--no-mac` on `build` and `apply`
+  the person's. Check it with `./omacvm check --vm NAME --json` (read-only,
+  but for OmacVM's record of a feature switched outside OmacVM, which it fixes
+  to the real state; without `--vm` it picks the person's VM). `--no-mac` on `build` and `apply`
   leaves the Mac's installed helpers as they are; `OMACVM_HEADLESS=1` starts
   VMs without a window (UTM, Fusion, Parallels Pro or trial).
 - Ask before anything that changes the Mac side: `src/mac/install.sh`,
@@ -102,6 +103,16 @@ UTM, or choose their password: hand those over, never work around them.
      until `ok` (the person must be logged in to Omarchy; `needs_human: true`
      entries are theirs). With several VMs, Omanotch serves one at a time: an
      Omanotch failure on the others is expected, and `check` exits 1 for it.
+- **Where a VM's features are kept**: an OmacVM.app VM's folder has the
+  record in its `features` file (the app reads it at each start); every VM
+  has a copy in `/etc/omacvm/env`. `omacvm apply` (and so `enable`,
+  `disable`, the control centre's jobs) writes both; the app's Fast network
+  button writes the `fast-network` file and the record. `vm.env`'s
+  `FEATURES` is only the setup's choice for the first apply, which takes it
+  out. The fast network (the app's switch) and autologin (any SDDM
+  `[Autologin] User=`, also a file OmacVM did not write) keep their real
+  state: `omacvm features`, `check` and `apply` read it and fix the record
+  ("fixed the record"). Never edit the record by hand.
 - **Switch a feature** on an existing VM: `omacvm features --vm NAME --json`,
   then `omacvm enable|disable FEATURE... --vm NAME --yes`, then
   `omacvm check --vm NAME --json`. Dependencies are handled (scroll-momentum brings
@@ -218,7 +229,7 @@ GitHub.
 | `src/release/` | Update manifests (ADR 0032): `parts.tsv` (files → parts, first match wins, `core` last), `manifest.py digests|build|parts`, `sign.swift keygen|sign|verify` (Ed25519), `release-key.sh sign|team|teams|spare` (signs with the Keychain key and checks it), `keys.py` (verify on the command line: plain-python Ed25519, either key, kept spares). `omacvm apply` writes the digests it installed to the VM's `/etc/omacvm/installed.json`. Release keys: `src/lib/release-key.pub` (main) and `release-key-spare.pub`, either one signs; documents carry `kind` and `devid_teams`; who holds the private halves and how to rotate: `docs/release-keys.md`. A release: `release.sh` (every step, `--dry-run`, rollback; `docs/releasing.md`). Tests use `OMACVM_FEED_URL` + `OMACVM_FEED_KEY` (Bridge), `OMACVM_APPCAST_KEY` (app test builds), `OMACVM_RELEASE_TEST_KEYS` (command line), all throwaway keys |
 | `src/lib/helpers.sh` | OmacVM.app's prebuilt Bridge and Gestures (`Contents/Helpers`, Developer ID; `app/scripts/build-app.sh` builds and signs them): `src/mac/install.sh` installs them (`install.sh --prebuilt`) when built from the same sources, else builds; `src/tests/prebuilt-helpers.sh` |
 | `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, shared event stream, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr,nightshift}`. External display brightness (feature `external-brightness`): `mac/external-brightness.swift` (DDC/CI over IOAVService, Apple displays over DisplayServices, found per display at run time; one serial queue, coalesced writes), `mac/external-model.swift` (steps, DDC packets, which display; `mac/test.sh` offline, `--live` on this Mac's displays, always restoring), `/display/external*` in the API, `guest/omacvm-ddcutil` as `/usr/local/bin/ddcutil` in the VM so Omarchy's own DDC path asks the Bridge (`src/tests/external-brightness.sh`). Night light: the Mac's Night Shift only; the guest install hides Omarchy's NightLight indicator (`items` of `omarchy.indicators` in `shell.json`, original kept in `~/.local/state/omacvm/nightlight-indicator`, restored with bridge=off) and stops `hyprsunset`. `mac/control_policy.swift` + `control.swift`: the control centre's fixed request list under `/omacvm/` (ADR 0031; the VM is worked out from the peer address via `omacvm vms --json` and proves itself by signing each request with its own key, which never leaves it, jobs run the CLI named in `~/Library/Application Support/omacvm/cli` (written only by the installed checkout, `cli_for_bridge` in `src/lib/mac.sh`: a worktree that runs `src/mac/install.sh` does not take it over; `OMACVM_SET_CLI=1` forces it) with posix_spawn, own session, responsibility disclaimed so macOS's Local Network privacy lets its ssh through; job files in `omacvm-bridge/jobs/`); `mac/tests/run.sh` tests the policy |
-| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥ Esc (exact modifiers; the old ⌃⌥⌘ Esc still works through 3.0.x, the guest names the new one once per VM, then it is removed) moves the display under the pointer out of the VM with macOS's own Space shortcut (`EscapeSwipe` = `all` in `org.omacvm.gestures`: every display), and back; falls back to a Dock swipe, then Mission Control, never out of full screen; `mac/test-escape.c` tests it against a made-up world of displays and Spaces; also hides the Mac's pointer over the full-screen VM; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
+| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥ Esc (exact modifiers; the old ⌃⌥⌘ Esc still works through 3.0.x, the guest names the new one once per VM, then it is removed) moves the display under the pointer out of the VM with macOS's own Space shortcut (`EscapeSwipe` = `all` in `org.omacvm.gestures`: every display), and back; shortcut off or Space unchanged = a Dock swipe (macOS 15 ignores the shortcut from the notched display's full-screen Space); still no way out = a log line and a notice in Omarchy, never out of full screen; a late Space change is looked for before the next step (one press, one Space); Mission Control only on a double press (twice within 0.4 s); `mac/test-escape.c` tests it against a made-up world of displays and Spaces; also hides the Mac's pointer over the full-screen VM; a Magic Mouse's two-finger sideways swipe = three virtual fingers (workspaces), its one-finger flick = Back/Forward keys, `mac/mouse-model.h` + `mac/test-mouse.c`; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
 | `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
 | `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
 | `src/app/guest/` | OmacVM.app's VM side: `omacvm-display-sync` (each output follows its Mac window or display: mode, scale by EDID, position from the Mac's arrangement; Omarchy's zoom only for Virtual-1), `omacvm-displays` (user service on virtio port `org.omacvm.display`: hello and the switch to QEMU, the arrangement from it, Hyprland's outputs back for the pointer; `external on\|off\|toggle`, `status`), `monitor-widget/` (bar widget `omacvm.monitor` = Omarchy's display panel built from the installed Omarchy plus MAC DISPLAYS "Use external displays"; rebuilt by the agent after an Omarchy update), clipboard, guest agent, notch strip |
@@ -303,8 +314,11 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   at the HID level once the combo's keys are up, marked 0x0BAC0E5C (our tap
   and QEMU, `omacvm-cocoa-keys-for-macos.patch`, let it through), toward the
   Space the display showed before (`cameFrom`). Each move is checked: not
-  moved → Dock swipe → Mission Control (hotkey 32 for OmacVM.app, else its
-  app). Back in: the shortcut, else the VM's window to the front. An
+  moved or shortcut off → a Dock swipe (macOS 15 ignores the shortcut from
+  the notched built-in's full-screen Space; the user's log 2026-10-06), then
+  the other direction once; still not moved, or no Spaces info → one log
+  line and `N <why>` (a notice in Omarchy), nothing else: NEVER Mission
+  Control (user, 2026-10-06). Back in: the shortcut, else the VM's window to the front. An
   OmacVM.app window with the
   keyboard: the combo gives it to the app from before / Finder
   (`COMBO_WINDOW_OUT`), again in macOS brings the window back.
@@ -478,6 +492,7 @@ The less obvious ones, with causes and where the fix lives, are in
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Black screen at start, journal: `Couldn't open a GBM device` | partial update: Mesa newer than its LLVM (`ldd /usr/lib/gbm/dri_gbm.so` shows "not found") | full `pacman -Syu`, or `pacman -U` the old Mesa from the cache; `src/guest/gbm-guard test` (docs/troubleshooting.md, 27) |
 | `omacvm check`: Omanotch not connected, Mac log says "another guest is connected" | Omanotch serves one VM at a time | close or stop `notchcast` in the other VM |
 | Bar widgets missing after a fresh build | the Omarchy shell was not running at install time | queued; `omacvm-plugins.service` enables them at the first login |
 | `OMARCHY_PATH is not set` from omarchy commands run as root/sudo | no Omarchy env | `source /usr/share/omarchy/default/bash/env-bootstrap` first |
@@ -505,6 +520,11 @@ The less obvious ones, with causes and where the fix lives, are in
 
 ## 8. Hard-won rules (do NOT)
 
+- Do not install packages in the VM with `pacman -S --needed` or refresh the
+  package list with `pacman -Sy` (without `u`): use `src/guest/pkg-add`, which
+  installs only missing packages and never updates one alone. A partial update
+  (2026-10-06: Mesa 26.2.4 next to LLVM 22) leaves GBM unable to load and the
+  VM on a black screen (docs/troubleshooting.md, 27).
 - Do not use try-omarchy as the installed system (pinned demo runtime). It is
   only the temporary live installer.
 - Do not update with bare `pacman -Syu`: omarchy-mac pins the Hyprland stack to

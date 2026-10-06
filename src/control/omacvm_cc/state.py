@@ -130,6 +130,62 @@ def desired(features: list[Feature], env: dict[str, str]) -> dict[str, bool]:
     return out
 
 
+def sddm_autologin_user(texts: list[str]) -> str:
+    """Who SDDM logs in, from its config files in the order SDDM reads them
+    (/usr/lib/sddm/sddm.conf.d, /etc/sddm.conf.d, /etc/sddm.conf): the last
+    User= of an [Autologin] section; "" nobody. The same rule as
+    src/guest/autologin.sh, whoever wrote the file."""
+    user, section = "", False
+    for text in texts:
+        for line in text.splitlines():
+            t = line.strip()
+            if t.startswith("["):
+                section = t.startswith("[Autologin]")
+            elif section and t.split("=", 1)[0].strip() == "User" and "=" in t:
+                user = t.split("=", 1)[1].strip()
+    return user
+
+
+# What a tag means, in words (never a bare tag; src/lib/features.sh says the
+# same in feature_slow_hint). NOTE: short, for the table's note column.
+TAG_NOTES = {"experimental": "experimental", "slow": "about 10 min to switch on"}
+TAG_HINTS = {"experimental": "experimental: it may change or be removed",
+             "slow": "switching it on takes about 10 minutes: a build in the VM, then a restart"}
+
+
+def tag_note(f: Feature) -> str:
+    return ", ".join(TAG_NOTES[t] for t in f.tags if t in TAG_NOTES)
+
+
+def fixed_note(on: bool) -> str:
+    """The table's note for a feature whose record the Mac just fixed."""
+    return f"OmacVM's record said {'off' if on else 'on'}: fixed"
+
+
+def feature_about(f: Feature, macos: str = "") -> str:
+    """More than the summary, for the details screen ("" nothing more).
+    macos: the Mac's macOS version as the Bridge says it ("" not known)."""
+    if f.name != "vulkan":
+        return ""
+    major = version_tuple(macos)
+    kk = ("macOS 26 or newer: Vulkan goes through KosmicKrisp, Mesa's Vulkan on Metal 4, "
+          "the fuller driver (more Vulkan features, faster).")
+    mvk = ("macOS 15: Vulkan goes through MoltenVK (KosmicKrisp needs macOS 26). WebGPU and OpenCL work, "
+           "with fewer Vulkan features, so some WebGPU pages and compute jobs may not run; "
+           "after an update to macOS 26 the VM gets KosmicKrisp by itself.")
+    if major is None:
+        mac = "On this Mac: " + kk + "\nOn " + mvk
+    elif major[0] >= 26:
+        mac = f"On this Mac (macOS {macos}): " + kk[len("macOS 26 or newer: "):]
+    else:
+        mac = f"On this Mac (macOS {macos}): " + mvk[len("macOS 15: "):]
+    return ("Needs an OmacVM.app VM; works with every Graphics setting.\n" + mac + "\n"
+            "Switching on: the VM builds OmacVM's Mesa (about 3 minutes, a 140 MB download), then "
+            "WebGPU and GPU compute from the VM's next start (shut it down and start it again).\n"
+            "Switching off: OpenGL only again from the next start; OmacVM's Mesa is removed. "
+            "You can switch it on again at any time (the build again, about 3 minutes).")
+
+
 def parse_check_tsv(text: str, side: str = "vm") -> list[Check]:
     """guest/check.sh --tsv: status name detail human feature (section lines skipped)."""
     out = []
@@ -232,11 +288,13 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
                avail: dict[str, Avail] | None = None, checks: list[Check] | None = None,
                jobs: list[Job] | None = None, installed: dict | None = None,
                offer: dict | None = None, mac_features: set[str] | None = None,
-               show_updates: bool = True) -> list[Row]:
+               show_updates: bool = True, fixed: dict[str, str] | None = None) -> list[Row]:
     """The features screen. mac_features: what the Mac's OmacVM knows (None:
     not known); a feature it lacks is unavailable until the Mac is updated.
     show_updates False (update checks off): no update marks, but an update
-    that runs still shows on the features it changes."""
+    that runs still shows on the features it changes. fixed: the features
+    whose record the Mac fixed to their real state (omacvm features --json
+    "fixed"); on must already say that state."""
     active = [j for j in (jobs or []) if j.active]
     rows = []
     for f in features:
@@ -248,6 +306,8 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
         job = next((j for j in active if f.name in j.features or (j.action == "update" and update)), None)
         mine = None if checks is None else [c for c in checks if c.feature == f.name]
         st, note = status_of(f, on.get(f.name, False), a, mine, job)
+        if (fixed or {}).get(f.name) and st in (Status.WORKS, Status.OFF, Status.UNKNOWN):
+            note = fixed_note(on.get(f.name, False))
         rows.append(Row(feature=f, on=on.get(f.name, False), status=st, note=note,
                         update=update and show_updates, checks=tuple(mine or ())))
     return rows
