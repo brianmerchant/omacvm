@@ -914,7 +914,8 @@ new session shows a notification that says so and names the apps that
 closed. A session that was locked locks itself again. At most once in 10 minutes: when the desktop is lost again that
 soon (macOS still short of memory), the app shows "The VM's desktop
 stopped drawing" with a button that restarts it, as it always did with
-the automatic restart off (`defaults write org.omacvm.app
+the automatic restart off; the window says why: the VM's graphics reached
+the guard, macOS ran short, or the graphics failed (`defaults write org.omacvm.app
 desktopAutoRestart -bool false`). After Later in that window the app menu
 (beside the Apple menu, under "Graphics memory") has "Restart the
 Desktop…", which brings the window back; it goes away once the desktop
@@ -923,6 +924,12 @@ launcher, Quickshell) is lost, only the shell starts again, and no app
 closes. `logs/qemu.log` says which app lost its context and why, and each
 restart the app made; `journalctl -t omacvm-desktop-recover` in the VM
 says what was closed (ADR 0038).
+
+The guard is not only for runaway VMs on an 8 GB Mac: on a MacBook Air M2
+(8 GB, 4 GB VM, 2026-10-06) Chromium with 7 windows of big WebGL pages
+(5K canvas and 512 MB of textures each) reached 6 GB while macOS still said
+normal (it said warn on the way, never critical; 2.3 GB swap, the Mac stayed
+responsive). The browser lost its context first, Hyprland a few seconds later.
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses

@@ -53,6 +53,21 @@ struct GPUMemory: Equatable {
         mb < 1024 ? "\(mb) MB" : String(format: "%.1f GB", Double(mb) / 1024)
     }
 
+    /// Why a context was lost, for the alert. A refusal with macOS's pressure
+    /// normal and the graphics in use at the budget came from the budget (all
+    /// graphics together at three quarters of the Mac), not from macOS running
+    /// short: on an 8 GB Mac a browser with big WebGL pages gets there while
+    /// macOS still says normal (Air M2, 2026-10-06). In use, not the peak: the
+    /// peak counts from the VM's start, so after one hit every later loss
+    /// would blame the budget.
+    var lostReason: String {
+        if refused == 0 && pressure == "normal" { return "Its graphics on the Mac failed." }
+        if pressure == "normal" && budgetMB > 0 && inUseMB + 512 >= budgetMB {
+            return "Its graphics reached the most one VM may use on this Mac (\(GPUMemory.gb(budgetMB)))."
+        }
+        return "macOS ran short of memory for its graphics."
+    }
+
     /// "Graphics memory: 1.6 GB (peak 2.6 GB)"
     var line: String { "Graphics memory: \(GPUMemory.gb(inUseMB)) (peak \(GPUMemory.gb(peakMB)))" }
 
@@ -60,7 +75,8 @@ struct GPUMemory: Equatable {
         VM memory is the Mac memory the VM gets as its RAM (set above). Graphics memory \
         is extra: the textures and buffers the VM's desktop and apps draw with, taken \
         from the Mac's memory as they need it (a 5K desktop with a browser: about 2 GB). \
-        There is no fixed limit; only when macOS itself runs short are new big ones refused.
+        New ones are refused when macOS itself runs short, or when all of them together \
+        reach three quarters of the Mac's memory.
         """
 }
 
@@ -182,7 +198,7 @@ final class GPUMemoryWatch {
             guest("/usr/local/bin/omacvm-desktop-recover", ["shell"]) { _ in }
         case .restartDesktop:
             restart.clear()
-            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
+            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
             log("OmacVM: restarting the VM's desktop by itself: apps open in the VM close (once per 10 min, else the app asks)")
             let why = DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)
             restartDesktop(why) { [weak self] result in
@@ -193,7 +209,7 @@ final class GPUMemoryWatch {
                 self.desktopLost(m, again: false)
             }
         case .ask(let again):
-            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
+            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
             desktopLost(m, again: again)
         }
     }
@@ -237,11 +253,8 @@ final class GPUMemoryWatch {
         guard alert == nil else { return }
         let a = NSAlert()
         a.messageText = again ? "The VM's desktop stopped drawing again" : "The VM's desktop stopped drawing"
-        a.informativeText = (again ? "It was restarted a few minutes ago. " : "") +
-            (DesktopRecovery.reason(pressure: m.pressure, refused: m.refused) == "graphics"
-            ? "Its graphics on the Mac failed. "
-            : "macOS ran short of memory for its graphics. ") +
-            "The VM still runs, but its screen stays black until the desktop starts again. " +
+        a.informativeText = (again ? "It was restarted a few minutes ago. " : "") + m.lostReason +
+            " The VM still runs, but its screen stays black until the desktop starts again. " +
             "Restarting the desktop closes the apps open in the VM; anything not saved in them is lost."
         a.addButton(withTitle: "Restart the Desktop")
         a.addButton(withTitle: "Later")
