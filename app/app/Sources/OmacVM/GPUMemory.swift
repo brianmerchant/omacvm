@@ -160,13 +160,14 @@ final class GPUMemoryWatch {
             log("OmacVM: the VM's shell (Quickshell) lost its GPU context: restarting the shell by itself")
             guest("/usr/local/bin/omacvm-desktop-recover", ["shell"]) { _ in }
         case .restartDesktop:
-            lastDesktopRestart = now
             log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
             log("OmacVM: restarting the VM's desktop by itself: apps open in the VM close (once per 10 min, else the app asks)")
             let why = DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)
-            guest("/usr/local/bin/omacvm-desktop-recover", ["desktop", why]) { [weak self] ok in
-                guard let self, !ok else { return }
-                self.log("OmacVM: the VM's agent did not restart the desktop: asking")
+            restartDesktop(why) { [weak self] result in
+                guard let self, result != .started else { return }
+                self.log(result == .refused
+                         ? "OmacVM: the VM's agent refused to restart the desktop: asking"
+                         : "OmacVM: the VM's agent did not answer in time (the restart may be under way): asking")
                 self.desktopLost(m, again: false)
             }
         case .ask(let again):
@@ -175,20 +176,34 @@ final class GPUMemoryWatch {
         }
     }
 
+    /// Restarts the VM's desktop session and counts it for the 10-minute
+    /// rule. Counted from the start, so a second loss while the agent is
+    /// asked does not restart it twice; taken back when the VM refused (no
+    /// restart happened), kept when it did not answer (one may be under way).
+    private func restartDesktop(_ why: String, done: @escaping @MainActor (GuestAgent.Start) -> Void) {
+        let before = lastDesktopRestart
+        let now = Date()
+        lastDesktopRestart = now
+        guest("/usr/local/bin/omacvm-desktop-recover", ["desktop", why]) { [weak self] result in
+            if result == .refused, let self, self.lastDesktopRestart == now { self.lastDesktopRestart = before }
+            done(result)
+        }
+    }
+
     /// Runs a program in the VM off the main thread. A VM set up before
     /// omacvm-desktop-recover (3.0.0) has no such program (the agent refuses):
     /// the login manager is restarted directly there (no note in the new
     /// session). Not when the agent did not answer: the restart may be under
     /// way, and a second one would end the new session too.
-    private func guest(_ path: String, _ args: [String], done: @escaping @MainActor (Bool) -> Void) {
+    private func guest(_ path: String, _ args: [String], done: @escaping @MainActor (GuestAgent.Start) -> Void) {
         let socket = config.agentSocket.path
         DispatchQueue.global(qos: .userInitiated).async {
             var result = GuestAgent.start(socketPath: socket, path, args)
             if result == .refused, args.first == "desktop" {
                 result = GuestAgent.start(socketPath: socket, "/usr/bin/systemctl", ["restart", "sddm"])
             }
-            let ok = result == .started
-            Task { @MainActor in done(ok) }
+            let final = result
+            Task { @MainActor in done(final) }
         }
     }
 
@@ -220,9 +235,10 @@ final class GPUMemoryWatch {
         }
         log("OmacVM: restarting the VM's desktop session")
         // Counts as a restart: lost again soon after, the app asks again.
-        lastDesktopRestart = Date()
         // The login manager starts again and logs the user in again (SDDM's
         // autologin), or shows its login screen.
-        guest("/usr/local/bin/omacvm-desktop-recover", ["desktop", DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)]) { _ in }
+        restartDesktop(DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)) { [weak self] result in
+            if result == .refused { self?.log("OmacVM: the VM's agent refused to restart the desktop") }
+        }
     }
 }

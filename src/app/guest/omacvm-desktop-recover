@@ -8,6 +8,8 @@
 #       manager starts again, which ends the session: every app open in it
 #       closes and what was not saved in them is lost. A note for the new
 #       session names those apps. With autologin off, the login screen comes.
+#       Was the session locked, the new one locks itself again (autologin
+#       must not bring back an unlocked desktop with nobody at the Mac).
 #   omacvm-desktop-recover shell
 #       The shell lost its context (Omarchy's bar and launcher, Quickshell):
 #       only the shell starts again, no app closes.
@@ -49,11 +51,12 @@ case ${1:-} in
 desktop)
   why=${2:-graphics}
   [[ $why == memory ]] || why=graphics
-  apps=""
+  apps=""; locked=0
   [[ -n $U ]] && apps=$(open_apps)
+  [[ -n $U ]] && in_session timeout 3 omarchy-hyprland-session-locked >/dev/null 2>&1 && locked=1
   # Written as the user: root never writes into a folder the user owns.
   if [[ -n $U ]] && install -d -m 700 -o "$U" -g "$(id -gn "$U")" "$(dirname "$NOTE")"; then
-    printf 'why=%s\napps=%s\nat=%s\n' "$why" "$apps" "$(date +%H:%M)" |
+    printf 'why=%s\napps=%s\nat=%s\nlocked=%s\n' "$why" "$apps" "$(date +%H:%M)" "$locked" |
       sudo -u "$U" sh -c 'cat > "$1.tmp" && mv -f "$1.tmp" "$1"' _ "$NOTE"
   fi
   say "the desktop lost its GPU context on the Mac ($why): restarting the session; closing: ${apps:-no app windows}"
@@ -68,7 +71,18 @@ shell)
 notify)
   [[ -r $NOTE ]] || exit 0
   why=$(sed -n 's/^why=//p' "$NOTE"); apps=$(sed -n 's/^apps=//p' "$NOTE"); at=$(sed -n 's/^at=//p' "$NOTE")
+  locked=$(sed -n 's/^locked=//p' "$NOTE")
   rm -f "$NOTE"
+  # Locked before: lock again first. The shell may not take a lock yet this
+  # early in the session: ask until Hyprland holds one, for half a minute.
+  if [[ $locked == 1 ]]; then
+    for _ in $(seq 30); do
+      omarchy-hyprland-session-locked >/dev/null 2>&1 && break
+      omarchy-system-lock >/dev/null 2>&1
+      sleep 1
+    done
+    omarchy-hyprland-session-locked >/dev/null 2>&1 || say "could not lock the new session again"
+  fi
   if [[ $why == memory ]]; then cause="macOS ran short of memory for the VM's graphics"
   else cause="the VM's graphics on the Mac failed"; fi
   if [[ -n $apps ]]; then closed="These apps were closed: $apps. Anything not saved in them is lost."

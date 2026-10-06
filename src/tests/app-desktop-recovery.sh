@@ -7,7 +7,10 @@
 # - The VM's omacvm-desktop-recover with stand-ins for systemctl, sudo,
 #   hyprctl and notify-send: the note names the apps that closed, the login
 #   manager restarts, the new session shows the note once, the shell mode
-#   restarts only the shell.
+#   restarts only the shell; a locked session is locked again.
+# - GuestAgent.start against a stand-in agent socket: a "return" reply is
+#   started, an "error" reply refused, no reply in time (or half a line) no
+#   answer, so the app never restarts the desktop a second time.
 # No VM, no window.
 #   src/tests/app-desktop-recovery.sh
 set -uo pipefail
@@ -82,6 +85,8 @@ STUB
 printf '#!/bin/bash\nshift; "$@"\n' > "$S/timeout"
 printf '#!/bin/bash\n[[ $1 == -f ]] && shift; "$@"\n' > "$S/setsid"
 printf '#!/bin/bash\necho omarchy-restart-shell >> "$CALLS"\n' > "$S/omarchy-restart-shell"
+printf '#!/bin/bash\n[[ -e $LOCKED ]]\n' > "$S/omarchy-hyprland-session-locked"
+printf '#!/bin/bash\necho omarchy-system-lock >> "$CALLS"; [[ -e $LOCK_FAILS ]] || touch "$LOCKED"\n' > "$S/omarchy-system-lock"
 printf '#!/bin/bash\n[[ $* == "clients -j" ]] && cat "$CLIENTS"\n' > "$S/hyprctl"
 printf '#!/bin/bash\n[[ -e $NOTIFY_FAILS ]] && exit 1; printf "%%s|" "notify-send" "$@" >> "$CALLS"; echo >> "$CALLS"\n' > "$S/notify-send"
 printf '#!/bin/bash\n[[ $1 == -u ]] && { echo 1000; exit; }; [[ $1 == -gn ]] && { echo staff; exit; }; echo staff\n' > "$S/id"
@@ -91,7 +96,7 @@ printf '#!/bin/bash\n:\n' > "$S/chown"
 printf '#!/bin/bash\n:\n' > "$S/sleep"
 chmod +x "$S"/*
 export PATH="$S:$PATH"
-export OMACVM_RECOVER_ENV=$T/env OMACVM_RECOVER_NOTE=$T/run/desktop/restarted CLIENTS=$T/clients NOTIFY_FAILS=$T/notify-fails
+export OMACVM_RECOVER_ENV=$T/env OMACVM_RECOVER_NOTE=$T/run/desktop/restarted CLIENTS=$T/clients NOTIFY_FAILS=$T/notify-fails LOCKED=$T/locked LOCK_FAILS=$T/lock-fails
 printf 'OMACVM_VM_TYPE=app\nOMACVM_USER=tester\n' > "$T/env"
 cat > "$CLIENTS" <<'JSON'
 [{"class": "chromium", "title": "a"}, {"class": "Alacritty"}, {"class": "chromium"}, {"class": "", "initialClass": "obsidian"}, {"class": "bad\nwhy=x"}]
@@ -106,6 +111,7 @@ grep -q "closing: chromium, Alacritty, obsidian, bad why=x" "$CALLS" && expect "
   || expect "desktop: logged to the journal" yes no
 : > "$CALLS"
 "$G" notify
+cp "$CALLS" "$T/calls.unlocked"
 n=$(grep -c '^notify-send' "$CALLS")
 expect "notify: shown once"                      1 "$n"
 grep -q "These apps were closed: chromium, Alacritty, obsidian, bad why=x. Anything not saved in them is lost." "$CALLS" \
@@ -116,6 +122,20 @@ expect "notify: the note is gone after"          no "$( [[ -e $T/run/desktop/res
 : > "$CALLS"
 "$G" notify
 expect "notify: nothing without a note"          "" "$(cat "$CALLS")"
+expect "notify: unlocked before, no lock"        0 "$(grep -c '^omarchy-system-lock' "$T/calls.unlocked")"
+# Locked when the desktop was lost: the new session locks itself again, first.
+touch "$LOCKED"
+"$G" desktop memory > /dev/null
+expect "desktop while locked: the note says so"  1 "$(sed -n 's/^locked=//p' "$T/run/desktop/restarted")"
+rm -f "$LOCKED"; : > "$CALLS"
+"$G" notify
+expect "notify after a locked session: locks once, then the note" "omarchy-system-lock notify-send" \
+  "$(grep -o '^omarchy-system-lock\|^notify-send' "$CALLS" | tr '\n' ' ' | sed 's/ $//')"
+touch "$LOCK_FAILS" "$LOCKED"; "$G" desktop memory > /dev/null; rm -f "$LOCKED"; : > "$CALLS"
+"$G" notify > /dev/null
+grep -q "could not lock the new session again" "$CALLS" && expect "notify: a lock that does not hold is logged" yes yes \
+  || expect "notify: a lock that does not hold is logged" yes no
+rm -f "$LOCK_FAILS"
 # No Hyprland answer (hung): still restarts, the note says apps closed.
 : > "$CALLS"; echo 'not json' > "$CLIENTS"
 "$G" desktop graphics > /dev/null
@@ -145,4 +165,44 @@ expect "shell without a user: refused"           1 "$rc"
 expect "desktop without a user: still restarts"  "systemctl restart sddm" "$(grep '^systemctl' "$CALLS")"
 "$G" bogus 2>/dev/null; rc=$?
 expect "unknown mode: usage"                     2 "$rc"
+
+# GuestAgent.start against a stand-in agent: answers, refuses, says nothing.
+mkdir -p "$T/agent-src"
+cat > "$T/agent-src/main.swift" <<'SWIFT'
+import Foundation
+switch GuestAgent.start(socketPath: CommandLine.arguments[1], "/usr/local/bin/omacvm-desktop-recover", ["desktop", "memory"]) {
+case .started: print("started")
+case .refused: print("refused")
+case .noAnswer: print("noAnswer")
+}
+SWIFT
+if ! swiftc -O -o "$T/agent" "$R/app/app/Sources/OmacVM/GuestAgent.swift" "$T/agent-src/main.swift" 2>"$T/swiftc.log"; then
+  cat "$T/swiftc.log"; echo "FAIL GuestAgent.swift does not compile on its own"; exit 1
+fi
+cat > "$T/fake-agent.py" <<'PY'
+import os, socket, sys, time
+path, mode = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX); s.bind(path); s.listen(1)
+print("up", flush=True)
+c, _ = s.accept(); f = c.makefile("rb")
+line = f.readline()
+assert b"guest-exec" in line, line
+if mode == "return": c.sendall(b'{"return": {"pid": 4242}}\n')
+elif mode == "error": c.sendall(b'{"error": {"class": "GenericError", "desc": "Failed to execute child process (No such file or directory)"}}\n')
+elif mode == "partial": c.sendall(b'{"retu')
+time.sleep(3)   # longer than the app waits (2 s)
+PY
+agent() {   # MODE -> what GuestAgent.start says
+  local sock=$T/qga-$1.sock
+  python3 "$T/fake-agent.py" "$sock" "$1" > "$T/fake-$1.out" 2>&1 &
+  local pid=$!
+  for _ in $(seq 50); do [[ -S $sock ]] && break; /bin/sleep 0.1; done
+  "$T/agent" "$sock"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+expect "agent: a return reply is started"                 started  "$(agent return)"
+expect "agent: an error reply is refused"                 refused  "$(agent error)"
+expect "agent: no reply in 2 s is no answer, not refused" noAnswer "$(agent silent)"
+expect "agent: half a reply in 2 s is no answer"          noAnswer "$(agent partial)"
+expect "agent: no socket is no answer"                    noAnswer "$("$T/agent" "$T/none.sock")"
 exit $fail

@@ -25,7 +25,8 @@ in more words.
   example when macOS runs short of memory), the desktop now starts again by
   itself instead of staying black until you click *Restart the Desktop*.
   Apps open in the VM close and what was not saved in them is lost; the new
-  session shows a notification naming them. At most once in 10 minutes,
+  session shows a notification naming them, and locks itself again if it
+  was locked. At most once in 10 minutes,
   then the app asks again. Only the bar lost: only the bar restarts. Turn
   it off with `defaults write org.omacvm.app desktopAutoRestart -bool false`.
   VMs get it with `omacvm apply` (before that, the app restarts the login

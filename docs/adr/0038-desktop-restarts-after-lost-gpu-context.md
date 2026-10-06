@@ -35,6 +35,17 @@ Nothing in the VM learns of the loss by itself:
 - The new session (Hyprland autostart, `omacvm-desktop-recover notify`)
   shows a notification: why, and which apps were closed, and that anything
   not saved in them is lost. Said plainly, because it is real data loss.
+- A locked session stays locked. Autologin would otherwise bring back an
+  unlocked desktop with nobody at the Mac (idle lock). The script notes
+  whether Hyprland held a lock (`omarchy-hyprland-session-locked`), and the
+  new session locks itself again (`omarchy-system-lock`, retried until
+  Hyprland holds the lock, up to 30 s) before it shows the notification.
+  For those few seconds the new desktop is unlocked. With autologin off,
+  the user who just logged in is asked once more.
+- Only a refusal counts as "nothing happened". When the agent does not
+  answer within 2 s (likely when macOS is short of memory), the restart may
+  be under way: the app neither tries again nor restarts SDDM directly, it
+  asks, and the 10-minute count stays.
 - At most once in 10 minutes. Lost again that soon means the cause is
   still there (macOS still short of memory, a cap too low): a loop of
   restarts would only close apps again and again. Then the app asks with

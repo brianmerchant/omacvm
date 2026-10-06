@@ -757,7 +757,7 @@ the Mac mini the desktop drew again 2 to 3 seconds after QEMU reported it):
 SDDM logs you in again (or shows its login screen when autologin is off).
 **Apps open in the VM close, and what was not saved in them is lost.** The
 new session shows a notification that says so and names the apps that
-closed. At most once in 10 minutes: when the desktop is lost again that
+closed. A session that was locked locks itself again. At most once in 10 minutes: when the desktop is lost again that
 soon (macOS still short of memory), the app shows "The VM's desktop
 stopped drawing" with a button that restarts it, as it always did with
 the automatic restart off (`defaults write org.omacvm.app

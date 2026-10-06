@@ -68,13 +68,16 @@ enum GuestAgent {
 
     /// As `run`, and tells a refusal (the agent answered with an error, such
     /// as no such program in the VM) from no answer (the program may still
-    /// have started).
+    /// have started). A reply that comes too late for the 2 s wait, or only
+    /// in part, counts as no answer, not as a refusal.
     static func start(socketPath: String, _ path: String, _ args: [String]) -> Start {
         let body: [String: Any] = ["execute": "guest-exec", "arguments": ["path": path, "arg": args]]
         guard let json = try? JSONSerialization.data(withJSONObject: body),
               let command = String(data: json, encoding: .utf8) else { return .refused }
         guard let reply = execute(socketPath: socketPath, command) else { return .noAnswer }
-        return reply.contains("\"return\"") ? .started : .refused
+        if reply.contains("\"return\"") { return .started }
+        if reply.contains("\"error\"") { return .refused }
+        return .noAnswer
     }
 
     /// Sends one command and waits up to two seconds for its one-line reply.
