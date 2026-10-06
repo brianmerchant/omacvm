@@ -540,11 +540,13 @@ What is missing before it can become the default: [below](#fast-network-not-done
   them ("packet with disallowed source address"): what VMs got before the
   VPN NAT. Down and up again, the VM leaving: as with the test tunnel.
   An IKEv2-style `ipsec0` (macOS's own kernel interface for IKEv2, here
-  without a security association) got no NAT at first: macOS announces an
-  IPv4 address added to an interface that is already up only as a new
-  route, which the service did not count. Fixed: it follows route changes
-  too (not ARP entries or per-destination routes); `ipsec0` now gets its
-  rule within a second, and pf translates to its address.
+  without a security association) got no NAT at first: for an IPv4
+  address added to an interface that was already up, the service saw only
+  a new route (its local route), which it did not count. Fixed: it
+  follows route changes too (not ARP entries or per-destination routes);
+  `ipsec0` now gets its rule within a second, and pf translates to its
+  address. It also missed IPv4 address messages, which are shorter than
+  it expected; it counts them now.
   Then an app VM's QEMU (headless clone of a test VM) on the fast network
   with the fixed service and the same client: NAT on 1.1 s after the
   tunnel; the VM reaches the server over IPv4 and IPv6 (seen as

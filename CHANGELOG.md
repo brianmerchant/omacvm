@@ -23,9 +23,10 @@ in more words.
   "Behind a proxy".
 - Fast network: a VPN whose interface is up before it gets its address (an
   IKEv2 connection's `ipsec0`, a tunnel brought up first) now gets the VPN
-  NAT within a second. macOS announces such an address only as a new
-  route, and the service waited for the next other change. Tested with a
-  real WireGuard client (docs/routes/app.md).
+  NAT within a second. For such an address the service saw only a new
+  route, and waited for the next other change. It also missed IPv4 address
+  messages (shorter than it expected). Tested with a real WireGuard client
+  (docs/routes/app.md).
 
 ## 3.0.0 (unreleased)
 
