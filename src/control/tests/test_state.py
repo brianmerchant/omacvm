@@ -334,3 +334,19 @@ def test_update_plan():
     assert update_line("app+vm", "3.0.2") == "Update available: 3.0.2 (Mac app and this VM) · u updates"
     assert update_line("vm", "3.0.2") == "Update available: 3.0.2 (this VM) · u updates"
     assert update_line("none", "3.0.2") == ""
+
+
+def test_progress_lines():
+    j = S.Job(id="1", action="update", features=(), state="running", step=3, of=9, text="Gestures")
+    out = S.progress_lines("Updating to OmacVM 3.0.2", j, ["==> Mac helpers", "built OmacVMGestures", ""])
+    assert out[0] == ("Updating to OmacVM 3.0.2", "bold")
+    assert out[1][0] == f"  {S.bar(3 / 9)}  step 3 of 9: Gestures"
+    assert out[2] == ("  built OmacVMGestures", "bright_black")
+    # The latest line is not repeated when it is the step's own text.
+    assert len(S.progress_lines("x", j, ["==> Gestures"])) == 2
+    # Before the first step, and while the Mac does not answer.
+    j0 = S.Job(id="1", action="update", features=(), state="queued")
+    assert S.progress_lines("x", j0, [], waiting="waiting for the Mac")[1:] == [
+        (f"  {S.bar(0)}  starting", ""), ("  waiting for the Mac", "bright_black")]
+    assert S.bar(0.5, 4) == "██░░" and S.bar(2, 4) == "████"
+    assert S.latest_line(["==> a", "b ", "  "]) == "b" and S.latest_line([]) == ""

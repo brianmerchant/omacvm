@@ -13,6 +13,12 @@ in more words.
   more U, then c, then i. The app's window gets **Check Now** and "Update to
   X…". From 3.0.0, update the app once by hand (shut the VM down, then
   OmacVM › Check for Updates…): the one-step update works from 3.0.1 on.
+- The control centre shows an update while it runs: step n of N with a bar
+  and the latest log line (also on the Updates screen); through OmacVM.app
+  the four steps (the Mac gets the app, the VM shuts down, the app installs
+  and starts the VM again, the VM updates). At the end "Updated to X" or the
+  error with the next step, the list at once, and R restarts the VM for the
+  kernel, memory and keyboard changes.
 - Error texts say the next step: "update OmacVM.app first: u in the control
   centre does it, or Check Now in OmacVM on the Mac" instead of
   "OmacVM.app is older than this release".

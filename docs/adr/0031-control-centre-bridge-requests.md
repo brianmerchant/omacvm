@@ -109,9 +109,15 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
   waits up to 5 minutes; past 4 the app answers "try again" and nothing
   shuts down. Before asking, the control centre writes
   `~/.cache/omacvm/update-after-restart`; after the restart `omacvm notify`
-  (2 minutes after login) opens it and it runs the VM's `update` job without
+  (30 s after login) opens it and it runs the VM's `update` job without
   asking again (the marker counts for an hour), or says the app was not
-  updated. `updates` answers `mac_app` so the control centre knows the plan
+  updated. While it runs the control centre shows the four steps (the Mac
+  gets the app, the VM shuts down, the app installs and starts the VM again,
+  the VM updates) and, for a job, step n of N from its progress lines with
+  the latest log line (GET /omacvm/jobs/<id>); at the end "Updated to X" or
+  the error with the next step, and R restarts the VM (only in the boot of
+  the update: `~/.cache/omacvm/restart-needed` holds the boot id).
+  `updates` answers `mac_app` so the control centre knows the plan
   before it asks. A 3.0.0 Mac knows none of this: the control centre then
   says to update OmacVM.app on the Mac first.
 

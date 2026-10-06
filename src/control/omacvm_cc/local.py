@@ -94,6 +94,31 @@ def take_resume(remove: bool = True) -> str | None:
     return v
 
 
+def restart_file() -> str:
+    """Written after an update in this VM: kernel, memory and keyboard
+    changes wait for a restart (only in this boot)."""
+    return os.path.join(os.path.dirname(cache_file()), "restart-needed")
+
+
+def write_restart_needed(version: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(restart_file()), exist_ok=True)
+        with open(restart_file(), "w", encoding="utf-8") as f:
+            json.dump({"version": version, "boot": boot_id()}, f)
+    except OSError:
+        pass
+
+
+def restart_needed() -> str | None:
+    """The version an update in this boot brought in, if the VM has not
+    restarted since (None: nothing waits for a restart)."""
+    d = read_json(restart_file())
+    if not d or d.get("boot") != boot_id() or not boot_id():
+        return None
+    v = d.get("version")
+    return v if isinstance(v, str) else None
+
+
 def cache_file() -> str:
     return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "omacvm", "state.json")
 

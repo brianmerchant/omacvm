@@ -150,7 +150,8 @@ and "report a problem" without personal data.
 OmacVM.app looks for a new version once a week (Check Now in its window asks
 at once; Go Back in its menu; off in its settings or the control centre). `u`
 in the control centre updates everything: OmacVM.app on the Mac first (the VM
-restarts once, after one confirm), then the VM.
+restarts once, after one confirm), then the VM. It shows each step while it
+runs; R restarts the VM at the end for kernel, memory and keyboard changes.
 
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
 omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.

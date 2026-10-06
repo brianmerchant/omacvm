@@ -37,6 +37,7 @@ class FakeMac:
         self.job_end = ("done", "done")   # (state, text) a job ends with
         self.job_extra: dict = {}         # more fields of the ended job (failed_part, mac_omacvm)
         self.job_polls_to_end = 2
+        self.on_job_end = None            # called once with the job when it ends (a VM side that changed)
         self.requests: list[tuple[str, str, dict]] = []
         self.jobs: dict[str, dict] = {}
         self.checks_enabled = True
@@ -160,6 +161,9 @@ class FakeMac:
                     if j["polls"] >= fake.job_polls_to_end:
                         j["state"], j["text"] = fake.job_end
                         j.update(fake.job_extra)
+                        if fake.on_job_end and not j.get("ended"):
+                            j["ended"] = True
+                            fake.on_job_end(j)
                     return self.send(200, {k: v for k, v in j.items() if k != "polls"})
                 if p in ("/state", "/scan?cached=1", "/bluetooth"):
                     return self.send(200, {"ssid": "ZorroNet 5G", "bssid": "a4:2b:b0:11:22:33",
