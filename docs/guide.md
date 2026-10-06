@@ -108,7 +108,11 @@ omacvm disable gestures --vm "Omarchy ARM"
 ```
 
 Or in Omarchy itself: `omacvm` (or OmacVM in the Omarchy menu, or the OmacVM
-item in the bar) opens the control centre. Space switches the feature under
+item in the bar) opens the control centre. From the Mac, *Features…* in
+OmacVM.app's menu (beside the Apple menu, while the VM runs) or
+`omacvm features --vm NAME --in-vm` opens it on the VM's desktop (one
+window, brought to the front if it is open already; someone must be logged
+in there). Space switches the feature under
 the cursor; the Mac does the same as `omacvm enable/disable` there, and macOS
 still asks for its permissions on the Mac. `r` repairs the feature under the
 cursor (only that one). If a change fails, the VM goes back to what it had

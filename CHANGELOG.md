@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.1 (unreleased)
+
+- The control centre opens from the Mac: *Features…* in OmacVM.app's menu
+  (while the VM runs) or `omacvm features --vm NAME --in-vm` (also in
+  `omacvm`'s menu) open it on the VM's desktop, one window, in front. It
+  says what is missing when it cannot: nobody logged in, the control centre
+  off, an older OmacVM in the VM.
+- Control centre: `r` on a feature that works asks first (it installs that
+  feature again) instead of starting at once without a word. "Report a
+  problem" keeps sudo's working folder (`PWD=/`), which it used to take out
+  as a secret, and counts only what it really took out.
+
 ## 3.0.0 (unreleased)
 
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
