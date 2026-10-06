@@ -19,7 +19,7 @@ in more words.
   traces, turns green and draws a check (or shakes red); no click needed.
   Parallels, UTM and Fusion keep macOS's own dialog.
 
-## 3.0.1 (unreleased)
+## 3.0.1
 
 - OmacVM.app: the globe (fn) key pressed on its own goes to the VM, no
   longer to macOS's Emoji & Symbols over it, while the VM's window has the

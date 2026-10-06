@@ -166,7 +166,7 @@ download() {
     awk 'tolower($1) == "content-length:" && $2 ~ /^[0-9]+$/ { n = $2 } END { print n + 0 }') || total=0
   bytes_watch "$3" "${total:-0}" "$out" & w=$!
   curl -fsSL --retry 3 -o "$out" "$url" || rc=$?
-  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null || true
+  kill "$w" 2>/dev/null || true; wait "$w" 2>/dev/null || true
   [[ $rc == 0 ]] && progress_line download "$3" "$(stat -f %z "$out")" "${total:-0}"
   return "$rc"
 }
