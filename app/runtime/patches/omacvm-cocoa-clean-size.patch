@@ -40,9 +40,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -44,6 +44,7 @@
- #include "ui/omacvm-pointer-start.h"
  #include "ui/omacvm-shortcuts.h"
  #include "ui/omacvm-gpu-memory.h"
+ #include "ui/omacvm-desktop-restart.h"
 +#include "ui/omacvm-clean-size.h"
  #include "hw/core/boards.h"
  #include "system/system.h"
