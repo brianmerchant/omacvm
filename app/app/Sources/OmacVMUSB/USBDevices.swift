@@ -96,7 +96,7 @@ public struct USBDevice: Equatable, Sendable {
     public static func reason(_ user: String) -> String {
         let u = user.lowercased()
         func has(_ words: String...) -> Bool { words.contains { u.contains($0) } }
-        if has("usbmuxd", "ptpcamerad", "ios") { return "macOS uses it (iPhone, iPad or photo import)" }
+        if has("usbmuxd", "ptpcamerad", "iosdevice") { return "macOS uses it (iPhone, iPad or photo import)" }
         if has("hid") { return "macOS uses it as a keyboard, mouse or security key" }
         if has("audio") { return "macOS uses it for sound" }
         if has("massstorage", "scsi", "uas", "storage") { return "macOS uses it as a disk" }
@@ -158,8 +158,8 @@ public enum USBChoice {
 
     /// A name for the file: one line, printable, short.
     static func clean(_ s: String) -> String {
-        String(s.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7f }.prefix(60))
-            .trimmingCharacters(in: .whitespaces)
+        let printable = String(String.UnicodeScalarView(s.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7f }))
+        return String(printable.prefix(60)).trimmingCharacters(in: .whitespaces)
     }
 
     public static func load(folder: URL) -> [Entry] {
