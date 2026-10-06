@@ -201,9 +201,10 @@ VM runs, and goes back by itself when a new version does not start
   either place.
 - **The VMs**: `~/OmacVM/<VM name>/`, one folder per VM: `vm.env` (the
   settings), `disk.img` (the disk; sparse: it takes what it holds, not its
-  full size), `efi-vars.fd`, `logs/`. To take a VM to another Mac, copy its
-  folder into that Mac's VMs folder (the VM must be shut down; above) with
-  `cp -R`, which keeps the disk sparse (`ditto` wrote it in full). Where
+  full size; what Omarchy deletes goes back to the Mac within a minute),
+  `efi-vars.fd`, `logs/` ([disk options](../adr/0038-system-disk-options.md)).
+  To take a VM to another Mac, copy its folder into that Mac's VMs folder
+  (the VM must be shut down; above) with `cp -R`, which keeps the disk sparse (`ditto` wrote it in full). Where
   something else already has the name ~/OmacVM (a file, a git clone
   ~/omacvm: the same folder on a case-insensitive disk), new VMs go to the
   old place below instead.
