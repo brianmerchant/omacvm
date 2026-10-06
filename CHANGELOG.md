@@ -105,6 +105,7 @@ in more words.
   restart or an Omanotch quit with the VM running keeps that. If the VM is
   windowed now, Omanotch gives the bar back as soon as it connects (an older
   Omanotch, or none running: after 8 s).
+- Vulkan on an M1 or M2 Mac gets a host memory window of 1 GB or more (3.0.0: 256 MB).
 
 ## 3.0.0
 
