@@ -90,12 +90,14 @@ let cap = Capture()
 let sem = DispatchSemaphore(value: 0)
 var stream: SCStream?
 var winFrame = CGRect.zero
+var winID: CGWindowID = 0
 SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, err in
   guard let wins = content?.windows.filter({ $0.owningApplication?.processID == pid && $0.windowLayer == 0 }),
         let win = wins.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
     print("no window of pid \(pid): \(String(describing: err))"); exit(1)
   }
   winFrame = win.frame
+  winID = win.windowID
   let c = SCStreamConfiguration()
   c.width = Int(win.frame.width); c.height = Int(win.frame.height)
   c.minimumFrameInterval = CMTime(value: 1, timescale: 240)
@@ -120,6 +122,9 @@ func move(_ p: CGPoint) {
   moveLock.lock()
   e.setIntegerValueField(.mouseEventDeltaX, value: Int64(p.x - lastMove.x))
   e.setIntegerValueField(.mouseEventDeltaY, value: Int64(p.y - lastMove.y))
+  // The window under the pointer (WindowServer fills these for real moves): AppKit routes the move by it.
+  e.setIntegerValueField(CGEventField(rawValue: 91)!, value: Int64(winID))
+  e.setIntegerValueField(CGEventField(rawValue: 92)!, value: Int64(winID))
   lastMove = p
   moveLock.unlock()
   e.postToPid(pid)

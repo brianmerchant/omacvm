@@ -7,20 +7,21 @@
 # ScreenCaptureKit. QEMU's trace (-msg timestamp=on) splits each event into
 # Mac -> QEMU input, QEMU input -> the guest's next flush, flush -> screen.
 #   src/tests/input-latency-vm.sh --runtime DIR --vm DIR --ssh-port PORT [--hz 60|120]
-#        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--out DIR]
-# MODES (default all): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
+#        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--native] [--out DIR]
+# MODES (default all; spaces or commas): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
 # no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP).
 # DIR (vm): a COPY of an OmacVM.app VM made by omacvm apply (disk.img,
 # efi-vars.fd); the test writes to it. --runtime: a built runtime or an
 # app's Contents/Resources/runtime (with --firmware: its firmware's
 # edk2-aarch64-code.fd). --env passes settings to QEMU for an A/B run
-# (e.g. OMACVM_GL_VSYNC=0). --hw-cursor: the guest's pointer on
+# (e.g. OMACVM_GL_VSYNC=0). OMACVM_GUEST_KEY: the VM's SSH key (default
+# ~/.ssh/omacvm). --hw-cursor: the guest's pointer on
 # virtio-gpu's cursor plane (OMACVM_HW_CURSOR=1, omacvm.hwcursor=1).
 # Each mode prints a JSON summary; --out keeps the raw rows, QEMU's log and
 # the breakdown (breakdown.json).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0
+RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0; NATIVE=0
 FW=$R/app/runtime/.build/firmware/edk2-aarch64-code.fd
 QENV=()
 while (( $# )); do
@@ -31,9 +32,10 @@ while (( $# )); do
     --firmware) FW=$2; shift 2 ;;
     --hz) HZ=$2; shift 2 ;;
     --count) COUNT=$2; shift 2 ;;
-    --modes) MODES=$2; shift 2 ;;
+    --modes) MODES=${2//,/ }; shift 2 ;;
     --env) QENV+=("$2"); shift 2 ;;
     --hw-cursor) HWC=1; shift ;;
+    --native) NATIVE=1; shift ;;
     --out) OUT=$2; shift 2 ;;
     *) sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
@@ -58,14 +60,15 @@ cleanup() {
   for _ in $(seq 40); do pgrep -f -- "$PAT" >/dev/null || break; sleep 1; done
   pkill -f -- "$PAT" 2>/dev/null
   [[ -n $VD_PID ]] && kill "$VD_PID" 2>/dev/null
-  rm -rf "$W/run" "$W/inputlat" "$W/vdisplay"
+  [[ -n ${NPID:-} ]] && kill "$NPID" 2>/dev/null
+  rm -rf "$W/run" "$W/inputlat" "$W/vdisplay" "$W/nativelat"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 gssh() {
-  ssh -i "$HOME/.ssh/omacvm" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+  ssh -i "${OMACVM_GUEST_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -p "$PORT" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@"
 }
 
@@ -87,6 +90,18 @@ print(ids[0..<Int(n)].map(String.init).joined(separator: ","))' 2>/dev/null | tr
 [[ -n $SKIP ]] || { echo "input-latency-vm: could not list the Mac's displays" >&2; exit 1; }
 echo "virtual display $VD at $HZ Hz; left alone: $SKIP; settings: ${QENV[*]:-none}; hardware cursor: $HWC"
 
+# --native: the macOS floor first, a plain AppKit window on the same display (nativelat.swift).
+if ((NATIVE)); then
+  swiftc -O "$R/tests/graphics/pacing/nativelat.swift" -o "$W/nativelat" || exit 1
+  "$W/nativelat" "$VD" 60 > "$W/native.out" 2>&1 &
+  NPID=$!
+  sleep 2
+  for m in key pointer; do
+    "$W/inputlat" "$NPID" "$m" "$COUNT" "$OUT/native-$m.jsonl" | sed 's/^{/{"app":"native",/' | tee "$OUT/native-$m.summary"
+  done
+  kill "$NPID" 2>/dev/null
+fi
+
 RUN=$W/run; mkdir -p "$RUN"
 TRACE=(-trace 'input_event_key_qcode' -trace 'input_event_abs' -trace 'virtio_gpu_cmd_res_flush'
        -trace 'virtio_gpu_update_cursor' -trace 'cocoa_present_direct' -trace 'cocoa_present_frame')
@@ -104,7 +119,7 @@ env OMACVM_PRODUCT_NAME="$NAME" OMACVM_SLIRP_HOST_PORTS=1 OMACVM_NOTCH=0 \
   -device nvme,serial=omacvm,drive=disk,bootindex=0 \
   -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$PORT-:22" -device virtio-net-pci,netdev=net0,romfile= \
   -device virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile= \
-  -display "cocoa,gl=on,show-cursor=$( ((HWC)) && echo on || echo off),zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off" \
+  -display "cocoa,gl=on,show-cursor=off,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=off,swap-opt-cmd=off" \
   -device virtio-keyboard-pci,romfile= -device virtio-tablet-pci,romfile= \
   -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-pci,rng=rng0 \
   ${SMB[@]+"${SMB[@]}"} "${TRACE[@]}" \
@@ -147,11 +162,17 @@ source /etc/omacvm/env 2>/dev/null
 U=${OMACVM_USER:-$(id -nu 1000)}; X=/run/user/$(id -u "$U")
 SIG=$(ls "$X/hypr" | head -1)
 hc() { sudo -u "$U" env XDG_RUNTIME_DIR=$X HYPRLAND_INSTANCE_SIGNATURE=$SIG hyprctl "$@"; }
-if command -v alacritty >/dev/null; then T="alacritty -o cursor.blinking=\"Never\" -e bash --norc --noprofile"
+if command -v alacritty >/dev/null; then T="alacritty -o 'cursor.blinking=\"Never\"' -e bash --norc --noprofile"
 elif command -v ghostty >/dev/null; then T="ghostty --cursor-style-blink=false -e bash --norc --noprofile"
 else T="foot -o cursor.blink=no bash --norc --noprofile"; fi
-hc dispatch exec "$T" >/dev/null
-sleep 3
+echo "guest: terminal: $T"
+# Started by Hyprland itself (its session's environment).
+hc eval "hl.exec_cmd([[$T > /tmp/inputlat-term.log 2>&1]])" | head -2
+for _ in 1 2 3 4 5 6; do
+  sleep 1
+  hc -j clients | grep -q '"class"' && break
+done
+cat /tmp/inputlat-term.log 2>/dev/null | head -5
 echo "guest: $(hc -j clients | python3 -c 'import json,sys; print([c["class"] for c in json.load(sys.stdin)])')"
 echo "guest: no_hardware_cursors $(hc getoption cursor:no_hardware_cursors 2>/dev/null | head -1)"
 GUEST
