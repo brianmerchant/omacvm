@@ -779,6 +779,15 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-even
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-start.patch"
 "$native_dir/Tests/display/test-fullscreen-start.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
+# Experimental: the guest's pointer as the Mac's cursor (OMACVM_HW_CURSOR=1, the
+# app's hidden macPointer setting), and its rules' test.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor.patch"
+"$native_dir/Tests/display/test-hw-cursor.sh"
+grep -q 'omacvm_hwc_take(0, qemu_console_get_cursor(dcl->con), cocoaView,' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not hand the guest's pointer image to the Mac's cursor (hw-cursor patch)"
+# Opt-in (OMACVM_GL_INPUT_FIRST=1): while input comes, the newest frame goes on screen.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-input-first.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

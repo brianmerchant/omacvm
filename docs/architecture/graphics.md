@@ -878,6 +878,48 @@ second with no VM), so it does not show the panel's rate; that needs
 WindowServer's frame times on that display (with the power matrix). The Mac's power in that 10-minute check (14.4-20.7 W
 with the VM, 26.9 W without) was set by other tracks' VMs, not by this:
 the power comparison needs a quiet Mac (end of the pipeline).
+
+### Input latency (3.0.1 lane `input-latency-cursor`)
+
+From an event on the Mac to the first changed picture of the VM's window on
+screen (WindowServer's display time, ScreenCaptureKit), Mac mini M4, a 60 Hz
+virtual display, a 1440x900 window, `foot` in Omarchy, 30 events per row,
+median (p10-p90) in ms. `src/tests/input-latency-vm.sh`
+(`tests/graphics/pacing/inputlat.swift`); the native row is a plain AppKit
+window on the same display (`nativelat.swift`), the floor macOS itself sets.
+
+| | Mac to screen | Mac to QEMU's input | QEMU's input to the guest's flush | flush to screen |
+|---|---|---|---|---|
+| native AppKit window, key | 16.0-19.0 (9-24) | - | - | - |
+| VM, key on an idle screen | 24.1-26.7 (18-36) | 0.7-1.0 | 5.2-8.1 | 16.2-17.5 |
+| VM, pointer move (software cursor, QMP) | 23.3-27.2 (16-33) | 1.4-1.6 (QMP) | 3.4-5.1 | 17.9-19.7 |
+| VM, key while the pointer moves | 34.3-44.7 (26-52) | 0.5-1.5 | 7.6-9.7 | 19.6-30.7 |
+
+- Where the VM's time goes: the present itself costs what macOS costs any
+  app (flush to screen 16-18 ms on an idle screen = the native floor); the
+  guest's own part (Hyprland and the app, through virgl) is 3-10 ms; QEMU's
+  input path under 1 ms. While frames come steadily (the pointer moving, an
+  animation) the flush-to-screen part grows by up to a refresh: frames wait
+  in the jitter buffer (ADR 0020), and the guest's vblank phase is free.
+- Opt-in, `OMACVM_GL_INPUT_FIRST=1` (`qemu-cocoa-gl-present-input-first.patch`):
+  while input comes, the newest queued frame goes on screen and older ones
+  are dropped. The queue behind a new frame shrank (2 deep in 4 % of frames
+  instead of 26 %); keys while the pointer moved: median 34.8 vs 35.1 ms
+  (n=30) and 34.3 vs 39.5 ms (n=60), p90 46.7 vs 51.3 and 41.4 vs 49.9 ms.
+  Off by default until scrolling's pacing with it is measured (scrolling is
+  input too). Showing frames when drawn (`OMACVM_GL_VSYNC=0`) was no faster
+  (43.9 vs 44.7 ms).
+- The pointer is the biggest single delay: with Omarchy's software cursor a
+  move waits for a whole guest frame and its present (about 25 ms at 60 Hz;
+  the Mac's own cursor is not in a frame at all). The Mac pointer setting
+  (`omacvm-cocoa-hw-cursor.patch`, hidden, off) makes the guest's cursor
+  plane image the Mac's cursor; Hyprland 0.56.2 does not use the cursor
+  plane on virtio-gpu yet (Linux hides a virtual GPU's cursor plane from
+  atomic clients without DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, and
+  aquamarine does not ask for it), so it waits for the guest side.
+- Posted mouse moves (`CGEventPostToPid`) reach no app's view, so pointer
+  rows go in through QMP (no AppKit; AppKit's part for keys is under 1 ms).
+
 ## 13. Merging the tracks
 
 The tracks share one runtime. Order and overlaps known today:

@@ -454,6 +454,15 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
+    /// Experimental, off by default, no switch in the window yet: the VM
+    /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor
+    /// shows it (QEMU's OMACVM_HW_CURSOR, the guest's omacvm.hwcursor), so it
+    /// moves without waiting for a guest frame and does not flicker between
+    /// the VM, Omanotch and other displays. Hyprland 0.56 in Omarchy does not
+    /// use the cursor plane yet (docs/routes/app.md), so it changes nothing
+    /// there today. From the VM's next start.
+    /// Hidden: defaults write org.omacvm.app macPointer -bool true
+    static var macPointer: Bool { UserDefaults.standard.bool(forKey: "macPointer") }
 }
 
 extension Mac {

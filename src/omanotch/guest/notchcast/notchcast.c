@@ -450,9 +450,29 @@ static int on_vmware(void) {
     return v = strstr(vendor, "VMware") != NULL;
 }
 
+// OmacVM.app's "Mac pointer for the VM" (OMACVM_HWCURSOR=1 in
+// /run/omacvm/host.env, fixed for the VM's run): the Mac's own cursor shows
+// the guest's pointer over the VM too, so there is only one cursor and the
+// guest's never hides for the strip (hiding it would leave the Mac's cursor
+// empty for a moment when the pointer comes back into the VM).
+static int mac_pointer(void) {
+    static int v = -1;
+    if (v >= 0) return v;
+    v = 0;
+    FILE *f = fopen("/run/omacvm/host.env", "r");
+    if (f) {
+        char line[128];
+        while (fgets(line, sizeof line, f))
+            if (!strcmp(line, "OMACVM_HWCURSOR=1\n")) v = 1;
+        fclose(f);
+    }
+    return v;
+}
+
 // Hides or shows the guest's own cursor (while the pointer is over the strip
 // the helper shows the guest's cursor images itself).
 static void set_guest_cursor_visible(int visible) {
+    if (!visible && mac_pointer()) return;
     if (visible) {
         hypr_eval("hl.config({ cursor = { invisible = false } })");
         return;
@@ -484,7 +504,9 @@ static void set_guest_cursor_visible(int visible) {
 // display arranged above ("up"). Without this the cursor would reappear where
 // it was hidden and jump once Parallels reports the next position.
 static void show_guest_cursor_at_exit(const char *dir, double strip_x, double depth) {
-    if (on_vmware()) {   // Fusion already puts the cursor where the Mac's pointer is
+    // Fusion already puts the cursor where the Mac's pointer is; with the Mac
+    // pointer it was never hidden and QEMU's next move places it.
+    if (on_vmware() || mac_pointer()) {
         set_guest_cursor_visible(1);
         return;
     }
