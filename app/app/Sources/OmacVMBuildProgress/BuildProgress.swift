@@ -169,9 +169,10 @@ public enum BuildText {
 }
 
 /// How long each step usually takes, so a long one does not look stuck.
-/// Measured on real builds (2026-10): a Mac with a base chip (M1/M2/M4, 4
-/// performance cores) and one with a Pro/Max chip, on a fast home line.
-/// Downloads depend on the line: those steps show their own speed instead.
+/// From a real build (2026-10-06, MacBook Air M2, 4 performance cores, the
+/// live system cached, a fast line): 12 min in all, step 4 about 6 min, step 5
+/// about 2, step 6 about 1.5, step 2 about 1. A Pro/Max chip (8+ performance
+/// cores) is quicker. Downloads depend on the line and show their own speed.
 public enum StepTimes {
     public enum Route: String, Sendable { case build, prebuilt }
 
@@ -181,13 +182,13 @@ public enum StepTimes {
         let f = fast ? 0.7 : 1.0
         let t: (Double, Double)?
         switch (route, step) {
-        case (.build, 1): t = (60, 300)          // cached: unpack; else + 1.4 GB download
-        case (.build, 2): t = (90, 300)          // pacstrap: ~180 packages
-        case (.build, 3): t = (15, 60)
-        case (.build, 4): t = (900, 2400)        // omarchy-mac: ~1100 packages
-        case (.build, 5), (.prebuilt, 5): t = (120, 420)
-        case (.build, 6), (.prebuilt, 6): t = (60, 240)   // Swift builds of the Mac helpers
-        case (.build, 7), (.prebuilt, 7): t = (10, 60)
+        case (.build, 1): t = (30, 300)          // cached: unpack; else + 1.4 GB download
+        case (.build, 2): t = (45, 240)          // pacstrap: ~180 packages
+        case (.build, 3): t = (10, 60)
+        case (.build, 4): t = (300, 1200)        // omarchy-mac: ~1100 packages
+        case (.build, 5), (.prebuilt, 5): t = (60, 300)
+        case (.build, 6), (.prebuilt, 6): t = (45, 240)   // Swift builds of the Mac helpers
+        case (.build, 7), (.prebuilt, 7): t = (5, 60)
         case (.prebuilt, 1): t = (2, 20)
         case (.prebuilt, 2): t = nil             // the download shows its own time
         case (.prebuilt, 3): t = (60, 240)

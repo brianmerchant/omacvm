@@ -66,8 +66,8 @@ expect(BuildText.tail(Data(many.utf8)) == (31...50).map { "line \($0)" }, "the l
 let slow = StepTimes.usual(route: .build, step: 4, performanceCores: 4)!
 let quick = StepTimes.usual(route: .build, step: 4, performanceCores: 10)!
 expect(quick.1 < slow.1, "a Pro/Max chip is quicker")
-expect(StepTimes.usualText(slow) == "usually 15-40 min", "usual text: \(StepTimes.usualText(slow))")
-expect(StepTimes.usualText((15, 60)) == "usually 15 s to 1 min", "usual text across units")
+expect(StepTimes.usualText(slow) == "usually 5-20 min", "usual text: \(StepTimes.usualText(slow))")
+expect(StepTimes.usualText((15, 60)) == "usually 15 s to 1 min" && StepTimes.usualText((10, 50)) == "usually 10-50 s", "usual text across units")
 expect(StepTimes.usual(route: .prebuilt, step: 2, performanceCores: 4) == nil, "a download has no usual time")
 
 let d = UserDefaults(suiteName: "org.omacvm.test.build-progress.\(getpid())")!
