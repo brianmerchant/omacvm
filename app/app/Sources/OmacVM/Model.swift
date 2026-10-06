@@ -53,7 +53,7 @@ enum Paths {
         return roots
     }
 
-    /// OmacVM.app's downloads (try-omarchy, prebuilt VMs); "Clear Downloads" empties it.
+    /// The Omarchy images OmacVM.app downloaded to set up VMs (try-omarchy, prebuilt VMs); Storage > Downloaded images > Remove empties it.
     static let downloads = VMsFolder.home.appendingPathComponent("Library/Caches/omacvm")
 
     /// The app's resources: Contents/Resources in the app, the source tree when

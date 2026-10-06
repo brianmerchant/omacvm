@@ -229,9 +229,14 @@ VM runs, and goes back by itself when a new version does not start
   `omacvm` finds VMs in every folder the app does. Going back to 2.9.0
   after that: it shows only the VMs in ~/OmacVM (or the picked folder); the
   others are hidden from it, not deleted.
-- **Sizes**: the settings show each VM's size on disk (with Show in Finder)
-  and the downloads in `~/Library/Caches/omacvm` (try-omarchy's live system,
-  prebuilt VMs) with **Clear Downloads** (not while a build uses them).
+- **Sizes**: Storage shows the VM in the window with its size on disk and
+  Show in Finder. **All VMs…** lists every VM with its size, Show in Finder
+  and Delete (to the Trash; not while it runs).
+- **Downloaded images**: the Omarchy images the app downloaded to set up
+  VMs (try-omarchy's live system, prebuilt VMs), in `~/Library/Caches/omacvm`.
+  **Remove…** deletes them after a confirmation with the size (not while a
+  VM is being set up). Your VMs keep everything; a new VM downloads them
+  again. The Mac's Downloads folder is not touched.
 - **Backups and search**: Time Machine leaves VM folders out (the disk
   changes all the time). Spotlight never reads a VM's disk (it has no
   importer for it), but lists the files' names; macOS has no switch an app
