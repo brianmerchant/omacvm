@@ -187,6 +187,22 @@ ditto "$HB/src/bridge/mac/build/OmacVMBridge.app" "$C/Helpers/$BRIDGE_APP"
 ditto "$HB/src/gestures/mac/build/OmacVMGestures.app" "$C/Helpers/$GESTURES_APP"
 rm -rf "$HB"
 
+# Every program in the app must start on the macOS the app says it needs
+# (LSMinimumSystemVersion 15.0 below): a helper built without a minimum takes
+# the build Mac's macOS (Gestures built on macOS 27 did not start on 26).
+MIN_MACOS=15.0
+while IFS= read -r -d '' f; do
+  file -b "$f" | grep -q '^Mach-O' || continue
+  # KosmicKrisp is loaded only on macOS 26 and newer (Graphics.swift).
+  [[ $f == */libvulkan_kosmickrisp.dylib ]] && continue
+  m=$(otool -l "$f" 2>/dev/null | awk '/LC_BUILD_VERSION/ {b = 1} b && $1 == "minos" {print $2; exit}')
+  [[ -z $m ]] && m=$(otool -l "$f" 2>/dev/null | awk '/LC_VERSION_MIN_MACOSX/ {b = 1} b && $1 == "version" {print $2; exit}')
+  if [[ -n $m ]] && [[ $(printf '%s\n%s\n' "$m" "$MIN_MACOS" | sort -V | tail -1) != "$MIN_MACOS" ]]; then
+    echo "${f#"$C/"} needs macOS $m, newer than the app's $MIN_MACOS: build it with a -target / deployment target" >&2
+    exit 1
+  fi
+done < <(find "$C" -type f -perm -u+x -print0)
+
 # The app carries the version of the OmacVM it is part of.
 # Bluetooth: macOS charges Bluetooth, the camera and the microphone of a
 # helper run from inside this bundle (Contents/Helpers) to the app, and kills
@@ -214,7 +230,7 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>OmacVMCommit</key><string>$COMMIT</string>
-  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
