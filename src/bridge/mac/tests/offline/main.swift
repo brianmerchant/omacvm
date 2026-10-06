@@ -223,5 +223,19 @@ check(WindowList.rects(list, pid: 9).isEmpty, "another pid: none")
 check(DisplayPick.spansOne(WindowList.rects(list, pid: 7), displays.map(\.bounds)), "the media keys' full-screen rule from the same list")
 check(!DisplayPick.spansOne([windowOnExternal], displays.map(\.bounds)), "...a window is not full screen")
 
+// ---- which Bridge an OmacVM.app VM belongs to (test identity vs normal) ----
+let rt = "/Contents/Resources/runtime/bin/OmacVM"
+check(VMOwner.app(executable: "/Applications/OmacVM.app" + rt) == "/Applications/OmacVM.app", "the VM's app from its QEMU")
+check(VMOwner.app(executable: "/Volumes/SD/apps/OmacVM Test.app" + rt) == "/Volumes/SD/apps/OmacVM Test.app", "...also on another drive, with a space")
+check(VMOwner.app(executable: "/opt/homebrew/bin/qemu-system-aarch64") == nil, "a development build's QEMU: no app")
+check(VMOwner.app(executable: "/Applications/OmacVM.app/Contents/MacOS/OmacVM") == nil, "the launcher is no VM")
+check(VMOwner.ours(appID: "org.omacvm.app", testBridge: false), "normal Bridge: OmacVM.app's VM")
+check(!VMOwner.ours(appID: "org.omacvm.app", testBridge: true), "test Bridge: not OmacVM.app's VM")
+check(VMOwner.ours(appID: "org.omacvm.app.test", testBridge: true), "test Bridge: OmacVM Test.app's VM")
+check(!VMOwner.ours(appID: "org.omacvm.app.test", testBridge: false),
+      "normal Bridge: not OmacVM Test.app's VM (Air 2026-10-06: it took the keys, no OSD in the VM)")
+check(VMOwner.ours(appID: "com.example.omacvm", testBridge: false), "normal Bridge: a build with another bundle id")
+check(VMOwner.ours(appID: nil, testBridge: false) && VMOwner.ours(appID: nil, testBridge: true), "unknown app (development build): every Bridge's, as before")
+
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("external brightness: all offline tests passed")

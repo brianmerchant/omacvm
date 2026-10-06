@@ -5,7 +5,8 @@
 #   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
 #   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre. A feature that needs another one brings it
+# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre
+# fast-network vulkan x86-apps. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM (--transaction: as omacvm apply's). A stopped VM is

@@ -362,6 +362,14 @@ app)
     else
       bad "OpenCL (rusticl on Zink)" "no device: on MoltenVK (macOS 15) Zink needs OmacVM's Mesa (omacvm enable vulkan)"
     fi
+    # WebGPU in Chromium: the launcher, on a Venus driver with shared semaphores (OmacVM's vulkan-virtio build).
+    if [[ ! -x /usr/local/bin/omacvm-chromium-webgpu ]]; then
+      bad "WebGPU in Chromium" "no \"Chromium (WebGPU)\" launcher: omacvm apply"
+    elif [[ $(pacman -Q vulkan-virtio 2>/dev/null) == *omacvm* ]]; then
+      ok "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)"
+    else
+      skip "WebGPU in Chromium" "after OmacVM's Venus driver build ($(pacman -Q vulkan-virtio 2>/dev/null || echo "no vulkan-virtio") now; the VM builds it after its next start)"
+    fi
   else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
   FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
@@ -410,6 +418,8 @@ app)
     omacvm) ;;
     ok) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* }"
         else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
+    update) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* } (built after the VM's next start, or omacvm apply)"
+            else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
     needed) bad "Vulkan (Venus)" "${vk#* }: omacvm apply" ;;
     no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
     *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
@@ -530,6 +540,16 @@ if [[ $MAC_CLOCK == on ]]; then
   elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
 else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
+
+FEATURE=x86-apps
+x86=$(/usr/local/share/omacvm/x86/guest/install.sh --status 2>/dev/null)
+if [[ ${OMACVM_FEATURE_x86_apps:-off} == on ]]; then
+  if [[ ${x86%% *} != ok ]]; then bad "x86 apps" "${x86#* }"
+  elif ! /usr/local/share/omacvm/x86/guest/install.sh --test; then bad "x86 apps" "${x86#* }, but a test x86_64 program does not run"
+  else ok "x86 apps" "${x86#* }"; fi
+elif [[ -n $x86 && ${x86%% *} != off && $x86 != *"not OmacVM's"* ]]; then bad "x86 apps" "off, but OmacVM's box64 is still installed: omacvm apply"
+else skip "x86 apps" "off (omacvm enable x86-apps: x86_64 programs through box64)"; fi
+FEATURE=""
 
 section "Omanotch"
 FEATURE=omanotch
