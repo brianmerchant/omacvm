@@ -40,6 +40,23 @@ done
 R=$(cd "$(dirname "$src")" && pwd)
 C=$R/src/cmd
 cmd=${1:-}; [[ $# -gt 0 ]] && shift
+# OmacVM.app's own copy (Contents/Resources/omacvm, what the Bridge runs for
+# the control centre when there is no checkout): the app's signed helpers and
+# runtime, and commands that change things run from a copy, as the app's
+# apply-vm.sh does, so nothing is ever written inside the signed app.
+if [[ $R == */Contents/Resources/omacvm && -f $R/COMMIT && -z ${OMACVM_APP_COPY:-} ]]; then
+  app=${R%/Resources/omacvm}
+  export OMACVM_APP_CLI=$R/omacvm OMACVM_HELPERS=$app/Helpers OMACVM_APP_RUNTIME=$app/Resources/runtime
+  case $cmd in
+    build|apply|update|enable|disable|uninstall|features)
+      if [[ $cmd != features || " $* " != *" --json "* ]]; then
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        cp -R "$R" "$tmp/omacvm"
+        rc=0; OMACVM_APP_COPY=1 "$tmp/omacvm/omacvm" "$cmd" "$@" || rc=$?
+        exit "$rc"
+      fi ;;
+  esac
+fi
 case $cmd in
   "") exec "$C/home.sh" ;;
   build|apply|check|vms|update|resources|graphics) exec "$C/$cmd.sh" "$@" ;;

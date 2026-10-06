@@ -32,7 +32,7 @@ fi
 
 # Omanotch's build tools (Mac-independent): omacvm apply only has to clone
 # and build it when the Mac has a notch.
-pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1 || true
+"$here/../../guest/pkg-add" base-devel lz4 wayland wayland-protocols git || true
 
 if [[ -n $H ]]; then
 log "stopping $U's session"

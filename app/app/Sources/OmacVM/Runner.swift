@@ -76,13 +76,6 @@ final class Runner {
             "-monitor", "none",
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
-        // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
-        if Settings.useNotch, let s = Mac.notchScreen {
-            let k = s.backingScaleFactor
-            let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
-            let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
-            a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
-        }
         // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch):
         // the guest then presents Vulkan on the GPU, not through a CPU copy (omacvm-vulkan-present).
         if Graphics.vulkanWindowsOnGPU(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
@@ -214,7 +207,10 @@ final class Runner {
         // Omanotch, Gestures, Bridge.
         links = MacLinks.load(folder: c.folder)
         env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
-        env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
+        // And the port of the Mac's proxy on its 127.0.0.1, if it has one
+        // (MacProxy, #122): a VM built behind it reaches it as 10.0.2.2.
+        let proxy = MacProxy.current()
+        env["OMACVM_SLIRP_HOST_PORTS"] = proxy.addingPorts(to: links.hostPorts)
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
         if Settings.macPointer { env["OMACVM_HW_CURSOR"] = "1" }
@@ -264,6 +260,7 @@ final class Runner {
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
+        log.write(Data("OmacVM: Mac proxy: \(proxy.record(fastNetwork: network.vmnet))\n".utf8))
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
         log.write(Data("OmacVM: USB devices: \(USBChoice.record(usb))\n".utf8))
         if Settings.firmwareWait > 0 {
@@ -273,6 +270,7 @@ final class Runner {
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
         }
+        log.write(Data("OmacVM: \(KeyAccess.record)\n".utf8))
         if Settings.hdr && !Mac.hasHDRDisplay {
             log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
         }
