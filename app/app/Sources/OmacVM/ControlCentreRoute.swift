@@ -81,6 +81,7 @@ final class ControlCentreRoute {
         case .noAgent: return "no answer from the guest agent"
         case .refused(let why): return "not started (\(line(why)))"
         case .running: return "no result within 12 s"
+        case .badReply: return "the guest agent's reply could not be read (too long or not JSON)"
         case .exited(let code, let out): return "exit \(code): \(line(out))"
         }
     }
@@ -111,6 +112,9 @@ final class ControlCentreRoute {
         case .running:
             return ("The control centre did not open",
                     "The VM did not answer within 12 seconds. In Omarchy: omacvm in a terminal, or OmacVM in the Omarchy menu.")
+        case .badReply:
+            return ("The control centre did not open",
+                    "The VM's answer could not be read. In Omarchy: omacvm in a terminal, or OmacVM in the Omarchy menu.")
         }
     }
 }
