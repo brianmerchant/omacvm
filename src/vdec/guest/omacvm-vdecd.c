@@ -1008,19 +1008,57 @@ static const char *gpu_init(void)
 	return prog_init() ? NULL : "GL";
 }
 
-/* What omacvm check reports: the codecs on offer (systemd's runtime folder). */
-static void write_status(const char *codecs)
+/* A file in systemd's runtime folder (kept across restarts: the unit). */
+static bool runtime_path(char *path, size_t size, const char *name)
 {
 	const char *dir = getenv("RUNTIME_DIRECTORY");
+
+	return dir && snprintf(path, size, "%s/%s", dir, name) < (int)size;
+}
+
+/* What omacvm check reports: the codecs on offer. */
+static void write_status(const char *codecs)
+{
 	char path[512];
 	FILE *f;
 
-	if (!dir || snprintf(path, sizeof(path), "%s/status", dir) >= (int)sizeof(path))
+	if (!runtime_path(path, sizeof(path), "status"))
 		return;
 	f = fopen(path, "w");
 	if (f) {
 		fprintf(f, "%s\n", codecs);
 		fclose(f);
+	}
+}
+
+/* The GPU is not usable: wait longer each time, then exit 4 and systemd
+ * starts a new process (a Mesa fixed by an update loads only in a new one).
+ * With the unit's RestartSec=2: 2 s, 4 s, 8 s ... up to 2 minutes. The count
+ * is in the runtime folder; it goes once the daemon is ready, so a crash
+ * later is restarted in 2 s again. */
+static void gpu_wait(void)
+{
+	char path[512];
+	int n = 0, wait;
+	FILE *f;
+
+	if (!runtime_path(path, sizeof(path), "gpu-tries"))
+		return;
+	f = fopen(path, "r");
+	if (f) {
+		if (fscanf(f, "%d", &n) != 1 || n < 0)
+			n = 0;
+		fclose(f);
+	}
+	f = fopen(path, "w");
+	if (f) {
+		fprintf(f, "%d\n", n + 1);
+		fclose(f);
+	}
+	wait = n >= 6 ? 118 : (2 << n) - 2;
+	for (int s = 0; s < wait; s++) {
+		sd_notify(0, "WATCHDOG=1");
+		sleep(1);
 	}
 }
 
@@ -1033,7 +1071,7 @@ int main(void)
 	size_t bufsize = sizeof(struct ovd_msg) + OVD_MAX_BITSTREAM;
 	AVBufferPool *pool = av_buffer_pool_init(bufsize + AV_INPUT_BUFFER_PADDING_SIZE, NULL);
 	AVBufferRef *buf = NULL;
-	char codecs[32];
+	char codecs[32], path[512];
 	uint64_t wd_usec = 0;
 	int wd_ms = -1;		/* systemd's watchdog: ping every third of it */
 	double pinged = 0;
@@ -1043,14 +1081,19 @@ int main(void)
 	signal(SIGPIPE, SIG_IGN);
 	if (!pool)
 		return 1;
-	/* The GPU can come later (a broken Mesa fixed by an update): exit 4,
-	 * systemd starts it again, less often each time (the unit). */
+	/* Not ready (yet): no status from an earlier run. */
+	if (runtime_path(path, sizeof(path), "status"))
+		unlink(path);
+	/* The GPU can come later (a broken Mesa fixed by an update). */
 	gpu_fail = gpu_init();
 	if (gpu_fail) {
 		log_msg("vdecd: the GPU is not usable (%s on %s failed): apps decode on the CPU, trying again",
 			gpu_fail, RENDER_NODE);
+		gpu_wait();
 		return 4;
 	}
+	if (runtime_path(path, sizeof(path), "gpu-tries"))
+		unlink(path);
 	caps.codecs = va_codecs();
 	if (!caps.codecs) {
 		log_msg("vdecd: VA-API offers no H.264, HEVC or VP9 decoding: exiting, apps decode on the CPU");
