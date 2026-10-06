@@ -93,6 +93,9 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: omacvm check's media keys line (normal Bridge log lines are not failures)
+        run: src/tests/media-keys-check.sh
+
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null
 

@@ -35,6 +35,20 @@ mac_helper_feature() {
   esac
 }
 
+# media_keys_state LINE: the Bridge's last "media keys: event tap|waiting|cannot"
+# log line -> "ok|warn|fail<TAB>detail". The tap is created again whenever an
+# OmacVM VM comes to the front or macOS invalidated it: that is how it works,
+# not a failure. A failed re-creation keeps the old tap (works, so warn).
+media_keys_state() {
+  local m=${1#media keys: }
+  case $m in
+    "event tap installed"*|"event tap created again"*) printf 'ok\tevent tap installed\n' ;;
+    *"keeping the old one"*) printf 'warn\t%s\n' "$m" ;;
+    "") printf 'fail\tno event tap yet\n' ;;
+    *) printf 'fail\t%s\n' "$m" ;;
+  esac
+}
+
 # cli_for_bridge OMACVM: true when OMACVM (a checkout's omacvm, resolved) is
 # the one the omacvm command runs: install.sh links it into one of these. So
 # another clone or worktree that runs src/mac/install.sh never becomes what

@@ -397,6 +397,17 @@ def test_details_and_back(world):
     asyncio.run(go())
 
 
+def test_escape_closes_it(world):
+    """A floating window like a quick-access one: Escape closes it (q too)."""
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.vm_checks is not None)
+            await pilot.press("escape")
+            await pilot.pause(0.2)
+            assert a.return_code is not None
+    asyncio.run(go())
+
 def test_rollback_says_which_part_failed(world):
     world.job_end = ("rolled-back", "the Mac's clock was not set up")
     world.job_extra = {"failed_part": "mac-clock"}
