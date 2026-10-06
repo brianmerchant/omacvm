@@ -8,6 +8,9 @@
 #   install.sh --status  one line: STATE DETAIL, STATE one of
 #                        ok | off | needed | broken
 #   install.sh --test    run a tiny x86_64 program through the binfmt rule
+# The package is omacvm-box64 (provides box64): a package named box64 would be
+# swapped for the AUR's by Omarchy's update. One named box64 is someone else's,
+# or OmacVM's from before the rename (replaced on the next apply).
 # Tests: OMACVM_X86_ROOT puts /proc/sys/fs/binfmt_misc and the test program
 # under a scratch folder.
 set -euo pipefail
@@ -23,8 +26,11 @@ HELLO=f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAeABAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAOA
 
 # (pacman's output read whole first: grep -q could end the pipe early, and pipefail
 # would count pacman's SIGPIPE as "not ours")
-ours() { local i; i=$(pacman -Qi box64 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
-have() { pacman -Q box64 2>/dev/null | awk '{ print $2 }' || true; }
+PKG=omacvm-box64
+ours() { local i; i=$(pacman -Qi "$1" 2>/dev/null) || return 1; grep -q "^Packager *: $PACKAGER" <<<"$i"; }
+ver() { pacman -Q "$1" 2>/dev/null | awk '{ print $2 }' || true; }
+have() { ver $PKG; }
+old() { [[ -n $(ver box64) ]] && ours box64; }   # OmacVM's, under the old name
 registered() { [[ -f $BINFMT/box64 ]] && grep -q '^enabled' "$BINFMT/box64"; }
 x86_test() {
   local t rc
@@ -36,8 +42,12 @@ x86_test() {
 
 status() {
   local v; v=$(have)
-  if [[ -z $v ]]; then echo "off box64 not installed"
-  elif ! ours; then echo "ok box64 $v (not OmacVM's: installed by hand, left alone)"
+  if [[ -z $v ]]; then
+    v=$(ver box64)
+    if [[ -z $v ]]; then echo "off box64 not installed"
+    elif ours box64; then echo "needed box64 $v under its old package name: omacvm apply"
+    else echo "ok box64 $v (not OmacVM's: installed by hand, left alone)"; fi
+  elif ! ours $PKG; then echo "ok box64 $v (not OmacVM's: installed by hand, left alone)"
   elif (( $(vercmp "$v" "$VER") < 0 )); then echo "needed box64 $v is older than $VER: omacvm apply"
   elif ! registered; then echo "broken box64 $v installed, but x86_64 programs are not handed to it (binfmt): omacvm apply"
   else echo "ok box64 $v runs x86_64 programs and AppImages"; fi
@@ -58,9 +68,12 @@ esac
 (( EUID == 0 )) || [[ -n $ROOT ]] || { echo "x86 apps: run as root" >&2; exit 1; }
 
 if [[ $1 == off ]]; then
-  [[ -n $(have) ]] && ours || exit 0
+  rm=()
+  [[ -n $(have) ]] && ours $PKG && rm+=("$PKG")
+  old && rm+=(box64)
+  (( ${#rm[@]} )) || exit 0
   echo "x86 apps: removing box64"
-  pacman -Rns --noconfirm box64 >>"$LOG" 2>&1 || { echo "x86 apps: pacman could not remove box64 (details in $LOG)" >&2; exit 1; }
+  pacman -Rns --noconfirm "${rm[@]}" >>"$LOG" 2>&1 || { echo "x86 apps: pacman could not remove box64 (details in $LOG)" >&2; exit 1; }
   binfmt_reload off
   ! registered || { echo "x86 apps: box64 removed, but its binfmt rule is still there (reboot)" >&2; exit 1; }
   exit 0
@@ -92,7 +105,7 @@ fail() { echo "x86 apps: $1 (details in $LOG)" >&2; exit 1; }
 : > "$LOG"
 if [[ -n $missing ]]; then
   # shellcheck disable=SC2086 # one package per word
-  pacman -S --needed --noconfirm --asdeps $missing >>"$LOG" 2>&1 || fail "pacman could not install the build tools"
+  pacman -S --needed --noconfirm --asdeps $missing >>"$LOG" 2>&1 || fail "pacman could not install the build tools; update Omarchy first (omarchy-update), then omacvm apply"
 fi
 install -m644 PKGBUILD "$B/"
 chown -R nobody: "$B"
@@ -100,8 +113,10 @@ chown -R nobody: "$B"
 ( cd "$B" && runuser -u nobody -- env HOME="$B" PKGDEST="$B" BUILDDIR="$B/build" SRCDEST="$B" LOGDEST="$B" PACKAGER="$PACKAGER" \
     makepkg --nodeps --noconfirm --noprogressbar ) >>"$LOG" 2>&1 || fail "the build failed"
 pkg=""
-for f in "$B"/box64-"$VER"-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=$f; done
+for f in "$B/$PKG-$VER"-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=$f; done
 [[ -n $pkg ]] || fail "the build made no package"
+# OmacVM's box64 under the old name first (the two conflict); fuse2 stays.
+if old; then pacman -Rdd --noconfirm box64 >>"$LOG" 2>&1 || fail "pacman could not remove the old box64 package"; fi
 # pacman -U brings fuse2 from the distro if the VM lacks it.
 pacman -U --noconfirm --needed "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
 registered || binfmt_reload on

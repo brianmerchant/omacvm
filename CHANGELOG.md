@@ -32,8 +32,8 @@ in more words.
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (on an M4: about 85 % of native speed for
   plain code, under half for vector-heavy code, plus a start-up cost;
-  tested with 7-Zip, ripgrep and Obsidian's AppImage; Node.js is not
-  reliable). `omacvm disable x86-apps` removes it. Every route.
+  tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
+  Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
   ([details](docs/features.md#x86-linux-apps))
 
 ## 3.0.0 (unreleased)

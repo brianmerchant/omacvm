@@ -184,8 +184,9 @@ translator: [box64](https://github.com/ptitSeb/box64).
   program or AppImage starts like any other: `./Some-App-x86_64.AppImage`.
   box64 translates the app's own code and uses the VM's native libraries
   (glibc, GTK, X11, Wayland, OpenGL, SDL, FUSE) where it can.
-- **Off:** `omacvm disable x86-apps` removes the package and its binfmt
-  rule. A box64 you installed yourself is left alone.
+- **Off:** `omacvm disable x86-apps` removes the package (`omacvm-box64`,
+  not `box64`, so Omarchy's update does not swap it for the AUR's box64)
+  and its binfmt rule. A box64 you installed yourself is left alone.
 - `omacvm check` runs a tiny x86_64 program to show it works.
 
 **Speed**, the same program and version, the x86_64 build through box64
@@ -209,6 +210,13 @@ when there is one.
 **Tested:** 7-Zip, ripgrep and appimagetool run. Obsidian's x86_64
 AppImage (Electron) opens in 3.9 s against 0.8 s for its ARM build (on an
 ARM64 Linux server with an X11 display; box64's malloc hack is on for
-every program, which Electron apps need). Node.js runs, but crashed in 2
+every program, which Electron apps need; to turn it off for one program,
+give it its own entry in `~/.box64rc`, as the environment variable
+`BOX64_MALLOC_HACK=0` does not win over the shared entry). Node.js runs, but crashed in 2
 of 3 runs of the benchmark. **Not covered:** 32-bit x86 programs and
 Windows programs (Wine).
+
+On Parallels, keep Parallels' own Rosetta for Linux off (OmacVM's VMs
+start with it off): it and box64 both claim x86_64 programs. Installing or
+removing box64 restarts systemd-binfmt, which drops binfmt rules that were
+added by hand and are not in a binfmt.d folder.
