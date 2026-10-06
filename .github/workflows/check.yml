@@ -172,6 +172,9 @@ jobs:
       - name: Feature state truth (the record against the fast network and SDDM autologin)
         run: src/tests/feature-truth.sh
 
+      - name: A feature switch runs only its parts (no Hyprland reload for the rest)
+        run: src/tests/feature-switch.sh
+
       - name: The vulkan feature's Mesa build (build tools come and go)
         run: src/tests/venus-build-tools.sh
 
@@ -252,6 +255,9 @@ jobs:
         run: |
           python3 src/app/guest/tests/test_omacvm_displays.py -v
           python3 src/app/guest/tests/test_idle_waits.py -v
+
+      - name: A feature switch on Linux (GNU sed, glide off path)
+        run: src/tests/feature-switch.sh
 
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |

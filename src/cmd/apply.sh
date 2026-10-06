@@ -340,6 +340,28 @@ if (( ${#REINSTALL[@]} )); then
   else
     ONLY=$(IFS=,; echo "${REINSTALL[*]}"); GI_ARGS+=" --only $ONLY"
   fi
+# A feature switch (--feature that changes what the VM has) on a VM with
+# this OmacVM: only the parts of the features that change (and parts this
+# copy changed), not the whole VM side, which reloads Hyprland and its
+# displays (lib/features.sh, feature_switch_parts). The same features again
+# (apply-vm.sh passes them all) is a whole apply, as before; so is a switch
+# while the VM's Graphics changed (the app step builds its Vulkan driver).
+elif (( ${#SETN[@]} )) && [[ -n $had && $had == "$now" ]] && ! grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe" &&
+     [[ $(sed -n 's/^OMACVM_GRAPHICS=//p' <<<"$probe" | tail -1) == "$GRAPHICS" ]]; then
+  sw=""; switched=0
+  for ((i = 0; i < ${#FN[@]}; i++)); do
+    [[ ${FV[$i]} != "${PREV[$i]}" ]] || continue
+    sw+=" ${FN[$i]}"
+    [[ " ${SETN[*]} " == *" ${FN[$i]} "* ]] && switched=1
+  done
+  if (( switched )); then
+    inst=$(gssh "$IP" "cat /etc/omacvm/installed.json 2>/dev/null" < /dev/null) || inst=""
+    if ONLY=$(feature_switch_parts "$inst" "$("$R/src/release/manifest.py" digests --src "$R/src")" "$sw" "${FN[*]}"); then
+      GI_ARGS+=" --only $ONLY"
+    else
+      ONLY=""
+    fi
+  fi
 fi
 # changed_features: the features whose part the VM has another digest of (its
 # /etc/omacvm/installed.json); none when it does not say.

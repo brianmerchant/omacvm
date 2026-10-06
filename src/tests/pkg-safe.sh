@@ -169,7 +169,7 @@ bad=$(git grep -nE 'pacman +(-S[a-zA-Z]*|--sync)( |$)' -- 'src/**' ':!src/tests/
 # message; openssh only when missing; the kernel's own headers version (dkms.sh).
 [[ -z $bad ]] && pass "no pacman -S/-Sy in guest code outside guest/pkg-add" || { fail "pacman -S outside guest/pkg-add:"; echo "$bad"; }
 grep -q "^ExecCondition=.*OMACVM_GRAPHICS=vulkan" src/app/guest/venus/omacvm-venus-driver.service &&
-  grep -q 'systemctl disable --now omacvm-venus-driver.timer' src/app/guest/install.sh &&
+  grep -q 'systemctl disable --now omacvm-venus-driver.timer' src/app/guest/venus/timer.sh &&
   pass "Venus driver unit only with Graphics Vulkan (or the vulkan feature)" || fail "Venus driver unit also runs with OpenGL"
 
 exit $fails
