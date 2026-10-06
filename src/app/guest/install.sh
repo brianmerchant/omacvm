@@ -63,7 +63,12 @@ systemctl enable omacvm-mac-folder.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
 # Omarchy ignores the power key; here it comes only from the Mac's Quit.
 install -Dm644 90-omacvm-app-power.conf /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
-install -o "$U" -g "$U" -m644 omacvm_app.lua "$H/.config/hypr/omacvm_app.lua"
+# Only when it changed: Hyprland reloads its config on every write, and a
+# reload moves the displays (a flicker on each apply).
+if ! cmp -s omacvm_app.lua "$H/.config/hypr/omacvm_app.lua"; then
+  install -o "$U" -g "$U" -m644 omacvm_app.lua "$H/.config/hypr/.omacvm_app.lua.new"
+  mv -f "$H/.config/hypr/.omacvm_app.lua.new" "$H/.config/hypr/omacvm_app.lua"
+fi
 B=$H/.config/hypr/hyprland.lua
 grep -qxF 'require("hypr.omacvm_app")' "$B" || {
   printf -- '-- OmacVM.app: the display follows the Mac window.\nrequire("hypr.omacvm_app")\n' >> "$B"; chown "$U:$U" "$B"; }
@@ -105,21 +110,8 @@ elif [[ $graphics == opengl ]]; then venus/webgpu.sh --off; fi
 # environment.d file.
 rm -f /etc/environment.d/90-omacvm-vulkan.conf
 install -Dm755 omacvm-vulkan-present /usr/lib/systemd/user-environment-generators/90-omacvm-vulkan-present
-# Up to 3.0.0 RC2 the service itself was wanted by multi-user.target, after
-# network-online.target: the boot (and the desktop) waited for a build.
-# Now a timer starts it after the desktop is up.
-rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service
-install -Dm644 venus/omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service
-install -Dm644 venus/omacvm-venus-driver.timer /etc/systemd/system/omacvm-venus-driver.timer
-systemctl daemon-reload
-# Only for a VM whose Graphics gives it Vulkan (or with the vulkan feature):
-# with OpenGL nothing of it runs (2026-10-06: it ran at every boot).
-vfeat=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' /etc/omacvm/env 2>/dev/null | tail -1)
-if [[ $graphics == vulkan || $vfeat == on ]]; then
-  systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
-else
-  systemctl disable --now omacvm-venus-driver.timer >/dev/null 2>&1 || true
-fi
+# The Venus driver check after each boot (a timer, only with Vulkan).
+venus/timer.sh || true
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then

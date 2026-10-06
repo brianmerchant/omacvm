@@ -103,6 +103,15 @@ in more words.
   OmacVM's own Dock icon: a click on it brings the VM to the front, and
   "Keep in Dock" keeps OmacVM. If you pinned the old blank icon, remove it
   from the Dock and pin OmacVM again.
+- Switching a feature (control centre, `omacvm enable` or `disable`) no
+  longer makes the screens flicker. A switch ran the whole VM side again:
+  Hyprland's config files were rewritten and reloaded, and the displays
+  moved several times (seen with a 6K display when WebGPU was switched on).
+  Now a switch installs only that feature's part, plus parts this OmacVM
+  changed. The whole VM side still runs when the VM has another OmacVM
+  version or its Graphics setting changed. Any apply now rewrites
+  Hyprland's files only when they change, and the Mesa build for WebGPU
+  runs at the lowest priority.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).

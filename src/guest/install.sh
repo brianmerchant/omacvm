@@ -192,7 +192,8 @@ if system; then
     ufw delete allow from 192.168.77.1 to any port 22 proto tcp >/dev/null 2>&1 || true
   fi
 else
-  log "repair: $(tr , ' ' <<<"${ONLY:1:-1}")"
+  # A repair, or a feature switch (apply.sh): the rest stays as it is.
+  log "only: $(tr , ' ' <<<"${ONLY:1:-1}")"
 fi
 # Network cards without a link: their routes are skipped at once. OmacVM.app
 # moves a running VM between its two cards (fast network <-> QEMU's user
@@ -336,6 +337,8 @@ if want vulkan && [[ $TYPE == app ]]; then
   elif [[ -e /opt/omacvm-mesa ]]; then
     log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
   fi
+  # The driver check after each boot follows the switch (a switch runs only this step).
+  "$R/app/guest/venus/timer.sh" || true
 fi
 # x86 apps: box64, built once in the VM as a pacman package. Every route.
 if want x86-apps; then
