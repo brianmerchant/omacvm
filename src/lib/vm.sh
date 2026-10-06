@@ -136,6 +136,12 @@ vm_probe() {
     grep -q "^OMACVM_FEATURE_omanotch=" /etc/omacvm/env 2>/dev/null || { [ -x "$H/.local/bin/notchcast" ] && echo OMACVM_FEATURE_omanotch=on; }
     grep -q "^OMACVM_FEATURE_autologin=" /etc/omacvm/env 2>/dev/null || { [ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ] && echo OMACVM_FEATURE_autologin=on; }
     grep -q "^OMACVM_FEATURE_thp_kernel=" /etc/omacvm/env 2>/dev/null || { pacman -Q linux-aarch64-thp >/dev/null 2>&1 && echo OMACVM_FEATURE_thp_kernel=on; }
+    # Autologin as SDDM does it, whoever wrote the file (src/guest/autologin.sh: the same rule).
+    if [ -d /etc/sddm.conf.d ] || [ -f /etc/sddm.conf ]; then
+      u=$(cat /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf 2>/dev/null |
+        awk "/^[[:space:]]*\\[/ { s = (\$0 ~ /^[[:space:]]*\\[Autologin\\]/) } s && /^[[:space:]]*User[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, \"\"); sub(/[[:space:]]+\$/, \"\"); u = \$0 } END { print u }")
+      [ -n "$u" ] && echo OMACVM_REAL_autologin=on || echo OMACVM_REAL_autologin=off
+    fi
     true' < /dev/null 2>/dev/null
 }
 

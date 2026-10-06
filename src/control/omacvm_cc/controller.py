@@ -207,22 +207,37 @@ class Controller:
             with_updates = self.checks_enabled
         avail = {}
         mac_checks = None
+        on = dict(self.local.on)
+        fixed: dict[str, str] = {}
         if self.mac_status:
             for f in self.mac_status.get("features") or []:
                 if isinstance(f, dict) and f.get("name"):
                     avail[f["name"]] = S.Avail(bool(f.get("available", True)), str(f.get("reason") or ""))
+                    # The Mac found the record wrong (switched outside OmacVM) and fixed it:
+                    # the real state, until the VM's copy (fixed too) is read again.
+                    if f.get("fixed") and isinstance(f.get("on"), bool) and f["name"] in on:
+                        on[f["name"]] = f["on"]
+                        fixed[f["name"]] = str(f["fixed"])
             if isinstance(self.mac_status.get("checks"), list):
                 mac_checks = S.parse_mac_checks(self.mac_status["checks"])
         checks = None if self.vm_checks is None and mac_checks is None else (self.vm_checks or []) + (mac_checks or [])
         mac_features = set(self.hello.features) if self.hello and self.hello.features else None
-        rows = S.build_rows(self.local.features, self.local.on, vm_type=self.local.vm_type, avail=avail,
+        rows = S.build_rows(self.local.features, on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
-                            offer=self.offer(), mac_features=mac_features, show_updates=with_updates)
+                            offer=self.offer(), mac_features=mac_features, show_updates=with_updates,
+                            fixed=fixed)
         g = S.graphics_row(self.mac_status, self.local.vm_type, list(self.jobs.values()), checks,
                            offline=self.mac_error is not None)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
                              offline=self.mac_error is not None)
         return rows + [r for r in (g, m) if r is not None]
+
+    def fixed_of(self, name: str) -> str:
+        """What the Mac said it fixed in this feature's record ("" nothing)."""
+        for f in (self.mac_status or {}).get("features") or []:
+            if isinstance(f, dict) and f.get("name") == name and f.get("fixed"):
+                return str(f["fixed"])
+        return ""
 
     def graphics(self) -> str:
         """This VM's Graphics setting as the Mac last said it ("" unknown)."""

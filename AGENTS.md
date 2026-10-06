@@ -42,8 +42,9 @@ Mac's hardware to the VM over its private network, with a token.
 - No VM needed: the CI steps ([CONTRIBUTING.md](CONTRIBUTING.md#test-your-change)),
   `./omacvm build --plan --json --vm-type ROUTE`, `src/omanotch/mac/test.sh`.
 - Use your own VM, named for the test (`--vm-name "OmacVM Test-<topic>"`), never
-  the person's. Check it with `./omacvm check --vm NAME --json` (read-only;
-  without `--vm` it picks the person's VM). `--no-mac` on `build` and `apply`
+  the person's. Check it with `./omacvm check --vm NAME --json` (read-only,
+  but for OmacVM's record of a feature switched outside OmacVM, which it fixes
+  to the real state; without `--vm` it picks the person's VM). `--no-mac` on `build` and `apply`
   leaves the Mac's installed helpers as they are; `OMACVM_HEADLESS=1` starts
   VMs without a window (UTM, Fusion, Parallels Pro or trial).
 - Ask before anything that changes the Mac side: `src/mac/install.sh`,
@@ -102,6 +103,16 @@ UTM, or choose their password: hand those over, never work around them.
      until `ok` (the person must be logged in to Omarchy; `needs_human: true`
      entries are theirs). With several VMs, Omanotch serves one at a time: an
      Omanotch failure on the others is expected, and `check` exits 1 for it.
+- **Where a VM's features are kept**: an OmacVM.app VM's folder has the
+  record in its `features` file (the app reads it at each start); every VM
+  has a copy in `/etc/omacvm/env`. `omacvm apply` (and so `enable`,
+  `disable`, the control centre's jobs) writes both; the app's Fast network
+  button writes the `fast-network` file and the record. `vm.env`'s
+  `FEATURES` is only the setup's choice for the first apply, which takes it
+  out. The fast network (the app's switch) and autologin (any SDDM
+  `[Autologin] User=`, also a file OmacVM did not write) keep their real
+  state: `omacvm features`, `check` and `apply` read it and fix the record
+  ("fixed the record"). Never edit the record by hand.
 - **Switch a feature** on an existing VM: `omacvm features --vm NAME --json`,
   then `omacvm enable|disable FEATURE... --vm NAME --yes`, then
   `omacvm check --vm NAME --json`. Dependencies are handled (scroll-momentum brings

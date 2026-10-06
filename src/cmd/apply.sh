@@ -117,10 +117,22 @@ PREV=("${FV[@]}")   # what the VM has now: --transaction goes back to it
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
-# OmacVM.app: the VM's fast-network file is the switch (the app's button sets
-# it too), so an apply without --feature fast-network keeps what it says.
-if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
-  [[ -s $d/fast-network ]] && FV[$(feature_index fast-network)]=on || FV[$(feature_index fast-network)]=off
+# OmacVM.app: the VM's record (its features file) over the VM's copy.
+rd=""
+if [[ $TYPE == app ]] && (( NAMED )) && rd=$(app_dir "$VM"); then
+  [[ -z $had ]] || features_read_record "$rd"
+fi
+# What was switched outside OmacVM keeps its real state: the fast network
+# (the app's button writes the fast-network file) and autologin (SDDM, also an
+# Omarchy install's own file). An apply without --feature for them keeps it.
+features_real "$probe" "$rd"
+if [[ -n $had ]]; then
+  while IFS= read -r l; do [[ -z $l ]] || info "$l"; done < <(features_drift_lines "kept, the record follows")
+  # What the VM has now is the real state: a rollback goes back to it, not
+  # to the record's mistake (it would set an autologin file aside).
+  for x in ${DRIFT[@]+"${DRIFT[@]}"}; do
+    IFS=$'\t' read -r n v _ <<<"$x"; PREV[$(feature_index "$n")]=$v
+  done
 fi
 # A VM from before the control centre: one question (yes without a terminal).
 cc=$(feature_index control-centre)

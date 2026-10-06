@@ -42,6 +42,16 @@ itself. Details below.
   splash). Hyprland no longer warns "Monitor Virtual-2 overlaps with other
   monitor(s)" when an external display comes back into the VM's full
   screen.
+- A feature switched outside OmacVM shows as it is: the fast network
+  turned on with OmacVM.app's button, and autologin set up by an Omarchy
+  install or a migration (any SDDM autologin file). `omacvm features`,
+  `omacvm check`, `omacvm apply` and the control centre read the real state
+  and fix OmacVM's record ("fixed the record"); before, they showed it off.
+  Autologin off now also sets such a file aside (`NAME.omacvm-off`). An
+  OmacVM.app VM's `features` file is the one record; `vm.env`'s `FEATURES`
+  goes after the first apply. The control centre says what "slow" meant
+  (about 10 minutes to switch on) and what WebGPU and GPU compute needs on
+  this Mac (KosmicKrisp on macOS 26, MoltenVK on 15).
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy

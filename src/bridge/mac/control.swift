@@ -457,7 +457,9 @@ final class Control {
     DispatchQueue.global().async(group: g) {
       if let (_, out) = runCLI([cli, "features", "--vm", vm.name, "--vm-type", vm.type, "--json"], timeout: 60),
          let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any], let f = o["features"] as? [[String: Any]] {
-        feats = f.map { ["name": $0["name"] ?? "", "on": $0["on"] ?? false, "available": $0["available"] ?? true, "reason": $0["reason"] ?? ""] }
+        // fixed: what OmacVM's record had wrong about this feature, now fixed (omacvm features --json).
+        feats = f.map { ["name": $0["name"] ?? "", "on": $0["on"] ?? false, "available": $0["available"] ?? true, "reason": $0["reason"] ?? "",
+                         "fixed": $0["fixed"] ?? ""] }
       }
     }
     DispatchQueue.global().async(group: g) {

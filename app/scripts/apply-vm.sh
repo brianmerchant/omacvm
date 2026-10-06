@@ -1,7 +1,8 @@
 #!/bin/bash
 # Put OmacVM onto a running OmacVM.app VM: `omacvm apply` from the copy of
 # OmacVM inside the app (the Mac side its features need, the Bridge token,
-# the VM side), with the features in the VM's vm.env.
+# the VM side), with the VM's features (its features file; before the first
+# apply, vm.env's FEATURES).
 #   apply-vm.sh VM_DIR [--no-mac | --image] [--reset-host-key]
 # --image: a VM for a prebuilt image (src/prebuilt/make-image.sh app): nothing
 # of this Mac, not even the Bridge token.
@@ -45,7 +46,14 @@ for rt in "$HERE/../runtime/.build/qemu-gpu-runtime" "$HERE/../runtime"; do   # 
   [[ -d $rt/lib ]] && { OMACVM_APP_RUNTIME=$(cd "$rt" && pwd); export OMACVM_APP_RUNTIME; break; }
 done
 args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
-for f in ${FEATURES:-}; do args+=(--feature "$f"); done
+# The VM's features: its record (the features file) once the first apply wrote
+# it, else the setup's choice (vm.env FEATURES). The fast network is the
+# app's own switch (its fast-network file), which apply reads itself.
+feats=${FEATURES:-}
+[[ -s $VM_DIR/features ]] && feats=$(cat "$VM_DIR/features")
+for f in $feats; do
+  [[ $f == fast-network=* ]] || args+=(--feature "$f")
+done
 # A changed SSH host key: say how to forget it the app's way.
 OMA_RESET_HINT="bash '$HERE/apply-vm.sh' '$VM_DIR' --reset-host-key"
 export OMA_RESET_HINT

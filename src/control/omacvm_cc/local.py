@@ -20,6 +20,21 @@ def env_file() -> str:
     return os.environ.get("OMACVM_ENV", "/etc/omacvm/env")
 
 
+def sddm_root() -> str:
+    return os.environ.get("OMACVM_SDDM_ROOT", "")
+
+
+def sddm_texts() -> list[str] | None:
+    """SDDM's config files in the order it reads them; None: no SDDM here."""
+    import glob
+    r = sddm_root()
+    if not (os.path.isdir(r + "/etc/sddm.conf.d") or os.path.isfile(r + "/etc/sddm.conf")):
+        return None
+    paths = (sorted(glob.glob(r + "/usr/lib/sddm/sddm.conf.d/*.conf")) +
+             sorted(glob.glob(r + "/etc/sddm.conf.d/*.conf")) + [r + "/etc/sddm.conf"])
+    return [read(p) for p in paths]
+
+
 def installed_file() -> str:
     return os.environ.get("OMACVM_INSTALLED", "/etc/omacvm/installed.json")
 
@@ -67,6 +82,10 @@ class Local:
         self.version = read(os.path.join(share(), "VERSION")).strip() or "?"
         self.env = S.parse_env(read(env_file()))
         self.on = S.desired(self.features, self.env)
+        # Autologin as SDDM does it, whoever wrote the file (the Mac fixes the record to match).
+        texts = sddm_texts()
+        if texts is not None and "autologin" in self.on:
+            self.on["autologin"] = bool(S.sddm_autologin_user(texts))
         self.vm_type = self.env.get("OMACVM_VM_TYPE", "")
         self.installed = read_json(installed_file())
         self.cache = read_json(cache_file())

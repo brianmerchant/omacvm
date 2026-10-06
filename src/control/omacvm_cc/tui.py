@@ -185,8 +185,7 @@ class FeaturesScreen(Screen):
                 t.add_row(status_cell(r, app.tick), "", r.feature.title, "", key=r.feature.name)
         for r in rows:
             dim = r.status in (S.Status.UNAVAILABLE, S.Status.OFF)
-            tags = [t for t in r.feature.tags if t in ("experimental", "slow")]
-            note = r.note or ", ".join(tags)
+            note = r.note or S.tag_note(r.feature)
             if len(note) > width:
                 note = note[: width - 1] + "…"
             style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan"}.get(r.status, "bright_black")
@@ -291,6 +290,9 @@ class DetailsScreen(Screen):
         box.border_subtitle = look.WORD[r.status] if r.status in (S.Status.OFF, S.Status.UNAVAILABLE) else f"on · {look.WORD[r.status]}"
         t = Text()
         t.append(f.summary + "\n\n")
+        about = S.feature_about(f, app.c.hello.macos if app.c.hello else "")
+        if about:
+            t.append(about + "\n\n")
 
         def field(k: str, v: str) -> None:
             t.append(f"{k:<9}", style="bright_black")
@@ -300,8 +302,11 @@ class DetailsScreen(Screen):
         t.append("     ")
         field("Needs", f.needs or "–")
         t.append("     ")
-        field("Tags", ", ".join(f.tags) or "–")
+        hints = [S.TAG_HINTS[x] for x in f.tags if x in S.TAG_HINTS]
         t.append("\n")
+        for h in hints:
+            field("Note", h)
+            t.append("\n")
         inst = app.c.local.installed_parts().get(f.name, {})
         offer = app.c.offer().get(f.name, {})
         version = inst.get("release") or app.c.local.version
@@ -311,6 +316,11 @@ class DetailsScreen(Screen):
         else:
             field("Version", version)
         t.append("\n")
+        fixed = app.c.fixed_of(f.name)
+        if fixed:
+            t.append("\n")
+            field("Record", fixed)
+            t.append("\n")
         if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY) or f.name == "gpu-memory") and r.note:
             t.append("\n")
             field("Now", r.note)
