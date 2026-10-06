@@ -244,8 +244,10 @@ if [[ $BRIDGE == on ]]; then
   m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
   if [[ $(jq -r '.capture_keys == false' "$OMA_BRIDGE_SUPPORT/config.json" 2>/dev/null) == true ]]; then
     skip "media keys" "off: macOS keeps them (capture_keys false in config.json)"
-  elif [[ $m == *installed* ]]; then ok "media keys" "event tap installed"
-  else bad "media keys" "${m:-no event tap yet}"; fi
+  else
+    IFS=$'\t' read -r st d <<<"$(media_keys_state "$m")"
+    case $st in ok) ok "media keys" "$d" ;; warn) warn "media keys" "$d" ;; *) bad "media keys" "$d" ;; esac
+  fi
   # The Bridge says which permissions it has (at start and on each change).
   pm=$(last_line "$BRIDGE_LOG" 'omacvm-bridge: permissions: ')
   case $pm in
