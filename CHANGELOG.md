@@ -227,6 +227,18 @@ in more words.
   again every 10 seconds, up to 40 seconds; qemu.log says each step. A
   hidden VM in full screen (test runs) no longer quits by itself.
 
+- OmacVM.app: the sound is in step with the picture in videos (YouTube in
+  Chromium, Firefox, mpv). The VM never knew how late the Mac plays its
+  sound (QEMU's buffers, 110-150 ms, plus the Mac's output: about 13 ms
+  wired, 170 ms with AirPods), so the sound came that much after the
+  picture. The app now tells the VM, at the start and whenever the Mac's
+  output changes, and PipeWire passes it on to the players. Measured on
+  the Mac mini (wired, Chromium): the sound 125-164 ms late before, 0 to
+  42 ms after. Not a 3.0.0 change: `audioClassic` (the old sound timing)
+  was as late. Fine-tuning:
+  `defaults write org.omacvm.app audioDelayExtraMs -int N`
+  (troubleshooting 28).
+
 ## 3.0.0
 
 In short: OmacVM.app updates itself, the control centre in Omarchy (a

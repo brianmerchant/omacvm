@@ -96,6 +96,9 @@ jobs:
       - name: OmacVM.app Restart the Desktop after Later (the app's side)
         working-directory: app/app
         run: swift run desktop-tests
+      - name: OmacVM.app sound delay for the VM (QEMU's part, the Mac's output, limits)
+        working-directory: app/app
+        run: swift run audio-tests
 
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
@@ -268,6 +271,7 @@ jobs:
           python3 src/app/guest/tests/test_monitor_widget.py
           python3 src/omanotch/guest/tests/test_display_panel.py
           python3 src/camera/guest/tests/test_frames.py
+          python3 src/app/guest/tests/test_audio_latency.py
 
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh

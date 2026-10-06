@@ -424,6 +424,11 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
+    /// ms, -500 ... 500: negative when the sound comes early in the VM's
+    /// videos, positive when it still comes late (a device that under-reports).
+    /// Hidden: defaults write org.omacvm.app audioDelayExtraMs -int -20
+    static var audioDelayExtraMs: Int { min(max(UserDefaults.standard.integer(forKey: "audioDelayExtraMs"), -500), 500) }
     /// Seconds the firmware waits for a key (its boot manager) before it boots.
     /// 0, the default: it boots at once (the boot logo covers the firmware, so
     /// the wait only cost time: 5 s on every start up to 3.0.0).

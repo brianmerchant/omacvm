@@ -5,6 +5,7 @@
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
+#  * the Mac's sound delay for A/V sync in videos (omacvm-audio-latency)
 #  * the Mac folder at ~/Mac, when the app shares one (omacvm-mac-folder)
 #  * the desktop starts again by itself when the Mac lost its GPU context
 #    (omacvm-desktop-recover, run by the app; the new session says so)
@@ -54,6 +55,12 @@ if python3 monitor-widget/build.py "$W/omacvm.monitor"; then
   ../../lib/install-plugin.sh "$U" "$W/omacvm.monitor" || echo "WARN: the display widget did not install"
 fi
 rm -rf "$W"
+# The Mac's sound delay (QEMU's buffers and the Mac's output), sent by the
+# app over the guest agent: PipeWire's latency offset on the card's output,
+# so videos keep the picture in step with the sound.
+install -m755 omacvm-audio-latency /usr/local/bin/
+install -m644 omacvm-audio-latency.service /etc/systemd/user/
+systemctl --global enable omacvm-audio-latency.service >/dev/null 2>&1 || true
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
 # The Mac folder at ~/Mac, when the app shares one (its setting; off by default).
