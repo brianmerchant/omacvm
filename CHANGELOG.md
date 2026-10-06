@@ -49,6 +49,10 @@ in more words.
   tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
   Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
   ([details](docs/features.md#x86-linux-apps))
+- OmacVM.app's own window (start, options, setup) opens centred on the
+  MacBook's built-in display, not somewhere on an external monitor. With
+  the lid closed or on a Mac without a built-in display, it opens centred
+  on the main display. The VM's window still opens where you are.
 
 ## 3.0.0
 
