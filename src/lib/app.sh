@@ -76,7 +76,12 @@ app_vms_roots() {
 app_vm_dirs() {   # every app VM folder (with vm.env), one per line
   local r d
   while IFS= read -r r; do
-    for d in "$r"/*; do [[ -f $d/vm.env ]] && echo "$d"; done
+    # ls, not a glob: on macOS 26 a glob in a forked bash (this runs in a
+    # process substitution) can see a folder on an external drive as empty
+    # until a program it starts has read it (the removable-volume check).
+    while IFS= read -r d; do
+      [[ -f $r/$d/vm.env ]] && echo "$r/$d"
+    done < <(ls -1 "$r" 2>/dev/null)
   done < <(app_vms_roots)
 }
 
