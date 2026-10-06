@@ -280,6 +280,8 @@ final class Runner {
                 self?.clipboard?.stop()
                 self?.battery?.stop()
                 self?.control?.stop()
+                self?.audioLatency?.stop()
+                self?.audioLatency = nil
                 self?.onExit?(status)
             }
         }
@@ -306,6 +308,12 @@ final class Runner {
         if links.battery { startBattery() }
         if links.camera { startCamera() }
         startControl()
+        // The sound's delay on the Mac, so the VM's videos keep the picture in step.
+        let audioDelay = AudioLatencyWatch(agentSocket: agentPath) { [weak self] line in
+            Task { @MainActor in self?.appendLog(line) }
+        }
+        audioDelay.start()
+        audioLatency = audioDelay
         // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
         Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
     }
@@ -544,6 +552,7 @@ final class Runner {
     // MARK: The control centre's port (NativeControlBridge.swift), reconnected while QEMU runs.
 
     private var control: NativeControlBridge?
+    private var audioLatency: AudioLatencyWatch?
 
     private func startControl() {
         let path = config.controlSocket.path, name = config.name

@@ -5,6 +5,7 @@
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
+#  * the Mac's sound delay for A/V sync in videos (omacvm-audio-latency)
 #  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 #  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
@@ -48,6 +49,12 @@ if python3 monitor-widget/build.py "$W/omacvm.monitor"; then
   ../../lib/install-plugin.sh "$U" "$W/omacvm.monitor" || echo "WARN: the display widget did not install"
 fi
 rm -rf "$W"
+# The Mac's sound delay (QEMU's buffers and the Mac's output), sent by the
+# app over the guest agent: PipeWire's latency offset on the card's output,
+# so videos keep the picture in step with the sound.
+install -m755 omacvm-audio-latency /usr/local/bin/
+install -m644 omacvm-audio-latency.service /etc/systemd/user/
+systemctl --global enable omacvm-audio-latency.service >/dev/null 2>&1 || true
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf

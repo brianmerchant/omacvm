@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFeatures"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFeatures", "OmacVMAudio"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -25,6 +25,11 @@ let package = Package(
         // `swift run features-tests`.
         .target(name: "OmacVMFeatures"),
         .executableTarget(name: "features-tests", dependencies: ["OmacVMFeatures"]),
+        // The sound delay the app tells a VM (QEMU's buffers and the Mac's
+        // output device), so its players keep the picture in step:
+        // `swift run audio-tests`.
+        .target(name: "OmacVMAudio"),
+        .executableTarget(name: "audio-tests", dependencies: ["OmacVMAudio"]),
     ],
     swiftLanguageModes: [.v5]
 )
