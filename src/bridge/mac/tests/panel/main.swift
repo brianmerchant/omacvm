@@ -36,7 +36,7 @@ func stockTheme(_ name: String, border: [String]? = nil, angle: Double = 0, radi
 
 let sudo = TouchIDRequest(kind: .sudo, user: "v", detail: "pacman -Syu", action: "", tty: "pts/3")
 let long = TouchIDRequest(kind: .sudo, user: "v",
-  detail: String("pacman -S --needed --noconfirm base-devel git rustup python-pipx docker docker-compose lazydocker btop fastfetch zoxide".prefix(120)),
+  detail: String("yay -S --needed --noconfirm base-devel git rustup python-pipx docker docker-compose lazydocker btop fastfetch zoxide".prefix(120)),
   action: "", tty: "pts/12")
 
 func on(_ f: @escaping () -> Void) { DispatchQueue.main.async(execute: f) }
