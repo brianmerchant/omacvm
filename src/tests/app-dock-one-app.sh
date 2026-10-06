@@ -16,13 +16,29 @@ expect() {   # WHAT WANT GOT
 if [[ ${1:-} == --live ]]; then
   APP=$(cd "${2:?--live APP}" && pwd -P)
   ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
-  Q=$(pgrep -f "^$APP/Contents/(MacOS/OmacVM-VM|Resources/runtime/bin/OmacVM) " | head -1)
+  # A process of APP by its command line (APP may show as /tmp/... for /private/tmp/...).
+  of_app() {   # REGEX (after the .app) -> first PID
+    local p a
+    for p in $(pgrep -f "\.app/Contents/$1"); do
+      a=$(ps -o args= -p "$p" | sed -E "s#/Contents/$1.*##")
+      [[ $(cd "$a" 2>/dev/null && pwd -P) == "$APP" ]] && { echo "$p"; return; }
+    done
+  }
+  Q=$(of_app '(MacOS/OmacVM-VM|Resources/runtime/bin/OmacVM) ')
   [[ -n $Q ]] || { echo "FAIL no VM of $APP runs"; exit 1; }
-  L=$(pgrep -f "^$APP/Contents/MacOS/OmacVM( |\$)" | head -1)
-  info() { lsappinfo info -only "$2" "$(lsappinfo find pid="$1")" 2>/dev/null | sed -n 's/.*=//p' | tr -d '"'; }
+  L=$(of_app 'MacOS/OmacVM( |$)')
+  info() {   # PID KEY: LaunchServices' value for that process
+    local asn; asn=$(lsappinfo find pid="$1" 2>/dev/null | head -1)
+    [[ -n $asn ]] && lsappinfo info -only "$2" "$asn" 2>/dev/null | sed -n 's/.*=//p' | head -1 | tr -d '"'
+  }
   expect "QEMU ($Q) counts as $ID" "$ID" "$(info "$Q" bundleID)"
-  expect "QEMU is a regular app (menu bar, Cmd-Tab, full screen)" Foreground "$(info "$Q" ApplicationType)"
-  [[ -n $L ]] && expect "the launcher ($L) is out of the Dock" UIElement "$(info "$L" ApplicationType)"
+  # lsappinfo gives no ApplicationType on macOS 27 ("[ NULL ]"): then skipped.
+  type_is() {   # WHAT PID WANT
+    local t; t=$(info "$2" ApplicationType)
+    if [[ -z $t || $t == "[ NULL ]"* ]]; then echo "SKIP $1: lsappinfo gives no type here"; else expect "$1" "$3" "$t"; fi
+  }
+  type_is "QEMU is a regular app (menu bar, Cmd-Tab, full screen)" "$Q" Foreground
+  [[ -n $L ]] && type_is "the launcher ($L) is out of the Dock" "$L" UIElement
   expect "qemu.log says one app" 1 "$(grep -l 'OmacVM: dock: one app' "$(lsof -p "$Q" -Fn 2>/dev/null | sed -n 's/^n\(.*logs\/qemu.log\)$/\1/p' | head -1)" 2>/dev/null | wc -l | tr -d ' ')"
   # The Dock's tiles, over Accessibility (the shell's grant): System Events
   # gives no AXURL for them on macOS 27, so a small tool reads them.

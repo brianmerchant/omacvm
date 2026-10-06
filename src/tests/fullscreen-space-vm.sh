@@ -41,7 +41,6 @@ NAME="OmacVM T-fullscreen-space"
 PAT="-name $NAME -machine"
 W=$(mktemp -d "${TMPDIR:-/tmp}/omacvm-fs-space-vm.XXXXXX")
 LOG=$VMD/qemu-fullscreen-space.log
-VDS=()
 gssh() {
   ssh -i "$HOME/.ssh/omacvm" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@"
@@ -50,7 +49,8 @@ cleanup() {
   pgrep -f -- "$PAT" >/dev/null && gssh "sync; systemctl poweroff" >/dev/null 2>&1
   for _ in $(seq 40); do pgrep -f -- "$PAT" >/dev/null || break; sleep 1; done
   pkill -f -- "$PAT" 2>/dev/null
-  (( ${#VDS[@]} )) && kill "${VDS[@]}" 2>/dev/null
+  # vd runs in $(...): its pids come from files (an array set there stays there).
+  cat "$W"/*.vd-pid 2>/dev/null | xargs kill 2>/dev/null
   rm -rf "$W"
 }
 trap cleanup EXIT
@@ -66,7 +66,7 @@ clang -fobjc-arc -framework Foundation -framework CoreGraphics \
   "$R/app/scripts/dev/virtual-display.m" -o "$W/virtual-display" || exit 1
 vd() {   # NAME SIZE AT -> display id (a new identity each run: pid as serial)
   "$W/virtual-display" "$2" --at "$3" --name "$1" > "$W/$1.out" 2>&1 &
-  VDS+=($!)
+  echo $! > "$W/$1.vd-pid"
   for _ in $(seq 40); do grep -q '^id=' "$W/$1.out" && break; sleep 0.25; done
   sed -n 's/^id=//p' "$W/$1.out"
 }
