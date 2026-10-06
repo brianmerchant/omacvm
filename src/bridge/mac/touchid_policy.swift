@@ -179,13 +179,22 @@ struct TouchIDLimiter {
 
 enum TouchIDOutcome: Equatable { case yes, no(TouchIDNo) }
 
+/// What the dialog (or the panel) is about, and for which VM.
+struct TouchIDPrompt {
+  let reason: String           // touchIDReason: the text of macOS's alert
+  let request: TouchIDRequest  // the panel's words come from here (touchIDPanelText)
+  let vmLabel: String?         // the VM's name when the Mac has several
+  let vmType: String           // its app (omacvm vms --json "type")
+  var theme: String?           // its key name: the theme the Mac keeps for it
+}
+
 /// LocalAuthentication, or a mock.
 protocol TouchIDAuthenticator {
   /// Nil when a dialog can be shown; else why not (no-touch-id, lockout).
   func unavailable(passwordFallback: Bool) -> TouchIDNo?
   /// Shows the dialog; a fresh context each time. `gone` is asked about every
   /// quarter second: true (the VM's client went away) cancels the dialog.
-  func evaluate(reason: String, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome
+  func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome
 }
 
 /// The Mac's state, or a mock.
@@ -204,16 +213,20 @@ final class TouchIDDecider {
   init(auth: TouchIDAuthenticator, mac: TouchIDMacState) { self.auth = auth; self.mac = mac }
 
   /// `vm`: the VM's key for the limits; `type`: its app (omacvm vms --json);
-  /// `on`: the feature is on for it (its key is on the Mac).
+  /// `on`: the feature is on for it (its key is on the Mac); `theme`: its
+  /// key name, for the panel's colours.
   func decide(vm: String, type: String, on: Bool, request: TouchIDRequest, vmLabel: String?, passwordFallback: Bool,
-              now: Date = Date(), gone: @escaping () -> Bool = { false }) -> TouchIDOutcome {
+              theme: String? = nil, now: Date = Date(), gone: @escaping () -> Bool = { false }) -> TouchIDOutcome {
     guard on else { return .no(.off) }
     if let n = locked({ limits.admit(vm, now: now) }) { return .no(n) }
     let outcome: TouchIDOutcome
     if mac.locked { outcome = .no(.locked) }
     else if mac.frontType != type { outcome = .no(.notFront) }
     else if let n = auth.unavailable(passwordFallback: passwordFallback) { outcome = .no(n) }
-    else { outcome = auth.evaluate(reason: touchIDReason(request, vm: vmLabel), passwordFallback: passwordFallback, timeout: timeout, gone: gone) }
+    else {
+      let p = TouchIDPrompt(reason: touchIDReason(request, vm: vmLabel), request: request, vmLabel: vmLabel, vmType: type, theme: theme)
+      outcome = auth.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone)
+    }
     // The pause after misses counts from the request's time (tests give it).
     locked {
       if case .no(let n) = outcome { limits.finished(vm, yes: false, no: n, now: now) } else { limits.finished(vm, yes: true, no: nil, now: now) }

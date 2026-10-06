@@ -16,8 +16,9 @@ final class MockAuth: TouchIDAuthenticator {
   var asked: [String] = []
   var fallbacks: [Bool] = []
   func unavailable(passwordFallback: Bool) -> TouchIDNo? { notThere }
-  func evaluate(reason: String, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
-    asked.append(reason); fallbacks.append(passwordFallback)
+  var prompts: [TouchIDPrompt] = []
+  func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
+    asked.append(p.reason); fallbacks.append(passwordFallback); prompts.append(p)
     guard waits else { return answer }
     let end = Date().addingTimeInterval(timeout)
     while Date() < end {
