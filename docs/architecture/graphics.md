@@ -271,7 +271,10 @@ bound program per sub context (one GL context each) and skips the repeat.
 Deleting a program or pipeline, the GL blitter, and binds from paths that do
 not know their sub context (transfers, read-back) drop what it remembers.
 `bench-program-binds` (vrend through its API, one draw with new constants
-per object, mini, no lock): 0.83 -> 0.64 us per draw.
+per object, mini, no lock): 0.83 -> 0.64 us per draw. In a VM, the same
+runtime with the cache off and on: Aquarium 30k fish 20.85 -> 25.45 fps
+(MacBook Pro M4 Max) and 19.65 -> 24.2 fps (Mac mini M4, macOS 27);
+Basemark the same within its noise; WebGL 1 and 2 conformance identical.
 `OMACVM_VIRGL_PROGRAM_CACHE=0` binds on every draw again. Test:
 `test-program-binds`.
 
