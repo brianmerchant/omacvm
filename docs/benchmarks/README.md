@@ -450,10 +450,11 @@ which MoltenVK lacks. With Vulkan on, OpenGL stays on virgl (Zink is slower
 and ES 2.0 only) and Chrome keeps ANGLE on GL, so on macOS 26 and newer
 Vulkan adds Vulkan apps on the better driver and changes nothing else.
 
-**Automatic = OpenGL on every Mac in 3.0.0.** On macOS 26 and newer
-(KosmicKrisp) Vulkan windows still go through the slow CPU copy below, and
-the GPU path for them is not tested there yet, so Vulkan is the user's
-choice. Turning Automatic to Vulkan on macOS 26 and newer is one constant
+**Automatic = OpenGL on every Mac in 3.0.0.** In 3.0.0 Vulkan windows on
+macOS 26 and newer (KosmicKrisp) went through the slow CPU copy below; 3.0.1
+gives them the same path as MoltenVK (numbers below). What Vulkan costs the
+OpenGL desktop on KosmicKrisp is not measured yet, so Vulkan stays the
+user's choice. Turning Automatic to Vulkan on macOS 26 and newer is one constant
 (`Graphics.autoVulkan`, `GRAPHICS_AUTO_VULKAN`).
 
 Vulkan windows: a Venus image handed to Hyprland as a dma-buf cannot be
@@ -474,11 +475,15 @@ display's refresh; that was not measured here (the hidden test window paces
 Hyprland at ~12 Hz for both paths). With vkmark's headless output, no window:
 4,700-5,200.
 
-The GPU path is on only with MoltenVK (macOS 15): the app sends
-`omacvm.vkwindows=1` only there. With KosmicKrisp (macOS 26 and newer) and
-with an older app, Vulkan windows still go through the CPU copy (vkmark full
-screen with it on a Mac mini M4 at 5K, macOS 27: 203; another run, not the
-table's scene set).
+3.0.0 sent `omacvm.vkwindows=1` only with MoltenVK (macOS 15); with
+KosmicKrisp Vulkan windows went through the CPU copy (vkmark full screen on
+a Mac mini M4 at 5K, macOS 27: 203; another run, not the table's scene set).
+3.0.1 sends it with KosmicKrisp too. Mac mini M4, macOS 27, KosmicKrisp,
+Mesa's normal WSI, 2026-10-06: vkcube windowed and full screen at 5K; then
+10 minutes of vkmark (shading and texture, 20 s each) in turns full screen
+at 5120x2880 (8 runs: 252-272) and in a 1280x800 window (7 runs:
+1279-1777), with vkcube in a window the whole time. No context lost, the
+desktop answered and showed at the end, QEMU's memory stayed at 2.7-2.9 GB.
 
 ## GPU compute with Venus (2026-10-04)
 

@@ -876,7 +876,7 @@ class ControlCentre(App):
         nxt = S.next_graphics(cur)
         text = {"auto": "Automatic: OpenGL on every Mac in this version (Vulkan is your choice).",
                 "opengl": "OpenGL only (no Vulkan in the VM).",
-                "vulkan": "OpenGL plus Vulkan on the Mac's GPU (experimental; Vulkan windows are copied through the CPU). The VM builds its Vulkan driver now, a few minutes; until it is there the VM runs on OpenGL."}[nxt]
+                "vulkan": "OpenGL plus Vulkan on the Mac's GPU (experimental; Vulkan windows show through the GPU with OmacVM.app 3.0.1 and newer). The VM builds its Vulkan driver now, a few minutes; until it is there the VM runs on OpenGL."}[nxt]
         self.push_screen(ConfirmScreen(f"Graphics: {S.GRAPHICS_TITLES[cur]} -> {S.GRAPHICS_TITLES[nxt]}",
                                        text + "\nFrom the VM's next start (shut it down, then start it again)."),
                          lambda yes: yes and self.run_job("graphics", [nxt]))
