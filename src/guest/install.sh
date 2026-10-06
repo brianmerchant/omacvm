@@ -271,6 +271,16 @@ if system && ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/
   pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1 || true
   user_ctl restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 fi
+# PipeWire's sound threads get real-time priority through RTKit. RTKit's
+# watchdog demotes them for good after the VM was stopped (sound/
+# rtkit-no-canary.conf says why): run it without the watchdog. PipeWire
+# asks again at its next start (the next login).
+if system && ! cmp -s "$R/guest/sound/rtkit-no-canary.conf" /etc/systemd/system/rtkit-daemon.service.d/90-omacvm-no-canary.conf; then
+  log "sound: PipeWire stays real-time after the VM was stopped"
+  install -Dm644 "$R/guest/sound/rtkit-no-canary.conf" /etc/systemd/system/rtkit-daemon.service.d/90-omacvm-no-canary.conf
+  systemctl daemon-reload || true
+  systemctl try-restart rtkit-daemon.service 2>/dev/null || true
+fi
 system && case $TYPE in
   parallels)
     log "display";    "$R/display/guest/install.sh" "$U"

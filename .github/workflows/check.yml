@@ -70,6 +70,10 @@ jobs:
         working-directory: app/app
         run: swift run net-tests
 
+      - name: OmacVM.app USB device tests (which devices a VM may have, QEMU arguments)
+        working-directory: app/app
+        run: swift run usb-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
@@ -89,6 +93,9 @@ jobs:
         run: |
           src/bridge/mac/test.sh
           src/tests/external-brightness.sh
+
+      - name: Building behind a proxy (scutil samples, the VM's variables, sudo, systemd-run, retries, a stub proxy)
+        run: src/tests/proxy.sh
 
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh

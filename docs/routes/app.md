@@ -290,6 +290,10 @@ one VM at a time: the build stops at the start while another one runs.
   Mission Control); the pointer goes to Omarchy again once its window shows.
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
   it checks for them before a build and offers to install them.
+- Instant resume (save the VM when you quit, continue where you were at the
+  next start): QEMU cannot save a VM that uses the Mac's GPU, so Quit still
+  shuts Omarchy down and the next start boots it
+  ([why, and what could change it](../adr/0037-no-instant-resume-yet.md)).
 
 ## How it talks to the Mac
 
@@ -300,7 +304,8 @@ the VM's SSH on `127.0.0.1:<port>`.
   47811 (Omanotch), 47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
   127.0.0.1 (dev servers, databases) is refused, like on the other routes.
   The app's QEMU carries a libslirp patch for that
-  (`OMACVM_SLIRP_HOST_PORTS`).
+  (`OMACVM_SLIRP_HOST_PORTS`). One more port when the Mac has a proxy on
+  its 127.0.0.1 (`MacProxy.swift`, [Behind a proxy](../guide.md#behind-a-proxy)).
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,

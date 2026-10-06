@@ -207,6 +207,13 @@ FEATURE=""
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
 else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
+# PipeWire's sound threads run real-time (RTKit, install.sh); at normal
+# priority the sound breaks whenever the VM is busy.
+pw=$(pgrep -u "$U" -x pipewire | head -1)
+if [[ -z $pw ]]; then skip "sound priority" "PipeWire is not running"
+elif ps -L -o cls=,comm= -p "$pw" | awk '$2 ~ /^data-loop/ && ($1 == "RR" || $1 == "FF") { f = 1 } END { exit !f }'; then
+  ok "sound priority" "real-time (PipeWire's data loop)"
+else bad "sound priority" "PipeWire runs at normal priority, so the sound breaks when the VM is busy: omacvm apply, then systemctl --user restart pipewire pipewire-pulse wireplumber"; fi
 
 section "The Mac's battery"
 FEATURE=battery
