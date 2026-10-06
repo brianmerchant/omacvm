@@ -6,9 +6,9 @@ work, which do not and why, and how to turn it on.
 
 ## Turn it on
 
-In the app's VM window: **USB devices (experimental)**. The list shows every
-USB device on the Mac. A device you can give to the VM has a switch; the
-others say what macOS uses them for. Switch a device on, then start the VM.
+In the app's VM window: **USB devices (experimental)**. Each device you can
+give to the VM has a switch; the devices macOS keeps are named below the
+list (point at it to see why). Switch a device on, then start the VM.
 
 - Per VM. Off by default: with no device on, the VM has no USB controller at
   all, exactly as before.

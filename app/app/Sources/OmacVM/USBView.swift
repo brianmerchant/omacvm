@@ -29,7 +29,13 @@ struct USBSection: View {
                     }
                 }
                 if rows.isEmpty {
-                    Text("No USB devices on this Mac.").font(.caption).foregroundStyle(.secondary)
+                    Text("No device a VM can have is plugged in.").font(.caption).foregroundStyle(.secondary)
+                }
+                if !kept.isEmpty {
+                    Text("Kept by macOS: " + kept.map { $0.0 }.joined(separator: ", "))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(kept.map { "\($0.0): \($0.1)" }.joined(separator: "\n"))
                 }
                 HStack {
                     Button("Refresh") { refresh() }
@@ -58,8 +64,8 @@ struct USBSection: View {
         var why: String?
     }
 
-    /// The Mac's devices (hubs and USB-C info devices left out), then the
-    /// chosen ones that are not plugged in now.
+    /// The devices a VM can have and the chosen ones (hubs and USB-C info
+    /// devices left out), then the chosen ones that are not plugged in now.
     private var rows: [Row] {
         var out: [Row] = []
         var seen = Set<USBDeviceID>()
@@ -70,8 +76,9 @@ struct USBSection: View {
             case .free:
                 out.append(Row(id: d.id, name: d.name, on: on, canChoose: true, why: nil))
             case .usedByMac(let why):
+                guard on else { continue }
                 out.append(Row(id: d.id, name: d.name, on: on, canChoose: false,
-                               why: on ? "\(why): the VM gets it once macOS lets it go." : why))
+                               why: "\(why): the VM gets it once macOS lets it go."))
             }
             seen.insert(d.id)
         }
@@ -80,6 +87,14 @@ struct USBSection: View {
                            why: "Not plugged in: the VM gets it when it is."))
         }
         return out
+    }
+
+    /// Devices macOS uses (not chosen): their names on one line, why on hover.
+    private var kept: [(String, String)] {
+        devices.compactMap { d in
+            guard case .usedByMac(let why) = d.availability, !chosen.contains(where: { $0.id == d.id }) else { return nil }
+            return (d.name, why)
+        }
     }
 
     private func binding(_ row: Row) -> Binding<Bool> {
