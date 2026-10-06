@@ -451,11 +451,32 @@ enum VMApp {
 
   /// The app's executable: OmacVM.app runs each VM as Contents/Resources/runtime/bin/OmacVM
   /// (a development build as qemu-system-aarch64); its launcher has no VM windows.
+  /// A VM of the other identity's app (test or normal, VMOwner) is not ours: nil.
+  /// The kernel's path first: LaunchServices reports OmacVM.app's own
+  /// executable for its QEMU (the app's DockIdentity, 3.0.1).
   static func of(_ app: NSRunningApplication?) -> VMApp? {
-    guard let app, let exe = app.executableURL?.path ?? pidPath(app.processIdentifier) else { return nil }
+    guard let app, let exe = pidPath(app.processIdentifier) ?? app.executableURL?.path else { return nil }
     let name = (exe as NSString).lastPathComponent
-    if exe.hasSuffix("/runtime/bin/OmacVM") || name == "qemu-system-aarch64" { return .omacvm }
+    if exe.hasSuffix("/runtime/bin/OmacVM") || name == "qemu-system-aarch64" {
+      return VMOwner.ours(appID: appID(exe), testBridge: testBridge) ? .omacvm : nil
+    }
     return ["prl_client_app", "UTM", "VMware Fusion"].contains(name) ? .other : nil
+  }
+
+  private static let testBridge = Bundle.main.bundleIdentifier == VMOwner.testBridge
+  private static var ids: [String: String] = [:]   // app path -> bundle id, under idsLock
+  private static let idsLock = NSLock()   // the key tap (main thread) and the server's threads ask
+
+  /// The bundle id of the app a VM process runs from (read once per app path).
+  /// A failed read is not kept: during an update swap or before an external
+  /// volume is ready, the next key press reads it again.
+  private static func appID(_ exe: String) -> String? {
+    guard let path = VMOwner.app(executable: exe) else { return nil }
+    idsLock.lock(); defer { idsLock.unlock() }
+    if let id = ids[path] { return id }
+    guard let id = Bundle(path: path)?.bundleIdentifier else { return nil }
+    ids[path] = id
+    return id
   }
 }
 

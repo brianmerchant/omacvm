@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OmacVMUpdate
 import OmacVMFeatures
 
 enum HelperError: LocalizedError, Equatable {
@@ -164,6 +165,14 @@ struct VMConfig: Equatable {
     var readyMarker: URL { folder.appendingPathComponent("ready") }
     var isReady: Bool { FileManager.default.fileExists(atPath: readyMarker.path) }
 
+    /// The OmacVM the VM got at its last apply (omacvm apply writes it from
+    /// 3.0.1 on); nil for a VM last set up by an older app.
+    var guestVersion: String? {
+        guard let s = try? String(contentsOf: folder.appendingPathComponent("omacvm-version"), encoding: .utf8) else { return nil }
+        let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Version(v) == nil ? nil : v
+    }
+
     /// Same id as scripts/vm-common.sh: the first 8 hex digits of SHA-1 of the folder path.
     var id: String {
         let p = Process()
@@ -210,17 +219,21 @@ struct VMConfig: Equatable {
     /// Only CPUS and MEM_MB in vm.env, every other line as it was (`omacvm
     /// resources` changes the same two). The VM reads them at its next start.
     func writeResources() throws {
+        try writeEnv(["CPUS": "\(cpus)", "MEM_MB": "\(memoryMB)"])
+    }
+
+    /// These KEY=value lines in vm.env, every other line as it was (numbers
+    /// only: no quoting).
+    func writeEnv(_ values: [String: String]) throws {
         let url = folder.appendingPathComponent("vm.env")
         var lines = try String(contentsOf: url, encoding: .utf8).components(separatedBy: "\n")
         if lines.last == "" { lines.removeLast() }
-        var cpusDone = false, memDone = false
+        var done = Set<String>()
         lines = lines.map { line in
-            if line.hasPrefix("CPUS=") { cpusDone = true; return "CPUS=\(cpus)" }
-            if line.hasPrefix("MEM_MB=") { memDone = true; return "MEM_MB=\(memoryMB)" }
+            for (k, v) in values where line.hasPrefix(k + "=") { done.insert(k); return "\(k)=\(v)" }
             return line
         }
-        if !cpusDone { lines.append("CPUS=\(cpus)") }
-        if !memDone { lines.append("MEM_MB=\(memoryMB)") }
+        for (k, v) in values.sorted(by: { $0.key < $1.key }) where !done.contains(k) { lines.append("\(k)=\(v)") }
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 
@@ -285,6 +298,14 @@ enum Mac {
         return Int(value)
     }
     static var memoryGB: Int { sysctlInt("hw.memsize") / 1_073_741_824 }
+    /// The address space macOS gives a VM, in bits (M1/M2: 36, M4: 40-42;
+    /// nil when macOS does not say). The smaller of the two page sizes' values,
+    /// as QEMU may use either. Graphics.hostmemMB needs it.
+    static var vmAddressBits: Int? {
+        let sizes = ["kern.hv.ipa_size_16k", "kern.hv.ipa_size_4k"].map(sysctlInt).filter { $0 > 0 }
+        guard let s = sizes.min() else { return nil }
+        return Int.bitWidth - 1 - s.leadingZeroBitCount
+    }
     static var performanceCores: Int { max(2, sysctlInt("hw.perflevel0.physicalcpu")) }
     static var efficiencyCores: Int { sysctlInt("hw.perflevel1.physicalcpu") }
     static var cores: Int { max(2, sysctlInt("hw.ncpu")) }
@@ -403,6 +424,11 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// Seconds the firmware waits for a key (its boot manager) before it boots.
+    /// 0, the default: it boots at once (the boot logo covers the firmware, so
+    /// the wait only cost time: 5 s on every start up to 3.0.0).
+    /// Hidden: defaults write org.omacvm.app firmwareWait -int 5 (the old wait)
+    static var firmwareWait: Int { min(max(UserDefaults.standard.integer(forKey: "firmwareWait"), 0), 60) }
     /// The hidden Vulkan switch up to 2.9 (`venus`): moved once into each
     /// VM's Graphics setting at the first 3.0.0 launch, then removed
     /// (Graphics.migrateVenusSwitch).
@@ -430,6 +456,11 @@ enum Settings {
     /// working in macOS), so it waits for a fix.
     /// Hidden: defaults write org.omacvm.app macShortcuts -bool false
     static var macShortcuts: Bool { UserDefaults.standard.object(forKey: "macShortcuts") as? Bool ?? true }
+    /// The globe (fn) key pressed on its own goes to the VM while it has the
+    /// keyboard (Omarchy's emoji picker there), not to macOS's Emoji & Symbols
+    /// (omacvm-cocoa-globe-key.patch). Off: macOS keeps it.
+    /// Hidden: defaults write org.omacvm.app globeKeyToVM -bool false
+    static var globeKeyToVM: Bool { UserDefaults.standard.object(forKey: "globeKeyToVM") as? Bool ?? true }
     /// The VM's window takes the pointer without a click (after a start, a
     /// guest reboot, or the window becoming key with the pointer on it).
     /// Off: QEMU's own way, on entering the window or a click.
@@ -449,6 +480,15 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
+    /// Experimental, off by default, no switch in the window yet: the VM
+    /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor
+    /// shows it (QEMU's OMACVM_HW_CURSOR, the guest's omacvm.hwcursor), so it
+    /// moves without waiting for a guest frame and does not flicker between
+    /// the VM, Omanotch and other displays. Hyprland 0.56 in Omarchy does not
+    /// use the cursor plane yet (docs/routes/app.md), so it changes nothing
+    /// there today. From the VM's next start.
+    /// Hidden: defaults write org.omacvm.app macPointer -bool true
+    static var macPointer: Bool { UserDefaults.standard.bool(forKey: "macPointer") }
 }
 
 extension Mac {
@@ -473,4 +513,21 @@ extension Mac {
 
     /// A MacBook: its battery shows in Omarchy's bar.
     static let hasBattery: Bool = HostBatterySnapshot.capture().present
+}
+
+/// OmacVM's own version (src/VERSION in the app) and the VM's, for Update VM.
+enum OmacVMVersion {
+    static var app: String? {
+        let url = Paths.resources.appendingPathComponent(Mac.omacvmSrc + "/VERSION")
+        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Version(v) == nil ? nil : v
+    }
+
+    /// The VM has an older OmacVM than the app (none recorded counts as older).
+    static func vmIsBehind(_ vm: String?, app: String) -> Bool {
+        guard let a = Version(app) else { return false }
+        guard let v = vm.flatMap(Version.init) else { return true }
+        return v < a
+    }
 }

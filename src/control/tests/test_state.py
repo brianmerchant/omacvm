@@ -46,6 +46,25 @@ def test_desired_defaults_for_unnamed(features):
     assert on["omanotch"] is False           # notch: the Mac decides; unnamed = off
 
 
+def test_no_idle_lock_named_for_what_omacvm_does(features):
+    f = by(features, "no-idle-lock")
+    assert f.title == "Screensaver and lock disabled"
+    assert f.default == "off"                # Omarchy's own screensaver and lock, as before
+    assert "idle-lock" not in [x.name for x in features]
+
+
+@pytest.mark.parametrize("env,want", [
+    ({"OMACVM_FEATURE_idle_lock": "off"}, True),     # before 3.0.1: chosen off = now ticked
+    ({"OMACVM_FEATURE_idle_lock": "on"}, False),
+    ({}, False),                                      # unnamed: Omarchy's own
+    ({"OMACVM_FEATURE_no_idle_lock": "on"}, True),
+    ({"OMACVM_FEATURE_no_idle_lock": "off", "OMACVM_FEATURE_idle_lock": "off"}, False),   # the new name wins
+])
+def test_desired_reads_idle_lock_flipped(features, env, want):
+    assert S.desired(features, env)["no-idle-lock"] is want
+    assert "idle-lock" not in S.desired(features, env)
+
+
 def test_parse_check_tsv():
     text = "section\tBridge\nok\tWi-Fi\tHome, -50 dBm\t\tbridge\nfail\tLocation\tnot granted\t1\tbridge\nskip\tx\ty\t\t\nweird line\n"
     c = S.parse_check_tsv(text)
@@ -226,6 +245,15 @@ def test_graphics_row_vulkan_waiting_for_driver():
     # A Mac whose omacvm has no summary yet still says why.
     del st["graphics"]["summary"]
     assert "driver not built yet" in S.graphics_row(st, "app").note
+
+
+def test_graphics_row_vulkan_fell_back():
+    why = ("Vulkan did not start on this Mac: using OpenGL (the firmware found no devices in 25 s: "
+           "no boot disk, no picture; choose Vulkan again to try once more)")
+    st = {"graphics": {"graphics": "vulkan", "next_start": "opengl", "waiting_for_driver": False, "summary": why,
+                       "this_start": f"vulkan -> opengl ({why})"}}
+    r = S.graphics_row(st, "app")
+    assert r.note == why and r.status is S.Status.WORKS
 
 
 def test_graphics_row_unknown_and_busy():

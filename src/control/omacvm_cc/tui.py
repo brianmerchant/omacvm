@@ -42,6 +42,10 @@ UNKNOWN_TRIES, UNKNOWN_WAIT = 20, 5.0
 # change from another window or the Mac) and asks the Mac again, also after
 # "no such OmacVM.app VM". Nothing runs while it is closed.
 LIVE_EVERY = 5.0
+# Said before Graphics -> Vulkan or its repair runs (src/cmd/graphics.sh).
+VULKAN_BUILD = ("The VM builds its Vulkan driver now, a few minutes (when its packages are too old for that, "
+                "after a whole system update with omarchy update, often 5-15 minutes); "
+                "until it is there the VM runs on OpenGL.")
 
 THEME = Theme(
     name="omacvm-ansi", ansi=True, dark=True,
@@ -185,7 +189,7 @@ class FeaturesScreen(Screen):
                 t.add_row(status_cell(r, app.tick), "", r.feature.title, "", key=r.feature.name)
         for r in rows:
             dim = r.status in (S.Status.UNAVAILABLE, S.Status.OFF)
-            note = r.note or S.tag_note(r.feature)
+            note = r.note or S.tag_note(r.feature, r.on)
             if len(note) > width:
                 note = note[: width - 1] + "…"
             style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan"}.get(r.status, "bright_black")
@@ -302,7 +306,7 @@ class DetailsScreen(Screen):
         t.append("     ")
         field("Needs", f.needs or "–")
         t.append("     ")
-        hints = [S.TAG_HINTS[x] for x in f.tags if x in S.TAG_HINTS]
+        hints = S.tag_hints(f, r.on)
         t.append("\n")
         for h in hints:
             field("Note", h)
@@ -876,7 +880,7 @@ class ControlCentre(App):
         nxt = S.next_graphics(cur)
         text = {"auto": "Automatic: OpenGL on every Mac in this version (Vulkan is your choice).",
                 "opengl": "OpenGL only (no Vulkan in the VM).",
-                "vulkan": "OpenGL plus Vulkan on the Mac's GPU (experimental; Vulkan windows are copied through the CPU). The VM builds its Vulkan driver now, a few minutes; until it is there the VM runs on OpenGL."}[nxt]
+                "vulkan": "OpenGL plus Vulkan on the Mac's GPU (experimental; Vulkan windows show through the GPU with OmacVM.app 3.0.1 and newer). " + VULKAN_BUILD}[nxt]
         self.push_screen(ConfirmScreen(f"Graphics: {S.GRAPHICS_TITLES[cur]} -> {S.GRAPHICS_TITLES[nxt]}",
                                        text + "\nFrom the VM's next start (shut it down, then start it again)."),
                          lambda yes: yes and self.run_job("graphics", [nxt]))
@@ -886,8 +890,12 @@ class ControlCentre(App):
             self.notify(f"Graphics memory is measured, not switched. {S.GPU_MEMORY_EXPLAINER}")
             return
         if r.feature.name == "graphics":
-            if self.can_ask() and self.c.graphics():
-                self.run_job("graphics", [self.c.graphics()])   # its Vulkan driver again, if it gets Vulkan
+            g = self.c.graphics() if self.can_ask() else ""
+            if g == "vulkan":   # its Vulkan driver again: may update the VM's system first, so asked
+                self.push_screen(ConfirmScreen("Graphics: the Vulkan driver again", VULKAN_BUILD),
+                                 lambda yes: yes and self.run_job("graphics", [g]))
+            elif g:
+                self.run_job("graphics", [g])
             return
         if not r.on:
             self.notify(f"{r.feature.title} is off: space turns it on", severity="warning")
@@ -895,8 +903,16 @@ class ControlCentre(App):
         if not self.can_ask():
             return
         name = r.feature.name   # that feature only (apply --reinstall)
+        texts = []
+        # A row that works: nothing to repair, so say what r would do and ask
+        # (before, r there started a reinstall with no word first).
+        if r.status is S.Status.WORKS:
+            texts.append(f"{r.feature.title} works: nothing to repair. Install it again anyway? "
+                         "Its parts go in once more (on the Mac and in this VM); this can take a minute.")
         if self.brings_mac_version():
-            self.push_screen(ConfirmScreen(f"Repair {r.feature.title}", self.brings_mac_version()),
+            texts.append(self.brings_mac_version())
+        if texts:
+            self.push_screen(ConfirmScreen(f"Repair {r.feature.title}", "\n".join(texts)),
                              lambda yes: yes and self.run_job("reinstall", [name]))
         else:
             self.run_job("reinstall", [name])

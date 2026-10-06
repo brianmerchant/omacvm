@@ -84,8 +84,9 @@ VM runs, and goes back by itself when a new version does not start
   as up to 2.9. Vulkan: the same, plus Vulkan on the Mac's GPU (Venus) for
   Vulkan apps: on KosmicKrisp on macOS 26 and newer (in the app since 3.0.0),
   on MoltenVK before (fewer Vulkan features). OpenGL stays on virgl either
-  way, so Vulkan only adds Vulkan apps; Vulkan windows are copied through
-  the CPU (slow in full screen). Automatic is OpenGL on every Mac in 3.0.0
+  way, so Vulkan only adds Vulkan apps; Vulkan windows show through the
+  Mac's GPU (on KosmicKrisp since 3.0.1, before through the CPU, slow in
+  full screen). Automatic is OpenGL on every Mac in 3.0.0
   ([numbers and why](../benchmarks/README.md#graphics-automatic-2026-10-05)).
   A change applies at the
   VM's next start; `omacvm check` shows what the start got ("Graphics" row)
@@ -93,12 +94,24 @@ VM runs, and goes back by itself when a new version does not start
   MoltenVK when KosmicKrisp cannot run on that Mac, logged).
   The VM needs a Venus driver that sizes GPU memory to the Mac's 16 KiB
   pages (Mesa 26.2.4 or newer; with Arch Linux ARM's 26.2.3 every Vulkan app
-  fails with `ERROR_OUT_OF_HOST_MEMORY`). While Arch Linux ARM has 26.2.3,
-  apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
-  package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
-  minutes the first time) when the setting gives the VM Vulkan (also
-  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's 26.2.4
-  replaces it on an update. Until the driver is there the VM starts with
+  fails with `ERROR_OUT_OF_HOST_MEMORY`). Apply builds Mesa 26.2.4's Venus
+  driver as Arch's own `vulkan-virtio` package, with OmacVM's patch for the
+  shared semaphores Chrome's WebGPU needs (version `26.2.4.omacvm1`,
+  [`src/app/guest/venus`](../../src/app/guest/venus), a few minutes the
+  first time) when the setting gives the VM Vulkan (also
+  `omacvm graphics --vm NAME vulkan` on a running VM). When the VM's
+  package list is too old for the build tools (a prebuilt VM a day after
+  its image: the mirrors no longer have those versions), `omacvm graphics`
+  and the control centre's Graphics -> Vulkan first update the whole
+  system the way `omarchy update` does
+  ([`src/guest/system-update`](../../src/guest/system-update), then the GBM
+  test; in a terminal `omacvm graphics` asks first) and stop with the
+  reason if the update fails. `omacvm apply` and `omacvm update` never
+  update the VM's system: they say to run `omarchy update` first. Arch's
+  own builds of 26.2.4 do not replace it; a newer Mesa from Arch does
+  (Vulkan keeps working, WebGPU in Chrome waits for OmacVM's next build of
+  it; the check says so). VMs from 3.0.0 rebuild it once, after the next
+  start or with `omacvm apply`. Until the driver is there the VM starts with
   OpenGL only, and the app, `omacvm graphics` and the control centre say
   "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the
   VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
@@ -112,8 +125,12 @@ VM runs, and goes back by itself when a new version does not start
   OpenGL turns the switch off again). That works on KosmicKrisp (macOS 26
   and newer). On MoltenVK Zink refuses the device (no `nullDescriptor`):
   there OpenCL needs the vulkan feature below. `omacvm check` has an
-  "OpenCL (rusticl on Zink)" row. WebGPU in Chrome needs the feature too
-  (its Venus driver has the semaphores Chrome's WebGPU asks for).
+  "OpenCL (rusticl on Zink)" row. WebGPU in Chromium comes with it too: a
+  "Chromium (WebGPU)" menu entry ([`venus/webgpu.sh`](../../src/app/guest/venus/webgpu.sh))
+  starts Chromium (`omacvm-chrome-webgpu`: Google Chrome) with its
+  compositor on Vulkan, which Chrome needs before it gives pages the Mac's
+  GPU for WebGPU; the normal Chromium entry stays as it is (that mode costs
+  WebGL about a fifth). `omacvm check` has a "WebGPU in Chromium" row.
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
@@ -299,6 +316,10 @@ one VM at a time: the build stops at the start while another one runs.
   Mission Control); the pointer goes to Omarchy again once its window shows.
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
   it checks for them before a build and offers to install them.
+- Instant resume (save the VM when you quit, continue where you were at the
+  next start): QEMU cannot save a VM that uses the Mac's GPU, so Quit still
+  shuts Omarchy down and the next start boots it
+  ([why, and what could change it](../adr/0037-no-instant-resume-yet.md)).
 
 ## How it talks to the Mac
 
@@ -309,7 +330,8 @@ the VM's SSH on `127.0.0.1:<port>`.
   47811 (Omanotch), 47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
   127.0.0.1 (dev servers, databases) is refused, like on the other routes.
   The app's QEMU carries a libslirp patch for that
-  (`OMACVM_SLIRP_HOST_PORTS`).
+  (`OMACVM_SLIRP_HOST_PORTS`). One more port when the Mac has a proxy on
+  its 127.0.0.1 (`MacProxy.swift`, [Behind a proxy](../guide.md#behind-a-proxy)).
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,
@@ -348,6 +370,30 @@ the VM's SSH on `127.0.0.1:<port>`.
   `src/tests/pointer-start-vm.sh`). QEMU's log says which way it takes
   ("cocoa: pointer: ..."). Off (QEMU's own way, on entering the window or a
   click): `defaults write org.omacvm.app pointerStart -bool false`.
+- Mac pointer for the VM (experimental, off, no switch in the window yet:
+  `defaults write org.omacvm.app macPointer -bool true`, from the VM's
+  next start): Omarchy is asked to put its pointer on virtio-gpu's cursor
+  plane (Hyprland's hardware cursor) and QEMU makes that image the Mac's
+  own cursor over the VM's windows, so the pointer would move with the
+  Mac's cursor instead of waiting for the next guest frame (about 25 ms at
+  60 Hz, see `docs/architecture/graphics.md`) and stay one cursor over the
+  VM, Omanotch's strip and every display. The app sets
+  `OMACVM_HW_CURSOR=1` for QEMU and the OEM string `omacvm.hwcursor=1`
+  (`/run/omacvm/host.env`; `omacvm_app.lua` turns `no_hardware_cursors`
+  off, notchcast stops hiding the guest's pointer at the strip). Not working
+  yet: Hyprland 0.56.2 keeps drawing a software cursor on OmacVM's
+  virtio-gpu (no cursor command reaches QEMU, also with `use_cpu_buffer`),
+  so today nothing changes. Why: since Linux 6.8 a virtual GPU's cursor
+  plane is hidden from atomic clients that do not ask for cursor hotspots
+  (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT); the guest kernel has it (plane 36,
+  unused) but Hyprland's aquamarine only sees the primary plane. Next:
+  aquamarine with that cap, or its legacy (non-atomic) path for this
+  mode. Until the guest's first image after a reset and with a relative
+  pointer (games) QEMU keeps its own way anyway.
+  `omacvm-cocoa-hw-cursor.patch`, rules in
+  `omacvm-cocoa-hw-cursor-logic.patch` (unit test
+  `app/runtime/Tests/display/test-hw-cursor.sh`); in a VM:
+  `src/tests/input-latency-vm.sh --hw-cursor`.
 
 ## Fast network (experimental, off by default)
 
@@ -534,8 +580,36 @@ What is missing before it can become the default: [below](#fast-network-not-done
     tunnel too (no VM, no service), and not without it: Parallels' (or
     macOS's) doing with a tunnel present, not the NAT. Quit and reopen
     Parallels Desktop, or `sudo killall prl_naptd`, brings them back.
-- Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
-  VM runs (the test tunnel is a `utun` as theirs), real trackpad gestures over the fast network
+- A real WireGuard client on the Mac mini (macOS 27, 2026-10-06):
+  `wireguard-go` on a `utun`, set up as a VPN app does (addresses, MTU
+  1420, split routes), and a WireGuard server in userspace that takes only
+  the tunnel's own address as source, as a real one does. A stand-in VM on
+  the fast network (the daemon's socket, ARP and pings): the NAT is on
+  about a second after the tunnel; the VM's pings reach the server as
+  `10.99.0.1`. With the service's anchor emptied by hand the server drops
+  them ("packet with disallowed source address"): what VMs got before the
+  VPN NAT. Down and up again, the VM leaving: as with the test tunnel.
+  An IKEv2-style `ipsec0` (macOS's own kernel interface for IKEv2, here
+  without a security association) got no NAT at first: for an IPv4
+  address added to an interface that was already up, the service saw only
+  a new route (its local route), which it did not count. Fixed: it
+  follows route changes too (not ARP entries or per-destination routes);
+  `ipsec0` now gets its rule within a second, and pf translates to its
+  address. It also missed IPv4 address messages, which are shorter than
+  it expected; it counts them now.
+  Then an app VM's QEMU (headless clone of a test VM) on the fast network
+  with the fixed service and the same client: NAT on 1.1 s after the
+  tunnel; the VM reaches the server over IPv4 and IPv6 (seen as
+  `10.99.0.1` and `2001:db8:99::1`), 20 MiB down and 20 MiB up through the
+  tunnel's MTU of 1420 (VM 1500) at about 70 MB/s each; anchor emptied by
+  hand: dropped by the server, back 1.1 s later on the next change. A full
+  tunnel for 25 s: the VM's requests to `1.1.1.1` and `9.9.9.9` went
+  through it as `10.99.0.1`; internet as before after. The VM restarting
+  with the tunnel up: NAT in the same second, all of the above again.
+  pf outside the service's anchor, Parallels and Tailscale unchanged.
+- Not tested yet: a VPN app's own tunnel (WireGuard app, an IKEv2 profile in
+  System Settings; the tests above use the same kernel interfaces without
+  touching the Mac's VPN settings), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
@@ -543,6 +617,76 @@ What is missing before it can become the default: [below](#fast-network-not-done
   numbers).
 - SMAppService would give macOS's own approval (System Settings) instead of
   a password dialog; not done.
+
+## Mac folder (off by default)
+
+**Mac folder › Choose…** in the VM's settings shares one folder of the Mac
+with the VM. From the VM's next start it is at `~/Mac` in Omarchy. **Turn
+Off** stops it from the next start.
+
+- The VM can read and change everything in that folder, as your Mac user,
+  and nothing outside it. Share a project folder: the app refuses your home
+  folder and the folders above it (your keys and every app's data would be
+  in the VM).
+- Your files show as your Omarchy user's in the VM; files the VM makes are
+  yours on the Mac. `chown` in the VM fails (as root too): the Mac keeps the
+  owner.
+- How: QEMU's virtio-9p, run as your Mac user. No system service, no
+  password. The VM mounts it with `cache=mmap,msize=512000`
+  (`omacvm-mac-folder`).
+- A change on either side shows on the other at once (tested: rewrite,
+  grow, create, delete, rename on the Mac; write in the VM).
+- A folder that is not there at a start (a drive not connected), or that
+  OmacVM may not open (denied in System Settings > Privacy & Security >
+  Files and Folders, or no permission), is left out for that start, and the
+  VM starts as usual. `omacvm check` says what the start shared and why not.
+- A folder in Documents, Desktop, Downloads or iCloud Drive: macOS may ask
+  once whether OmacVM may open it (not tested yet).
+- The Mac's disk ignores case by default: two files whose names differ only
+  in case (some git repos, such as the Linux kernel) are one file there.
+- File locks are not passed to the Mac: do not use one SQLite database or
+  lock file from the Mac and the VM at the same time.
+- VMs from before 3.0.1 need the VM side once: `omacvm apply` (or the
+  control centre's update).
+- Git in one repo from both sides: each side's git re-reads every file once
+  after the other ran (the two record files differently; 57 s for 30,000
+  files the first time below). `git config core.checkStat minimal` in that
+  repo avoids most of it.
+
+Speed (Mac mini M4, macOS 27, a 4-CPU VM, one run each; small files: 12,000
+files of 0.5-16 KB; git: `git status` in a 30,000-file repo made on the Mac):
+
+| | 1 GiB write | 1 GiB read | unpack 12k files | read them | `git status` |
+|---|---|---|---|---|---|
+| VM's own disk | 1991 MB/s | 5224 MB/s | 0.7 s | 0.8 s | 0.02 s |
+| Mac folder (`cache=mmap`) | 1747 MB/s | 3135 MB/s | 18 s | 16 s | 8.1 s |
+| 9p without cache (QEMU's usual) | 123 MB/s | 114 MB/s | 19 s | 18 s | 8.1 s |
+| 9p `cache=loose` (not used) | 1670 MB/s | 3551 MB/s | 13 s | 7.5 s | 1.8 s |
+
+Big files are fast. Many small files are slow: every file operation is a
+round trip to QEMU (about 0.4 ms), and only `cache=loose` saves those, but
+it shows old content after the Mac changes a file. Build in the VM's own
+disk, keep sources on the Mac if you like.
+
+NFS instead of 9p (a user-space NFS server on the Mac, over QEMU's network,
+for comparison only): unpacking was 3x faster (5.6 s), the rest no better
+(big files 315/1227 MB/s, reading the small files 12 s, `stat` 5.6 s). It
+would need a server program, a port and its own access control, so the Mac
+folder stays on 9p. virtio-fs needs a Linux host daemon; QEMU on macOS has
+none.
+
+Tested on the Mac mini (M4, macOS 27; a throwaway copy of a test VM,
+`tests/share/rig.sh`): the VM's unit mounts `~/Mac` at boot and the desktop
+user can write there; without a share it does nothing (18 ms) and leaves no
+`~/Mac`. Not tested on macOS 15 or 26, nor on another Mac.
+
+### Mac folder: not done yet
+
+- One folder per VM, read and write; no read-only switch.
+- It changes only at the VM's next start.
+- Not measured: Parallels' and UTM's shared folders on the same Mac.
+- QEMU cannot save a VM's state while the folder is mounted (9p blocks it):
+  matters once instant resume comes.
 
 ## Every Mac display
 
@@ -568,6 +712,12 @@ window per guest screen:
   around all its outputs. `omacvm-displays` reports where Hyprland put each
   output, and QEMU points the tablet at the matching spot of that box, so
   the pointer lands where it is on the Mac, also with Omarchy's zoom.
+  Hyprland sends no event when an output only moves (display-sync and
+  Omanotch move them, and a config reload puts them back to "auto" for a
+  moment), and a stale report kept the pointer in half the screen for up
+  to 30 s. So a Lua hook (`monitor.layout_changed`) pokes the agent, which
+  also compares the layout twice a second for 15 s after any change and
+  every 10 s otherwise (a report goes out only when it changed).
   The other displays' windows take the pointer (and with it the keyboard)
   only while OmacVM.app is in front, or on a click; another app coming to
   the front gets both back.
@@ -754,11 +904,22 @@ QEMU's environment sets another, 0 turns it off; for tests).
 (the VM's graphics driver cannot hand back an "out of memory" for it). A
 browser starts its GPU process again. Hyprland cannot: the VM's Mesa does
 not report a lost context, and Hyprland 0.56, when told, stops ("Cannot
-continue until proper GPU reset handling is implemented"). The app then
-shows "The VM's desktop stopped drawing" with a button that restarts the
-desktop session (SDDM logs you in again; apps open in the VM close),
-instead of leaving a black window. `logs/qemu.log` says which app lost its
-context and why.
+continue until proper GPU reset handling is implemented"). So the app tells
+the VM through its guest agent, and the VM's `omacvm-desktop-recover`
+restarts the desktop session by itself, a few seconds after the loss (on
+the Mac mini the desktop drew again 2 to 3 seconds after QEMU reported it):
+SDDM logs you in again (or shows its login screen when autologin is off).
+**Apps open in the VM close, and what was not saved in them is lost.** The
+new session shows a notification that says so and names the apps that
+closed. A session that was locked locks itself again. At most once in 10 minutes: when the desktop is lost again that
+soon (macOS still short of memory), the app shows "The VM's desktop
+stopped drawing" with a button that restarts it, as it always did with
+the automatic restart off (`defaults write org.omacvm.app
+desktopAutoRestart -bool false`). When only the shell (Omarchy's bar and
+launcher, Quickshell) is lost, only the shell starts again, and no app
+closes. `logs/qemu.log` says which app lost its context and why, and each
+restart the app made; `journalctl -t omacvm-desktop-recover` in the VM
+says what was closed (ADR 0038).
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses

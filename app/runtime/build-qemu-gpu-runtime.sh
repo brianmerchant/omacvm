@@ -622,6 +622,9 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+# OmacVM: usb-host leaves a device the Mac uses alone (no reset: on macOS that
+# re-enumerates it); the app's USB devices (docs/usb.md).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-usb-host-busy-device.patch"
 # OmacVM: a main loop stall > 2 s is logged with its place.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
@@ -698,6 +701,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-blob-align
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-on-flush.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-iosurface.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subregion.patch"
+# OmacVM: a small high PCI window right above RAM (highmem-mmio-size from
+# 1 GiB), so M1/M2 (36-bit VM address space) get a Venus window of 1 GB and more.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virt-small-high-window.patch"
+grep -q 'highmem-mmio-size cannot be smaller than 1 GiB' "$source_dir/hw/arm/virt.c" || \
+  die "hw/arm/virt.c does not take a small highmem-mmio-size"
 # Frames on the display's refresh: one per refresh, no judder.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-vsync.patch"
 # Colour-space tagged frames; 10-bit scanouts in half float; HDR (PQ) with EDR.
@@ -736,6 +744,11 @@ OMACVM_IDLE_REFRESH=0 "$display_tests/test-idle-refresh" off
 # OmacVM: VM memory and graphics memory in the app menu (read when it opens).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-graphics-memory.patch"
 "$native_dir/Tests/display/test-gpu-memory-menu.sh"
+# OmacVM: "Features…" in the app menu: the launcher opens the control centre
+# in the VM (ControlCentreRoute.swift, src/control/guest/open.sh).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-features-menu.patch"
+grep -q '^    omacvm_add_features_item(menu);$' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m has no Features... item in the app menu (features-menu patch)"
 # OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
 # logo until the guest's desktop, and instead of "Display output is not
 # active."; the cells must be the firmware's logo, the animation's table the
@@ -771,6 +784,19 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-even
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-start.patch"
 "$native_dir/Tests/display/test-fullscreen-start.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
+# Experimental: the guest's pointer as the Mac's cursor (OMACVM_HW_CURSOR=1, the
+# app's hidden macPointer setting), and its rules' test.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor.patch"
+"$native_dir/Tests/display/test-hw-cursor.sh"
+grep -q 'omacvm_hwc_take(0, qemu_console_get_cursor(dcl->con), cocoaView,' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not hand the guest's pointer image to the Mac's cursor (hw-cursor patch)"
+# Opt-in (OMACVM_GL_INPUT_FIRST=1): while input comes, the newest frame goes on screen.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-input-first.patch"
+# The globe key on its own goes to the VM (not Emoji & Symbols) while it has the keyboard.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-globe-key.patch"
+grep -q '^    omacvm_globe_init();$' "$source_dir/ui/cocoa.m" && grep -q 'if (omacvm_globe_event(event)) {' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not hand the globe key to the VM (globe-key patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

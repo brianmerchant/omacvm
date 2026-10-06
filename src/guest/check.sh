@@ -89,7 +89,9 @@ FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
-GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
+GESTURES=${OMACVM_FEATURE_gestures:-on}
+# no-idle-lock was idle-lock before 3.0.1, on and off the other way round.
+NO_IDLE_LOCK=${OMACVM_FEATURE_no_idle_lock:-$( [[ ${OMACVM_FEATURE_idle_lock:-on} == off ]] && echo on || echo off)}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 CONTROL=${OMACVM_FEATURE_control_centre:-off}
@@ -221,6 +223,13 @@ FEATURE=""
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
 else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
+# PipeWire's sound threads run real-time (RTKit, install.sh); at normal
+# priority the sound breaks whenever the VM is busy.
+pw=$(pgrep -u "$U" -x pipewire | head -1)
+if [[ -z $pw ]]; then skip "sound priority" "PipeWire is not running"
+elif ps -L -o cls=,comm= -p "$pw" | awk '$2 ~ /^data-loop/ && ($1 == "RR" || $1 == "FF") { f = 1 } END { exit !f }'; then
+  ok "sound priority" "real-time (PipeWire's data loop)"
+else bad "sound priority" "PipeWire runs at normal priority, so the sound breaks when the VM is busy: omacvm apply, then systemctl --user restart pipewire pipewire-pulse wireplumber"; fi
 
 section "The Mac's battery"
 FEATURE=battery
@@ -291,6 +300,7 @@ if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   else skip "Cmd as Super" "comes with trackpad gestures, which are off (omacvm enable gestures)"; fi
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
+[[ $TYPE != app ]] || check "globe key binding" "XF86Launch3: Omarchy's emoji picker" grep -qs '"Emojis (Mac globe key)"' "$H/.config/hypr/bindings.lua"
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
@@ -355,6 +365,14 @@ app)
     else
       bad "OpenCL (rusticl on Zink)" "no device: on MoltenVK (macOS 15) Zink needs OmacVM's Mesa (omacvm enable vulkan)"
     fi
+    # WebGPU in Chromium: the launcher, on a Venus driver with shared semaphores (OmacVM's vulkan-virtio build).
+    if [[ ! -x /usr/local/bin/omacvm-chromium-webgpu ]]; then
+      bad "WebGPU in Chromium" "no \"Chromium (WebGPU)\" launcher: omacvm apply"
+    elif [[ $(pacman -Q vulkan-virtio 2>/dev/null) == *omacvm* ]]; then
+      ok "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)"
+    else
+      skip "WebGPU in Chromium" "after OmacVM's Venus driver build ($(pacman -Q vulkan-virtio 2>/dev/null || echo "no vulkan-virtio") now; the VM builds it after its next start)"
+    fi
   else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
   FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
@@ -403,6 +421,8 @@ app)
     omacvm) ;;
     ok) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* }"
         else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
+    update) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* } (built after the VM's next start, or omacvm apply)"
+            else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
     needed) bad "Vulkan (Venus)" "${vk#* }: omacvm apply" ;;
     no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
     *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
@@ -415,8 +435,11 @@ app)
       OMACVM_VA_DEBUG=1 vainfo --display drm 2>&1)
   v=$(sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' <<<"$va" | tr '\n' ' ')
   lim=$(sed -n 's/^omacvm_drv_video: the Mac keeps at most \([1-9][0-9]*\) decoders.*/\1/p' <<<"$va" | head -1)
+  # VA-API that does not start (vaInitialize failed): the line that says why.
+  vafail=$(/usr/local/share/omacvm/vdec/guest/vdecd.sh vafail <<<"$va" 2>/dev/null)
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
+  elif [[ -n $vafail ]]; then bad "video decoding" "VA-API does not start, videos decode on the CPU: $vafail"
   else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
   # Arch Linux ARM's Chromium decodes through V4L2 (omacvm-vdec + omacvm-vdecd).
   FEATURE=chromium-video
@@ -427,10 +450,13 @@ app)
     [[ -n $m && -e /sys/module/omacvm_vdec && $(cat /sys/module/omacvm_vdec/srcversion 2>/dev/null) != "$m" ]] &&
       pend=" (an update waits: restart the VM)"
     if [[ $CHROMIUM_VIDEO != on ]]; then skip "video decoding in Chromium" "off (omacvm enable chromium-video)"
+    elif [[ -z $v && -n $vafail ]]; then skip "video decoding in Chromium" "VA-API does not start (see video decoding)"
     elif [[ -z $v ]]; then skip "video decoding in Chromium" "no decoders on the Mac's side"
     elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then bad "video decoding in Chromium" "not set up: omacvm apply"
     elif [[ ! -e /dev/omacvm-vdec ]]; then bad "video decoding in Chromium" "no module for kernel $(uname -r) yet: omacvm apply, or reboot after an update"
-    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then bad "video decoding in Chromium" "omacvm-vdecd not running (journalctl -u omacvm-vdecd)$pend"
+    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then
+      w=$(/usr/local/share/omacvm/vdec/guest/vdecd.sh why 2>/dev/null)
+      bad "video decoding in Chromium" "omacvm-vdecd down: ${w:-not running (journalctl -u omacvm-vdecd)}$pend"
     elif ! as_user /usr/local/lib/omacvm/chromium-flags.py check; then bad "video decoding in Chromium" "AcceleratedVideoDecoder missing in Chromium's flags: omacvm apply"
     else ok "video decoding in Chromium" "V4L2 -> the Mac's media engine: $s$pend"; fi
   fi
@@ -503,10 +529,10 @@ if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH fro
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 
 section "Choices"
-FEATURE=idle-lock
-if [[ $IDLE_LOCK == off ]]; then
-  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock" "off: the Mac's lock protects the VM"
-  else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
+FEATURE=no-idle-lock
+if [[ $NO_IDLE_LOCK == on ]]; then
+  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock disabled" "the Mac's lock protects the VM"
+  else bad "screensaver and lock disabled" "chosen, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 FEATURE=autologin
 # As SDDM does it, whoever wrote the file (the Mac's omacvm check fixes OmacVM's record to match).
@@ -523,6 +549,16 @@ if [[ $MAC_CLOCK == on ]]; then
   elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
 else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
+
+FEATURE=x86-apps
+x86=$(/usr/local/share/omacvm/x86/guest/install.sh --status 2>/dev/null)
+if [[ ${OMACVM_FEATURE_x86_apps:-off} == on ]]; then
+  if [[ ${x86%% *} != ok ]]; then bad "x86 apps" "${x86#* }"
+  elif ! /usr/local/share/omacvm/x86/guest/install.sh --test; then bad "x86 apps" "${x86#* }, but a test x86_64 program does not run"
+  else ok "x86 apps" "${x86#* }"; fi
+elif [[ -n $x86 && ${x86%% *} != off && $x86 != *"not OmacVM's"* ]]; then bad "x86 apps" "off, but OmacVM's box64 is still installed: omacvm apply"
+else skip "x86 apps" "off (omacvm enable x86-apps: x86_64 programs through box64)"; fi
+FEATURE=""
 
 section "Omanotch"
 FEATURE=omanotch

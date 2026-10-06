@@ -136,8 +136,12 @@ install -m755 "$LAUNCHER" "$C/MacOS/OmacVM"
 install -m644 "$ICON" "$C/Resources/OmacVM.icns"
 ditto "$RT/qemu-gpu-runtime" "$C/Resources/runtime"
 mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/OmacVM"
+# The app starts QEMU through this link, so macOS counts it as this app: one
+# icon in the Dock (DockIdentity.swift). The kernel still names it OmacVM.
+ln -s ../Resources/runtime/bin/OmacVM "$C/MacOS/OmacVM-VM"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$RT/firmware/firmware-source" "$C/Resources/firmware/"
 install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/prebuilt-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" \
+  "$ROOT/scripts/update-vm.sh" \
   "$ROOT/scripts/update-swap.sh" "$C/Resources/scripts/"
 # The complete omacvm (entry script + src, as a release checkout): apply-vm.sh
 # runs its src/, and the Bridge runs it for the control centre when there is no
@@ -204,6 +208,8 @@ while IFS= read -r -d '' f; do
 done < <(find "$C" -type f -perm -u+x -print0)
 
 # The app carries the version of the OmacVM it is part of.
+# OmacVMControlRun: OmacVM Bridge may run the control centre's omacvm through
+# this app (OmacVM --control-run, ControlRun.swift); an older app has no key.
 # Bluetooth: macOS charges Bluetooth, the camera and the microphone of a
 # helper run from inside this bundle (Contents/Helpers) to the app, and kills
 # the helper if the app's Info.plist has no reason for it (OS_REASON_TCC).
@@ -211,10 +217,10 @@ done < <(find "$C" -type f -perm -u+x -print0)
 # a Bridge started in place alive (src/tests/prebuilt-helpers.sh checks).
 # NSPrefersDisplaySafeAreaCompatibilityMode false: macOS never shrinks the
 # whole display below the camera for the launcher's windows (no "Scale to fit
-# below built-in camera" box in Get Info). It has no effect on the VM's
-# windows: QEMU runs as Contents/Resources/runtime/bin/OmacVM without a bundle
-# of its own, so AppKit never reads this file for it; its full screen is
-# macOS's own and sits below the camera.
+# below built-in camera" box in Get Info). Since 3.0.1 it holds for the VM's
+# windows too: QEMU, started as Contents/MacOS/OmacVM-VM, counts as this app
+# (DockIdentity.swift), so AppKit reads this file for it as well; its full
+# screen is macOS's own and sits below the camera.
 VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -230,12 +236,19 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>OmacVMCommit</key><string>$COMMIT</string>
+  <key>OmacVMControlRun</key><true/>
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
+  <key>NSLocalNetworkUsageDescription</key><string>OmacVM reaches your VM on the Mac's own VM network: to set it up, for the control centre and for the fast network.</string>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
   <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>Your Mac folder setting shares a folder on this drive with the VM at ~/Mac.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>Your Mac folder setting shares a folder on this network drive with the VM at ~/Mac.</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>OmacVM Bridge shows this Mac's Bluetooth devices in your Linux VM's status bar, and connects, disconnects or forgets them when you ask there.</string>$( (( TEST )) && printf '\n  <key>OmacVMGesturesDomain</key><string>%s</string>' "$GESTURES_ID")
 </dict>
 </plist>

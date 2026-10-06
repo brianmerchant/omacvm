@@ -342,8 +342,12 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   lost=$(grep -o 'context error reported [0-9]* "[^"]*"' "$miclog" | sed 's/.*"\(.*\)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
   # Not a failure by itself: the app may have been restarted since (the VM's
   # "desktop" line says whether the shell draws now).
+  # The app restarts the desktop (and the shell) by itself (DesktopRecovery).
+  restarts=$(grep -ac "restarting the VM's desktop by itself" "$miclog")
+  again=""
+  (( restarts > 0 )) && again="; the app restarted the desktop by itself $restarts time(s), closing the apps open in it"
   if [[ -n $lost ]]; then
-    skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
+    skip "GPU contexts" "lost earlier in this run by: $lost$again (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
   # The VM's graphics memory on the Mac (on top of its VM memory): now and
   # the peak of this run from QEMU's status file (logs/gpu-memory, written
@@ -392,6 +396,13 @@ if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then
   gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd"); gs=$(graphics_summary "$gd")
   if [[ -z $gl ]]; then
     skip "Graphics" "$(graphics_title "$gc"): $gs from the VM's next start (an app from before 3.0.0 has OpenGL only)"
+  elif gf=$(graphics_fallback "$gd") && [[ $(graphics_wants "$gd") == vulkan ]]; then
+    # Vulkan fell back and stays off until chosen again (graphics-fallback).
+    # Choosing the same setting again clears it (graphics.sh), whatever it is.
+    warn "Graphics" "$GRAPHICS_DID_NOT_START ($gf; choose the setting again to try Vulkan once more: omacvm graphics --vm \"$VM\" $gc)"
+  elif [[ $gl == *"(${GRAPHICS_DID_NOT_START%%:*}"* ]]; then
+    # Vulkan fell back for this start only; the next start tries it again.
+    warn "Graphics" "this start: $gl"
   elif [[ ${gl%% *} != "$gc" || $gl != *"-> $gn "* ]]; then
     skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $gs from the VM's next start"
   elif graphics_waiting_for_driver "$gd"; then
@@ -432,6 +443,16 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security: OmacVM on under Input Monitoring and Accessibility (on already: remove it with − and add it again), then restart the VM"
   fi
 fi
+# The globe key on its own (3.0.1): to the VM while it has the keyboard.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  if grep -q 'globe key stays with macOS' "$miclog"; then
+    skip "globe key" "stays with macOS (defaults write org.omacvm.app globeKeyToVM -bool false)"
+  elif grep -q "globe key: macOS's switch for its shortcut was not found\|globe key .*FAILED" "$miclog"; then
+    warn "globe key" "opens macOS's Emoji & Symbols: macOS refused to switch its shortcut off (logs/qemu.log)"
+  elif grep -q 'globe key goes to the VM' "$miclog"; then
+    ok "globe key" "goes to the VM while it has the keyboard (Omarchy's emoji picker)"
+  fi
+fi
 # Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
 # user-interactive QoS, and the sound card paced (no catch-up after a stall);
 # the hidden audioClassic setting keeps QEMU's own timing for both.
@@ -453,6 +474,18 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   case $(grep -o "OmacVM: sound: the Mac's audio device [a-z ]*" "$miclog" | tail -1) in
     *"does not answer"*) warn "sound" "Mac audio device not answering, the VM runs without sound; fix: pick another output in System Settings > Sound, replug it, or sudo killall coreaudiod" ;;
     *"works again"*) ok "sound" "the Mac's audio device stopped answering earlier in this run and works again" ;;
+  esac
+fi
+# The Mac folder (the app's setting, off by default): what this start shared,
+# and whether the VM has it at ~/Mac.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  mf=$(sed -n 's/^OmacVM: Mac folder: //p' "$miclog" | tail -1)
+  case $mf in
+    ""|off) ;;   # off, or an app from before the setting
+    "off this start: "*) warn "Mac folder" "${mf#off this start: }" ;;
+    *)
+      if gssh "$IP" "mountpoint -q ~$U/Mac" < /dev/null 2>/dev/null; then ok "Mac folder" "$mf"
+      else bad "Mac folder" "shared, but not at ~/Mac in the VM (omacvm apply installs omacvm-mac-folder; then restart the VM)"; fi ;;
   esac
 fi
 FEATURE=gestures
@@ -597,6 +630,20 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
     if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
     else ok "Mac links (app)" "$l"; fi
+  fi
+fi
+# OmacVM.app's USB devices (off by default, docs/usb.md): which ones this
+# start passed, and a chosen one macOS kept (QEMU leaves it alone). Per
+# device the last line counts: one QEMU took after a replug is no warning.
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
+  u=$(sed -n 's/^OmacVM: USB devices: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+  busy=$(sed -n -e 's/.*usb-host: \([0-9a-f]\{4\}:[0-9a-f]\{4\}\) .* is in use on the host: not taken.*/\1 busy/p' \
+    -e 's/.*usb-host: \([0-9a-f]\{4\}:[0-9a-f]\{4\}\) (bus [0-9]*, addr [0-9]*) taken$/\1 taken/p' \
+    "$d/logs/qemu.log" 2>/dev/null | awk '{ s[$1] = $2 } END { for (i in s) if (s[i] == "busy") print i }' \
+    | sort | tr '\n' ' ')
+  if [[ -n $u && $u != off ]]; then
+    if [[ -n $busy ]]; then warn "USB devices (app)" "$u; macOS uses ${busy% }: not passed (docs/usb.md)"
+    else ok "USB devices (app)" "$u"; fi
   fi
 fi
 FEATURE=""

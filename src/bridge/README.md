@@ -333,7 +333,7 @@ are strict JSON up to 4 KB, unknown keys refused.
 |---|---|
 | `GET /omacvm/hello` | `{"proto", "proto_min", "omacvm", "requests", "features", "macos", "chip"}` |
 | `GET /omacvm/status` | the Mac's view of this VM: per feature on/available/reason, the Mac-side checks (`omacvm features --json` and `omacvm check --json --mac-only`, cached 30 s) |
-| `GET /omacvm/gpu-memory` | an OmacVM.app VM's graphics memory on the Mac, from `logs/gpu-memory` in its folder (QEMU writes it; the folder from `omacvm vms --json`): `{"measured", "in_use_mb", "peak_mb", "budget_mb", "pressure": "normal"\|"warn"\|"critical"\|"unknown", "refused", "lost"}`, numbers only (no app names, no paths); `measured` false before QEMU's first numbers; 409 `not-app` for other VMs. The control centre asks at most every 2 s while it is open; 200 answers are not logged, and it never starts a new `omacvm vms` run for a VM the list already has |
+| `GET /omacvm/gpu-memory` | an OmacVM.app VM's graphics memory on the Mac, from `logs/gpu-memory` in its folder (QEMU writes it; OmacVM.app sends it with the relayed request as `X-OmacVM-GPU-Memory`, base64 or `-` for none, so the Bridge never reads an external drive; from an older app, the folder from `omacvm vms --json`): `{"measured", "in_use_mb", "peak_mb", "budget_mb", "pressure": "normal"\|"warn"\|"critical"\|"unknown", "refused", "lost"}`, numbers only (no app names, no paths); `measured` false before QEMU's first numbers; 409 `not-app` for other VMs. The control centre asks at most every 2 s while it is open; 200 answers are not logged, and it never starts a new `omacvm vms` run for a VM the list already has |
 | `GET /omacvm/updates` | the last update check: `checks_enabled`, `checked_at`, `ok`, `offline`, `error`, the verified manifest |
 | `POST /omacvm/updates/check` | fetch and verify the manifest now (once a minute) |
 | `POST /omacvm/settings/update-checks` `{"enabled": bool}` | the one switch for update checks and notices |
@@ -359,7 +359,15 @@ with the VM and the answer; refusals (and 401s) once a minute per address, VM
 and reason, with the count left out.
 
 Which VM asked comes from `omacvm vms --json`, cached: a request never waits
-for it. It is read again in the background, one run at a time, when the list
+for it. OmacVM.app's VMs come from a second run, `omacvm vms --json
+--app-only`, through the app's own executable (`OmacVM --control-run`, when
+the CLI is the app's copy and its Info.plist has `OmacVMControlRun`); so do
+the status runs and jobs for an app VM. The Bridge spawns omacvm with its
+responsibility disclaimed (Local Network privacy), and macOS refuses such a
+program a VMs folder on an external drive without asking (Removable
+Volumes): through the app, the run is the app's, with the access the person
+gave the app. The app runs only the Bridge's commands, only for OmacVM Bridge
+of its own identity and signer (app/app/Sources/OmacVM/ControlRun.swift). It is read again in the background, one run at a time, when the list
 is a minute old, after a job, and for an address the list does not have (a
 VM that just started) at most once a minute, since any guest can add
 addresses. Also when a request does not prove with the key of the VM the
