@@ -298,7 +298,7 @@ if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   else skip "Cmd as Super" "comes with trackpad gestures, which are off (omacvm enable gestures)"; fi
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
-[[ $TYPE != app ]] || check "globe key" "emoji picker binding" grep -qs '"Emojis (Mac globe key)"' "$H/.config/hypr/bindings.lua"
+[[ $TYPE != app ]] || check "globe key binding" "XF86Launch3: Omarchy's emoji picker" grep -qs '"Emojis (Mac globe key)"' "$H/.config/hypr/bindings.lua"
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
