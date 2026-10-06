@@ -1054,6 +1054,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-memory-pres
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
 # OmacVM: a compositor's dma-buf import (a Vulkan window) no longer ends its context on macOS OpenGL.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-set-type-without-egl.patch"
+# OmacVM: a draw binds its GL program only when it changed (Apple's GL rebuilds its draw state
+# on every glUseProgram; WebGL pages with one draw per object paid that on each draw).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-use-program-cache.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
