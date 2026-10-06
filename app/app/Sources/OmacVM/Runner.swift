@@ -228,12 +228,14 @@ final class Runner {
                 case .wait: continue
                 case .fine: return
                 case .note(let line):
-                    self.appendLog("OmacVM: graphics: \(line)")
+                    // Not "OmacVM: graphics:": omacvm check and the control
+                    // centre read the last such line as this start's record.
+                    self.appendLog("OmacVM: Vulkan start: \(line)")
                 case .fallBack(let why, let graceful, let keep):
                     // The user stopped the VM already: no OpenGL start.
                     if self.stopAsked { return }
                     self.venusFallback = (why, keep)
-                    self.appendLog("OmacVM: graphics: \(Graphics.didNotStart): \(why); stopping this start and starting again on OpenGL")
+                    self.appendLog("OmacVM: Vulkan start: \(Graphics.didNotStart): \(why); stopping this start and starting again on OpenGL")
                     if graceful {
                         self.powerDown(byApp: true)
                         try? await Task.sleep(nanoseconds: 60_000_000_000)
