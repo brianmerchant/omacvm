@@ -316,5 +316,30 @@ do {
     r.stop()
 }
 
+// stop() after run() closed the socket (Runner does so) leaves the number
+// alone: by then it may be another socket's.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread { try? r.run(); done.signal() }
+    usleep(50_000)
+    close(vm)
+    _ = done.wait(timeout: .now() + 2)
+    var fds: [Int32] = [0, 0]
+    precondition(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0)
+    let other = fds.contains(app) ? app : -1
+    r.stop()
+    if other >= 0 {
+        let peer = fds[0] == other ? fds[1] : fds[0]
+        var b: UInt8 = 7
+        expect(write(peer, &b, 1) == 1 && read(other, &b, 1) == 1, "relay: stop() after the close does not shut a reused descriptor")
+    } else {
+        print("note: descriptor not reused, the reuse check did not run")
+    }
+    close(fds[0]); close(fds[1])
+}
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

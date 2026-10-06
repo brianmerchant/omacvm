@@ -190,7 +190,10 @@ public final class AuthRelay: @unchecked Sendable {
         stopped = true
         lock.unlock()
         drop(nil)
-        Darwin.shutdown(guest, SHUT_RDWR)   // run() sees the end and closes it
+        // run() sees the end and closes it. Not once it has: the number may
+        // be another socket's by now (Runner stops the relay after run()).
+        writeLock.lock(); defer { writeLock.unlock() }
+        if !closed { Darwin.shutdown(guest, SHUT_RDWR) }
     }
 
     private func closeGuest() {
