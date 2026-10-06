@@ -39,6 +39,7 @@ source "$R/src/lib/ui.sh"
 source "$R/src/lib/prereq.sh"
 source "$R/src/prebuilt/lib.sh"
 source "$R/src/prebuilt/vm.sh"
+source "$R/src/lib/proxy.sh"
 features_load
 # Bash 3.2 gives the EXIT trap status 0 after a set -u abort: only DONE=1 (set
 # right before each successful exit) counts as success.
@@ -716,6 +717,20 @@ fi
 export OMA_PIN_NEW=1 OMA_PIN
 OMA_PIN=$(mktemp -t omacvm-live)
 ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
+# The Mac's proxy (#122). Parallels', UTM's and Fusion's VMs cannot reach the
+# Mac's 127.0.0.1: only a proxy on another address (or one the Mac serves on
+# its LAN address) is passed on. OmacVM.app's build does its own (vm-common.sh).
+if ! (( IMAGE )); then
+  proxy_detect
+  [[ -z $PROXY_NOTE ]] || info "proxy: $PROXY_NOTE"
+  [[ -z $(proxy_ports) ]] ||
+    info "proxy: the Mac's proxy listens on 127.0.0.1, which $TYPE VMs cannot reach; set http_proxy/https_proxy to the Mac's LAN address (with the proxy allowing LAN connections) and build again, or build in OmacVM.app"
+  penv=$(proxy_guest_env "")
+  if [[ -n $penv ]]; then
+    log "proxy: $(proxy_summary)"
+    printf '%s\n' "$penv" | gssh "$IP" "umask 022; cat > /root/omacvm-proxy.env"
+  fi
+fi
 
 # ---------- 3. Arch Linux ARM onto the NVMe disk ----------
 step "Arch Linux ARM onto the VM's disk ($IP)"

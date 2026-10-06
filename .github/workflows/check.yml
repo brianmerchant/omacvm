@@ -98,6 +98,9 @@ jobs:
           src/bridge/mac/test.sh
           src/tests/external-brightness.sh
 
+      - name: Building behind a proxy (scutil samples, the VM's variables, sudo, systemd-run, retries, a stub proxy)
+        run: src/tests/proxy.sh
+
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 

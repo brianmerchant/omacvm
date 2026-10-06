@@ -217,6 +217,10 @@ final class Runner {
         // Omanotch, Gestures, Bridge.
         links = MacLinks.load(folder: c.folder)
         env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
+        // And the port of the Mac's proxy on its 127.0.0.1, if it has one
+        // (MacProxy, #122): a VM built behind it reaches it as 10.0.2.2.
+        let proxy = MacProxy.current()
+        env["OMACVM_SLIRP_HOST_PORTS"] = proxy.addingPorts(to: links.hostPorts)
         env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
@@ -266,6 +270,7 @@ final class Runner {
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
+        log.write(Data("OmacVM: Mac proxy: \(proxy.record(fastNetwork: network.vmnet))\n".utf8))
         log.write(Data("OmacVM: Mac folder: \(macFolder)\n".utf8))
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
         log.write(Data("OmacVM: USB devices: \(USBChoice.record(usb))\n".utf8))
