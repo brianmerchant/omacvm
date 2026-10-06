@@ -446,15 +446,17 @@ enum VMApp {
   }
 
   private static let testBridge = Bundle.main.bundleIdentifier == VMOwner.testBridge
-  private static var ids: [String: String?] = [:]   // app path -> bundle id, under idsLock
+  private static var ids: [String: String] = [:]   // app path -> bundle id, under idsLock
   private static let idsLock = NSLock()   // the key tap (main thread) and the server's threads ask
 
   /// The bundle id of the app a VM process runs from (read once per app path).
+  /// A failed read is not kept: during an update swap or before an external
+  /// volume is ready, the next key press reads it again.
   private static func appID(_ exe: String) -> String? {
     guard let path = VMOwner.app(executable: exe) else { return nil }
     idsLock.lock(); defer { idsLock.unlock() }
     if let id = ids[path] { return id }
-    let id = Bundle(path: path)?.bundleIdentifier
+    guard let id = Bundle(path: path)?.bundleIdentifier else { return nil }
     ids[path] = id
     return id
   }
