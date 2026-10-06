@@ -84,6 +84,10 @@ ConfirmScreen > Vertical { width: 72; max-width: 95%; height: auto; border: roun
 """
 
 
+# OmacVM.app gives a VM 3 minutes to shut down for an update; past that it
+# stops the update (nothing forced). A little longer here, then it says so.
+SHUTDOWN_WAIT = 210.0
+
 # The only place that sends the user to the Mac for an update: the Mac's
 # OmacVM.app cannot be asked from this VM (another app's VM, an older Mac).
 MANUAL_APP_UPDATE = ("Update OmacVM.app first: shut this VM down, open OmacVM on the Mac and click Check Now. "
@@ -667,6 +671,7 @@ class ControlCentre(App):
         self.started_at = 0.0     # when the update or job on show started (monotonic)
         self.waiting_mac = ""     # why the job's answers are late
         self.restart_after = restart_needed()   # an update in this boot waits for a restart
+        self.shutdown_asked = 0.0   # when OmacVM.app said it shuts this VM down (monotonic)
 
     def on_mount(self) -> None:
         self.register_theme(THEME)
@@ -771,6 +776,16 @@ class ControlCentre(App):
 
     def tick_progress(self) -> None:
         """Once a second while an update runs: the time on it moves on."""
+        if self.app_step is not None and self.app_step[1] == 2 and self.shutdown_asked \
+                and time.monotonic() - self.shutdown_asked > SHUTDOWN_WAIT:
+            # Still running: OmacVM.app stopped the update (the Mac asks before it forces anything).
+            drop_resume()
+            self.app_step, self.started_at, self.shutdown_asked = None, 0.0, 0.0
+            self.last_result = ("This VM did not shut down in 3 minutes, so OmacVM.app stopped the update; nothing "
+                                "changed. Close what may block the shutdown and press u again (the Mac also offers "
+                                "Force Off and Update).")
+            self.refresh_all()
+            return
         if not self.progress():
             return
         for s in self.screen_stack:
@@ -1106,6 +1121,7 @@ class ControlCentre(App):
         wait = answer.get("shutdown_in")
         wait = f" in {wait} s" if isinstance(wait, int) and 0 < wait < 600 else " in a moment"
         self.app_step = (version, 2)
+        self.shutdown_asked = time.monotonic()
         self.waiting_mac = ""
         self.last_result = (f"OmacVM.app {version} is ready: this VM shuts down{wait} and starts again "
                             "with the update; this VM's part follows after you log in.")

@@ -307,6 +307,27 @@ def test_u_updates_the_mac_app_and_this_vm(tmp_path, monkeypatch):
     checks.stop()
 
 
+def test_a_vm_that_does_not_shut_down_says_the_update_stopped(tmp_path, monkeypatch):
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "SHUTDOWN_WAIT", 1.0)
+    mac, checks = app_world(tmp_path, monkeypatch)
+
+    async def go():
+        from omacvm_cc.local import resume_file
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.manifest())
+            await pilot.press("u")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))
+            await pilot.press("y")
+            assert await settle(pilot, lambda: a.app_step == ("2.9.1", 2))
+            assert await settle(pilot, lambda: "did not shut down in 3 minutes" in a.last_result, 6)
+            assert a.app_step is None and not os.path.exists(resume_file())
+    asyncio.run(go())
+    mac.stop()
+    checks.stop()
+
+
 def test_app_update_refused_says_the_next_step(tmp_path, monkeypatch):
     mac, checks = app_world(tmp_path, monkeypatch, answer=(409, {"code": "busy", "error": "OmacVM.app is busy (a VM is being built): try again in a minute"}))
 
