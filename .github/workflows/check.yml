@@ -87,7 +87,9 @@ jobs:
           src/bridge/mac/build.sh
 
       - name: Omanotch offline tests
-        run: src/omanotch/mac/test.sh
+        run: |
+          src/omanotch/mac/test.sh
+          src/omanotch/guest/tests/test.sh
 
       - name: External display brightness offline tests (Bridge and VM side)
         run: |
