@@ -167,6 +167,9 @@ jobs:
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh
 
+      - name: Mac pointer for the VM (experimental hardware cursor rules, guest image checks)
+        run: app/runtime/Tests/display/test-hw-cursor.sh
+
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 

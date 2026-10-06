@@ -90,6 +90,11 @@ final class Runner {
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
         }
+        // Experimental: the guest's pointer on the cursor plane, shown by the
+        // Mac's cursor (omacvm_app.lua reads it from host.env; QEMU: OMACVM_HW_CURSOR).
+        if Settings.macPointer {
+            a += ["-smbios", "type=11,value=omacvm.hwcursor=1"]
+        }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
               "-chardev", "file,id=hvc0,path=\(q(console))",
@@ -201,6 +206,7 @@ final class Runner {
         env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
+        if Settings.macPointer { env["OMACVM_HW_CURSOR"] = "1" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.

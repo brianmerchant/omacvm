@@ -457,6 +457,15 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
+    /// Experimental, off by default: the VM puts its pointer on virtio-gpu's
+    /// cursor plane and the Mac's own cursor shows it (QEMU's OMACVM_HW_CURSOR,
+    /// the guest's omacvm.hwcursor). The pointer then moves without waiting for
+    /// a guest frame and does not flicker between the VM, Omanotch and other
+    /// displays. Takes effect at the VM's next start.
+    static var macPointer: Bool {
+        get { UserDefaults.standard.bool(forKey: "macPointer") }
+        set { UserDefaults.standard.set(newValue, forKey: "macPointer") }
+    }
 }
 
 extension Mac {

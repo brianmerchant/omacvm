@@ -1,7 +1,20 @@
 -- OmacVM.app: Hyprland draws the pointer (Omarchy's cursor) into the picture;
--- QEMU hides the Mac's over the VM window. Software cursor: virtio-gpu's cursor
--- plane stayed empty here. Written by OmacVM; changes here are overwritten.
-hl.config({ cursor = { no_hardware_cursors = 1 } })
+-- QEMU hides the Mac's over the VM window. Software cursor: the default.
+-- With the app's experimental "Mac pointer for the VM" (OEM string
+-- omacvm.hwcursor=1 -> /run/omacvm/host.env) the pointer goes on virtio-gpu's
+-- cursor plane and the Mac's own cursor shows it (no frame to wait for).
+-- Written by OmacVM; changes here are overwritten.
+local function mac_pointer()
+  local ok, f = pcall(function() return io.open("/run/omacvm/host.env") end)
+  if not ok or not f then return false end
+  local on = false
+  for l in f:lines() do
+    if l == "OMACVM_HWCURSOR=1" then on = true end
+  end
+  f:close()
+  return on
+end
+hl.config({ cursor = { no_hardware_cursors = mac_pointer() and 0 or 1 } })
 -- A config reload brings back the cached mode; apply the window's again.
 hl.on("config.reloaded", function()
   hl.exec_cmd("/usr/local/bin/omacvm-display-sync --once")
