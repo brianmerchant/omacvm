@@ -59,7 +59,7 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   click OmacVM in the Dock, hold Option, choose Force Quit (or Activity
   Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
   Applications › Utilities). The shortcuts work again at once. From the
-  Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
+  Terminal: `pkill -9 -f 'Contents/(MacOS/OmacVM-VM|Resources/runtime/bin/OmacVM) '`.
 - **⌃⌥ Esc showed "macOS did not switch the Space"**: neither macOS's "Move
   left/right a space" shortcut nor the swipe after it moved the Space (the
   VM stays full screen; Mission Control only opens when you press the combo
