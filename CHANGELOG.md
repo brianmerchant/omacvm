@@ -5,6 +5,12 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app: the globe (fn) key pressed on its own goes to the VM, no
+  longer to macOS's Emoji & Symbols over it, while the VM's window has the
+  keyboard. In Omarchy it opens the emoji picker (it is XF86Launch3 there,
+  for your own bindings). fn+F1..F12 and the brightness and media keys work
+  as before. `defaults write org.omacvm.app globeKeyToVM -bool false` leaves
+  it with macOS.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).

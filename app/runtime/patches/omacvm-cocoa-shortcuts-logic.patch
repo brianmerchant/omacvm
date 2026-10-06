@@ -4,9 +4,10 @@ Subject: [PATCH] ui: when macOS's shortcuts go to the VM, and Apple's own key co
 What: a header with no AppKit in it: when macOS's global shortcuts are off
 (the VM has the keyboard, and nothing says otherwise), which Linux key
 Apple's own top-row key codes become (Mission Control, Spotlight, Dictation,
-Do Not Disturb, Launchpad, Dashboard: the F-key they sit on), and the escape
-combo. Used by omacvm-cocoa-system-shortcuts.patch (which explains the why)
-and omacvm-cocoa-escape-combo-tap.patch.
+Do Not Disturb, Launchpad, Dashboard: the F-key they sit on), when macOS's
+globe-key shortcut is off and which Linux key the globe key becomes, and the
+escape combo. Used by omacvm-cocoa-system-shortcuts.patch (which explains the
+why), omacvm-cocoa-escape-combo-tap.patch and omacvm-cocoa-globe-key.patch.
 
 Why its own file: so the logic is tested against macOS's whole shortcut list
 without QEMU or a display (app/runtime/Tests/keys/test-shortcuts.sh applies
@@ -15,12 +16,13 @@ this patch to an empty folder; at build time and in CI).
 Upstream: not applicable (OmacVM's keyboard policy).
 Test: app/runtime/Tests/keys/test-shortcuts.c.
 
+
 diff --git a/ui/omacvm-shortcuts.h b/ui/omacvm-shortcuts.h
 new file mode 100644
-index 0000000..5f66de0
+index 0000000..d485605
 --- /dev/null
 +++ b/ui/omacvm-shortcuts.h
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,123 @@
 +/*
 + * OmacVM: macOS's own shortcuts while the VM has the keyboard.
 + *
@@ -54,10 +56,49 @@ index 0000000..5f66de0
 +}
 +
 +/*
++ * The globe (fn) key pressed on its own. macOS turns that press into key
++ * code 0xb3 and its own shortcut 188 (no modifiers), which does what System
++ * Settings > Keyboard > "Press globe key to" says: Emoji & Symbols, input
++ * source, dictation. While the VM has the keyboard OmacVM switches that one
++ * shortcut off (in default mode too, where macOS keeps all its others), so
++ * the press reaches the VM, as KEY_PROG3 (XF86Launch3 in XKB; OmacVM's guest
++ * part binds it to Omarchy's emoji picker). A key below KEY_REPLY (232):
++ * QEMU's virtio keyboard offers no higher ones. fn as a modifier (fn+F1, fn
++ * plus an arrow) is no lone press and stays as it is.
++ * OMACVM_GLOBE_KEY=mac leaves the shortcut with macOS.
++ */
++#define OMACVM_GLOBE_HOTKEY 188
++#define OMACVM_GLOBE_LINUX_KEY 202      /* KEY_PROG3 */
++
++static inline bool omacvm_globe_to_vm(bool app_active, bool keyboard_captured,
++                                      bool mac_keeps, bool stalled)
++{
++    return app_active && keyboard_captured && !mac_keeps && !stalled;
++}
++
++/*
++ * What to do with macOS's globe shortcut now. `want_vm`: the above.
++ * `mac_on`: the shortcut is on in macOS right now. `ours`: this VM switched
++ * it off. It is only ever given back by the VM that took it, so one a user
++ * switched off stays off; another VM that gave it back while this one has
++ * the keyboard gets it switched off again.
++ */
++enum { OMACVM_GLOBE_KEEP = 0, OMACVM_GLOBE_TAKE = 1, OMACVM_GLOBE_GIVE_BACK = 2 };
++
++static inline int omacvm_globe_action(bool want_vm, bool mac_on, bool ours)
++{
++    if (want_vm) {
++        return mac_on ? OMACVM_GLOBE_TAKE : OMACVM_GLOBE_KEEP;
++    }
++    return ours ? OMACVM_GLOBE_GIVE_BACK : OMACVM_GLOBE_KEEP;
++}
++
++/*
 + * Keys of Apple keyboards that macOS knows by their own key code (the top
 + * row without fn, older keyboards' Dashboard and Launchpad keys). With the
-+ * shortcuts off they reach the VM as the F-key they sit on. 0: no key for
-+ * the guest (the globe key, the power key; brightness, which the Bridge
++ * shortcuts off they reach the VM as the F-key they sit on. The globe key
++ * pressed on its own (key code 0xb3, below) is OMACVM_GLOBE_LINUX_KEY.
++ * 0: no key for the guest (the power key; brightness, which the Bridge
 + * handles). -1: not one of these, the normal table applies.
 + * The Linux codes are the kernel's (input-event-codes.h): F3 61, F4 62,
 + * F5 63, F6 64.
@@ -76,10 +117,11 @@ index 0000000..5f66de0
 +        return 63;
 +    case 0xb2:          /* Do Not Disturb (F6) */
 +        return 64;
++    case 0xb3:          /* the globe key on its own */
++        return OMACVM_GLOBE_LINUX_KEY;
 +    case 0x7f:          /* the power key */
 +    case 0x90:          /* brightness up as a key code */
 +    case 0x91:          /* brightness down as a key code */
-+    case 0xb3:          /* globe */
 +        return 0;
 +    default:
 +        return -1;

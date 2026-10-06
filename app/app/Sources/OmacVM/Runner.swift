@@ -208,6 +208,7 @@ final class Runner {
         env["OMACVM_SLIRP_HOST_PORTS"] = proxy.addingPorts(to: links.hostPorts)
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
+        if !Settings.globeKeyToVM { env["OMACVM_GLOBE_KEY"] = "mac" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
@@ -273,8 +274,12 @@ final class Runner {
         let agentPath = c.agentSocket.path
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
+            // A QEMU killed while the VM had the keyboard leaves macOS's globe
+            // shortcut off: give it back (GlobeKey).
+            let globe = GlobeKey.giveBack(after: proc.processIdentifier)
             GuestAgent.release(socketPath: agentPath)
             Task { @MainActor in
+                if globe { self?.appendLog("OmacVM: macOS's globe shortcut given back (QEMU ended without)") }
                 self?.stopObserving()
                 self?.gpuMemory?.stop()
                 self?.clipboard?.stop()

@@ -152,9 +152,12 @@ static int guest_keys(int keycode, unsigned flags, const char *qcodes[8], int *k
     int special = omacvm_special_key(keycode);
     *key_linux = special >= 0 ? special
                : keycode >= 0 && keycode < 128 ? osx_keys[keycode].linux_code : 0;
-    if (special > 0) {
+    if (special >= 61 && special <= 64) {
         static const char *f[] = { "f3", "f4", "f5", "f6" };
         qcodes[n++] = f[special - 61];
+    } else if (special > 0) {
+        /* The globe key: QEMU has no qcode for KEY_PROG3; the guest gets its
+           Linux code straight (QEMU's linux-keyed input, this runtime). */
     } else if (special < 0 && *key_linux) {
         qcodes[n++] = osx_keys[keycode].qcode;
     }
@@ -164,7 +167,7 @@ static int guest_keys(int keycode, unsigned flags, const char *qcodes[8], int *k
 /* Keys that reach the VM as nothing on purpose (omacvm-shortcuts.h). */
 static int no_guest_key(int keycode)
 {
-    return keycode == 0x7f || keycode == 0x90 || keycode == 0x91 || keycode == 0xb3;
+    return keycode == 0x7f || keycode == 0x90 || keycode == 0x91;
 }
 
 static int check_list(const char *path, int print_qcodes, int *enabled_out)
@@ -183,7 +186,7 @@ static int check_list(const char *path, int print_qcodes, int *enabled_out)
         const char *q[8]; int lnx;
         int n = guest_keys(kc, flags, q, &lnx);
         if (print_qcodes) {
-            if (!en || !lnx) continue;
+            if (!en || !lnx || kc == 0xb3) continue;   /* the globe key: no qcode (above) */
             printf("%d", id);
             for (int i = 0; i < n; i++) printf(" %s", q[i]);
             printf("\t%s\n", name);
@@ -194,6 +197,11 @@ static int check_list(const char *path, int print_qcodes, int *enabled_out)
               "%s: shortcut %d (%s) is the escape combo", path, id, name);
         if (no_guest_key(kc)) {
             CHECK(lnx == 0, "%s: shortcut %d (%s): key 0x%x should give the guest nothing", path, id, name, kc);
+        } else if (kc == 0xb3) {
+            CHECK(lnx == OMACVM_GLOBE_LINUX_KEY, "%s: shortcut %d (%s): the globe key should reach the VM as KEY_PROG3",
+                  path, id, name);
+            CHECK(id != OMACVM_GLOBE_HOTKEY || (flags & (SHIFT | CONTROL | OPTION | COMMAND)) == 0,
+                  "%s: macOS's globe shortcut %d has modifiers: not the lone press", path, id);
         } else {
             CHECK(lnx > 0, "%s: shortcut %d (%s): Mac key 0x%x has no key in the VM", path, id, name, kc);
             CHECK(n >= 1 && q[n - 1] && q[n - 1][0], "%s: shortcut %d (%s): no QEMU key name", path, id, name);
@@ -240,6 +248,36 @@ int main(int argc, char **argv)
     CHECK(omacvm_special_key(0xb2) == 64, "Do Not Disturb key -> F6");
     CHECK(omacvm_special_key(0x83) == 62, "Launchpad key -> F4");
     CHECK(omacvm_special_key(0x67) == -1, "F11 uses QEMU's table");
+
+    /* The globe key on its own: KEY_PROG3, a key no Mac key gives otherwise,
+       below KEY_REPLY (232), the end of what QEMU's virtio keyboard offers. */
+    CHECK(omacvm_special_key(0xb3) == 202 && OMACVM_GLOBE_LINUX_KEY == 202, "globe key -> KEY_PROG3 (202)");
+    CHECK(OMACVM_GLOBE_LINUX_KEY < 232, "globe key below KEY_REPLY: QEMU's virtio keyboard offers it");
+    for (int k = 0; k < 256; k++) {
+        int lnx = omacvm_special_key(k);
+        if (lnx < 0) lnx = k < 128 ? osx_keys[k].linux_code : 0;
+        CHECK(k == 0xb3 || lnx != OMACVM_GLOBE_LINUX_KEY, "Mac key 0x%x also gives KEY_PROG3", k);
+    }
+    CHECK(omacvm_special_key(0x3f) == -1 && osx_keys[0x3f].linux_code == 464,
+          "fn itself (0x3f) stays QEMU's (a modifier change the window drops)");
+
+    /* macOS's globe shortcut: off only while the VM has the keyboard, even when
+       macOS keeps its other shortcuts (that is not an input here). */
+    CHECK(omacvm_globe_to_vm(1, 1, 0, 0), "VM has the keyboard: the globe key goes to the VM");
+    CHECK(!omacvm_globe_to_vm(0, 1, 0, 0), "another app in front: macOS keeps the globe key");
+    CHECK(!omacvm_globe_to_vm(1, 0, 0, 0), "our window not key: macOS keeps the globe key");
+    CHECK(!omacvm_globe_to_vm(1, 1, 1, 0), "OMACVM_GLOBE_KEY=mac: macOS keeps the globe key");
+    CHECK(!omacvm_globe_to_vm(1, 1, 0, 1), "hung VM window: macOS gets the globe key back");
+    CHECK(OMACVM_GLOBE_HOTKEY == 188, "macOS's globe shortcut is 188");
+    /* want VM, macOS has it on, ours */
+    CHECK(omacvm_globe_action(1, 1, 0) == OMACVM_GLOBE_TAKE, "VM gets the keyboard: switch the shortcut off");
+    CHECK(omacvm_globe_action(1, 0, 1) == OMACVM_GLOBE_KEEP, "already off by us: nothing");
+    CHECK(omacvm_globe_action(1, 1, 1) == OMACVM_GLOBE_TAKE, "another VM gave it back meanwhile: off again");
+    CHECK(omacvm_globe_action(1, 0, 0) == OMACVM_GLOBE_KEEP, "off by the user (or another VM): not ours, nothing");
+    CHECK(omacvm_globe_action(0, 1, 1) == OMACVM_GLOBE_GIVE_BACK, "VM loses the keyboard: give it back");
+    CHECK(omacvm_globe_action(0, 0, 1) == OMACVM_GLOBE_GIVE_BACK, "VM loses the keyboard: give it back (state not read)");
+    CHECK(omacvm_globe_action(0, 1, 0) == OMACVM_GLOBE_KEEP, "not ours: never switched on by us");
+    CHECK(omacvm_globe_action(0, 0, 0) == OMACVM_GLOBE_KEEP, "a user's off stays off");
 
     int enabled = 0, live_enabled = 0;
     int rows = check_list(argv[1], 0, &enabled);

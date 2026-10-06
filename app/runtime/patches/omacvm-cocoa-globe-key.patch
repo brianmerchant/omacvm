@@ -1,0 +1,212 @@
+From: OmacVM
+Subject: [PATCH] cocoa: the globe key goes to the VM, not to Emoji & Symbols
+
+Applies after all other Cocoa patches (last in build-qemu-gpu-runtime.sh);
+the logic is in ui/omacvm-shortcuts.h (omacvm-cocoa-shortcuts-logic.patch).
+
+What: while the VM window has the keyboard, macOS's globe-key shortcut (188:
+the globe key pressed on its own, key code 0xb3) is switched off, and on again
+the moment it has not. A lone globe press then reaches the VM as KEY_PROG3
+(XF86Launch3), which OmacVM's guest part binds to Omarchy's emoji picker.
+Only this one shortcut: macOS keeps all its others (the default), fn as a
+modifier (fn+F1..F12, fn+arrows) works as before, and so do the globe
+shortcuts outside the VM.
+
+Why: macOS opened Emoji & Symbols (or what System Settings > Keyboard >
+"Press globe key to" says) over the VM on every press, and the guest never
+got the key. QEMU already dropped the fn modifier change itself; the palette
+comes from macOS's shortcut, which takes the key before any app sees it.
+
+Safety: unlike the global shortcut mode (system-shortcuts patch), this switch
+is the window server's for the whole login, not this process's. So: given
+back when the VM loses the keyboard, at QEMU's exit (atexit and the app's
+terminate), by a watchdog thread when the window's thread has not answered
+for 2 s, and after a crash or kill by the next OmacVM VM's start or by
+OmacVM.app when QEMU ends: $TMPDIR/omacvm-globe-off holds the pid of the QEMU
+that has it off. Only the QEMU that switched it off gives it back, so a
+shortcut a user switched off stays off. OMACVM_GLOBE_KEY=mac leaves it with
+macOS.
+
+Upstream: not proposed (OmacVM's keyboard policy).
+Test: app/runtime/Tests/keys/test-shortcuts.sh (the logic, the key, and that
+no other Mac key gives KEY_PROG3); app/runtime/Tests/keys/globe-probe.m on a
+Mac (macOS's shortcut 188 and key code 179).
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -675,7 +675,167 @@
+         pthread_detach(watchdog);
+     }
+     omacvm_shortcuts_update();
++}
++
++/*
++ * OmacVM: the globe (fn) key pressed on its own goes to the VM while it has
++ * the keyboard, instead of opening macOS's Emoji & Symbols over it
++ * (ui/omacvm-shortcuts.h says how). Only macOS's globe shortcut is switched
++ * off, and only while our window has the keyboard; macOS keeps all its other
++ * shortcuts (the default) and fn as a modifier. The switch is the window
++ * server's for the whole login, so it is given back when the VM loses the
++ * keyboard, when QEMU exits, by a watchdog when the window's thread stops
++ * answering, and after a crash by the next OmacVM VM or OmacVM.app: a note
++ * in the user's temp folder holds the pid of the QEMU that has it off.
++ * OMACVM_GLOBE_KEY=mac leaves it with macOS.
++ */
++typedef int32_t (*OmacVMHotKeyIsOnFn)(int);
++typedef int32_t (*OmacVMHotKeySetOnFn)(int, bool);
++static OmacVMHotKeyIsOnFn omacvm_globe_is_on;
++static OmacVMHotKeySetOnFn omacvm_globe_set_on;
++static pthread_mutex_t omacvm_globe_lock = PTHREAD_MUTEX_INITIALIZER;
++static bool omacvm_globe_ours;          /* under the lock */
++static int omacvm_globe_said;           /* under the lock: log lines so far */
++static int64_t omacvm_globe_heartbeat;  /* ms; qatomic */
++static char omacvm_globe_note[1024];
++
++static pid_t omacvm_globe_note_pid(void)
++{
++    char line[32] = "";
++    FILE *f = fopen(omacvm_globe_note, "r");
++    if (!f) {
++        return 0;
++    }
++    if (!fgets(line, sizeof line, f)) {
++        line[0] = 0;
++    }
++    fclose(f);
++    return (pid_t)atoi(line);
++}
++
++/* Under the lock: switch the shortcut and keep the note in step. */
++static void omacvm_globe_apply_locked(bool want_vm, const char *why)
++{
++    bool mac_on = want_vm ? omacvm_globe_is_on(OMACVM_GLOBE_HOTKEY) != 0 : true;
++    int action = omacvm_globe_action(want_vm, mac_on, omacvm_globe_ours);
++    if (action == OMACVM_GLOBE_KEEP) {
++        return;
++    }
++    bool take = action == OMACVM_GLOBE_TAKE;
++    int32_t err = omacvm_globe_set_on(OMACVM_GLOBE_HOTKEY, !take);
++    if (err == 0) {
++        omacvm_globe_ours = take;
++        if (take) {
++            FILE *f = fopen(omacvm_globe_note, "w");
++            if (f) {
++                fprintf(f, "%d\n", (int)getpid());
++                fclose(f);
++            }
++        } else if (omacvm_globe_note_pid() == getpid()) {
++            unlink(omacvm_globe_note);
++        }
++    }
++    if (err != 0 || why || omacvm_globe_said < 2) {
++        omacvm_globe_said++;
++        fprintf(stderr, "omacvm: globe key %s%s%s\n",
++                take ? "goes to the VM (macOS's globe shortcut off while it has the keyboard)"
++                     : "is macOS's again",
++                why ? why : "", err != 0 ? ": FAILED" : "");
++    }
+ }
++
++static void omacvm_globe_apply(bool want_vm, const char *why)
++{
++    pthread_mutex_lock(&omacvm_globe_lock);
++    omacvm_globe_apply_locked(want_vm, why);
++    pthread_mutex_unlock(&omacvm_globe_lock);
++}
++
++/* Main thread: activation, key window, every 0.5 s. */
++static void omacvm_globe_update(void)
++{
++    qatomic_set(&omacvm_globe_heartbeat, omacvm_now_ms());
++    omacvm_globe_apply(omacvm_globe_to_vm([NSApp isActive],
++                                          cocoaView && [cocoaView isKeyboardCaptured],
++                                          false, false), NULL);
++}
++
++static void *omacvm_globe_watchdog(void *opaque)
++{
++    for (;;) {
++        g_usleep(500 * 1000);
++        int64_t quiet = omacvm_now_ms() - qatomic_read(&omacvm_globe_heartbeat);
++        if (quiet > OMACVM_UI_STALL_MS) {
++            pthread_mutex_lock(&omacvm_globe_lock);
++            if (omacvm_globe_ours) {
++                omacvm_globe_apply_locked(false, " (the VM window stopped answering)");
++            }
++            pthread_mutex_unlock(&omacvm_globe_lock);
++        }
++    }
++    return NULL;
++}
++
++/* QEMU's exit (any thread): give it back. */
++static void omacvm_globe_exit(void)
++{
++    pthread_mutex_lock(&omacvm_globe_lock);
++    omacvm_globe_apply_locked(false, NULL);
++    pthread_mutex_unlock(&omacvm_globe_lock);
++}
++
++static void omacvm_globe_init(void)
++{
++    const char *keep = getenv("OMACVM_GLOBE_KEY");
++    if (keep && !strcmp(keep, "mac")) {
++        fprintf(stderr, "omacvm: globe key stays with macOS (OMACVM_GLOBE_KEY=mac)\n");
++        return;
++    }
++    omacvm_globe_is_on = (OmacVMHotKeyIsOnFn)dlsym(RTLD_DEFAULT, "SLSIsSymbolicHotKeyEnabled");
++    omacvm_globe_set_on = (OmacVMHotKeySetOnFn)dlsym(RTLD_DEFAULT, "SLSSetSymbolicHotKeyEnabled");
++    if (!omacvm_globe_is_on || !omacvm_globe_set_on) {
++        omacvm_globe_is_on = (OmacVMHotKeyIsOnFn)dlsym(RTLD_DEFAULT, "CGSIsSymbolicHotKeyEnabled");
++        omacvm_globe_set_on = (OmacVMHotKeySetOnFn)dlsym(RTLD_DEFAULT, "CGSSetSymbolicHotKeyEnabled");
++    }
++    char tmp[PATH_MAX];
++    if (!omacvm_globe_is_on || !omacvm_globe_set_on ||
++        !confstr(_CS_DARWIN_USER_TEMP_DIR, tmp, sizeof tmp)) {
++        fprintf(stderr, "omacvm: globe key: macOS's switch for its shortcut was not found: "
++                "it stays with macOS\n");
++        return;
++    }
++    snprintf(omacvm_globe_note, sizeof omacvm_globe_note, "%s/omacvm-globe-off", tmp);
++    /* A VM that ended without giving it back (killed, crashed). */
++    pid_t left = omacvm_globe_note_pid();
++    if (left > 0 && left != getpid() && kill(left, 0) != 0 && errno == ESRCH) {
++        omacvm_globe_set_on(OMACVM_GLOBE_HOTKEY, true);
++        unlink(omacvm_globe_note);
++        fprintf(stderr, "omacvm: globe key: macOS's globe shortcut given back "
++                "(an OmacVM VM, pid %d, ended without)\n", (int)left);
++    }
++    qatomic_set(&omacvm_globe_heartbeat, omacvm_now_ms());
++    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
++    for (NSNotificationName name in @[NSApplicationDidBecomeActiveNotification,
++                                      NSApplicationDidResignActiveNotification,
++                                      NSWindowDidBecomeKeyNotification,
++                                      NSWindowDidResignKeyNotification]) {
++        [nc addObserverForName:name object:nil queue:[NSOperationQueue mainQueue]
++                    usingBlock:^(NSNotification *note) { omacvm_globe_update(); }];
++    }
++    [nc addObserverForName:NSApplicationWillTerminateNotification object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) { omacvm_globe_exit(); }];
++    atexit(omacvm_globe_exit);
++    NSTimer *beat = [NSTimer timerWithTimeInterval:0.5 repeats:YES
++                                             block:^(NSTimer *t) { omacvm_globe_update(); }];
++    [beat setTolerance:0.1];
++    [[NSRunLoop mainRunLoop] addTimer:beat forMode:NSRunLoopCommonModes];
++    pthread_t watchdog;
++    if (pthread_create(&watchdog, NULL, omacvm_globe_watchdog, NULL) == 0) {
++        pthread_detach(watchdog);
++    }
++    omacvm_globe_update();
++}
+ static VMChangeStateEntry *pinch_vm_change;
+ 
+ /* OmacVM: one window per Mac display (the code is further down). */
+@@ -7448,6 +7608,7 @@
+         [controller setFullGrab: nil];
+     }
+     omacvm_shortcuts_init();
++    omacvm_globe_init();
+ 
+     if (opts->has_show_cursor && opts->show_cursor) {
+         cursor_hide = 0;
