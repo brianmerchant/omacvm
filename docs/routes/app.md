@@ -598,6 +598,8 @@ without a share it does nothing (18 ms) and leaves no `~/Mac`.
 - One folder per VM, read and write; no read-only switch.
 - It changes only at the VM's next start.
 - Not measured: Parallels' and UTM's shared folders on the same Mac.
+- QEMU cannot save a VM's state while the folder is mounted (9p blocks it):
+  matters once instant resume comes.
 
 ## Every Mac display
 
