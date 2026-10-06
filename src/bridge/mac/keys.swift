@@ -57,8 +57,11 @@ final class Config {
   }
 
   func save() {
-    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps,
-                            "external_brightness": externalBrightness, "brightness_steps": brightnessSteps]
+    // Keys this class does not know stay (touch_id_password_fallback, touchid.swift).
+    var o = object ?? [:]
+    let mine: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps,
+                               "external_brightness": externalBrightness, "brightness_steps": brightnessSteps]
+    o.merge(mine) { _, new in new }
     if let d = try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys]) {
       FileManager.default.createFile(atPath: path, contents: d)
     }
