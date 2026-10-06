@@ -549,8 +549,9 @@ final class Control {
     q.sync { jobs[id] = j }
     DispatchQueue.global(qos: .utility).async { [self] in
       var st: Int32 = 0
-      // A whole thp-kernel build is about 10 minutes; nothing takes an hour.
-      let deadline = Date().addingTimeInterval(3600)
+      // The longest job is the memory-optimized kernel's build: about 10
+      // minutes with 16 CPUs, over an hour with 4 (an M2 MacBook Air's VM).
+      let deadline = Date().addingTimeInterval(4 * 3600)
       while waitpid(pid, &st, WNOHANG) == 0 {
         if Date() > deadline { kill(-pid, SIGTERM); sleep(5); kill(-pid, SIGKILL) }
         usleep(250_000)

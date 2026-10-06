@@ -22,6 +22,11 @@ in more words.
 - Error texts say the next step: "update OmacVM.app first: u in the control
   centre does it, or Check Now in OmacVM on the Mac" instead of
   "OmacVM.app is older than this release".
+- The memory-optimized kernel says how long it really takes: a kernel build
+  in the VM, about 10 minutes with 16 CPUs, over an hour with 4 (it said
+  about 10 minutes). The control centre and `omacvm features` say it only
+  while it is off. A control centre job may now run 4 hours (it was 1 hour,
+  which could stop a kernel build on a 4-CPU VM).
 - OmacVM.app: a VM build, and each apply in a VM without a window, is about
   a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
@@ -85,6 +90,13 @@ in more words.
   MacBook's built-in display, not somewhere on an external monitor. With
   the lid closed or on a Mac without a built-in display, it opens centred
   on the main display. The VM's window still opens where you are.
+- The feature "Screensaver and lock" is now "Screensaver and lock
+  disabled" (`no-idle-lock`), ticked when OmacVM keeps Omarchy's own
+  screensaver and lock off. Before, switching them off showed an empty
+  row, as if something was missing. Nothing changes on a VM: its old
+  choice is read the other way round, and `omacvm enable/disable
+  idle-lock` still works as before. New VMs keep Omarchy's own screensaver
+  and lock, as before.
 
 ## 3.0.0
 

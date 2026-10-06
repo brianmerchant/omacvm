@@ -42,7 +42,7 @@ Do all of this, or the numbers won't compare:
 | Each VM | 16 CPUs, 48 GB memory. On Parallels that needs Pro or the trial: Standard stops at 4 CPUs and 8 GB |
 | One VM at a time | the VM under test runs alone. Quit the other VM apps, Parallels' background service included: `pgrep -l prl_` should print nothing while you test UTM or Fusion |
 | Full screen | the VM app in full screen on the built-in display. `bench.sh` also starts Chrome full screen, on the Mac without the toolbar, so the page is the same size everywhere (1728x1080 at 2x on a 16" MacBook Pro). In a VM that also has an external display (Parallels, Fusion), Chrome must open on the built-in one: move the focus there first (`hyprctl dispatch focusmonitor Virtual-1`) |
-| No screensaver | Omarchy's screensaver and lock off: `omacvm disable idle-lock --vm NAME`. It can start in the middle of a run otherwise |
+| No screensaver | Omarchy's screensaver and lock off: `omacvm enable no-idle-lock --vm NAME`. It can start in the middle of a run otherwise |
 | Google Chrome everywhere | Google Chrome on the Mac and in the VM. Arch's Chromium is much slower than Chrome (Parallels: 35.4 with Chromium 153 vs about 45 with Chrome), so it would not compare |
 | Chrome's flags | in a VM, `bench.sh` starts Chrome with the flags in `/etc/chrome-flags.conf` and Omarchy's `~/.config/chrome-flags.conf`. On Fusion one of them must have `--ignore-gpu-blocklist` (OmacVM puts it in `/etc`), or Chrome draws in software ([why](../troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
 | Runs | 3 of each test (`bench.sh`'s default), report the median. Single runs land within 2 to 3 % of each other. The published [results](#results) say where they are single runs |

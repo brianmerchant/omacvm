@@ -31,6 +31,10 @@ struct PolicyError: Error, Equatable {
   init(_ status: Int, _ code: String, _ message: String) { self.status = status; self.code = code; self.message = message }
 }
 
+/// Old names a control centre from before a rename still sends: the Mac's
+/// omacvm takes them (src/lib/features.sh: feature_alias).
+let renamedFeatures = ["idle-lock": "no-idle-lock"]
+
 /// The names the control centre may send (as features.tsv's own rule).
 func validFeatureName(_ s: String) -> Bool {
   guard (2...32).contains(s.utf8.count), let f = s.utf8.first, (97...122).contains(f) else { return false }
@@ -103,7 +107,7 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       var names: [String] = []
       for item in list {
         guard let n = item as? String, validFeatureName(n) else { throw PolicyError(400, "bad-features", "not a feature name") }
-        guard known.contains(n) else { throw PolicyError(400, "unknown-feature", "'\(n)' is not a feature of this Mac's OmacVM") }
+        guard known.contains(n) || renamedFeatures[n].map(known.contains) == true else { throw PolicyError(400, "unknown-feature", "'\(n)' is not a feature of this Mac's OmacVM") }
         guard !names.contains(n) else { throw PolicyError(400, "bad-features", "'\(n)' twice") }
         names.append(n)
       }

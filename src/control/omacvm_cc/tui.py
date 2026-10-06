@@ -215,7 +215,7 @@ class FeaturesScreen(Screen):
                 t.add_row(status_cell(r, app.tick), "", r.feature.title, "", key=r.feature.name)
         for r in rows:
             dim = r.status in (S.Status.UNAVAILABLE, S.Status.OFF)
-            note = r.note or S.tag_note(r.feature)
+            note = r.note or S.tag_note(r.feature, r.on)
             if len(note) > width:
                 note = note[: width - 1] + "…"
             style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan"}.get(r.status, "bright_black")
@@ -338,7 +338,7 @@ class DetailsScreen(Screen):
         t.append("     ")
         field("Needs", f.needs or "–")
         t.append("     ")
-        hints = [S.TAG_HINTS[x] for x in f.tags if x in S.TAG_HINTS]
+        hints = S.tag_hints(f, r.on)
         t.append("\n")
         for h in hints:
             field("Note", h)
