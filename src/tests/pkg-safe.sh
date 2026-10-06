@@ -30,13 +30,17 @@ case $1 in
           [[ $p == --noconfirm ]] && continue
           line=$(awk -v n="$p" '$1 == n' "$sync"); [[ -n $line ]] || { echo "error: target not found: $p" >&2; exit 1; }
           set -- $line; echo "$1 $2"; shift 2
-          for d in "$@"; do s=$(ver "$d" "$sync"); [[ $(ver "$d" "$db") == "$s" ]] || echo "$d $s"; done
+          for d in "$@"; do [[ $d == ~* ]] && continue; s=$(ver "$d" "$sync"); [[ $(ver "$d" "$db") == "$s" ]] || echo "$d $s"; done
         done
         exit 0
       fi
       echo "pacman -S $*" >> "$T/calls"
       for p in "$@"; do [[ $p == -* ]] && continue; s=$(ver "$p" "$sync")
         grep -v "^$p " "$db" > "$db.n"; echo "$p $s" >> "$db.n"; mv "$db.n" "$db"; done ;;
+  -Sl) while read -r n v _; do i=$(ver "$n" "$db"); echo "extra $n $v${i:+ [installed${i/#/: }]}" |
+         sed 's/ \[installed: '"$v"'\]$/ [installed]/'; done < "$sync" ;;
+  -Si) shift; for p in "$@"; do set -- $(awk -v n="$p" '$1 == n' "$sync"); shift 2
+         echo "Name            : $p"; echo "Depends On      : ${*//\~/}"; done ;;
   -U) shift; echo "pacman -U $*" >> "$T/calls"
       for f in "$@"; do [[ $f == -* ]] && continue
         b=$(basename "$f"); b=${b%-aarch64.pkg.tar.*}; v=${b##*-}; b=${b%-*}; v=${b##*-}-$v; n=${b%-*}
@@ -59,7 +63,7 @@ vm() {   # the user's VM of 2026-10-06: Mesa 26.2.3 on LLVM 22, a newer package 
     "make 4.4.1-2" "gcc 15.2.1-1" "python 3.14.0-1" > "$T/db"
   printf '%s\n' "mesa 1:26.2.4-1 llvm-libs" "llvm-libs 23.1.1-1" "ffmpeg 2:9.0.2-2" "libva 2.23.0-1" "dkms 3.2.2-1" \
     "make 4.4.1-2" "gcc 15.2.1-1" "python 3.14.0-1" "python-textual 8.2.8-2 python" "jq 1.8.1-1" \
-    "opencl-mesa 1:26.2.4-1 mesa llvm-libs" > "$T/sync"
+    "opencl-mesa 1:26.2.4-1 mesa llvm-libs" "lldb 23.1.1-1 ~llvm-libs ~python" > "$T/sync"
   : > "$T/calls"; rm -rf "$T/guard" "$T/cache"; mkdir -p "$T/cache"
 }
 P=src/guest/pkg-add G=src/guest/gbm-guard
@@ -85,6 +89,17 @@ out=$("$P" opencl-mesa 2>&1); rc=$?
 [[ $rc == 1 && ! -s $T/calls && $out == *"mesa 1:26.2.3-1 -> 1:26.2.4-1"* && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* && $out == *"omarchy update"* ]] &&
   pass "a missing package that would update Mesa and LLVM alone: refused, says why" ||
   fail "partial update not refused: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm
+out=$("$P" lldb 2>&1); rc=$?
+[[ $rc == 1 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
+  pass "a missing package built for a newer LLVM (unversioned dependency): refused" ||
+  fail "lldb 23 beside LLVM 22: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm; printf '%s\n' "llvm-libs 23.1.1-1" >> "$T/db"; grep -v '^llvm-libs 22' "$T/db" > "$T/db.n"; mv "$T/db.n" "$T/db"
+out=$("$P" lldb 2>&1); rc=$?
+[[ $rc == 0 && $(cat "$T/calls") == "pacman -S --noconfirm lldb" ]] && pass "the same once LLVM is up to date: installed" ||
+  fail "lldb with LLVM 23: rc $rc, calls '$(cat "$T/calls")', said '$out'"
 
 vm
 out=$("$P" no-such-package 2>&1); rc=$?

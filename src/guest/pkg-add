@@ -38,8 +38,22 @@ while read -r n v; do
   have=$(pacman -Q "$n" 2>/dev/null | awk '{ print $2 }') || have=""
   [[ -n $have && $have != "$v" ]] && change+=", $n $have -> $v"
 done <<<"$targets"
+# A new package built against newer libraries than the VM has is a partial
+# update too, though pacman lets it in (unversioned dependencies: lldb 23
+# beside LLVM 22). So: none of the new packages may depend on an installed
+# package that has a newer version waiting in the package list.
+waiting=$(pacman -Sl 2>/dev/null | awk '/\[installed: / { print $2 }')
+if [[ -n $waiting && -z $change ]]; then
+  # shellcheck disable=SC2046 # one package per word
+  deps=$(pacman -Si $(awk '{ print $1 }' <<<"$targets") 2>/dev/null |
+    awk '/^Depends On/ { f = 1; sub(/^Depends On *: */, ""); print; next } f && /^ / { print; next } { f = 0 }' |
+    tr ' ' '\n' | sed 's/[<>=].*//' | grep -v '^None$' | grep -v '^$' | sort -u)
+  for d in $(grep -Fxf <(echo "$waiting") <<<"$deps"); do
+    change+=", $d $(pacman -Q "$d" 2>/dev/null | awk '{ print $2 }') -> $(pacman -Sl 2>/dev/null | awk -v n="$d" '$2 == n { print $3; exit }')"
+  done
+fi
 if [[ -n $change ]]; then
-  echo "OmacVM: $names not installed: that would also update ${change#, } on its own (a partial update can break the desktop). Update the system with omarchy update, then omacvm apply" >&2
+  echo "OmacVM: $names not installed: it goes with newer versions of what the VM has (${change#, }); alone it would be a partial update, which can break the desktop. Update the system with omarchy update, then omacvm apply" >&2
   exit 1
 fi
 { echo "== $(date '+%F %T') pkg-add ${asdeps[*]-} $names"; } >>"$LOG" 2>/dev/null || true
