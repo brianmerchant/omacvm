@@ -208,6 +208,11 @@ cat > "$C/Info.plist" <<EOF
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
   <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>Your Mac folder setting shares a folder on this drive with the VM at ~/Mac.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>Your Mac folder setting shares a folder on this network drive with the VM at ~/Mac.</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>OmacVM Bridge shows this Mac's Bluetooth devices in your Linux VM's status bar, and connects, disconnects or forgets them when you ask there.</string>$( (( TEST )) && printf '\n  <key>OmacVMGesturesDomain</key><string>%s</string>' "$GESTURES_ID")
 </dict>
 </plist>
