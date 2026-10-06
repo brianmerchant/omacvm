@@ -19,6 +19,8 @@ cat > "$T/bin/pacman" <<'EOF'
 #!/bin/bash
 db=$T/db; sync=$T/sync
 ver() { awk -v n="$1" '$1 == n { print $2 }' "$2"; }
+# Like gettext: German output unless the locale is C (LC_ALL, then LANG).
+loc() { if [[ ${LC_ALL:-${LANG:-C}} == C* ]]; then cat; else sed 's/installed/installiert/; s/^Depends On     /Hängt ab von   /'; fi; }
 case $1 in
   -T) shift; rc=0; for p in "$@"; do [[ -n $(ver "$p" "$db") ]] || { echo "$p"; rc=127; }; done; exit $rc ;;
   -Q) [[ $# == 1 ]] && { cat "$db"; exit 0; }
@@ -38,9 +40,9 @@ case $1 in
       for p in "$@"; do [[ $p == -* ]] && continue; s=$(ver "$p" "$sync")
         grep -v "^$p " "$db" > "$db.n"; echo "$p $s" >> "$db.n"; mv "$db.n" "$db"; done ;;
   -Sl) while read -r n v _; do i=$(ver "$n" "$db"); echo "extra $n $v${i:+ [installed${i/#/: }]}" |
-         sed 's/ \[installed: '"$v"'\]$/ [installed]/'; done < "$sync" ;;
+         sed 's/ \[installed: '"$v"'\]$/ [installed]/' | loc; done < "$sync" ;;
   -Si) shift; for p in "$@"; do set -- $(awk -v n="$p" '$1 == n' "$sync"); shift 2
-         echo "Name            : $p"; echo "Depends On      : ${*//\~/}"; done ;;
+         { echo "Name            : $p"; echo "Depends On      : ${*//\~/}"; } | loc; done ;;
   -U) shift; echo "pacman -U $*" >> "$T/calls"
       for f in "$@"; do [[ $f == -* ]] && continue
         b=$(basename "$f"); b=${b%-aarch64.pkg.tar.*}; v=${b##*-}; b=${b%-*}; v=${b##*-}-$v; n=${b%-*}
@@ -95,6 +97,14 @@ out=$("$P" lldb 2>&1); rc=$?
 [[ $rc == 1 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
   pass "a missing package built for a newer LLVM (unversioned dependency): refused" ||
   fail "lldb 23 beside LLVM 22: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+# pacman's words are translated (Depends On, [installed: ...]); the checks
+# must not go blind in a German VM (the boot timer gets the VM's locale).
+vm
+out=$(LANG=de_CH.UTF-8 LC_ALL= "$P" lldb 2>&1); rc=$?
+[[ $rc == 1 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
+  pass "the same in a German VM: refused" ||
+  fail "German locale: rc $rc, calls '$(cat "$T/calls")', said '$out'"
 
 vm; printf '%s\n' "llvm-libs 23.1.1-1" >> "$T/db"; grep -v '^llvm-libs 22' "$T/db" > "$T/db.n"; mv "$T/db.n" "$T/db"
 out=$("$P" lldb 2>&1); rc=$?

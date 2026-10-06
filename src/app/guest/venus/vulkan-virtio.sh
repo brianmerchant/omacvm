@@ -100,7 +100,7 @@ for f in "$B"/vulkan-virtio-"$FIXED"-*-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=
 [[ -n $pkg ]] || fail "the build made no package"
 # Keep how the distro's package was installed (a dependency of Omarchy's, or by hand).
 reason=--asexplicit
-pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
+LC_ALL=C pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
 pacman -U --noconfirm "$reason" "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
 s=$(status)
 if [[ ${s%% *} == no-venus || ${s%% *} == no-pages ]]; then
