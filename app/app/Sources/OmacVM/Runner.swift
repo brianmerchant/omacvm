@@ -116,7 +116,7 @@ final class Runner {
         // app passes it on to OmacVM Bridge (AuthRelay). Only for a VM with
         // touch-id on at this start: other VMs keep their device list. A
         // port on vser0 moves no PCI device; the VM finds it by its name.
-        if MacLinks.load(folder: c.folder).touchID {
+        if links.touchID {
             a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
                   "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
         }
@@ -208,6 +208,9 @@ final class Runner {
         try? FileManager.default.removeItem(at: c.displaySocket)
         let p = Process()
         p.executableURL = Paths.qemu
+        // What of the Mac this start may use (its features), read once: the
+        // Touch ID port in the arguments and its relay below agree.
+        links = MacLinks.load(folder: c.folder)
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -217,7 +220,6 @@ final class Runner {
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
         // ports (patched libslirp), and only for its features that are on:
         // Omanotch, Gestures, Bridge.
-        links = MacLinks.load(folder: c.folder)
         env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
         // And the port of the Mac's proxy on its 127.0.0.1, if it has one
         // (MacProxy, #122): a VM built behind it reaches it as 10.0.2.2.

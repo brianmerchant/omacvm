@@ -127,6 +127,7 @@ public final class AuthRelay: @unchecked Sendable {
     private var current: (id: String, fd: Int32, lastPing: Date, cancelled: Bool)?
     private let writeLock = NSLock()
     private var stopped = false
+    private var closed = false   // the guest's socket (under writeLock: no write after the close)
 
     /// `guest`: the connected chardev socket. `connectBridge`: a connected
     /// socket to the Bridge, or nil. `headers`: the app's own headers (token,
@@ -176,6 +177,8 @@ public final class AuthRelay: @unchecked Sendable {
         stopped = true
         lock.unlock()
         drop(nil)
+        writeLock.lock(); defer { writeLock.unlock() }
+        closed = true
         Darwin.shutdown(guest, SHUT_RDWR)
         Darwin.close(guest)
     }
@@ -213,6 +216,7 @@ public final class AuthRelay: @unchecked Sendable {
     private func answer(_ id: String, _ a: Answer?, note: String? = nil) {
         if let note { log(note) }
         writeLock.lock(); defer { writeLock.unlock() }
+        guard !closed else { return }
         let d = Self.answerLine(id: id, a)
         _ = d.withUnsafeBytes { b -> Bool in
             var off = 0

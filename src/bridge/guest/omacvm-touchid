@@ -336,7 +336,7 @@ def over_port(key, data):
             say(f"Touch ID not available ({WHY['busy']}), use your password")
         return 1
     nonce, auth = signed(key, data)
-    stop, writing, sent = threading.Event(), threading.Lock(), False
+    stop, writing, sent, pinger = threading.Event(), threading.Lock(), False, None
 
     def send(o, wait):
         with writing:   # whole lines: the pings and the cancel never interleave
@@ -352,7 +352,8 @@ def over_port(key, data):
             return 1
         sent = True
         say("Touch ID on your Mac, or wait for the password prompt")
-        threading.Thread(target=pings, daemon=True).start()
+        pinger = threading.Thread(target=pings, daemon=True)
+        pinger.start()
         buf, end = b"", time.monotonic() + ANSWER_TIMEOUT + 5
         p = select.poll()
         p.register(fd, select.POLLIN)
@@ -390,6 +391,8 @@ def over_port(key, data):
                 buf = b""
     finally:
         stop.set()
+        if pinger:
+            pinger.join(0.5)   # no ping after the close
         if sent:   # the Mac's dialog goes at once too (deadline, Ctrl+C; after an answer the app ignores it)
             send({"op": "cancel", "id": nonce}, 0.2)
         os.close(fd)
