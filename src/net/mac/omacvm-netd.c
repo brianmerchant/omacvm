@@ -485,7 +485,10 @@ static void *watchSharing(void *arg) {
 //   rules go in on its stdin.
 // - A routing socket says when interfaces or addresses change (no polling);
 //   changes are gathered for NAT_SETTLE ms, then the anchor is set to what is
-//   needed, only when that changed (or the anchor lost it).
+//   needed, only when that changed (or the anchor lost it). macOS sends no
+//   RTM_NEWADDR for an IPv4 address added to an interface that is already up
+//   (an IKEv2 ipsecN, a utun brought up before its address), only RTM_ADD of
+//   the address's own route: route changes count too (natChange).
 // - NAT_FILE (readable by all: install.sh --status and omacvm check show it)
 //   says what is translated and keeps the pf reference, so the next daemon
 //   removes what one that crashed left.
@@ -895,6 +898,21 @@ static long msSince(const struct timespec *t) {
     return (n.tv_sec - t->tv_sec) * 1000 + (n.tv_nsec - t->tv_nsec) / 1000000;
 }
 
+// A routing message (len bytes) that can change what needs our NAT: an
+// interface's state, an address, or a route that is not a neighbour's
+// (ARP/NDP) or a per-destination copy (RTF_LLINFO, RTF_WASCLONED: they come
+// with every new peer and change nothing for the NAT).
+static int natChange(const void *msg, ssize_t len) {
+    struct rt_msghdr m;
+    if (len < (ssize_t)sizeof m) return 0;
+    memcpy(&m, msg, sizeof m);
+    switch (m.rtm_type) {
+    case RTM_IFINFO: case RTM_IFINFO2: case RTM_NEWADDR: case RTM_DELADDR: return 1;
+    case RTM_ADD: case RTM_DELETE: case RTM_CHANGE: return !(m.rtm_flags & (RTF_LLINFO | RTF_WASCLONED));
+    default: return 0;
+    }
+}
+
 // Waits for changes of interfaces and addresses (routing socket) and for
 // natPoke, then lets the NAT follow.
 static void *natWatch(void *arg) {
@@ -919,10 +937,7 @@ static void *natWatch(void *arg) {
             char b[2048];
             ssize_t r = read(rs, b, sizeof b);
             if (r < 0 && errno == ENOBUFS) settle = NAT_SETTLE;   // messages lost: something changed
-            else if (r >= (ssize_t)sizeof(struct rt_msghdr)) {
-                int t = ((struct rt_msghdr *)(void *)b)->rtm_type;
-                if (t == RTM_IFINFO || t == RTM_NEWADDR || t == RTM_DELADDR || t == RTM_IFINFO2) settle = NAT_SETTLE;
-            }
+            else if (natChange(b, r)) settle = NAT_SETTLE;
         }
         if (settle >= 0) {
             if (due < 0) { clock_gettime(CLOCK_MONOTONIC, &first); due = settle; }
