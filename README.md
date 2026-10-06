@@ -77,6 +77,7 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
 | Control centre in Omarchy | ✅ | ✅ | ✅ | ✅ |
 | Prebuilt VM (5 min) | ✅ | ✅ | ✅ | ✅ |
+| x86 Linux apps (optional, slower) | ✅ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
 ¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL in 3.0.0); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows are copied through the CPU, so full-screen Vulkan is slow; OpenGL and browsers are the same either way; WebGPU and OpenCL opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display

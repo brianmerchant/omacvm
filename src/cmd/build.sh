@@ -19,7 +19,7 @@
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
-#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery external-brightness idle-lock autologin thp-kernel)
+#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery external-brightness idle-lock autologin thp-kernel x86-apps)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+, UTM 5, VMware Fusion 13+ or OmacVM.app, and
 # Homebrew's zstd + e2fsprogs (not for OmacVM.app, which builds the VM with its
@@ -55,7 +55,7 @@ linux_name() {
 }
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
-BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=1; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; EXT_BRIGHTNESS=1; CHROMIUM_VIDEO=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0; CONTROL=1
+BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=1; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; EXT_BRIGHTNESS=1; CHROMIUM_VIDEO=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0; CONTROL=1; X86=0
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0; IMAGE=0; SOURCE=""
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
@@ -75,6 +75,7 @@ feature_flag() {   # NAME on|off
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
     thp-kernel) THP=$v ;;
+    x86-apps) X86=$v ;;
     control-centre) CONTROL=$v ;;
     fast-network) [[ $2 == off ]] || usage "the fast network goes on after the build: omacvm enable fast-network --vm NAME" ;;
     vulkan) [[ $2 == off ]] || usage "Vulkan goes on after the build: omacvm enable vulkan --vm NAME" ;;
@@ -385,6 +386,7 @@ fvar() {
     scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; camera) echo CAMERA ;; idle-lock) echo IDLE_LOCK ;;
     battery) echo BATTERY ;; external-brightness) echo EXT_BRIGHTNESS ;; chromium-video) echo CHROMIUM_VIDEO ;;
     autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;; control-centre) echo CONTROL ;;
+    x86-apps) echo X86 ;;
   esac
 }
 fget() { local v; v=$(fvar "$1"); echo "${!v:-0}"; }
@@ -448,7 +450,7 @@ esac
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
        mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" external-brightness "$EXT_BRIGHTNESS" chromium-video "$CHROMIUM_VIDEO" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP"
-       control-centre "$CONTROL")
+       control-centre "$CONTROL" x86-apps "$X86")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
   (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."
