@@ -1,7 +1,7 @@
 #!/bin/bash
 # x86 apps (as root, in the VM): x86_64 Linux programs and AppImages run on
 # the VM's ARM CPU through box64. Arch Linux ARM has no box64 package, so this
-# builds the one in PKGBUILD here (pinned release, a few minutes) and installs
+# builds the one in PKGBUILD here (pinned commit, a few minutes) and installs
 # it with pacman; its binfmt rule makes x86_64 programs start like native ones.
 #   install.sh on        build and install box64 if it is missing or older
 #   install.sh off       remove OmacVM's box64 package (silent when there is none)
@@ -12,7 +12,7 @@
 # under a scratch folder.
 set -euo pipefail
 cd "$(dirname "$0")"
-VER=$(sed -n 's/^pkgver=//p' PKGBUILD)-$(sed -n 's/^pkgrel=//p' PKGBUILD)
+VER=$(bash -c 'source ./PKGBUILD; echo "$pkgver-$pkgrel"')
 ROOT=${OMACVM_X86_ROOT:-}
 BINFMT=$ROOT/proc/sys/fs/binfmt_misc
 LOG=$ROOT/var/log/omacvm-x86-apps.log

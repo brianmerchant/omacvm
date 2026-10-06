@@ -14,6 +14,7 @@ expect() {   # WHAT WANT GOT
 }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 S=$T/state   # what the stand-ins share: installed, packager, registered
+V=$(bash -c 'source "$1"; echo "$pkgver-$pkgrel"' _ "$R/src/x86/guest/PKGBUILD")   # this version
 mkdir -p "$T/bin"
 
 cat > "$T/bin/pacman" <<'EOF'
@@ -24,7 +25,7 @@ case $1 in
   -Q) [[ -s $S/installed ]] || exit 1; echo "box64 $(cat "$S/installed")" ;;
   -Qi) [[ -s $S/installed ]] || exit 1; printf 'Name            : box64\nPackager        : %s\n' "$(cat "$S/packager")" ;;
   -Rns) [[ " $* " == *" box64 "* ]] && rm -f "$S/installed" ;;
-  -U) for a in "$@"; do [[ $a == *.pkg.tar.* ]] && { echo 0.4.4-1 > "$S/installed"; echo "OmacVM <omacvm@users.noreply.github.com>" > "$S/packager"; touch "$S/hook"; }; done ;;
+  -U) for a in "$@"; do [[ $a == *.pkg.tar.* ]] && { echo "$V" > "$S/installed"; echo "OmacVM <omacvm@users.noreply.github.com>" > "$S/packager"; touch "$S/hook"; }; done ;;
 esac
 exit 0
 EOF
@@ -53,7 +54,7 @@ EOF
 cat > "$T/bin/makepkg" <<'EOF'
 #!/bin/bash
 [[ $MAKEPKG == ok ]] || exit 1
-: > "$PKGDEST/box64-0.4.4-1-aarch64.pkg.tar.zst"
+: > "$PKGDEST/box64-$V-aarch64.pkg.tar.zst"
 EOF
 printf '#!/bin/bash\nexit 0\n' > "$T/bin/chown"
 # The test program, as the binfmt rule would run it: say x86_64 if it is ours.
@@ -69,7 +70,7 @@ run() {   # ARGS... ; env: INSTALLED PACKAGER REGISTERED MISSING MAKEPKG BINFMT_
   echo "${PACKAGER:-OmacVM <omacvm@users.noreply.github.com>}" > "$S/packager"
   [[ ${REGISTERED:-no} == yes ]] && echo enabled > "$T/root/proc/sys/fs/binfmt_misc/box64"
   : > "$T/calls"
-  OUT=$(CALLS=$T/calls S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
+  OUT=$(V=$V CALLS=$T/calls S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
     MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} BINFMT_RESTART=${BINFMT_RESTART:-works} X86_RUNS=${X86_RUNS:-yes} \
     PATH="$T/bin:$PATH" bash "$R/src/x86/guest/install.sh" "$@" 2>&1); CODE=$?
 }
@@ -79,12 +80,12 @@ registered() { [[ -f $T/root/proc/sys/fs/binfmt_misc/box64 ]] && echo yes || ech
 # ---------- status ----------
 INSTALLED="" run --status
 expect "status, none: off" "off box64 not installed" "$OUT"
-INSTALLED=0.4.4-1 REGISTERED=yes run --status
-expect "status, ours and registered: ok" "ok box64 0.4.4-1 runs x86_64 programs and AppImages" "$OUT"
-INSTALLED=0.4.4-1 REGISTERED=no run --status
+INSTALLED=$V REGISTERED=yes run --status
+expect "status, ours and registered: ok" "ok box64 $V runs x86_64 programs and AppImages" "$OUT"
+INSTALLED=$V REGISTERED=no run --status
 expect "status, not registered: broken" broken "${OUT%% *}"
 INSTALLED=0.4.2-1 REGISTERED=yes run --status
-expect "status, older: needed" "needed box64 0.4.2-1 is older than 0.4.4-1: omacvm apply" "$OUT"
+expect "status, older: needed" "needed box64 0.4.2-1 is older than $V: omacvm apply" "$OUT"
 INSTALLED=0.4.0-1 PACKAGER="someone <a@b>" run --status
 expect "status, installed by hand: ok, left alone" "ok box64 0.4.0-1 (not OmacVM's: installed by hand, left alone)" "$OUT"
 
@@ -92,17 +93,17 @@ expect "status, installed by hand: ok, left alone" "ok box64 0.4.0-1 (not OmacVM
 INSTALLED="" run off
 expect "off, none: silent, status 0" "0 " "$CODE $OUT"
 expect "off, none: pacman removes nothing" no "$(called "pacman -Rns")"
-INSTALLED=0.4.4-1 REGISTERED=yes run off
+INSTALLED=$V REGISTERED=yes run off
 expect "off, ours: removed" "0 yes" "$CODE $(called "pacman -Rns --noconfirm box64")"
 expect "off, ours: binfmt rule gone" no "$(registered)"
-INSTALLED=0.4.4-1 REGISTERED=yes PACKAGER="someone <a@b>" run off
+INSTALLED=$V REGISTERED=yes PACKAGER="someone <a@b>" run off
 expect "off, installed by hand: left alone" "0 no" "$CODE $(called "pacman -Rns")"
 
 # ---------- on ----------
-INSTALLED=0.4.4-1 REGISTERED=yes run on
+INSTALLED=$V REGISTERED=yes run on
 expect "on, already there: no build" "0 no" "$CODE $(called "runuser")"
-expect "on, already there: says so" "x86 apps: box64 0.4.4-1 runs x86_64 programs and AppImages" "$OUT"
-INSTALLED=0.4.4-1 REGISTERED=no run on
+expect "on, already there: says so" "x86 apps: box64 $V runs x86_64 programs and AppImages" "$OUT"
+INSTALLED=$V REGISTERED=no run on
 expect "on, rule lost: registered again, no build" "0 yes no" "$CODE $(registered) $(called "runuser")"
 
 MISSING="cmake python" run on
@@ -111,7 +112,7 @@ expect "on, fresh VM: built as nobody" yes "$(called "runuser -u nobody")"
 expect "on, fresh VM: build tools as dependencies" yes "$(called "pacman -S --needed --noconfirm --asdeps cmake python")"
 expect "on, fresh VM: build tools removed after" yes "$(called "pacman -Rns --noconfirm cmake python")"
 expect "on, fresh VM: binfmt rule registered" yes "$(registered)"
-expect "on, fresh VM: last line" "x86 apps: box64 0.4.4-1 runs x86_64 programs and AppImages" "$(tail -1 <<<"$OUT")"
+expect "on, fresh VM: last line" "x86 apps: box64 $V runs x86_64 programs and AppImages" "$(tail -1 <<<"$OUT")"
 expect "on, fresh VM: build folder gone" "" "$(ls -d /var/tmp/omacvm-box64.* 2>/dev/null | while read -r d; do [[ $d -nt $T/calls ]] && echo "$d"; done)"
 
 INSTALLED=0.4.2-1 REGISTERED=yes run on
@@ -154,6 +155,8 @@ assert all((b[k] & mask[k]) == magic[k] for k in range(20)), "box64's binfmt rul
 EOF
 [[ $? == 0 ]] || fail=1
 pk=$R/src/x86/guest/PKGBUILD
+expect "PKGBUILD: a pinned commit, not a branch" yes "$(grep -qE '^_commit=[0-9a-f]{40} ' "$pk" && echo yes)"
+expect "PKGBUILD: no settings app without its PyQt (menu entry)" yes "$(grep -q 'rm -f "$pkgdir/usr/bin/box64-configurator" "$pkgdir/usr/share/applications/box64-configurator.desktop"' "$pk" && echo yes)"
 expect "PKGBUILD: two sources, two sha256s" "2 2" \
   "$(bash -c 'source "$1"; echo "${#source[@]} ${#sha256sums[@]}"' _ "$pk")"
 expect "PKGBUILD: no SKIP checksum" 0 "$(grep -c SKIP "$pk")"
