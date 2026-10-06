@@ -186,6 +186,9 @@ in more words.
   tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
   Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
   ([details](docs/features.md#x86-linux-apps))
+- OmacVM.app: Omarchy's scale panel offers 1.25 and 1.6 on notched Macs
+  too (full screen leaves a few black rows at the bottom). On every Mac the
+  VM window now resizes in 20 point steps.
 - OmacVM.app's own window (start, options, setup) opens centred on the
   MacBook's built-in display, not somewhere on an external monitor. With
   the lid closed or on a Mac without a built-in display, it opens centred

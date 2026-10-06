@@ -808,6 +808,19 @@ grep -q '^    omacvm_globe_init();$' "$source_dir/ui/cocoa.m" && grep -q 'if (om
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-clean.patch"
 "$native_dir/Tests/display/test-quit-clean.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: quits by itself or presses the power button once (test-quit-clean.sh)"
+# OmacVM: guest sizes that fit Omarchy's scale presets (full screen a few
+# rows shorter, black at the bottom of a window that still fills the area,
+# so Omanotch finds it; a window in 20 point steps); last of the cocoa
+# patches, and its logic's test.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-clean-size-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-clean-size.patch"
+"$native_dir/Tests/display/test-clean-size.sh"
+grep -q 'OmacVMSize clean = omacvm_clean_size(' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not size the guest for Omarchy's scales (clean-size patch)"
+grep -q '\[\[self window\] setContentSize:area\];' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-screen window must fill the area (Omanotch), clean-size patch"
+grep -q 'full = isFullscreen && omacvm_present_layer() &&' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: rows may be cut only with the IOSurface layer below a notch, clean-size patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
