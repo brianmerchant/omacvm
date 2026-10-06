@@ -154,6 +154,62 @@ PAM_USER=root run yes; expect "polkit as root (auth_admin for a user outside whe
 for i in $(seq 400); do note org.freedesktop.policykit.exec; done
 if (( $(wc -c < "$T/run/vincent") <= 4200 )); then ok "notes stay short"; else bad "notes grow: $(wc -c < "$T/run/vincent") bytes"; fi
 
+# ---- OmacVM.app: the port org.omacvm.auth (a Unix socket standing in), the app relaying to the Bridge ----
+export PAM_SERVICE=sudo
+PS=$T/auth.sock
+python3 "$R/src/tests/touchid/fake-auth-port.py" "$T/bridge" "$PS" "$(cat "$T/bridge/port")" 2> "$T/bridge/port-err" & PPID2=$!
+trap 'kill "$PPID2" 2>/dev/null; if [[ -n $FPID ]]; then kill "$FPID" 2>/dev/null; fi; rm -rf "$T"' EXIT
+for _ in $(seq 100); do [[ -e $T/bridge/port-ready ]] && break; sleep 0.1; done
+echo "OMACVM_VM_TYPE=app" > "$T/etc/env"
+export OMACVM_TOUCHID_AUTH_PORT=$PS
+port_ops() { cut -d' ' -f1 "$T/bridge/port-ops" 2>/dev/null | sort | uniq -c | awk '{printf "%s=%s ", $2, $1}'; }
+: > "$T/bridge/port-mode"; : > "$T/bridge/port-ops"
+mv "$T/etc/touchid-token" "$T/token.off"   # the app adds the token: the VM needs none for the port
+s=$(ms); run yes; took=$(( $(ms) - s ))
+expect "app: yes over the port: let in" 0 "$rc"
+expect "app: asks on the screen" "Touch ID on your Mac, or wait for the password prompt" "$(head -1 "$T/out")"
+asked "app: the same request" '{"user":"vincent","kind":"sudo","detail":"pacman -Syu","tty":"pts/3"}'
+expect "app: the token added by the app, not the VM" "Bearer $(cat "$T/bridge/token")" "$(tail -1 "$T/bridge/requests" | python3 -c 'import json,sys; print(json.load(sys.stdin)["auth"])')"
+expect "app: one request, then a cancel the app ignores" "cancel=1 touchid=1 " "$(port_ops)"
+if (( took < 1500 )); then ok "app: answered in ${took} ms"; else bad "app: took ${took} ms"; fi
+mv "$T/token.off" "$T/etc/touchid-token"
+run no-not-front; expect "app: VM not in front: said" "Touch ID not available (VM not in front), use your password" "$(tail -1 "$T/out")"
+run off; expect "app: off on the Mac: said" "Touch ID not available (Touch ID off), use your password" "$(tail -1 "$T/out")"
+run unsigned; expect "app: unsigned yes: password" 1 "$rc"
+run other-key; expect "app: yes signed with another key: password" 1 "$rc"
+run other-nonce; expect "app: yes for another request: password" 1 "$rc"
+echo stale > "$T/bridge/port-mode"; run yes; expect "app: an earlier client's answer and junk skipped, ours taken" 0 "$rc"
+echo status0 > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
+expect "app: the Bridge did not answer: password" 1 "$rc"
+if (( took < 1500 )); then ok "app: ... at once (${took} ms)"; else bad "app: status 0 took ${took} ms"; fi
+echo close > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
+expect "app: the app hangs up: password" 1 "$rc"
+if (( took < 2000 )); then ok "app: ... at once (${took} ms)"; else bad "app: hang-up took ${took} ms"; fi
+: > "$T/bridge/port-mode"
+OMACVM_TOUCHID_AUTH_PORT=$T/none run yes
+expect "app: no port (the VM started before touch-id was on): password" 1 "$rc"
+expect "app: ... and says to restart once" "Touch ID not available (shut the VM down and start it again once), use your password" "$(tail -1 "$T/out")"
+asked "app: ... without asking" ""
+PAM_TTY= run yes; expect "app: the same rules (sudo without a terminal): password" 1 "$rc"; asked "app: ... without asking" ""
+# A dialog nobody answers: the pings keep it up; when the client is killed (Ctrl+C) the pings stop and it goes.
+echo hang > "$T/bridge/mode"; rm -f "$T/bridge/closed"; : > "$T/bridge/port-ops"
+python3 "$G/omacvm-touchid" > /dev/null 2>&1 & CP=$!
+sleep 2.5
+expect "app: pings keep the dialog up past the app's timeout" no "$([[ -f $T/bridge/closed ]] && echo yes || echo no)"
+n=$(grep -c '^ping ' "$T/bridge/port-ops"); if (( n >= 3 )); then ok "app: pinged ($n in 2.5 s)"; else bad "app: $n pings in 2.5 s"; fi
+kill -9 "$CP"; wait "$CP" 2>/dev/null
+for _ in $(seq 40); do [[ -f $T/bridge/closed ]] && break; sleep 0.1; done
+expect "app: client killed: the Mac's dialog goes (pings stopped)" yes "$([[ -f $T/bridge/closed ]] && echo yes)"
+rm -f "$T/bridge/closed"; : > "$T/bridge/port-ops"
+s=$(ms); OMACVM_TOUCHID_DEADLINE=1 run hang; took=$(( $(ms) - s ))
+for _ in $(seq 20); do [[ -f $T/bridge/closed ]] && break; sleep 0.1; done
+expect "app: the deadline: password, and a cancel" "1 cancel" "$rc $(tail -1 "$T/bridge/port-ops" | cut -d' ' -f1)"
+expect "app: ... the Mac's dialog goes" yes "$([[ -f $T/bridge/closed ]] && echo yes)"
+if (( took < 2500 )); then ok "app: ... after the deadline (${took} ms)"; else bad "app: deadline took ${took} ms"; fi
+kill "$PPID2" 2>/dev/null; wait "$PPID2" 2>/dev/null
+rm -f "$T/etc/env"; unset OMACVM_TOUCHID_AUTH_PORT
+export PAM_SERVICE=polkit-1; rm -f "$T/run/vincent"; note org.freedesktop.policykit.exec   # as the polkit part left it
+
 # ---- a Bridge that never finishes, a caller that goes, a Bridge that is down ----
 s=$(ms); OMACVM_TOUCHID_DEADLINE=2 run drip; took=$(( $(ms) - s ))
 expect "a dripping Bridge: password" 1 "$rc"
@@ -200,11 +256,16 @@ expect "polkit's helper may reach the Bridge (no env: the default address), noth
 mkdir -p "$T/root/etc/omacvm"; echo "OMACVM_HOST='10.0.2.2'" > "$T/root/etc/omacvm/env"
 OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" on
 expect "... the Bridge's address from the VM's env" "IPAddressAllow=10.0.2.2" "$(grep IPAddressAllow "$D")"
+echo "OMACVM_VM_TYPE=app" >> "$T/root/etc/omacvm/env"; OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" on
+expect "OmacVM.app: polkit's helper gets the port, no network" "BindPaths=-/dev/virtio-ports/org.omacvm.auth DeviceAllow=char-virtio-portsdev rw" \
+  "$(grep -v '^[#[]' "$D" | tr '\n' ' ' | sed 's/ $//')"
+echo "OMACVM_HOST='10.0.2.2'" > "$T/root/etc/omacvm/env"
+expect "the port rule: org.omacvm.auth root's alone" 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' "$(cat "$T/root/etc/udev/rules.d/70-omacvm-auth.rules")"
 expect "the old rule's name gone" no "$([[ -e $T/root/etc/polkit-1/rules.d/49-omacvm-touchid.rules ]] && echo yes || echo no)"
 touch "$T/root/etc/omacvm/touchid-key" "$T/root/etc/omacvm/touchid-token"
 OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" off
 expect "off: sudo as before" "" "$(diff "$T/pam.orig/sudo" "$P/sudo")"
 expect "off: our polkit-1 copy gone, the vendor's counts again" no "$([[ -e $P/polkit-1 ]] && echo yes || echo no)"
 expect "off: client, rule, drop-in and keys gone" "" \
-  "$(ls "$T/root/usr/lib/omacvm" "$T/root/etc/polkit-1/rules.d" "$T/root/etc/systemd/system" "$T/root/etc/omacvm" 2>/dev/null | grep -v ':$' | grep -vx env | grep .)"
+  "$(ls "$T/root/usr/lib/omacvm" "$T/root/etc/polkit-1/rules.d" "$T/root/etc/systemd/system" "$T/root/etc/omacvm" "$T/root/etc/udev/rules.d" 2>/dev/null | grep -v ':$' | grep -vx env | grep .)"
 exit $fail

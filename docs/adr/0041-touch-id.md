@@ -1,7 +1,7 @@
 # 0041: Touch ID in the VM: the Mac answers yes or no to the VM's own PAM
 
-Status: accepted (`touch-id`, for 3.0.2). Built for Parallels, UTM and
-VMware Fusion; OmacVM.app's auth port is still to do (see Built, below).
+Status: accepted (`touch-id`, for 3.0.2). Built for Parallels, UTM,
+VMware Fusion and OmacVM.app (its `org.omacvm.auth` port, see Built).
 
 ## Context
 
@@ -149,13 +149,56 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   token, then the signed request). OmacVM.app: a new virtio port
   `org.omacvm.auth`, root 0600 by udev rule, so the control centre's port
   (one opener, held up to 60 s by status requests) never blocks a sudo.
-  The app relays it like `org.omacvm.control`.
+  The app relays it like `org.omacvm.control` (see "OmacVM.app's port").
 - Timeouts in the client: 1 s to connect, 35 s for the answer, and one
   deadline of 40 s for the whole request (a "Bridge" that drips a byte at a
   time cannot hold sudo or the agent), then exit 1. Ctrl+C in sudo kills
   the client; the agent's Cancel kills the helper, and the client, which
   watches its parent, stops too; either way the closed connection cancels
   the Mac dialog.
+
+### OmacVM.app's port
+
+- The port is there only for a VM whose features say `touch-id=on` when
+  it starts (`MacLinks.touchID`; no features file, or not named: no port).
+  Every other VM keeps its device list. A port on `vser0` moves no PCI
+  device, and the VM finds it by its name. So turning Touch ID on for an
+  app VM takes one restart of the VM: `omacvm apply` says so ("OmacVM.app:
+  Touch ID only from the VM's next start"), `omacvm check` fails with "shut
+  it down and start it again" (in the VM: "the VM has no Touch ID port
+  yet"), and the client says "Touch ID not available (shut the VM down and
+  start it again once)". Off again: the port goes at the next start; until
+  then the Bridge has no key for the VM and says `off`.
+- The app (`app/app/Sources/OmacVMAuth`, `AuthRelay`) passes each request
+  on to the Bridge's relay socket with the Bridge token, the relay key and
+  the VM's name (as for the control centre: the guest cannot name another
+  VM), plus the guest's own `X-OmacVM-Auth`. The Bridge checks that
+  signature with the VM's Touch ID key (`touchIDCaller`, relay path) and
+  shows the same system dialog as for the other routes; the app passes the
+  signed answer back byte for byte. The app checks no signature and holds
+  no Touch ID key. The VM needs no Bridge token for the port.
+- Lines, one JSON object each. VM to app: `{"op":"touchid","id":N,
+  "auth":"1 T N SIG","proto":1,"body":"<base64>"}` (N the request's nonce),
+  then `{"op":"ping","id":N}` every 0.5 s and `{"op":"cancel","id":N}` on
+  the way out. App to VM: `{"id":N,"status":S,"answer":"<X-OmacVM-Answer>",
+  "body":"<base64>"}`; status 0: the Bridge did not answer (the password).
+  Lines over 4 KB, bodies over 1 KB, an `auth` whose nonce is not the id:
+  dropped.
+- QEMU's socket does not tell the app when the VM closes the port, so the
+  client pings. No ping for 3 s, a cancel, or a new request (the port has
+  one opener at a time, so the old client is gone) drops the Bridge
+  connection, and the Bridge closes the dialog (`peerGone`). Answers for an
+  earlier client still in the port are skipped by their id.
+- polkit's helper (polkit 127, a sandbox with `PrivateDevices=yes` and
+  `DevicePolicy=strict`): on app VMs its drop-in binds the port into the
+  helper's private `/dev` (`BindPaths=-/dev/virtio-ports/org.omacvm.auth`,
+  `DeviceAllow=char-virtio-portsdev rw`) and gives it no network. The
+  `-`: a VM without the port yet starts the helper anyway (password).
+- A second sudo while one asks: the port is busy (`EBUSY`), "another Touch
+  ID prompt is open", the password.
+- Who shows the dialog: the Bridge, as for Parallels, UTM and Fusion (the
+  system dialog, no click needed). An Omarchy-style panel shown from the
+  process that owns the VM window is the panel's own step.
 
 ### Request and answer
 
@@ -286,6 +329,8 @@ sensor) and the last result.
   `pkexec true`, a polkit action standing in for 1Password; remote session
   refused; Bridge down falls to the password in under 2 s). One manual
   check with a real finger, by the person, on a Mac with Touch ID.
+- OmacVM.app: turning Touch ID on or off takes one restart of the VM (its
+  port is added or removed at the start).
 
 ## Built
 
@@ -323,6 +368,32 @@ sensor) and the last result.
   smaller ones (main thread, fast noes in the log, unsigned `off`, `VM
   clock off`, `sudo-i`, user names with dots, the client stops with its
   caller, a sh note writer).
+- App port VM pass (2026-10-06, MacBook Pro, QEMU-direct test VM with the
+  port as `Runner.swift` adds it, `AuthRelay` in a harness as
+  `Runner.startAuth` runs it, a stand-in Bridge on a Unix socket; no Touch
+  ID dialog): sudo in a uwsm foot terminal asked through the port and was
+  let in (224-250 ms), `pkexec true` too (506-526 ms; needs the device
+  drop-in above), a no gave the password prompt, Ctrl+C dropped the
+  Bridge connection at once, `kill -9` of the client after 2.9 s (pings
+  stopped), the port held by another opener: "another Touch ID prompt is
+  open", the app not relaying: "OmacVM.app does not answer", SSH never
+  asked, no Bridge token in the VM. A helper without the port still asks
+  for the password.
+- The same pass through the real app (2026-10-06, MacBook Pro, OmacVM
+  Test.app built from this branch, hidden, its relay pointed at the
+  stand-in Bridge): the app gave the VM the port (`Mac links: ... Touch ID
+  on`), sudo let in in 46-76 ms, `pkexec true` in 100-106 ms; no, Ctrl+C,
+  `kill -9` (dropped after 3.0 s), port busy, SSH as above.
+- Real dialog through the app's path (2026-10-06, MacBook Air M2, macOS
+  26.6.2): the Bridge built from this branch (test identity), `AuthRelay`
+  as the app runs it, the VM's request signed with a Touch ID key the Mac
+  knows, a diskless QEMU window in front. The macOS Touch ID dialog
+  (`coreautha`) came up 1.4 s after the request, without a click;
+  Escape closed it, and the VM got the signed answer `no`, `cancelled`.
+  Bridge log: `touchid: from relay (OmacVM A-tidapp): 200 sudo no
+  cancelled`. The first request right after the Bridge started got 409
+  `unknown-vm` (its VM list was still being read): the password that
+  time.
 - Test VM pass (2026-10-06, OmacVM.app test VM on the MacBook Pro, Arch
   ARM: sudo 1.9.17p2, polkit 127, systemd 262, Hyprland 0.56 through uwsm;
   the real PAM stacks and polkit, a stand-in Bridge on 127.0.0.1 in the
@@ -340,11 +411,21 @@ sensor) and the last result.
   stand-in (the sandbox). The polkit rule costs about 5 ms per check of a
   local subject (11 ms against 6 ms).
 
+- OmacVM.app (2026-10-06): the `org.omacvm.auth` port (`Runner.swift`,
+  only with `touch-id=on`, `MacLinks.touchID`), `AuthRelay`
+  (`app/app/Sources/OmacVMAuth`), the client over the port
+  (`over_port`), the udev rule `70-omacvm-auth.rules` (in `touchid.sh`),
+  the restart notices (`app_links_stale`, `omacvm check`). Tests:
+  `swift run auth-tests` (the relay with the port and the Bridge as socket
+  pairs: answer byte for byte, pings, cancel, a new request, no Bridge,
+  junk), `src/tests/touchid-client.sh` (the client against a stand-in port
+  that relays to the fake Bridge: yes, each no, stale answers, the app
+  gone, no port, the pings, Ctrl+C and the deadline closing the dialog),
+  `src/tests/features-off.sh` (the port only with `touch-id=on`, the
+  restart notices).
+
 Still to do:
 
-- OmacVM.app: the `org.omacvm.auth` virtio port and its relay in the app.
-  Until then the client says "Touch ID not available (OmacVM.app: not
-  yet)" on the app's VMs and the password prompt comes.
 - The manual check with a real finger (the person, on a Mac with Touch ID,
   a Parallels, UTM or Fusion VM): `omacvm enable touch-id`, then in an
   Omarchy terminal `sudo -k; sudo true` (Touch ID dialog "run sudo in

@@ -3,7 +3,8 @@
 POST /omacvm/touchid as touchid.swift answers them, with the answer chosen
 by the test (DIR/mode). Checks the request's signature like the Bridge.
   fake-bridge.py DIR [PORT]   (DIR/token, DIR/key; writes DIR/port, logs DIR/requests)
-PORT: 47831 as a stand-in for the Mac's Bridge inside a test VM; default any."""
+PORT: 47831 as a stand-in for the Mac's Bridge inside a test VM; default any;
+a path: a Unix socket, as the Bridge's relay socket for OmacVM.app (writes DIR/port "unix")."""
 import hashlib, hmac, http.server, json, os, socketserver, sys, time
 
 D = sys.argv[1]
@@ -93,8 +94,19 @@ class Server(http.server.ThreadingHTTPServer):
         self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
 
 
-s = Server(("127.0.0.1", int(sys.argv[2]) if len(sys.argv) > 2 else 0), H)
+class UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+
+if len(sys.argv) > 2 and sys.argv[2].startswith("/"):
+    try:
+        os.unlink(sys.argv[2])
+    except OSError:
+        pass
+    s = UnixServer(sys.argv[2], H)
+else:
+    s = Server(("127.0.0.1", int(sys.argv[2]) if len(sys.argv) > 2 else 0), H)
 with open(f"{D}/port.tmp", "w") as f:
-    f.write(str(s.server_address[1]))
+    f.write(str(s.server_address[1]) if isinstance(s.server_address, tuple) else "unix")
 os.replace(f"{D}/port.tmp", f"{D}/port")
 s.serve_forever()

@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -28,6 +28,10 @@ let package = Package(
         // `swift run features-tests`.
         .target(name: "OmacVMFeatures"),
         .executableTarget(name: "features-tests", dependencies: ["OmacVMFeatures"]),
+        // Touch ID's port for the app's VMs (org.omacvm.auth), relayed to
+        // OmacVM Bridge: `swift run auth-tests`.
+        .target(name: "OmacVMAuth"),
+        .executableTarget(name: "auth-tests", dependencies: ["OmacVMAuth"]),
     ],
     swiftLanguageModes: [.v5]
 )
