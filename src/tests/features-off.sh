@@ -94,7 +94,7 @@ expect "omanotch off, queued: disabled" yes "$(called "systemctl --global disabl
 
 # Omanotch built and running, nobody logged in (its uninstall needs the session).
 reset_root
-file "$H/.local/bin/notchcast"; file "$H/.config/systemd/user/notchcast.service"
+file "$H/.local/bin/notchcast"; file "$H/.local/bin/omanotch-display-panel"; file "$H/.config/systemd/user/notchcast.service"
 file "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
 link "$H/.config/systemd/user/graphical-session.target.wants/notchcast.service" "$H/.config/systemd/user/notchcast.service"
 file "$H/.config/hypr/notchbar.lua"; file "$H/.local/state/omacvm/omanotch"
@@ -102,7 +102,7 @@ file /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
 printf '%s\n' 'require("hypr.other")' '' '-- omarchy-notch-bar: hidden output for the macOS notch helper.' 'require("hypr.notchbar")' > "$ROOT$H/.config/hypr/hyprland.lua"
 run_off omanotch_off 0
 expect "omanotch off, built: its uninstall tried in the session" yes "$(called "in_session bash /repo/omanotch/guest/uninstall.sh")"
-for p in "$H/.local/bin/notchcast" "$H/.config/systemd/user/notchcast.service" "$H/.config/systemd/user/notchcast.service.d" \
+for p in "$H/.local/bin/notchcast" "$H/.local/bin/omanotch-display-panel" "$H/.config/systemd/user/notchcast.service" "$H/.config/systemd/user/notchcast.service.d" \
          "$H/.config/systemd/user/graphical-session.target.wants/notchcast.service" "$H/.config/hypr/notchbar.lua" \
          /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook; do
   expect "omanotch off, built, no session: $p gone" no "$(has "$p")"

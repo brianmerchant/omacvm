@@ -5,6 +5,8 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- Omanotch: Omarchy's display panel no longer lists the hidden NOTCH output
+  as a display (it could be scaled or switched off there).
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
