@@ -66,6 +66,13 @@ OMACVM_SRC=src
 check "no progress line unless asked" "[[ -z \$(unset OMACVM_PROGRESS; progress_line download x 1 2; bytes_watch x 2 /dev/null) ]]"
 check "progress line when asked" "OMACVM_PROGRESS=1 progress_line download x 1 2 | grep -q '^{\"omacvm_progress\": 1, '"
 check "progress.sh sent only when asked" "[[ \$(unset OMACVM_PROGRESS; vm_script base-install.sh | grep -c '^pac_progress()') == 0 && \$(OMACVM_PROGRESS=1 vm_script base-install.sh | grep -c '^pac_progress()') == 1 ]]"
+# In a terminal the watcher returns at once, so stopping it must not end a
+# set -e script (3.0.1 e2e: prebuilt-vm.sh exit 1 right after the download).
+for f in app/scripts/prebuilt-vm.sh app/scripts/vm-common.sh; do
+  while IFS= read -r line; do
+    check "watcher stop survives set -e: ${f##*/}" "(unset OMACVM_PROGRESS; set -e; w=; watch=; bytes_watch x 1 /dev/null & w=\$!; watch=\$w; wait \$w; ${line//\"/\\\"}; true)"
+  done < <(grep -E '^ *kill "\$(w|watch)" 2>/dev/null' "$f")
+done
 # omacvm build --vm-type app drops them anyway (an app of another version).
 f=$(grep -m1 "omacvm_progress\"/d" src/cmd/build.sh); f=${f% |}
 printf '%s\n' '{"omacvm_progress": 1, "phase": "download", "now": "x", "done": 1, "total": 2}' '| raw' 'STEP 2/7 Base' > "$t/cli"

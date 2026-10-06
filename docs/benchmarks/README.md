@@ -214,17 +214,16 @@ cd ~/bench
 - The chart's input is [`chart.json`](chart.json): the medians from
   `results.json` with the GPU rounds added. CPU and Speedometer come from the
   2026-10-03 round, Aquarium and Basemark from the 2026-10-04 GPU round, both
-  in [Results](#results). Numbers from a build that is not released yet are
-  listed under `"unreleased"`; the chart stripes those bars and tags them.
-- GPU compute in the chart: OmacVM.app with Vulkan in the VM (Venus on
-  MoltenVK, OpenCL through rusticl), not released yet. Geekbench 7 GPU OpenCL,
+  in [Results](#results). OmacVM.app's Speedometer, Aquarium and Basemark are
+  3.0.0's, from the Mac mini run below (OmacVM.app 3.0.0). Numbers from a
+  build that is not released yet are listed under `"unreleased"`; the chart
+  stripes those bars and tags them.
+- GPU compute in the chart: OmacVM.app with the vulkan feature (Venus on
+  MoltenVK, OpenCL through rusticl; experimental in 3.0.0). Geekbench 7 GPU OpenCL,
   one locked batch on 2026-10-04: Mac 95,380
   ([252722](https://browser.geekbench.com/v7/gpu/252722)), OmacVM.app 42,486
   ([252731](https://browser.geekbench.com/v7/gpu/252731)), 45 %. Parallels, UTM
   and Fusion offer no OpenCL or Vulkan to the VM.
-- OmacVM.app's Basemark has no full-screen run yet (2157 in a window, not
-  comparable), so its bar is empty. The 2.9.0 candidate (not released) gives
-  the same Aquarium as before on a quiet Mac, 21 to 23 fps in a window.
 
 **About Geekbench.** The free version uploads every result to
 browser.geekbench.com and prints only a link. `bench.sh` saves the link;
@@ -346,12 +345,39 @@ left out), range in brackets.
 | QEMU CPU during the session | 106 % | 130 % |
 | testufo on a virtual 120 Hz display, new frames a second | 88.8-90.6 | 116.6-119.6 |
 
-The chart in the README shows RC2's Aquarium against the Mac's full-screen
-numbers above, tagged "2.9.0 RC", because it is not taken the same way. RC2's
-Basemark is not in the chart: in a window it came out above the other apps'
-full-screen numbers, and that is not a fair comparison (the page size was not
-recorded; see the 2157 run above). The release run in full screen, with the
-VM alone, fills both.
+RC2's numbers are not in the chart: in a window, with another VM running,
+they are not taken the same way as the others. The 3.0.0 run below, in full
+screen with the VM alone, replaced them.
+
+### OmacVM.app 3.0.0 (2026-10-06)
+
+The chart's Speedometer, Aquarium and Basemark for OmacVM.app. Mac mini M4
+(macOS 27, LG 5K display at 60 Hz), Google Chrome, `bench.sh`, median of 3.
+Each VM alone in native full screen (guest 5120x2880, Chrome's page 2560x1440
+at 2x), 6 CPUs and 8 GB. OmacVM.app with v3.0.0's runtime and GPU path
+(test build 33fa0079), Graphics on Automatic (OpenGL). Parallels ran in the
+same session because it is also in the MacBook rounds above.
+
+| | Mac mini | OmacVM.app 3.0.0 | Parallels | OmacVM.app in the chart |
+|---|---|---|---|---|
+| Speedometer 3.1 | 56.95 | 33.9 (33.9, 34.3, 30.6) | 35.5 (36.5, 35.5, 35.5) | 40.5 (64 %) |
+| WebGL Aquarium, 30,000 fish (fps) | 60.0 | 19.1 (14.0, 19.1, 19.1) | 26.9 (21.0, 26.9, 26.9) | 19.0 (18 %) |
+| Basemark Web 3.0 | 2481 | 1730 (1730, 1650, 1743) | 1723 (1723, 1789, 1720) | 2456 (76 %) |
+
+The chart's number is Parallels' MacBook result times OmacVM.app / Parallels
+on the mini, for Speedometer 42.4 × 33.9 / 35.5 = 40.5. Scaling by the mini's
+own Chrome does not work: its Aquarium stops at the display's 60 Hz, and the
+6-CPU VMs lose more on the 10-core mini. Scaled that way, Parallels would get
+48.3 fps in Aquarium against the 26.7 it got on the MacBook.
+
+- Aquarium did not change: 19.1, the same as 2.9.0 RC2. UTM and Parallels
+  stay ahead.
+- Basemark: OmacVM.app's first full-screen run, level with Parallels.
+- The Mac mini's Speedometer is the median of 6 runs, 3 before the VMs and 3
+  after.
+- Geekbench 7 multi-core and GPU OpenCL in the chart are from the MacBook
+  rounds (2026-10-03 and 2026-10-04). The mini has no Geekbench, and the CPU
+  path did not change in 3.0.0. OpenCL needs `omacvm enable vulkan`.
 
 ## Fast network (OmacVM.app)
 

@@ -95,7 +95,7 @@ in more words.
   longer blinks. The top of the screen went black for a frame every 2
   seconds until the VM restarted (the 3.0.1 known issue, also in 3.0.0).
 
-## 3.0.1 (unreleased)
+## 3.0.1
 
 - OmacVM.app: the globe (fn) key pressed on its own goes to the VM, no
   longer to macOS's Emoji & Symbols over it, while the VM's window has the
