@@ -82,6 +82,7 @@ static int warps;
 static void fakeWarp(CGPoint p) { pointer = p; warps++; }
 static int same(Hotkey a, Hotkey b) { return a.enabled && b.enabled && a.keycode == b.keycode && a.flags == b.flags; }
 // "macOS": the key is one of the user's Space shortcuts (as set now) -> that move.
+static double lateKeys;   // macOS moves the Space only this many verify periods after the key
 static int fakeKey(Hotkey k) {
   keys++; lastKey = k;
   Hotkey l = hotkeyFrom(binding, HOTKEY_SPACE_LEFT), r = hotkeyFrom(binding, HOTKEY_SPACE_RIGHT);
@@ -90,7 +91,12 @@ static int fakeKey(Hotkey k) {
   if (same(k, l) || same(k, r)) {
     if (spaceKeys < 4) movedOn[spaceKeys] = w ? w->id : 0;
     spaceKeys++;
-    if (!keysIgnored) moveSpace(w, same(k, l) ? -1 : 1);
+    int dir = same(k, l) ? -1 : 1;
+    if (!keysIgnored && lateKeys) {
+      pendingSteps++;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(lateKeys * verifyAfter * NSEC_PER_SEC) + 3 * NSEC_PER_MSEC),
+                     dispatch_get_main_queue(), ^{ pendingSteps--; moveSpace(w, dir); });
+    } else if (!keysIgnored) moveSpace(w, dir);
   } else if (same(k, mc)) mcKeys++;
   return 1;
 }
@@ -102,6 +108,8 @@ static int fakeSwipe(CGDirectDisplayID id, CGRect b, int dir) {
   return 1;
 }
 static void fakeSaveSign(void) { signSaves++; }   // never the real settings
+static int mcApps;
+static int fakeMissionApp(void) { mcApps++; return 1; }   // never the real Mission Control
 static CFDictionaryRef fakeHotkeys(void) { return binding ? CFRetain(binding) : NULL; }
 static CGEventFlags fakeHeld(void) {
   heldAsked++;
@@ -231,7 +239,7 @@ int main(void) {
   warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu;
   hotkeysFn = fakeHotkeys; keyFn = fakeKey; heldFn = fakeHeld;
   swipeFn = fakeSwipe; saveSignFn = fakeSaveSign;
-  verifyAfter = 0.01; cameFromEvery = 0;
+  verifyAfter = 0.01; cameFromEvery = 0; doublePress = 0; missionAppFn = fakeMissionApp;
   initKeymap();
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   int sv[2]; socketpair(AF_UNIX, SOCK_STREAM, 0, sv); peer = sv[1]; fcntl(peer, F_SETFL, O_NONBLOCK);
@@ -684,6 +692,92 @@ int main(void) {
     frontChanged(vm, NET_APP, 1, "Omarchy", 24, 0); sent();
     check(press(K, HID, 0) == 1 && !hidden && !mcKeys && spaceKeys == 1, "a VM window over a desktop Space: never hidden");
     sent(); frontChanged(terminal, -1, 0, "", 11, 1); front = terminal; escaped = 0;
+  }
+
+  // ---- The user's 10:13 case: three desktops and the VM's Space between
+  // them; macOS's Space slide lands after the first look. One key, one Space:
+  // the neighbour the user came from, never the first desktop ----
+  {
+    const uint64_t desks[] = { 501, 502, 503, 504 };   // Desktop 1, Desktop 2, the VM, Desktop 3
+    layout(1, desks, 4, NULL, 0);
+    owner[501] = terminal; winOn[501] = 11; owner[502] = safari; winOn[502] = 33;
+    owner[503] = vm; winOn[503] = 25; owner[504] = finder;
+    pointer = CGPointMake(1000, 700);
+    front = safari; world[0].cur = 502; settle(vm, NET_APP);   // came from Desktop 2
+    inVM(vm, 503);
+    lateKeys = 1.5;
+    int r2 = press(K, HID, 0); const char *got2 = sent();
+    check(r2 == 1 && spaceKeys == 1 && keys == 1 && !swipes && world[0].cur == 502,
+          "Space change lands late: one shortcut, no swipe after it, on the neighbour (Desktop 2), not Desktop 1");
+    check(!strstr(got2, "space-unchanged") && !mcKeys && !hidden, "... no 'did not change' notice, no Mission Control, not hidden");
+    settle(vm, NET_APP); sent();
+    r2 = press(K, HID, 0); sent();
+    check(r2 == 1 && spaceKeys == 1 && world[0].cur == 503 && front == vm, "... the combo again: one Space back, into the VM");
+    settle(vm, NET_APP); sent();
+    // Came from Desktop 3 on the right: one step right, late as well.
+    front = finder; world[0].cur = 504; settle(vm, NET_APP);
+    inVM(vm, 503);
+    r2 = press(K, HID, 0); sent();
+    check(r2 == 1 && spaceKeys == 1 && lastKey.keycode == 124 && world[0].cur == 504, "came from the right: one step right");
+    settle(vm, NET_APP); sent();
+    r2 = press(K, HID, 0); sent();
+    check(r2 == 1 && spaceKeys == 1 && world[0].cur == 503, "... and back in");
+    // Too late (never lands within the looks): the notice, still one key.
+    settle(vm, NET_APP); sent();
+    front = safari; world[0].cur = 502; settle(vm, NET_APP); inVM(vm, 503);
+    lateKeys = 20; int sm = swipeMoves; swipeMoves = 0;
+    r2 = press(K, HID, 0); got2 = sent();
+    check(r2 == 1 && spaceKeys == 1 && strstr(got2, "N space-unchanged"), "lands only after every look (the swipe does nothing): the notice, one key");
+    swipeMoves = sm;
+    settleSteps();
+    check(world[0].cur == 502, "... (and macOS's own slide still ends one Space over)");
+    lateKeys = 0;
+    sent(); frontChanged(safari, -1, 0, "", 33, 1); front = safari; escaped = 0;
+  }
+
+  // ---- Pressed twice within doublePress: Mission Control; once: never ----
+  {
+    const uint64_t desks[] = { 471, 472, 473 };   // Desktop 1, Desktop 2, the VM
+    layout(1, desks, 3, NULL, 0);
+    owner[471] = terminal; winOn[471] = 11; owner[472] = safari; winOn[472] = 33; owner[473] = vm; winOn[473] = 26;
+    pointer = CGPointMake(1000, 700);
+    front = safari; world[0].cur = 472; settle(vm, NET_APP); inVM(vm, 473);
+    doublePress = 0.4; mcApps = 0; lastComboAt = -1;
+    // Ctrl+Option held, Esc tapped twice: the first press's move waits for
+    // the keys to come up, the second one drops it.
+    heldPolls = 5;
+    went = hidden = keys = spaceKeys = mcKeys = swipes = 0;
+    for (int t = 0; t < 2; t++) {
+      CGEventRef d = key(1, K, HID, 0), u = key(0, K, HID, 0);
+      CGEventRef rd = tapCb(NULL, kCGEventKeyDown, d, NULL), ru = tapCb(NULL, kCGEventKeyUp, u, NULL);
+      check(!rd && !ru, t ? "double press: the second Esc is eaten too" : "double press: the first Esc is eaten");
+      CFRelease(d); CFRelease(u);
+    }
+    settleSteps();
+    check(mcKeys == 1 && spaceKeys == 0 && !swipes && world[0].cur == 473,
+          "double press (keys still down): Mission Control (macOS's Ctrl+Up), no Space move from the first press");
+    check(!capturing && escaped, "... capture off (Mission Control is macOS's)");
+    sent();
+    // Released between the presses: the first press has moved one Space; the
+    // second opens Mission Control and moves nothing more.
+    escaped = 0; front = vm; world[0].cur = 473; frontChanged(vm, NET_APP, 1, "Omarchy", 26, 0); sent();
+    heldPolls = 0; lastComboAt = -1;
+    int r3 = press(K, HID, 0);
+    check(r3 == 1 && spaceKeys == 1 && world[0].cur == 472 && !mcKeys, "first press: one Space (Desktop 2), no Mission Control");
+    r3 = press(K, HID, 0);
+    check(r3 == 1 && mcKeys == 1 && spaceKeys == 0 && world[0].cur == 472, "... a second press right after: Mission Control, no other move");
+    // Mission Control's shortcut off: the Mission Control app.
+    setKey(HOTKEY_MISSION_CONTROL, kCFBooleanFalse, 126, 8650752);
+    escaped = 0; front = vm; world[0].cur = 473; frontChanged(vm, NET_APP, 1, "Omarchy", 26, 0); sent(); lastComboAt = -1;
+    press(K, HID, 0); r3 = press(K, HID, 0);
+    check(r3 == 1 && mcApps == 1 && !mcKeys, "Mission Control's shortcut off: the app opens it");
+    unsetKeys();
+    // Apart (more than doublePress): two single presses, out and back in.
+    escaped = 0; front = vm; world[0].cur = 473; frontChanged(vm, NET_APP, 1, "Omarchy", 26, 0); sent(); lastComboAt = -1;
+    press(K, HID, 0); usleep(450000); settle(vm, NET_APP); sent();
+    r3 = press(K, HID, 0);
+    check(r3 == 1 && !mcKeys && world[0].cur == 473, "two presses 0.45 s apart: out, then back in, no Mission Control");
+    doublePress = 0; sent(); settle(vm, NET_APP); sent();
   }
 
   // Which apps the combo goes back to.

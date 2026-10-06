@@ -71,14 +71,17 @@ unless you changed them) and its own animation. The VM stays full screen in
 its Space. Only that monitor changes; the keyboard goes to what it shows.
 No trackpad needed, so it works with a mouse too. Press **⌃⌥ Esc** there
 again to go back into the VM, with the trackpad and keys. Coming back with
-a swipe or Mission Control works as well.
+a swipe or Mission Control works as well. Press **⌃⌥ Esc twice** quickly
+(within 0.4 s) for Mission Control; a single press never opens it.
 
 OmacVM.app's **Escape combo** setting: *This monitor* (the one under the
 pointer, the default) or *All monitors*, every monitor that shows the VM. For
 Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
 EscapeSwipe all` (or `pointer`).
 
-Never out of full screen, and never Mission Control: every move is checked.
+Never out of full screen, and one press moves one Space at most: every move
+is checked, and a Space change that lands late is waited for before anything
+else is tried.
 If the shortcut is off or did not move the Space (macOS 15 ignores it on a
 MacBook's built-in display), OmacVM swipes the Space like a trackpad. If that
 did not move it either, or macOS gives no Spaces information, Omarchy shows

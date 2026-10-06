@@ -874,7 +874,8 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 // the shortcut does nothing from the notched built-in display's full-screen
 // Space, the swipe does) -> still in the VM's Space, or macOS gives no Spaces
 // information -> one log line and a short notice in Omarchy ("N <why>"),
-// nothing else: never Mission Control (user, 2026-10-06: "never"). Back in:
+// nothing else: never Mission Control from one press (user, 2026-10-06:
+// "never"; only twice in a row, see missionControl). Back in:
 // the shortcut did not land -> the VM's window to the front (macOS shows its
 // Space).
 // An OmacVM VM in a window with the keyboard has no Space of its own: the
@@ -1448,6 +1449,29 @@ static void focusPointerDisplay(void) {
   goTo(to, w, "keyboard to", ^(int ok) { (void)ok; checkOut(); });
 }
 
+// ---- the combo pressed twice: Mission Control ----
+// User, 2026-10-06 10:31: "esc combo triggering mission control is rather
+// nerving.. disable it, maybe only do it when combo is clicked twice". A
+// single press only ever moves one Space (or does nothing); a second press
+// within doublePress stops what the first one has not posted yet and opens
+// Mission Control: macOS's own shortcut (as the user set it), else the app.
+static double doublePress = 0.4;     // s between the two presses (the offline test sets its own)
+#define HOTKEY_MISSION_CONTROL 32    // Ctrl+Up
+int ns_open_mission_control(void);
+static int (*missionAppFn)(void) = ns_open_mission_control;
+static int movesCancelled;           // the first press's steps not posted yet are dropped
+static double lastComboAt = -1;
+
+static void missionControl(void) {
+  Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
+  if (k.enabled && keyFn(k)) {
+    logf_("escape combo: pressed twice: Mission Control (macOS's shortcut)");
+    return;
+  }
+  int ok = missionAppFn();
+  logf_("escape combo: pressed twice: Mission Control (the app%s)", ok ? "" : ": macOS refused!");
+}
+
 // No way out to macOS (the Space shortcut is off, macOS did not move the
 // Space, not even with a Dock swipe, or it gives no Spaces information): one
 // log line and a short notice in Omarchy, nothing else. Never Mission
@@ -1495,6 +1519,7 @@ static int postMove(const Move *m, int by, Hotkey *k) {
 // Every move not done yet, one way. Returns how many were made.
 static int runMoves(int by, const char *what) {
   int made = 0;
+  if (movesCancelled) return 0;
   for (int i = 0; i < nMoves; i++) {
     Move *m = &moves[i];
     if (m->done) continue;
@@ -1554,8 +1579,28 @@ static int retryOtherWay(void (^then)(void)) {
 // Out: macOS's shortcut, then (it did not move: macOS 15 from the notched
 // display's full-screen Space) a Dock swipe, then the other direction once.
 // Nothing landed: noWayOut. Never Mission Control.
+// A Space change can land after verifyAfter (macOS still sliding or busy).
+// Before the next step (a swipe, the other direction) look again a few times:
+// a step after a late landing moves a second Space (the user's 10:13 log:
+// the shortcut, then the swipe, ended on Desktop 1 of 3 instead of the Space
+// beside the VM).
+#define LATE_LOOKS 2
+static int lateLooks;
+// The extra looks come quicker than the first one (half of verifyAfter).
+static void afterLook(void (^f)(void)) {
+  pendingSteps++;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * 0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(),
+                 ^{ pendingSteps--; f(); });
+}
 static void checkLeave(int by) {
+  if (movesCancelled) return;
   int moved, rest = movesLeft(by, &moved);
+  if (rest && !moved && lateLooks < LATE_LOOKS) {
+    lateLooks++;
+    afterLook(^{ checkLeave(by); });
+    return;
+  }
+  lateLooks = 0;
   if (by == BY_DOCK && signRetried && !learnedNow) {
     if (rest) swipeSign = -swipeSign;   // the retry did not land either: as before
     else { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
@@ -1576,8 +1621,15 @@ static void checkLeave(int by) {
 }
 
 static void checkEnter(void) {
-  int moved;
-  if (movesLeft(BY_SHORTCUT, &moved)) {
+  if (movesCancelled) return;
+  int moved, rest = movesLeft(BY_SHORTCUT, &moved);
+  if (rest && !moved && lateLooks < LATE_LOOKS) {
+    lateLooks++;
+    afterLook(^{ checkEnter(); });
+    return;
+  }
+  lateLooks = 0;
+  if (rest) {
     logf_("escape combo: not in the VM's Space: its window to the front instead");
     goTo(vmPid, vmWin, "back into the VM:", NULL);
     return;
@@ -1610,7 +1662,7 @@ static void leaveVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
-  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0;
+  nMoves = 0; leaving = 1; signRetried = 0; shortcutOff = 0; lateLooks = 0;
   int pointerOnVM = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
@@ -1642,7 +1694,7 @@ static void enterVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
   uint64_t vmSpace = windowSpaceFn(vmWin);
-  nMoves = 0; leaving = 0;
+  nMoves = 0; leaving = 0; lateLooks = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     if (!all && !CGRectContainsPoint(d->bounds, p)) continue;
@@ -1736,6 +1788,19 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     }
     escKeys = combo == ESC_OLD ? "ctrl-opt-cmd" : "ctrl-opt";
     if (combo == ESC_OLD) logf_("escape combo: the old Ctrl+Option+Cmd+Esc (works through 3.0.x; the new one is Ctrl+Option+Esc)");
+    // Twice in a row (the first press's state stays: out of the VM, capture
+    // off): Mission Control, and nothing more of the first press.
+    double nowCombo = monoNow();
+    if (lastComboAt >= 0 && nowCombo - lastComboAt < doublePress) {
+      lastComboAt = -1;
+      movesCancelled = 1;
+      if (capturing) { capturing = 0; escaped = 1; logf_("escape combo: capture off"); sendState("esc"); }
+      later(missionControl);
+      swallowEscUp = 1;
+      return NULL;
+    }
+    lastComboAt = nowCombo;
+    movesCancelled = 0;   // this press's steps run (a second press may drop them)
     if (act == COMBO_ENTER) {
       later(enterVM);
     } else if (act == COMBO_WINDOW_BACK) {
