@@ -66,6 +66,9 @@ class Controller:
         # Graphics memory (OmacVM.app): a number of the moment, never cached.
         self.gpu_memory: dict | None = None
         self.gpu_memory_misses = 0
+        # The Mac's Magic Mouse swipe ({"magic_mouse", "fingers"}), never cached:
+        # the row shows only while the Mac has a Magic Mouse.
+        self.mouse_swipe: dict | None = None
 
     # ---- the Mac ----
     @property
@@ -102,6 +105,23 @@ class Controller:
                 self.local.save_cache(mac_status=st)
         except BridgeError as e:
             self.mac_error = e
+        self.refresh_mouse_swipe()
+
+    def mouse_swipe_supported(self) -> bool:
+        return self.hello is not None and "settings/mouse-swipe" in self.hello.requests
+
+    def refresh_mouse_swipe(self) -> None:
+        """The Mac's Magic Mouse swipe; a missed answer keeps the last one."""
+        if not self.linked or not self.mouse_swipe_supported():
+            self.mouse_swipe = None
+            return
+        try:
+            self.mouse_swipe = self.bridge.mouse_swipe()
+        except BridgeError:
+            pass
+
+    def set_mouse_swipe(self, fingers: int) -> None:
+        self.mouse_swipe = self.bridge.set_mouse_swipe(fingers)
 
     def gpu_memory_supported(self) -> bool | None:
         """The Mac answers gpu-memory (None: its hello is not in yet)."""
@@ -230,6 +250,12 @@ class Controller:
                            offline=self.mac_error is not None)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
                              offline=self.mac_error is not None)
+        # A Mac setting: shown while the Mac answers.
+        ms = S.mouse_swipe_row(self.mouse_swipe if self.linked else None, on.get("gestures", True))
+        if ms is not None:
+            # After Trackpad gestures and the features that need it.
+            at = max((i + 1 for i, r in enumerate(rows) if "gestures" in (r.feature.name, r.feature.needs)), default=len(rows))
+            rows.insert(at, ms)
         return rows + [r for r in (g, m) if r is not None]
 
     def fixed_of(self, name: str) -> str:

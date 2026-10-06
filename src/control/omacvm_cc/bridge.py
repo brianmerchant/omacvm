@@ -283,6 +283,13 @@ class Bridge:
     def set_update_checks(self, enabled: bool) -> dict:
         return self.call("POST", "/omacvm/settings/update-checks", {"enabled": bool(enabled)})
 
+    def mouse_swipe(self) -> dict:
+        """The Mac's Magic Mouse swipe: {"magic_mouse": bool, "fingers": 3|4}."""
+        return self.call("GET", "/omacvm/settings/mouse-swipe", timeout=3.0)
+
+    def set_mouse_swipe(self, fingers: int) -> dict:
+        return self.call("POST", "/omacvm/settings/mouse-swipe", {"fingers": 3 if fingers == 3 else 4})
+
     def start_job(self, action: str, features: list[str] | tuple[str, ...] = ()) -> dict:
         body: dict = {"action": action}
         if action == "graphics":

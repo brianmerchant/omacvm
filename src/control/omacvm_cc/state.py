@@ -442,3 +442,30 @@ def gpu_memory_row(answer: dict | None, vm_type: str, supported: bool | None = T
     if warn:
         return Row(GPU_MEMORY_FEATURE, True, Status.NEEDS_PERSON, "; ".join([note] + warn), checks=mine)
     return Row(GPU_MEMORY_FEATURE, True, Status.WORKS, note, checks=mine)
+
+
+# ---- the Mac's Magic Mouse swipe (GET/POST /omacvm/settings/mouse-swipe) ----
+# The same words as OmacVM.app's row (MouseSwipeSetting.swift).
+MOUSE_SWIPE_FEATURE = Feature(
+    name="mouse-swipe", default="4", sides=("mac",), tags=(), needs="gestures", title="Magic Mouse swipe",
+    summary="What a two-finger swipe on the mouse does in the VM: the same as this many fingers on a trackpad. "
+            "Omarchy switches workspaces with 4.")
+
+
+def mouse_swipe_row(answer: dict | None, gestures_on: bool = True) -> Row | None:
+    """The Magic Mouse swipe row: only while the Mac has a Magic Mouse (its
+    answer says so). Gestures off: the setting stays, the row says why
+    nothing swipes."""
+    if not isinstance(answer, dict) or answer.get("magic_mouse") is not True:
+        return None
+    n = answer.get("fingers")
+    if n not in (3, 4) or isinstance(n, bool):
+        return None
+    if not gestures_on:
+        return Row(MOUSE_SWIPE_FEATURE, False, Status.OFF, f"{n} fingers (Trackpad gestures is off)")
+    return Row(MOUSE_SWIPE_FEATURE, True, Status.WORKS, f"{n} fingers")
+
+
+def next_fingers(n) -> int:
+    """Space on the Magic Mouse swipe row: 4 -> 3 -> 4."""
+    return 4 if n == 3 else 3

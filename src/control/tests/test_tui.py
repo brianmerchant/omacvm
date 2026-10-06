@@ -901,3 +901,81 @@ def test_updates_screen_updates_omarchy_too(world, tmp_path, monkeypatch):
             # Nothing went to the Mac: this is not the OmacVM update.
             assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
     asyncio.run(go())
+
+
+def test_mouse_swipe_row_with_a_magic_mouse(world):
+    """A Magic Mouse on the Mac: its swipe row after Trackpad gestures; space
+    switches 4 and 3 fingers on the Mac, no job. Mouse gone: the row goes."""
+    world.mouse_swipe = {"magic_mouse": True, "fingers": 4}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "mouse-swipe" in rows(a))
+            names = [r.feature.name for r in a.rows]
+            assert names.index("mouse-swipe") == names.index("scroll-momentum") + 1
+            r = rows(a)["mouse-swipe"]
+            # Gestures is off in this VM: the setting shows, the note says why nothing swipes.
+            assert r.feature.title == "Magic Mouse swipe" and r.note == "4 fingers (Trackpad gestures is off)"
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            assert [k.value for k in t.rows] == names
+            t.move_cursor(row=names.index("mouse-swipe"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: rows(a)["mouse-swipe"].note.startswith("3 fingers"))
+            posts = [b for m, p, b in world.requests if m == "POST"]
+            assert posts == [{"fingers": 3}] and world.mouse_swipe["fingers"] == 3
+            await pilot.press("space")
+            assert await settle(pilot, lambda: world.mouse_swipe["fingers"] == 4)
+            # r explains instead of starting a repair.
+            await pilot.press("r")
+            await pilot.pause(0.1)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+            # The mouse is switched off: the row goes at the next look, the cursor stays on its row.
+            t.move_cursor(row=names.index("camera"))
+            world.mouse_swipe = {"magic_mouse": False, "fingers": 4}
+            a.live_refresh()
+            assert await settle(pilot, lambda: "mouse-swipe" not in rows(a))
+            assert [k.value for k in t.rows] == [x.feature.name for x in a.rows]
+            assert a.rows[t.cursor_row].feature.name == "camera"
+    asyncio.run(go())
+
+
+def test_mouse_swipe_row_follows_gestures(tmp_path, monkeypatch):
+    mac, checks = FakeMac(), FakeChecks()
+    mac.mouse_swipe = {"magic_mouse": True, "fingers": 3}
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path, "OMACVM_FEATURE_gestures=on\n").items():
+        monkeypatch.setenv(k, v)
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: "mouse-swipe" in rows(a))
+            from omacvm_cc.state import Status
+            assert rows(a)["mouse-swipe"].note == "3 fingers" and rows(a)["mouse-swipe"].status is Status.WORKS
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()
+
+
+def test_no_mouse_swipe_row_without_a_magic_mouse_or_on_an_older_mac(world):
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            # An older Mac (its hello does not list the request): not asked.
+            assert await settle(pilot, lambda: a.c.linked)
+            await pilot.pause(0.3)
+            assert "mouse-swipe" not in rows(a)
+            assert not any(p == "/omacvm/settings/mouse-swipe" for _, p, _ in world.requests)
+    asyncio.run(go())
+    world.mouse_swipe = {"magic_mouse": False, "fingers": 4}
+
+    async def go2():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: any(p == "/omacvm/settings/mouse-swipe" for _, p, _ in world.requests))
+            await pilot.pause(0.3)
+            assert "mouse-swipe" not in rows(a)
+    asyncio.run(go2())
