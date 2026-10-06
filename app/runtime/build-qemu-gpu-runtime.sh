@@ -759,7 +759,7 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tes
   -framework OpenGL -o "$display_tests/test-boot-splash-fade"
 "$display_tests/test-boot-splash-fade"
 # Experimental: the guest's pointer as the Mac's cursor (OMACVM_HW_CURSOR=1, the
-# app's "Mac pointer for the VM"), and its rules' test.
+# app's hidden macPointer setting), and its rules' test.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor-logic.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor.patch"
 "$native_dir/Tests/display/test-hw-cursor.sh"
