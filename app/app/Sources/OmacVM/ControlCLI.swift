@@ -22,7 +22,19 @@ enum ControlCLI {
         return app
     }
 
-    static func refresh(bundle: URL = Bundle.main.bundleURL) {
+    /// Only OmacVM itself (org.omacvm.app) and the test identity (its own
+    /// folder) write the file. Any other copy (a self-update test build, a
+    /// development build) leaves it alone: a test copy once pointed the
+    /// user's Bridge at a folder that was deleted later ("no-cli").
+    static func writes(bundleID: String?) -> Bool {
+        bundleID == "org.omacvm.app" || TestIdentity.isTest(bundleID)
+    }
+
+    static func refresh(bundle: URL = Bundle.main.bundleURL, bundleID: String? = Bundle.main.bundleIdentifier) {
+        guard writes(bundleID: bundleID) else {
+            FileHandle.standardError.write(Data("control: \(bundleID ?? "a build without a bundle id") is not OmacVM: the Bridge's cli file stays\n".utf8))
+            return
+        }
         let app = bundle.appendingPathComponent("Contents/Resources/omacvm/omacvm").path
         let file = supportFolder.appendingPathComponent("cli")
         let current = try? String(contentsOf: file, encoding: .utf8)

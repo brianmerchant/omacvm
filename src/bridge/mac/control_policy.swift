@@ -20,10 +20,12 @@ let graphicsChoices: Set<String> = ["opengl", "vulkan", "auto"]
 struct JobRequest: Equatable { let action: ControlAction; let features: [String] }
 
 enum ControlRoute: Equatable {
-  case hello, status, updates, updatesCheck, gpuMemory
+  case hello, status, updates, updatesCheck, gpuMemory, appUpdate
   case setUpdateChecks(Bool)
+  case mouseSwipe, setMouseSwipe(Int)
   case startJob(JobRequest)
   case job(String)
+  case theme(Data)   // the Touch ID panel's colours (touchid_theme.swift checks the body)
 }
 
 struct PolicyError: Error, Equatable {
@@ -76,11 +78,23 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
     case ("POST", "updates/check"):
       if let o = try strictObject(body, allowed: []), !o.isEmpty { throw PolicyError(400, "unknown-key", "no keys") }
       return .success(.updatesCheck)
+    case ("POST", "app-update"):
+      // The VM never names a version: the Mac's own verified release counts.
+      if let o = try strictObject(body, allowed: []), !o.isEmpty { throw PolicyError(400, "unknown-key", "no keys") }
+      return .success(.appUpdate)
     case ("POST", "settings/update-checks"):
       guard let o = try strictObject(body, allowed: ["enabled"]), let b = strictBool(o["enabled"]) else {
         throw PolicyError(400, "bad-body", "send {\"enabled\": true|false}")
       }
       return .success(.setUpdateChecks(b))
+    case ("GET", "settings/mouse-swipe"):
+      guard body.isEmpty else { throw PolicyError(400, "body", "no body for GET") }
+      return .success(.mouseSwipe)
+    case ("POST", "settings/mouse-swipe"):
+      guard let o = try strictObject(body, allowed: ["fingers"]), let n = strictFingers(o["fingers"]) else {
+        throw PolicyError(400, "bad-body", "send {\"fingers\": 3|4}")
+      }
+      return .success(.setMouseSwipe(n))
     case ("POST", "jobs"):
       guard let o = try strictObject(body, allowed: ["action", "features", "graphics"]),
             let a = o["action"] as? String, let action = ControlAction(rawValue: a) else {
@@ -108,12 +122,14 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
         names.append(n)
       }
       return .success(.startJob(JobRequest(action: action, features: names)))
+    case ("POST", "theme"):
+      return .success(.theme(body))
     case ("GET", let s) where s.hasPrefix("jobs/"):
       let id = String(s.dropFirst(5))
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
     case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
-         (_, "gpu-memory"):
+         (_, "gpu-memory"), (_, "settings/mouse-swipe"), (_, "app-update"), (_, "theme"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")
@@ -123,6 +139,40 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
   } catch {
     return .failure(PolicyError(400, "bad-request", "bad request"))
   }
+}
+
+// ---- Magic Mouse swipe (GET/POST /omacvm/settings/mouse-swipe) ----
+// OmacVM Gestures' MouseSwipeFingers (#127): a two-finger swipe on a Magic
+// Mouse is 3 or 4 fingers on the VM's trackpad. A Mac-wide setting, as in
+// OmacVM.app (MouseSwipeSetting.swift); the control centre shows it only
+// while the Mac has a Magic Mouse.
+let mouseSwipeChoices = [3, 4]
+
+/// A JSON 3 or 4: no bool, no 3.0, no "3".
+func strictFingers(_ v: Any?) -> Int? {
+  guard let n = v as? NSNumber, CFGetTypeID(n) == CFNumberGetTypeID(), !CFNumberIsFloatType(n),
+        mouseSwipeChoices.contains(n.intValue) else { return nil }
+  return n.intValue
+}
+
+/// What Gestures does with a stored value (mouseFingersOf in
+/// omacvm-gestures.c): 3 (number or text) is 3, anything else 4.
+func mouseSwipeFingers(stored: Any?) -> Int {
+  if let s = stored as? String { return s == "3" ? 3 : 4 }
+  if let n = stored as? NSNumber, CFGetTypeID(n) == CFNumberGetTypeID() { return n.doubleValue == 3 ? 3 : 4 }
+  return 4
+}
+
+/// A Magic Mouse as Gestures and the app find it: Apple's multitouch family
+/// 112, or Apple's product ids 0x030d, 0x0269, 0x0323 (Bluetooth or USB vendor).
+func isMagicMouse(vendor: Int?, product: Int?, family: Int?) -> Bool {
+  if family == 112 { return true }
+  guard let p = product, [0x030d, 0x0269, 0x0323].contains(p), let v = vendor else { return false }
+  return v == 0x004c || v == 0x05ac
+}
+
+func mouseSwipeAnswer(magicMouse: Bool, fingers: Int) -> [String: Any] {
+  ["magic_mouse": magicMouse, "fingers": fingers == 3 ? 3 : 4]
 }
 
 /// The protocol both sides speak: the guest's (X-OmacVM-Proto, 1 when
@@ -290,13 +340,14 @@ func hmacHex(_ key: String, _ text: String) -> String {
 
 /// What a request's signature covers: method, path, time, nonce, protocol
 /// header and the body's hash.
-func requestMAC(key: String, method: String, path: String, time: Int64, nonce: String, proto: String, body: Data) -> String {
-  hmacHex(key, ["omacvm-control-request 1", method, path, String(time), nonce, proto, hexSHA256(body)].joined(separator: "\n"))
+func requestMAC(key: String, method: String, path: String, time: Int64, nonce: String, proto: String, body: Data,
+                label: String = "omacvm-control-request 1") -> String {
+  hmacHex(key, [label, method, path, String(time), nonce, proto, hexSHA256(body)].joined(separator: "\n"))
 }
 
 /// What an answer's signature covers: the request's nonce, the status and the body.
-func answerMAC(key: String, nonce: String, status: Int, body: Data) -> String {
-  hmacHex(key, ["omacvm-control-answer 1", nonce, String(status), hexSHA256(body)].joined(separator: "\n"))
+func answerMAC(key: String, nonce: String, status: Int, body: Data, label: String = "omacvm-control-answer 1") -> String {
+  hmacHex(key, [label, nonce, String(status), hexSHA256(body)].joined(separator: "\n"))
 }
 
 func sameText(_ a: String, _ b: String) -> Bool {
@@ -395,7 +446,8 @@ func noVMKey() -> PolicyError {
 /// Checks X-OmacVM-Auth against the key the Mac keeps for the VM (made by
 /// omacvm apply). Success: the request's nonce (the answer is signed with it).
 func verifyControlAuth(header: String?, key stored: String?, vm: String, method: String, path: String, proto: String,
-                       body: Data, now: Date, nonces: inout NonceStore) -> Result<String, AuthFailure> {
+                       body: Data, now: Date, nonces: inout NonceStore,
+                       label: String = "omacvm-control-request 1") -> Result<String, AuthFailure> {
   guard let key = stored?.trimmingCharacters(in: .whitespacesAndNewlines), key.utf8.count >= authKeyMin else {
     return .failure(AuthFailure(error: noVMKey(), nonce: nil, macTime: nil))
   }
@@ -404,7 +456,7 @@ func verifyControlAuth(header: String?, key stored: String?, vm: String, method:
   let f = (header ?? "").split(separator: " ").map(String.init)
   guard f.count == 4, f[0] == "1", let t = Int64(f[1]), f[2].utf8.count == 32, f[3].utf8.count == 64,
         f[2].utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return .failure(bad) }
-  guard sameText(requestMAC(key: key, method: method, path: path, time: t, nonce: f[2], proto: proto, body: body), f[3]) else {
+  guard sameText(requestMAC(key: key, method: method, path: path, time: t, nonce: f[2], proto: proto, body: body, label: label), f[3]) else {
     return .failure(bad)
   }
   let mac = Int64(now.timeIntervalSince1970)
@@ -540,7 +592,7 @@ func versionLess(_ a: String, _ b: String) -> Bool? {
 func versionGate(_ r: JobRequest, mac: String, vm: String) -> PolicyError? {
   if r.action == .update || mac == vm { return nil }
   if versionLess(mac, vm) == true {
-    return PolicyError(409, "mac-older", "this VM has OmacVM \(vm), the Mac \(mac): update the Mac first (omacvm update on the Mac)")
+    return PolicyError(409, "mac-older", "this VM has OmacVM \(vm), the Mac \(mac): update the Mac first (u in the control centre)")
   }
   if r.action == .disable || r.action == .reinstall || r.action == .graphics { return nil }
   return PolicyError(409, "update-first", "the Mac has OmacVM \(mac), this VM \(vm.isEmpty ? "none" : vm): update first")
@@ -557,6 +609,31 @@ func forwardGate(release: String, mac: String, vm: String) -> PolicyError? {
   }
   if versionLess(mac, release) == false && versionLess(vm, release) == false {
     return PolicyError(409, "not-newer", "the Mac and this VM have OmacVM \(release) already")
+  }
+  return nil
+}
+
+/// The Mac's omacvm is OmacVM.app's own copy (no checkout): the app updates
+/// it, never `omacvm update`.
+func cliIsAppCopy(_ cli: String, hasGit: Bool) -> Bool {
+  cli.hasSuffix(".app/Contents/Resources/omacvm/omacvm") && !hasGit
+}
+
+/// POST /omacvm/app-update: the Bridge only says yes; OmacVM.app (which relays
+/// the request) checks its own signed feed and updates itself. Only for the
+/// app's own VMs, only when the Mac's omacvm is the app's copy, only forward.
+func appUpdateGate(viaApp: Bool, vmType: String, macAppCopy: Bool, release: String?, mac: String) -> PolicyError? {
+  guard viaApp, vmType == "app" else {
+    return PolicyError(409, "not-app", "the Mac updates OmacVM.app only for its own VMs: update it on the Mac")
+  }
+  guard macAppCopy else {
+    return PolicyError(409, "not-app-copy", "this Mac has an OmacVM checkout: u updates the Mac and this VM as usual")
+  }
+  guard let release else {
+    return PolicyError(409, "no-update", "no verified update on the Mac: check for updates first")
+  }
+  guard versionLess(mac, release) == true else {
+    return PolicyError(409, "not-newer", "OmacVM.app has \(mac), the release \(release): nothing newer")
   }
   return nil
 }

@@ -18,7 +18,7 @@ concurrency:
 jobs:
   check:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -53,8 +53,11 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
           cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
 
-      - name: Bridge's control centre requests (allow-list, limits, manifest signatures)
+      - name: Bridge's control centre and Touch ID requests (allow-list, limits, manifest signatures, LocalAuthentication mocked)
         run: src/bridge/mac/tests/run.sh
+
+      - name: Touch ID's PAM client against a fake Bridge, and its PAM lines in and out
+        run: src/tests/touchid-client.sh
 
       - name: Update parts cover src/
         run: python3 src/release/manifest.py parts > /dev/null
@@ -89,9 +92,24 @@ jobs:
         working-directory: app/app
         run: swift run features-tests
 
+      - name: OmacVM.app Touch ID port relay (org.omacvm.auth, no Bridge, no dialog)
+        working-directory: app/app
+        run: swift run auth-tests
+
+      - name: OmacVM.app Touch ID panel (never on screen, no LAContext)
+        working-directory: app/app
+        run: swift run touchid-panel-tests
+
       - name: OmacVM.app window rules (custom resources, disk, omacvm in Terminal, keyboard note)
         working-directory: app/app
         run: swift run window-tests
+
+      - name: OmacVM.app Restart the Desktop after Later (the app's side)
+        working-directory: app/app
+        run: swift run desktop-tests
+      - name: OmacVM.app sound delay for the VM (QEMU's part, the Mac's output, limits)
+        working-directory: app/app
+        run: swift run audio-tests
 
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
@@ -104,6 +122,9 @@ jobs:
         run: |
           src/gestures/mac/build.sh
           src/bridge/mac/build.sh
+
+      - name: Omanotch wallpaper runs through the notch strip (patch on Omarchy's file, both NOTCH places)
+        run: src/tests/notch-wallpaper.sh
 
       - name: Omanotch offline tests
         run: |
@@ -179,6 +200,9 @@ jobs:
       - name: The note when macOS refuses the VM's keyboard tap
         run: src/tests/app-key-access.sh
 
+      - name: Only OmacVM writes the Bridge's cli file (test copies keep away)
+        run: src/tests/app-cli-file.sh
+
       - name: The desktop restarts by itself after a lost GPU context (app rules, VM script)
         run: src/tests/app-desktop-recovery.sh
 
@@ -187,6 +211,9 @@ jobs:
 
       - name: Feature state truth (the record against the fast network and SDDM autologin)
         run: src/tests/feature-truth.sh
+
+      - name: A feature switch runs only its parts (no Hyprland reload for the rest)
+        run: src/tests/feature-switch.sh
 
       - name: The vulkan feature's Mesa build (build tools come and go)
         run: src/tests/venus-build-tools.sh
@@ -218,11 +245,16 @@ jobs:
       - name: App menu memory lines (VM memory, graphics memory)
         run: app/runtime/Tests/display/test-gpu-memory-menu.sh
 
+      - name: App menu Restart the Desktop after Later (QEMU's side)
+        run: app/runtime/Tests/display/test-restart-desktop.sh
+
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh
 
       - name: Mac pointer for the VM (experimental hardware cursor rules, guest image checks)
         run: app/runtime/Tests/display/test-hw-cursor.sh
+      - name: Guest sizes that fit Omarchy's scale presets (full screen, window steps)
+        run: app/runtime/Tests/display/test-clean-size.sh
 
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
@@ -251,12 +283,14 @@ jobs:
       - name: OmacVM.app while the VM idles (guest agent connection, clipboard poll)
         run: src/tests/app-idle.sh
 
-      - name: Guest agents offline tests (desktop check, idle waits, display panel)
+      - name: Guest agents offline tests (desktop check, idle waits, display panel, camera frame times)
         run: |
           python3 src/app/guest/tests/test_omacvm_displays.py
           python3 src/app/guest/tests/test_idle_waits.py
           python3 src/app/guest/tests/test_monitor_widget.py
           python3 src/omanotch/guest/tests/test_display_panel.py
+          python3 src/camera/guest/tests/test_frames.py
+          python3 src/app/guest/tests/test_audio_latency.py
 
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh
@@ -281,6 +315,13 @@ jobs:
           python3 src/app/guest/tests/test_idle_waits.py -v
           python3 src/app/guest/tests/test_monitor_widget.py -v
           python3 src/omanotch/guest/tests/test_display_panel.py -v
+          python3 src/camera/guest/tests/test_frames.py -v
+
+      - name: A feature switch on Linux (GNU sed, glide off path)
+        run: src/tests/feature-switch.sh
+
+      - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
+        run: src/tests/touchid-client.sh
 
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |

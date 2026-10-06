@@ -21,7 +21,31 @@ else
   OMACVM_SRC=$_root/omacvm/src
 fi
 [[ -x $QEMU && -f $FIRMWARE && -d $OMACVM_SRC ]] || die "the app is incomplete (QEMU, firmware or OmacVM missing under $_root)"
-CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/omacvm}
+# downloads_dir ROOT: where builds of VMs in the VMs folder ROOT keep their
+# downloads: ~/Library/Caches/omacvm when ROOT is on the home folder's drive,
+# else ROOT/.downloads, so VMs on another drive leave the Mac's disk alone.
+# The app's Storage.downloadsFolder has the same rule (src/tests/app-storage.sh).
+# -L: a linked VMs folder counts where it points, as in the app.
+downloads_dir() {
+  local a=$1
+  until [[ -e $a || $a == / ]]; do a=$(dirname "$a"); done
+  if [[ $(stat -L -f %d "$a") == "$(stat -L -f %d "$HOME")" ]]; then echo "$HOME/Library/Caches/omacvm"
+  else echo "${1%/}/.downloads"; fi
+}
+
+# Downloads (try-omarchy, prebuilt VMs): OMACVM_CACHE (the app passes it), else
+# those of the VMs folder OMACVM_VMS_ROOT (omacvm build passes it), else the
+# Mac's. Made only by builds and lookups (cache_ready).
+if [[ -n ${OMACVM_CACHE:-} ]]; then CACHE=$OMACVM_CACHE
+elif [[ -n ${OMACVM_VMS_ROOT:-} ]]; then CACHE=$(downloads_dir "$OMACVM_VMS_ROOT")
+else CACHE=$HOME/Library/Caches/omacvm; fi
+
+# cache_ready: makes CACHE. Time Machine leaves it out, each time: a lookup may
+# have made it first (~/Library/Caches is left out anyway).
+cache_ready() {
+  mkdir -p "$CACHE" || return 1
+  tmutil addexclusion "$CACHE" >/dev/null 2>&1 || true
+}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 source "$OMACVM_SRC/vm/live/release.sh"
 # A script of "OmacVM Test" run by hand (apply-vm.sh from a shell) is the
@@ -35,8 +59,9 @@ fi
 # The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Omanotch, Gestures, Bridge.
 # OMACVM_HOST_PORTS= (empty): none (image builds and test VMs leave the Mac's helpers alone).
 # The test identity (OMACVM_TEST_IDENTITY=1, from "OmacVM Test"): its own Gestures and
-# Bridge on 47930/47931 (libslirp maps the guest's ports), never Omanotch.
-if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then HOST_PORTS=${OMACVM_HOST_PORTS-47830>47930,47831>47931}
+# Bridge on 47930/47931 (libslirp maps the guest's ports); Omanotch on 47911, where
+# only a test Omanotch listens, never the installed one.
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then HOST_PORTS=${OMACVM_HOST_PORTS-47811>47911,47830>47930,47831>47931}
 else HOST_PORTS=${OMACVM_HOST_PORTS-47811,47830,47831}; fi
 source "$OMACVM_SRC/lib/proxy.sh"
 proxy_none
@@ -94,6 +119,7 @@ efi_vars_create() { [[ -f $VM_DIR/efi-vars.fd ]] || mkfile -n 64m "$VM_DIR/efi-v
 # the release's own manifest. Downloaded once.
 live_fetch() {
   local d=$CACHE/live dmg vol app g
+  cache_ready || die "could not make $CACHE"
   mkdir -p "$d"
   LIVE_KERNEL=$d/vmlinuz-linux LIVE_INITRD=$d/initramfs-linux.img LIVE_ROOTFS=$d/rootfs.ext4
   # macOS may clear Caches: the marker counts only with the files still there.
@@ -101,6 +127,7 @@ live_fetch() {
     log "live system cached"; return
   fi
   rm -f "$d/ok-$LIVE_RELEASE"
+  live_reuse "$d" && return
   dmg=$d/TryOmarchy-$LIVE_RELEASE.dmg
   # Only the app uses this folder: the omacvm command's build-live.sh works in
   # ../build-live and deletes its files when done.
@@ -169,6 +196,58 @@ download() {
   kill "$w" 2>/dev/null || true; wait "$w" 2>/dev/null || true
   [[ $rc == 0 ]] && progress_line download "$3" "$(stat -f %z "$out")" "${total:-0}"
   return "$rc"
+}
+
+# others_building: another OmacVM build runs: not this script, what it started
+# or what started it (omacvm build, say). It may read a downloads folder.
+others_building() {
+  local mine=" " p=$$
+  while [[ -n $p && $p -gt 1 ]]; do mine+="$p "; p=$(ps -o ppid= -p "$p" | tr -d ' '); done
+  # bash running one of the build scripts (not a shell line or an editor that names one)
+  local build='^[^ ]*bash ([^-].*/)?((create-vm|prebuilt-vm|build-live|make-image)[.]sh|omacvm build)( |$)'
+  ps -x -ww -U "$(id -u)" -o pid=,ppid=,args= | awk -v me=$$ -v mine="$mine" -v build="$build" '
+    { pid[NR] = $1; pp[$1] = $2; a = $0; sub(/^ *[0-9]+ +[0-9]+ /, "", a); args[NR] = a }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (index(mine, " " pid[i] " ") || args[i] !~ build) continue
+        q = pid[i]; ours = 0
+        for (n = 0; n < 64 && q + 0 > 1; n++) { if (q == me) { ours = 1; break }; q = pp[q] }
+        if (!ours) found = 1
+      }
+      exit !found
+    }'
+}
+
+# live_reuse DIR: a live system of this release in another downloads folder
+# (the Mac's own, or the app's others in OMACVM_LIVE_FROM, one per line) moves
+# to DIR instead of being downloaded again: copied (a clone on one APFS drive),
+# then deleted there. Any other live system there (an older release, a second
+# copy) is of no use then: deleted too. While another build runs, all stay (it
+# may read them).
+live_reuse() {
+  local d=$1 s f busy=0 found=1
+  others_building && busy=1
+  while IFS= read -r s; do
+    [[ -n $s ]] || continue
+    s=${s%/}/live
+    [[ -d $s && ! -L $s && ! -L ${s%/live} && ! $s -ef $d ]] || continue
+    if (( found )) && [[ -f $s/ok-$LIVE_RELEASE && -f $s/vmlinuz-linux && -f $s/initramfs-linux.img && -f $s/rootfs.ext4 ]]; then
+      log "moving the live system from $s"
+      rm -rf "$d/.moving" && mkdir -p "$d/.moving" || return 1
+      for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do
+        cp -c "$s/$f" "$d/.moving/$f" 2>/dev/null || cp "$s/$f" "$d/.moving/$f" ||
+          { rm -rf "$d/.moving"; log "could not copy it: downloading instead"; return 1; }
+      done
+      for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do
+        mv -f "$d/.moving/$f" "$d/$f" || { rm -rf "$d/.moving"; return 1; }
+      done
+      rmdir "$d/.moving" && touch "$d/ok-$LIVE_RELEASE" || return 1
+      found=0
+    fi
+    (( busy )) && continue
+    rm -f "$s"/ok-* && rm -f "$s/vmlinuz-linux" "$s/initramfs-linux.img" "$s/rootfs.ext4" "$s"/TryOmarchy-*.dmg || true
+  done <<<"$(printf '%s\n%s\n' "$HOME/Library/Caches/omacvm" "${OMACVM_LIVE_FROM:-}")"
+  return $found
 }
 
 # qemu_headless NAME ARGS...: QEMU without a window, serial console in

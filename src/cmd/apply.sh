@@ -290,6 +290,23 @@ if (( TOKEN && NAMED )) && on control-centre; then
     install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
     install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/vm-key\"" < "$vk"
 fi
+# Touch ID (ADR 0041): its own key, root's alone in the VM (PAM asks as
+# root), and for Parallels/UTM/Fusion the Bridge token (they reach the Bridge
+# over the network). OmacVM.app's VMs ask through the app's port: no Bridge
+# token in them. Off: the Mac's copy goes (the VM's goes in guest/install.sh).
+if (( TOKEN && NAMED )) && on touch-id; then
+  tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
+  gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
+  if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token" < /dev/null
+  else gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"; fi
+else
+  # The key, and the theme the VM sent for the Bridge's Touch ID panel.
+  if (( NAMED )); then
+    rm -f "$(vm_key_file "$TYPE" "$VM").touchid" "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+  fi
+  # On without a key: the VM's PAM line gets 403 and the password comes.
+  if on touch-id; then log "Touch ID: not set up (it needs the VM by name and the Bridge token: not --ip, not --no-token)"; fi
+fi
 step copy "OmacVM into the VM"
 log "OmacVM -> $IP:/usr/local/share/omacvm"
 # Unpacked beside the one there; swapped in only once it is all there. The
@@ -339,6 +356,28 @@ if (( ${#REINSTALL[@]} )); then
     info "'$VM' has OmacVM $had: all of OmacVM $now goes in, $(IFS=,; echo "${REINSTALL[*]}") installed again"
   else
     ONLY=$(IFS=,; echo "${REINSTALL[*]}"); GI_ARGS+=" --only $ONLY"
+  fi
+# A feature switch (--feature that changes what the VM has) on a VM with
+# this OmacVM: only the parts of the features that change (and parts this
+# copy changed), not the whole VM side, which reloads Hyprland and its
+# displays (lib/features.sh, feature_switch_parts). The same features again
+# (apply-vm.sh passes them all) is a whole apply, as before; so is a switch
+# while the VM's Graphics changed (the app step builds its Vulkan driver).
+elif (( ${#SETN[@]} )) && [[ -n $had && $had == "$now" ]] && ! grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe" &&
+     [[ $(sed -n 's/^OMACVM_GRAPHICS=//p' <<<"$probe" | tail -1) == "$GRAPHICS" ]]; then
+  sw=""; switched=0
+  for ((i = 0; i < ${#FN[@]}; i++)); do
+    [[ ${FV[$i]} != "${PREV[$i]}" ]] || continue
+    sw+=" ${FN[$i]}"
+    [[ " ${SETN[*]} " == *" ${FN[$i]} "* ]] && switched=1
+  done
+  if (( switched )); then
+    inst=$(gssh "$IP" "cat /etc/omacvm/installed.json 2>/dev/null" < /dev/null) || inst=""
+    if ONLY=$(feature_switch_parts "$inst" "$("$R/src/release/manifest.py" digests --src "$R/src")" "$sw" "${FN[*]}"); then
+      GI_ARGS+=" --only $ONLY"
+    else
+      ONLY=""
+    fi
   fi
 fi
 # changed_features: the features whose part the VM has another digest of (its

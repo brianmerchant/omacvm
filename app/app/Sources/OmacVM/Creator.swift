@@ -88,8 +88,9 @@ final class Creator: ObservableObject {
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [Paths.scripts.appendingPathComponent(script).path, folder.path]
         // Progress lines only for the app: omacvm build runs the same scripts
-        // in a terminal, where they would be noise.
-        var env = TestIdentity.environment()
+        // in a terminal, where they would be noise. Downloads go to the drive
+        // of the VMs folder (PrebuiltImage.environment).
+        var env = PrebuiltImage.environment()
         env["OMACVM_PROGRESS"] = "1"
         p.environment = env
         let input = Pipe(), output = Pipe()
@@ -293,6 +294,22 @@ struct PrebuiltImage: Equatable {
         case none
     }
 
+    /// For the build scripts: the test identity, and the downloads on the
+    /// drive of the VMs folder (vm-common.sh CACHE). Never into a folder of a
+    /// drive that is not connected: that would be the Mac's own disk. The
+    /// other downloads folders: a live system there moves over (live_reuse).
+    static func environment() -> [String: String] {
+        var e = TestIdentity.environment()
+        e["OMACVM_CACHE"] = nil
+        e["OMACVM_VMS_ROOT"] = nil
+        let here = Paths.downloads
+        if Storage.missingDrive(for: Paths.vmsRoot) == nil { e["OMACVM_CACHE"] = here.path }
+        e["OMACVM_LIVE_FROM"] = Paths.allDownloads
+            .filter { $0.path != here.standardizedFileURL.path && Storage.missingDrive(for: $0) == nil }
+            .map(\.path).joined(separator: "\n")
+        return e
+    }
+
     /// Off the main thread; nil when there is none, no connection, or no
     /// answer within 20 seconds (then the VM is built here).
     static func lookup() async -> PrebuiltImage? {
@@ -302,6 +319,7 @@ struct PrebuiltImage: Equatable {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/bash")
             p.arguments = [script.path, "--lookup"]
+            p.environment = environment()
             let out = Pipe()
             p.standardOutput = out
             p.standardError = FileHandle.nullDevice

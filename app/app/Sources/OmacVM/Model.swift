@@ -55,8 +55,22 @@ enum Paths {
         return roots
     }
 
-    /// The Omarchy images OmacVM.app downloaded to set up VMs (try-omarchy, prebuilt VMs); Storage > Downloaded images > Remove empties it.
-    static let downloads = VMsFolder.home.appendingPathComponent("Library/Caches/omacvm")
+    /// Where builds download the Omarchy images to (try-omarchy, prebuilt VMs):
+    /// the drive of the VMs folder (Storage.downloadsFolder).
+    static var downloads: URL { Storage.downloadsFolder(vmsRoot: vmsRoot, home: VMsFolder.home) }
+
+    /// Downloads of VMs folders the app left that could not go along
+    /// (Storage.dropDownloads): kept until removed or used up.
+    static var oldDownloads: [URL] {
+        get { (UserDefaults.standard.stringArray(forKey: "oldDownloads") ?? []).map { URL(fileURLWithPath: $0) } }
+        set { UserDefaults.standard.set(newValue.map { $0.standardizedFileURL.path }, forKey: "oldDownloads") }
+    }
+
+    /// This one, the Mac's own, those of the other VMs folders and the old
+    /// ones; Storage > Downloaded images > Remove empties them.
+    static var allDownloads: [URL] {
+        Storage.downloadsFolders(vmsRoots: vmsRoots, home: VMsFolder.home, old: oldDownloads)
+    }
 
     /// The app's resources: Contents/Resources in the app, the source tree when
     /// run with `swift run` (OMACVM_RESOURCES).
@@ -71,6 +85,12 @@ enum Paths {
         let dev = resources.appendingPathComponent("runtime/.build/qemu-gpu-runtime/bin/qemu-system-aarch64")
         if FileManager.default.fileExists(atPath: dev.path) { return dev }
         return resources.appendingPathComponent("runtime/bin/OmacVM")
+    }
+
+    /// Touch ID's panel, which QEMU loads (OmacVMTouchIDPanel; nil: an app built without it).
+    static var touchIDPanel: URL? {
+        let url = resources.appendingPathComponent("runtime/lib/OmacVMTouchIDPanel.dylib")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     static var firmware: URL {
@@ -193,6 +213,8 @@ struct VMConfig: Equatable {
     var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
     var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
+    var authSocket: URL { Paths.runDir.appendingPathComponent("\(id).auth") }
+    var touchIDPanelSocket: URL { Paths.runDir.appendingPathComponent("\(id).tid") }
 
     func write() throws {
         try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)
@@ -424,6 +446,11 @@ enum Settings {
     /// HDA catching up after a stall), if the new one ever misbehaves.
     /// Hidden: defaults write org.omacvm.app audioClassic -bool true
     static var audioClassic: Bool { UserDefaults.standard.bool(forKey: "audioClassic") }
+    /// Added to the sound delay the app tells the VM (AudioLatencyWatch), in
+    /// ms, -500 ... 500: negative when the sound comes early in the VM's
+    /// videos, positive when it still comes late (a device that under-reports).
+    /// Hidden: defaults write org.omacvm.app audioDelayExtraMs -int -20
+    static var audioDelayExtraMs: Int { min(max(UserDefaults.standard.integer(forKey: "audioDelayExtraMs"), -500), 500) }
     /// Seconds the firmware waits for a key (its boot manager) before it boots.
     /// 0, the default: it boots at once (the boot logo covers the firmware, so
     /// the wait only cost time: 5 s on every start up to 3.0.0).

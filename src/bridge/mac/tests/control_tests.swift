@@ -33,6 +33,12 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            == .startJob(JobRequest(action: .reinstall, features: ["bridge"])), "reinstall")
     expect(ok(route("POST", "/omacvm/jobs", #"{"action": "update"}"#)) == .startJob(JobRequest(action: .update, features: [])), "update")
     expect(ok(route("GET", "/omacvm/jobs/0123456789abcdef")) == .job("0123456789abcdef"), "job")
+    expect(ok(route("GET", "/omacvm/settings/mouse-swipe")) == .mouseSwipe, "mouse swipe")
+    expect(ok(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 3}"#)) == .setMouseSwipe(3), "mouse swipe 3")
+    expect(ok(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 4}"#)) == .setMouseSwipe(4), "mouse swipe 4")
+    // The Touch ID panel's colours: the body goes to touchid_theme.swift's rules (tests/touchid_panel_tests.swift).
+    expect(ok(route("POST", "/omacvm/theme", ##"{"background": "#1a1b26"}"##)) == .theme(Data(##"{"background": "#1a1b26"}"##.utf8)), "theme")
+    expect(err(route("GET", "/omacvm/theme"))?.status == 405, "theme: POST only")
     for g in ["opengl", "vulkan", "auto"] {
       expect(ok(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "\#(g)"}"#))
              == .startJob(JobRequest(action: .graphics, features: [g])), "graphics \(g)")
@@ -71,12 +77,37 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(err(route("POST", "/omacvm/settings/update-checks", #"{"enabled": 1}"#))?.code == "bad-body", "1 is not true")
     expect(err(route("POST", "/omacvm/settings/update-checks", #"{"enabled": "false"}"#))?.code == "bad-body", "a string is not a bool")
     expect(err(route("POST", "/omacvm/updates/check", #"{"url": "http://evil"}"#))?.code == "unknown-key", "check from another feed")
+    for b in [#"{"fingers": 5}"#, #"{"fingers": 2}"#, #"{"fingers": 3.0}"#, #"{"fingers": 3.5}"#, #"{"fingers": "3"}"#,
+              #"{"fingers": true}"#, #"{"fingers": null}"#, "{}", ""] {
+      expect(err(route("POST", "/omacvm/settings/mouse-swipe", b))?.code == "bad-body", "mouse swipe: \(b) is not 3 or 4")
+    }
+    expect(err(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 3, "domain": "com.apple.dock"}"#))?.code == "unknown-key",
+           "mouse swipe: no other key")
+    expect(err(route("GET", "/omacvm/settings/mouse-swipe", #"{"fingers": 3}"#))?.code == "body", "mouse swipe: GET with a body")
+    expect(err(route("DELETE", "/omacvm/settings/mouse-swipe"))?.status == 405, "mouse swipe: method")
     expect(err(route("GET", "/omacvm/jobs/../../etc"))?.status == 404, "job path")
     expect(err(route("GET", "/omacvm/jobs/ABCDEF0123456789"))?.status == 404, "job id upper case")
     expect(err(route("GET", "/omacvm/run"))?.status == 404, "no other requests")
     expect(err(route("DELETE", "/omacvm/jobs"))?.status == 405, "method")
     expect(err(route("GET", "/omacvm/hello", "{}"))?.code == "body", "GET with a body")
     expect(err(route("GET", "/state"))?.status == 404, "outside /omacvm/")
+
+    // ---- Magic Mouse swipe: Gestures' rules ----
+    expect(mouseSwipeFingers(stored: nil) == 4, "not set: 4")
+    expect(mouseSwipeFingers(stored: NSNumber(value: 3)) == 3 && mouseSwipeFingers(stored: "3") == 3, "3 as a number or text")
+    expect(mouseSwipeFingers(stored: NSNumber(value: 5)) == 4 && mouseSwipeFingers(stored: "three") == 4
+           && mouseSwipeFingers(stored: NSNumber(value: 3.5)) == 4, "anything else: 4")
+    expect(mouseSwipeFingers(stored: kCFBooleanTrue) == 4, "a bool: 4")
+    expect(isMagicMouse(vendor: nil, product: nil, family: 112), "multitouch family 112")
+    expect(isMagicMouse(vendor: 0x004c, product: 0x0269, family: nil), "Magic Mouse 2 over Bluetooth")
+    expect(isMagicMouse(vendor: 0x05ac, product: 0x0323, family: nil), "Magic Mouse USB-C over USB")
+    expect(isMagicMouse(vendor: 0x05ac, product: 0x030d, family: nil), "first Magic Mouse")
+    expect(!isMagicMouse(vendor: 0x05ac, product: 0x0265, family: nil), "Magic Trackpad 2 is no mouse")
+    expect(!isMagicMouse(vendor: 0x046d, product: 0x0269, family: nil), "another vendor's 0x0269")
+    expect(!isMagicMouse(vendor: nil, product: 0x0269, family: nil), "no vendor")
+    let ms = mouseSwipeAnswer(magicMouse: true, fingers: 3)
+    expect(ms["magic_mouse"] as? Bool == true && ms["fingers"] as? Int == 3 && ms.count == 2, "answer: two keys")
+    expect(mouseSwipeAnswer(magicMouse: false, fingers: 7)["fingers"] as? Int == 4, "answer: never another number")
 
     // ---- protocol ----
     if case .success(let p) = negotiateProto(nil) { expect(p == 1, "no header: 1") } else { expect(false, "no header") }
@@ -289,6 +320,22 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
            "versions compare as numbers")
     expect(versionLess("1.x", "2.0.0") == nil, "not a version")
     // Updates only go forward.
+    // ---- app-update: OmacVM.app updates itself for its own VM ----
+    expect(ok(route("POST", "/omacvm/app-update")) == .appUpdate, "app-update, no body")
+    expect(ok(route("POST", "/omacvm/app-update", "{}")) == .appUpdate, "app-update, {}")
+    expect(err(route("POST", "/omacvm/app-update", #"{"version": "9.9.9"}"#))?.code == "unknown-key", "app-update names no version")
+    expect(err(route("GET", "/omacvm/app-update"))?.status == 405, "app-update: POST only")
+    expect(appUpdateGate(viaApp: true, vmType: "app", macAppCopy: true, release: "3.0.2", mac: "3.0.1") == nil, "app-update: newer")
+    expect(appUpdateGate(viaApp: false, vmType: "app", macAppCopy: true, release: "3.0.2", mac: "3.0.1")?.code == "not-app", "not through the app")
+    expect(appUpdateGate(viaApp: true, vmType: "parallels", macAppCopy: true, release: "3.0.2", mac: "3.0.1")?.code == "not-app", "not an app VM")
+    expect(appUpdateGate(viaApp: true, vmType: "app", macAppCopy: false, release: "3.0.2", mac: "3.0.1")?.code == "not-app-copy", "a checkout")
+    expect(appUpdateGate(viaApp: true, vmType: "app", macAppCopy: true, release: nil, mac: "3.0.1")?.code == "no-update", "no manifest")
+    expect(appUpdateGate(viaApp: true, vmType: "app", macAppCopy: true, release: "3.0.1", mac: "3.0.1")?.code == "not-newer", "same")
+    expect(appUpdateGate(viaApp: true, vmType: "app", macAppCopy: true, release: "3.0.0", mac: "3.0.1")?.code == "not-newer", "never down")
+    expect(appUpdateGate(viaApp: true, vmType: "app", macAppCopy: true, release: "x", mac: "3.0.1")?.code == "not-newer", "bad version")
+    expect(cliIsAppCopy("/Users/a/Applications/OmacVM.app/Contents/Resources/omacvm/omacvm", hasGit: false), "app copy")
+    expect(!cliIsAppCopy("/Users/a/Applications/OmacVM.app/Contents/Resources/omacvm/omacvm", hasGit: true), "app copy with .git")
+    expect(!cliIsAppCopy("/Users/a/omacvm/omacvm", hasGit: true), "checkout")
     expect(forwardGate(release: "2.9.1", mac: "2.9.0", vm: "2.9.0") == nil, "a newer release")
     expect(forwardGate(release: "2.9.1", mac: "2.9.1", vm: "2.9.0") == nil, "retry after a VM went back")
     expect(forwardGate(release: "2.9.1", mac: "2.9.0", vm: "") == nil, "a VM without a version")

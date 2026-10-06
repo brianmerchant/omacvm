@@ -63,6 +63,15 @@ commit 82927e9. Changes here:
   screen stays invisible until macOS has it there (no windowed frame, no
   menu bar over it). `Tests/display/test-shutdown-events.sh` and
   `test-fullscreen-start.sh` check them at build time.
+- `patches/omacvm-cocoa-quit-clean.patch`: QEMU no longer quits when AppKit
+  sees its last window go (a hidden full-screen test run quit after a minute
+  when AppKit closed its full-screen mouse detection window); the close
+  button, or the VM window closing any other way, still quits. A quit within
+  2 minutes of the guest's start or reset presses the power button again
+  every 10 s up to 40 s (a press while the guest boots is lost) and stops the
+  guest at 70 s; a guest that is up gets one press and 60 s, as before
+  (Omarchy's power menu opens on the key). qemu.log gets a line for each.
+  `Tests/display/test-quit-clean.sh` checks it at build time.
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's

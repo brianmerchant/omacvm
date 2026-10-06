@@ -66,6 +66,10 @@ class Controller:
         # Graphics memory (OmacVM.app): a number of the moment, never cached.
         self.gpu_memory: dict | None = None
         self.gpu_memory_misses = 0
+        # The Mac's Magic Mouse swipe ({"magic_mouse", "fingers"}), never cached:
+        # the row shows only while the Mac has a Magic Mouse.
+        self.mouse_swipe: dict | None = None
+        self.mouse_swipe_sets = 0   # bumped around each switch: an older look is not kept
 
     # ---- the Mac ----
     @property
@@ -102,6 +106,35 @@ class Controller:
                 self.local.save_cache(mac_status=st)
         except BridgeError as e:
             self.mac_error = e
+        self.refresh_mouse_swipe()
+
+    def mouse_swipe_supported(self) -> bool:
+        return self.hello is not None and "settings/mouse-swipe" in self.hello.requests
+
+    def refresh_mouse_swipe(self) -> None:
+        """The Mac's Magic Mouse swipe. The Mac away or a missed answer keeps
+        the last one (the row stays, it says it needs the Mac); a Mac that
+        does not list the request has none. A look that started before a
+        switch ended is dropped: it may be the old value."""
+        if self.hello is not None and not self.mouse_swipe_supported():
+            self.mouse_swipe = None
+            return
+        if not self.linked:
+            return
+        sets = self.mouse_swipe_sets
+        try:
+            answer = self.bridge.mouse_swipe()
+        except BridgeError:
+            return
+        if sets == self.mouse_swipe_sets:
+            self.mouse_swipe = answer
+
+    def set_mouse_swipe(self, fingers: int) -> None:
+        self.mouse_swipe_sets += 1
+        try:
+            self.mouse_swipe = self.bridge.set_mouse_swipe(fingers)
+        finally:
+            self.mouse_swipe_sets += 1
 
     def gpu_memory_supported(self) -> bool | None:
         """The Mac answers gpu-memory (None: its hello is not in yet)."""
@@ -193,6 +226,23 @@ class Controller:
         m = self.manifest()
         return m is not None and S.update_offered(m.get("version"), self.local.version, self.mac_version())
 
+    def update_plan(self) -> tuple[str, str]:
+        """What u does now (state.PLANS) and the release's version."""
+        m = self.manifest()
+        if m is None:
+            return "none", ""
+        u = self.updates or {}
+        app_update = self.hello is not None and "app-update" in self.hello.requests
+        plan = S.update_plan(m.get("version"), self.local.version, self.mac_version(), u.get("mac_app") is True,
+                             self.local.vm_type == "app", app_update)
+        return plan, str(m.get("version") or "")
+
+    def update_line(self) -> str:
+        """The top line: only with update checks on, or after a check in the last hour."""
+        if not (self.checks_enabled or self.manifest_fresh()):
+            return ""
+        return S.update_line(*self.update_plan())
+
     def offer(self) -> dict:
         """The release's parts, only when it is an update for this VM."""
         m = self.manifest()
@@ -230,6 +280,12 @@ class Controller:
                            offline=self.mac_error is not None)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
                              offline=self.mac_error is not None)
+        # A Mac setting: the last answer stays while the Mac is away for a moment.
+        ms = S.mouse_swipe_row(self.mouse_swipe, on.get("gestures", True), offline=not self.linked)
+        if ms is not None:
+            # After Trackpad gestures and the features that need it.
+            at = max((i + 1 for i, r in enumerate(rows) if "gestures" in (r.feature.name, r.feature.needs)), default=len(rows))
+            rows.insert(at, ms)
         return rows + [r for r in (g, m) if r is not None]
 
     def fixed_of(self, name: str) -> str:
