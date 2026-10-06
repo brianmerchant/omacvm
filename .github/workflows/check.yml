@@ -143,6 +143,9 @@ jobs:
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
 
+      - name: Feature state truth (the record against the fast network and SDDM autologin)
+        run: src/tests/feature-truth.sh
+
       - name: The vulkan feature's Mesa build (build tools come and go)
         run: src/tests/venus-build-tools.sh
 

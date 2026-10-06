@@ -175,6 +175,37 @@ BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "
 FAST_NET=$(feat fast_network off)
 if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then [[ -s $d/fast-network ]] && FAST_NET=on || FAST_NET=off; fi
 
+# OmacVM's record of the features against the VM as it is (src/lib/features.sh):
+# what was switched outside OmacVM (the app's Fast network button, an SDDM
+# autologin file OmacVM did not write) keeps its real state, and the record
+# is fixed to match; an OmacVM.app VM's record (its features file) and the
+# VM's copy (/etc/omacvm/env) should say the same.
+probe=$(vm_probe "$IP")
+if [[ -n $(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe") ]]; then
+  features_load
+  rd=""; [[ $TYPE == app && -n ${VM:-} ]] && rd=$(app_dir "$VM" 2>/dev/null)
+  features_read_env "$probe"; COPY=("${FV[@]}")
+  features_read_record "$rd"; REC=("${FV[@]}")
+  features_real "$probe" "$rd"
+  if [[ -n ${DRIFT[*]+x} ]]; then
+    if features_record_fix "$IP" "$rd"; then fx="fixed the record"; else fx="could not fix the VM's copy (/etc/omacvm/env)"; fi
+    for d in "${DRIFT[@]}"; do
+      FEATURE=${d%%$'\t'*}
+      if [[ $fx == fixed* ]]; then ok "record" "$(DRIFT=("$d"); features_drift_lines "$fx")"
+      else warn "record" "$(DRIFT=("$d"); features_drift_lines "$fx")"; fi
+    done
+    COPY=("${FV[@]}"); REC=("${FV[@]}")
+  fi
+  if [[ -n $rd && -f $rd/features ]]; then
+    for ((i = 0; i < ${#FN[@]}; i++)); do
+      [[ ${REC[$i]} == "${COPY[$i]}" ]] && continue
+      FEATURE=${FN[$i]}
+      warn "record" "${FTITLE[$i]}: ${REC[$i]} in OmacVM's record (the VM's features file), ${COPY[$i]} in the VM's copy: omacvm apply --vm \"$VM\" brings them together"
+    done
+  fi
+  FEATURE=""
+fi
+
 FEATURE=fast-network
 # OmacVM.app's fast network: the service on the Mac, and which network this
 # start of the VM took (the app writes it to logs/network).

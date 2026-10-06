@@ -8,6 +8,20 @@
 #   features_read_env ENV_TEXT    FV (on|off per index) from a VM's /etc/omacvm/env;
 #                                 defaults for what it does not name
 #   features_fix                  a feature needing another one is off without it
+#   features_read_record DIR      FV from an OmacVM.app VM's record (DIR/features)
+#   features_real PROBE [DIR]     FV as the VM really is where a feature can drift;
+#                                 DRIFT: what the record had wrong
+#   features_record_fix IP [DIR]  writes DRIFT into the record and the VM's copy
+#
+# The record of a VM's features (docs: tracks/control-centre.md, "Feature
+# state truth"): an OmacVM.app VM's folder has it in its features file (the
+# app reads it at each start); every VM keeps a copy in /etc/omacvm/env (the
+# VM side reads it). omacvm apply writes both. vm.env's FEATURES is only the
+# setup's choice for the VM's first apply, which then takes it out. Two
+# features can be switched outside OmacVM, and their real state wins: the
+# fast network (the app's Fast network button writes the VM's fast-network
+# file) and autologin (SDDM's [Autologin] in the VM, also a file OmacVM did
+# not write).
 FEATURES_TSV="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/features.tsv"
 
 features_load() {
@@ -78,6 +92,76 @@ features_fix() {
       [[ ${FV[$j]} == on ]] || { FV[$i]=off; changed=1; }
     done
   done
+}
+
+features_read_record() {
+  local i v rec
+  [[ -n ${1:-} && -f $1/features ]] || return 0
+  rec=" $(tr '\n\t' '  ' < "$1/features") "
+  for ((i = 0; i < ${#FN[@]}; i++)); do
+    v=${rec#* "${FN[$i]}="}
+    [[ $v == "$rec" ]] && continue   # not named: the VM's copy says
+    v=${v%% *}
+    [[ $v == on || $v == off ]] && FV[$i]=$v
+  done
+  return 0
+}
+
+# features_real PROBE [DIR]: the features that can be switched outside
+# OmacVM, as they are. FV gets the real state, and DRIFT
+# "name<TAB>real<TAB>where<TAB>said" for each one that the record (FV) or
+# the VM's copy (PROBE's OMACVM_FEATURE_) had wrong; said: what that was.
+features_real() {
+  local real
+  DRIFT=()
+  if [[ -n ${2:-} ]]; then   # OmacVM.app: the fast-network file is the switch
+    [[ -s $2/fast-network ]] && real=on || real=off
+    feature_drift "$1" fast-network "$real" "the app's Fast network setting"
+  fi
+  real=$(sed -n 's/^OMACVM_REAL_autologin=//p' <<<"$1" | tail -1)
+  [[ $real == on || $real == off ]] && feature_drift "$1" autologin "$real" "SDDM's autologin in the VM"
+  return 0
+}
+feature_drift() {   # PROBE NAME REAL WHERE
+  local i copy
+  i=$(feature_index "$2") || return 0
+  copy=$(sed -n "s/^OMACVM_FEATURE_$(tr - _ <<<"$2")=//p" <<<"$1" | tail -1)
+  [[ ${FV[$i]} == "$3" && ( -z $copy || $copy == "$3" ) ]] && return 0
+  DRIFT+=("$2"$'\t'"$3"$'\t'"$4"$'\t'"$( [[ $3 == on ]] && echo off || echo on)")
+  FV[$i]=$3
+}
+
+# One line per drift, as "Autologin: on (SDDM's autologin in the VM); OmacVM's
+# record said off: fixed the record" (TAIL: what came of it).
+features_drift_lines() {
+  local d n v w said i
+  for d in ${DRIFT[@]+"${DRIFT[@]}"}; do
+    IFS=$'\t' read -r n v w said <<<"$d"
+    i=$(feature_index "$n") || continue
+    echo "${FTITLE[$i]}: $v ($w); OmacVM's record said $said${1:+: $1}"
+  done
+}
+
+# features_record_fix IP [DIR]: DRIFT into the VM's copy (/etc/omacvm/env,
+# only when it has one) and, for an OmacVM.app VM, its features file. Status
+# 1 when the VM's copy could not be written (the record is still fixed).
+features_record_fix() {
+  local d n v w kv="" i feats=""
+  [[ -n ${DRIFT[*]+x} ]] || return 0
+  for d in "${DRIFT[@]}"; do
+    IFS=$'\t' read -r n v w _ <<<"$d"
+    [[ $n =~ ^[a-z][a-z0-9-]*$ && ( $v == on || $v == off ) ]] && kv+=" $(tr - _ <<<"$n")=$v"
+  done
+  if [[ -n ${2:-} && -f $2/features ]]; then
+    for ((i = 0; i < ${#FN[@]}; i++)); do feats+="${FN[$i]}=${FV[$i]} "; done
+    app_features_write "$2" "${feats% }" || true
+  fi
+  [[ -n $kv ]] || return 0
+  gssh "$1" "set -e; f=/etc/omacvm/env; [ -f \$f ] || exit 0
+    for kv in$kv; do k=OMACVM_FEATURE_\${kv%%=*}; v=\${kv#*=}
+      if grep -q \"^\$k=\" \$f; then sed \"s/^\$k=.*/\$k=\$v/\" \$f > \$f.omacvm-new; cat \$f.omacvm-new > \$f; rm -f \$f.omacvm-new
+      else echo \"\$k=\$v\" >> \$f; fi
+    done" < /dev/null >/dev/null 2>&1
 }
 
 # JSON string (for the --json outputs).

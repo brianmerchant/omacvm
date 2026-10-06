@@ -118,11 +118,16 @@ notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # O
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
-# OmacVM.app: the VM's fast-network file is the switch (the app's button sets
-# it too), so an apply without --feature fast-network keeps what it says.
-if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
-  [[ -s $d/fast-network ]] && FV[$(feature_index fast-network)]=on || FV[$(feature_index fast-network)]=off
+# OmacVM.app: the VM's record (its features file) over the VM's copy.
+rd=""
+if [[ $TYPE == app ]] && (( NAMED )) && rd=$(app_dir "$VM"); then
+  [[ -z $had ]] || features_read_record "$rd"
 fi
+# What was switched outside OmacVM keeps its real state: the fast network
+# (the app's button writes the fast-network file) and autologin (SDDM, also an
+# Omarchy install's own file). An apply without --feature for them keeps it.
+features_real "$probe" "$rd"
+[[ -z $had ]] || while IFS= read -r l; do [[ -z $l ]] || info "$l"; done < <(features_drift_lines "kept, the record follows")
 # A VM from before the control centre: one question (yes without a terminal).
 cc=$(feature_index control-centre)
 if [[ -n $had ]] && ! grep -q '^OMACVM_FEATURE_control_centre=' <<<"$probe" && [[ " ${SETN[*]:-} " != *" control-centre "* ]]; then
