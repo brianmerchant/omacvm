@@ -258,12 +258,13 @@ jobs:
       - name: OmacVM.app while the VM idles (guest agent connection, clipboard poll)
         run: src/tests/app-idle.sh
 
-      - name: Guest agents offline tests (desktop check, idle waits, display panel)
+      - name: Guest agents offline tests (desktop check, idle waits, display panel, camera frame times)
         run: |
           python3 src/app/guest/tests/test_omacvm_displays.py
           python3 src/app/guest/tests/test_idle_waits.py
           python3 src/app/guest/tests/test_monitor_widget.py
           python3 src/omanotch/guest/tests/test_display_panel.py
+          python3 src/camera/guest/tests/test_frames.py
 
       - name: Final-round benchmark kit offline tests (one timing method per row, what is left out, preflight)
         run: tests/bench/final-round/test.sh
@@ -288,6 +289,7 @@ jobs:
           python3 src/app/guest/tests/test_idle_waits.py -v
           python3 src/app/guest/tests/test_monitor_widget.py -v
           python3 src/omanotch/guest/tests/test_display_panel.py -v
+          python3 src/camera/guest/tests/test_frames.py -v
 
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |
