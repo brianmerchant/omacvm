@@ -5,6 +5,8 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app: a VM build, and each apply in a VM without a window, is about
+  a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer
