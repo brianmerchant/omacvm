@@ -183,7 +183,7 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then [[ -s $d/fast-netw
 probe=$(vm_probe "$IP")
 if [[ -n $(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe") ]]; then
   features_load
-  rd=""; [[ $TYPE == app && -n ${VM:-} ]] && rd=$(app_dir "$VM" 2>/dev/null)
+  rd=""; [[ $TYPE == app && -n ${VM:-} ]] && { rd=$(app_dir "$VM" 2>/dev/null) || rd=""; }
   features_read_env "$probe"; COPY=("${FV[@]}")
   features_read_record "$rd"; REC=("${FV[@]}")
   features_real "$probe" "$rd"

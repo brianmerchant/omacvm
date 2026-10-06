@@ -60,7 +60,7 @@ if [[ -z $version ]]; then   # not an OmacVM VM yet: what it would get
 else
   # The record (an OmacVM.app VM's features file), then what was switched
   # outside OmacVM as it really is; the record is fixed to match.
-  rd=""; [[ $TYPE == app && -n $VM ]] && rd=$(app_dir "$VM" 2>/dev/null)
+  rd=""; [[ $TYPE == app && -n $VM ]] && { rd=$(app_dir "$VM" 2>/dev/null) || rd=""; }
   features_read_record "$rd"
   features_real "$probe" "$rd"
   if [[ -n ${DRIFT[*]+x} ]]; then
