@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.1 (unreleased)
+
+- OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
+  desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
+  key before it boots (the wait was hidden under the boot logo).
+  `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+
 ## 3.0.0 (unreleased)
 
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
