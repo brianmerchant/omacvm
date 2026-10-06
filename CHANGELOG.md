@@ -5,10 +5,25 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app: a VM build, and each apply in a VM without a window, is about
+  a minute shorter. The QEMU guest agent no longer waits for its port there.
+- OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
+  with external displays: after a Hyprland config reload (a theme change, a
+  saved hypr file, a feature switched in the control centre) the pointer
+  could reach only the left or the right half of the screen for up to 30
+  seconds. The VM told the Mac where its outputs were from a moment when
+  they were still moving. It now hears every move and tells the Mac within
+  half a second. In the VM, a reinstall of the guest files no longer stops
+  the display agent.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
   `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- OmacVM.app: **Mac folder** (off by default). One folder of the Mac at
+  `~/Mac` in the VM (virtio-9p; big files fast, many small files slow). A
+  folder that is not there or that OmacVM may not open is left out for that
+  start and the VM starts as usual; the home folder and the folders above it
+  are refused. VMs from before 3.0.1: `omacvm apply` once.
 - USB devices (experimental, OmacVM.app, off by default): give a VM a USB
   device macOS does not use itself (debug probes, SDR sticks, boards in DFU
   mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
@@ -21,6 +36,12 @@ in more words.
   VM start. pacman and git clone try a failed download again (3 tries)
   while Omarchy installs. PAC files are not read. Details: docs/guide.md,
   "Behind a proxy".
+- Fast network: a VPN whose interface is up before it gets its address (an
+  IKEv2 connection's `ipsec0`, a tunnel brought up first) now gets the VPN
+  NAT within a second. For such an address the service saw only a new
+  route, and waited for the next other change. It also missed IPv4 address
+  messages (shorter than it expected). Tested with a real WireGuard client
+  (docs/routes/app.md).
 - In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
   which gives them real-time priority, took a VM that had been stopped for
   a runaway thread and put them back to normal priority for the rest of the
@@ -28,6 +49,25 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- Graphics Vulkan: WebGPU in Chromium on the Mac's GPU, without the
+  experimental vulkan feature. The VM's Venus driver (OmacVM's build of
+  Mesa 26.2.4) now shares the semaphores Chrome asks for before it offers
+  pages a WebGPU adapter (before: "no adapter"), and a "Chromium (WebGPU)"
+  menu entry starts Chromium with its compositor on Vulkan. VMs set to
+  Vulkan rebuild the driver once (a few minutes, in the background after
+  the next start, or with `omacvm apply`). `omacvm check` has a "WebGPU in
+  Chromium" row.
+- **x86 Linux apps** (experimental, off by default): `omacvm enable
+  x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
+  start like ARM ones, slower (on an M4: about 85 % of native speed for
+  plain code, under half for vector-heavy code, plus a start-up cost;
+  tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
+  Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
+  ([details](docs/features.md#x86-linux-apps))
+- OmacVM.app's own window (start, options, setup) opens centred on the
+  MacBook's built-in display, not somewhere on an external monitor. With
+  the lid closed or on a Mac without a built-in display, it opens centred
+  on the main display. The VM's window still opens where you are.
 
 - OmacVM.app: the sound is in step with the picture in videos (YouTube in
   Chromium, Firefox, mpv). The VM never knew how late the Mac plays its

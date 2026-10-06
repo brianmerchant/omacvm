@@ -6,6 +6,7 @@
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
 #  * the Mac's sound delay for A/V sync in videos (omacvm-audio-latency)
+#  * the Mac folder at ~/Mac, when the app shares one (omacvm-mac-folder)
 #  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 #  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
@@ -21,7 +22,10 @@ cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 ../../guest/pkg-add qemu-guest-agent python || true
-systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
+# Started without waiting: a VM without the agent's port (the headless QEMU
+# of a build or an update) would hold this step 60-90 s for the device.
+systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
+systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
 # HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
 # module's builder, and a pacman hook that rebuilds it for new kernels.
@@ -57,6 +61,10 @@ install -m644 omacvm-audio-latency.service /etc/systemd/user/
 systemctl --global enable omacvm-audio-latency.service >/dev/null 2>&1 || true
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
+# The Mac folder at ~/Mac, when the app shares one (its setting; off by default).
+install -m755 omacvm-mac-folder /usr/local/bin/
+install -m644 omacvm-mac-folder.service /etc/systemd/system/
+systemctl enable omacvm-mac-folder.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
 # Omarchy ignores the power key; here it comes only from the Mac's Quit.
 install -Dm644 90-omacvm-app-power.conf /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
@@ -92,6 +100,9 @@ venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL
 # OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
 if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
 elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
+# WebGPU in Chromium on that Vulkan: the "Chromium (WebGPU)" launcher (venus/webgpu.sh).
+if [[ $graphics == vulkan ]]; then venus/webgpu.sh || echo "WARN: WebGPU in Chromium is not set up; Vulkan and OpenGL are unaffected"
+elif [[ $graphics == opengl ]]; then venus/webgpu.sh --off; fi
 # Vulkan windows: on the GPU when the Mac's app can show them, else through a
 # CPU copy (omacvm-vulkan-present says why). It replaces 3.0.0 RC's fixed
 # environment.d file.
