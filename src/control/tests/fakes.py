@@ -56,6 +56,8 @@ class FakeMac:
         self.graphics: dict | None = None   # an OmacVM.app VM's Graphics (omacvm graphics --json)
         self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
+        self.mouse_swipe: dict | None = None   # {"magic_mouse", "fingers"} (None: an older Mac without it)
+        self.notch = False   # a MacBook with a notch: Omanotch can go on
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -127,8 +129,11 @@ class FakeMac:
                     names = [l.split("\t")[0] for l in open(os.path.join(SRC, "features.tsv"), encoding="utf-8")
                              if l.strip() and not l.startswith("#")]
                     reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else [])
+                    reqs += ["settings/mouse-swipe"] if fake.mouse_swipe is not None else []
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
                                            "requests": reqs, "macos": "15.7.4", "chip": "Apple M4 Max"})
+                if p == "/omacvm/settings/mouse-swipe" and fake.mouse_swipe is not None:
+                    return self.send(200, fake.mouse_swipe)
                 if p == "/omacvm/gpu-memory" and fake.gpu_memory is not None:
                     fake.gpu_memory_at.append(time.monotonic())
                     return self.send(200, fake.gpu_memory)
@@ -140,7 +145,8 @@ class FakeMac:
                     return self.send(200, {"omacvm": fake.version, "features": [], "checks": [], "graphics": fake.graphics})
                 if p == "/omacvm/status":
                     return self.send(200, {"omacvm": fake.version, "features": [
-                        {"name": "omanotch", "on": False, "available": False, "reason": "needs a MacBook with a notch"}],
+                        {"name": "omanotch", "on": False, "available": fake.notch,
+                         "reason": "" if fake.notch else "needs a MacBook with a notch"}],
                         "checks": [{"status": "fail", "name": "keyboard/trackpad access", "detail":
                                     "waiting for Accessibility: System Settings > Privacy & Security", "needs_human": True,
                                     "feature": "gestures"}]})
@@ -185,6 +191,11 @@ class FakeMac:
                 if self.path == "/omacvm/settings/update-checks":
                     fake.checks_enabled = bool(b["enabled"])
                     return self.send(200, fake.updates())
+                if self.path == "/omacvm/settings/mouse-swipe" and fake.mouse_swipe is not None:
+                    if b.get("fingers") not in (3, 4) or set(b) != {"fingers"}:
+                        return self.send(400, {"error": "send {\"fingers\": 3|4}", "code": "bad-body"})
+                    fake.mouse_swipe = dict(fake.mouse_swipe, fingers=b["fingers"])
+                    return self.send(200, fake.mouse_swipe)
                 if self.path == "/omacvm/updates/check":
                     fake.checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     return self.send(200, fake.updates())

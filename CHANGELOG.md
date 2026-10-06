@@ -238,6 +238,8 @@ in more words.
   was as late. Fine-tuning:
   `defaults write org.omacvm.app audioDelayExtraMs -int N`
   (troubleshooting 28).
+- Control centre: a Magic Mouse swipe row (3 or 4 fingers) while the Mac
+  has a Magic Mouse, on every route.
 
 ## 3.0.0
 

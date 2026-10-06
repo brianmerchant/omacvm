@@ -107,7 +107,7 @@ def test_controller_takes_the_macs_fixed_state(features):
     c.mac_status = {"features": [
         {"name": "fast-network", "on": True, "available": True, "reason": "", "fixed": "on (...): fixed the record"},
         {"name": "bridge", "on": True, "available": True, "reason": "", "fixed": ""}]}
-    c.vm_checks, c.jobs, c.hello, c.mac_error, c.gpu_memory = [], {}, None, None, None
+    c.vm_checks, c.jobs, c.hello, c.mac_error, c.gpu_memory, c.mouse_swipe = [], {}, None, None, None, None
     c.offer = lambda: {}
     c.gpu_memory_supported = lambda: None
     rows = {r.feature.name: r for r in c.rows(with_updates=False)}

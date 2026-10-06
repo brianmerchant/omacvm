@@ -22,6 +22,7 @@ struct JobRequest: Equatable { let action: ControlAction; let features: [String]
 enum ControlRoute: Equatable {
   case hello, status, updates, updatesCheck, gpuMemory
   case setUpdateChecks(Bool)
+  case mouseSwipe, setMouseSwipe(Int)
   case startJob(JobRequest)
   case job(String)
 }
@@ -81,6 +82,14 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
         throw PolicyError(400, "bad-body", "send {\"enabled\": true|false}")
       }
       return .success(.setUpdateChecks(b))
+    case ("GET", "settings/mouse-swipe"):
+      guard body.isEmpty else { throw PolicyError(400, "body", "no body for GET") }
+      return .success(.mouseSwipe)
+    case ("POST", "settings/mouse-swipe"):
+      guard let o = try strictObject(body, allowed: ["fingers"]), let n = strictFingers(o["fingers"]) else {
+        throw PolicyError(400, "bad-body", "send {\"fingers\": 3|4}")
+      }
+      return .success(.setMouseSwipe(n))
     case ("POST", "jobs"):
       guard let o = try strictObject(body, allowed: ["action", "features", "graphics"]),
             let a = o["action"] as? String, let action = ControlAction(rawValue: a) else {
@@ -113,7 +122,7 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
     case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
-         (_, "gpu-memory"):
+         (_, "gpu-memory"), (_, "settings/mouse-swipe"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")
@@ -123,6 +132,40 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
   } catch {
     return .failure(PolicyError(400, "bad-request", "bad request"))
   }
+}
+
+// ---- Magic Mouse swipe (GET/POST /omacvm/settings/mouse-swipe) ----
+// OmacVM Gestures' MouseSwipeFingers (#127): a two-finger swipe on a Magic
+// Mouse is 3 or 4 fingers on the VM's trackpad. A Mac-wide setting, as in
+// OmacVM.app (MouseSwipeSetting.swift); the control centre shows it only
+// while the Mac has a Magic Mouse.
+let mouseSwipeChoices = [3, 4]
+
+/// A JSON 3 or 4: no bool, no 3.0, no "3".
+func strictFingers(_ v: Any?) -> Int? {
+  guard let n = v as? NSNumber, CFGetTypeID(n) == CFNumberGetTypeID(), !CFNumberIsFloatType(n),
+        mouseSwipeChoices.contains(n.intValue) else { return nil }
+  return n.intValue
+}
+
+/// What Gestures does with a stored value (mouseFingersOf in
+/// omacvm-gestures.c): 3 (number or text) is 3, anything else 4.
+func mouseSwipeFingers(stored: Any?) -> Int {
+  if let s = stored as? String { return s == "3" ? 3 : 4 }
+  if let n = stored as? NSNumber, CFGetTypeID(n) == CFNumberGetTypeID() { return n.doubleValue == 3 ? 3 : 4 }
+  return 4
+}
+
+/// A Magic Mouse as Gestures and the app find it: Apple's multitouch family
+/// 112, or Apple's product ids 0x030d, 0x0269, 0x0323 (Bluetooth or USB vendor).
+func isMagicMouse(vendor: Int?, product: Int?, family: Int?) -> Bool {
+  if family == 112 { return true }
+  guard let p = product, [0x030d, 0x0269, 0x0323].contains(p), let v = vendor else { return false }
+  return v == 0x004c || v == 0x05ac
+}
+
+func mouseSwipeAnswer(magicMouse: Bool, fingers: Int) -> [String: Any] {
+  ["magic_mouse": magicMouse, "fingers": fingers == 3 ? 3 : 4]
 }
 
 /// The protocol both sides speak: the guest's (X-OmacVM-Proto, 1 when

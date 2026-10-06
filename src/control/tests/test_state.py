@@ -345,3 +345,34 @@ def test_gpu_memory_row_carries_the_macs_check():
     c = S.Check("mac", "ok", "graphics memory", "1.1 GB now (peak 1.6 GB)", False, "")
     other = S.Check("mac", "ok", "microphone", "", False, "")
     assert S.gpu_memory_row(GM, "app", checks=[c, other]).checks == (c,)
+
+
+# ---- the Mac's Magic Mouse swipe row ----
+def test_mouse_swipe_row_only_with_a_magic_mouse():
+    assert S.mouse_swipe_row(None) is None
+    assert S.mouse_swipe_row({"magic_mouse": False, "fingers": 4}) is None
+    r = S.mouse_swipe_row({"magic_mouse": True, "fingers": 4})
+    assert r.feature.title == "Magic Mouse swipe" and r.status is S.Status.WORKS and r.note == "4 fingers"
+    assert S.mouse_swipe_row({"magic_mouse": True, "fingers": 3}).note == "3 fingers"
+    assert "Omarchy switches workspaces with 4" in r.feature.summary
+
+
+def test_mouse_swipe_row_says_when_gestures_is_off():
+    r = S.mouse_swipe_row({"magic_mouse": True, "fingers": 3}, gestures_on=False)
+    assert r.status is S.Status.OFF and r.note == "3 fingers (Trackpad gestures is off)"
+
+
+def test_mouse_swipe_row_stays_while_the_mac_is_away():
+    r = S.mouse_swipe_row({"magic_mouse": True, "fingers": 3}, offline=True)
+    assert r.status is S.Status.UNKNOWN and r.note == "3 fingers (needs the Mac)"
+    assert S.mouse_swipe_row(None, offline=True) is None
+
+
+def test_mouse_swipe_row_ignores_junk():
+    for a in ({"magic_mouse": 1, "fingers": 3}, {"magic_mouse": True, "fingers": 5},
+              {"magic_mouse": True, "fingers": True}, {"magic_mouse": True, "fingers": "3"}, {"magic_mouse": True}):
+        assert S.mouse_swipe_row(a) is None, a
+
+
+def test_next_fingers():
+    assert [S.next_fingers(x) for x in (4, 3, None, 7)] == [3, 4, 3, 3]

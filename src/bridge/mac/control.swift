@@ -9,6 +9,7 @@
 // (caches, jobs, limiter) is only touched on `q`; CLI runs and downloads
 // happen outside it.
 import Foundation
+import IOKit
 
 /// The test identity's Bridge (org.omacvm.test.bridge, from app/scripts/build-app.sh
 /// --test-identity) keeps its own port and folders: it never meets the installed Bridge
@@ -17,6 +18,8 @@ let testIdentity = Bundle.main.bundleIdentifier == VMOwner.testBridge
 let omacvmSupport = FileManager.default.homeDirectoryForCurrentUser.path
   + (testIdentity ? "/Library/Application Support/omacvm-test" : "/Library/Application Support/omacvm")
 let jobsDir = supportDir + "/jobs"
+/// OmacVM Gestures' settings (Magic Mouse swipe): the test identity's own Gestures.
+let gesturesDomain = (testIdentity ? "org.omacvm.test.gestures" : "org.omacvm.gestures") as CFString
 let feedDefault = "https://github.com/gillesgoetsch/omacvm/releases/latest/download/omacvm-manifest.json"
 
 /// What a spawned CLI run gets: a fixed, small environment.
@@ -236,7 +239,8 @@ final class Control {
     let proto: Int
     switch negotiateProto(headers["x-omacvm-proto"]) { case .success(let p): proto = p; case .failure(let e): return refuse(e) }
     let version = macVersion(cli)
-    quiet = route == .gpuMemory
+    // Graphics memory and the Magic Mouse swipe are asked while the control centre is open.
+    quiet = route == .gpuMemory || route == .mouseSwipe
     // The VM list as it is for graphics memory (asked every 2 s): a new run of
     // omacvm vms only when the VM is not in it, not each minute.
     let fresh = route != .gpuMemory
@@ -245,7 +249,7 @@ final class Control {
       let v = ProcessInfo.processInfo.operatingSystemVersion
       return answer(200, ["proto": proto, "proto_min": controlProtoMin, "omacvm": version,
                           "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs",
-                                       "gpu-memory"],
+                                       "gpu-memory", "settings/mouse-swipe"],
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
@@ -312,6 +316,11 @@ final class Control {
     case .setUpdateChecks(let on):
       setUpdateChecks(on)
       return answer(200, updatesAnswer(version), on ? "checks on" : "checks off")
+    case .mouseSwipe:
+      answer(200, mouseSwipeAnswer(magicMouse: magicMouseConnected(), fingers: mouseSwipeNow()))
+    case .setMouseSwipe(let n):
+      setMouseSwipe(n)
+      answer(200, mouseSwipeAnswer(magicMouse: magicMouseConnected(), fingers: mouseSwipeNow()), "mouse swipe \(n) fingers")
     case .status:
       answer(200, statusAnswer(cli, vm, version))
     case .gpuMemory:
@@ -661,6 +670,34 @@ final class Control {
     o["update_checks"] = on
     try? FileManager.default.createDirectory(atPath: omacvmSupport, withIntermediateDirectories: true)
     try? jsonData(o).write(to: URL(fileURLWithPath: settingsPath), options: .atomic)
+  }
+
+  // ---- Magic Mouse swipe: Gestures' own setting, read at each swipe ----
+  private func mouseSwipeNow() -> Int {
+    CFPreferencesAppSynchronize(gesturesDomain)
+    return mouseSwipeFingers(stored: CFPreferencesCopyAppValue("MouseSwipeFingers" as CFString, gesturesDomain))
+  }
+
+  private func setMouseSwipe(_ n: Int) {
+    CFPreferencesSetAppValue("MouseSwipeFingers" as CFString, (n == 3 ? 3 : 4) as CFNumber, gesturesDomain)
+    CFPreferencesAppSynchronize(gesturesDomain)
+  }
+
+  /// A Magic Mouse connected now (Bluetooth or USB), looked for as the app does.
+  private func magicMouseConnected() -> Bool {
+    for cls in ["AppleMultitouchDevice", "IOHIDDevice"] {
+      var it: io_iterator_t = 0
+      guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(cls), &it) == KERN_SUCCESS else { continue }
+      defer { IOObjectRelease(it) }
+      while case let s = IOIteratorNext(it), s != 0 {
+        defer { IOObjectRelease(s) }
+        func num(_ k: String) -> Int? {
+          (IORegistryEntryCreateCFProperty(s, k as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.intValue
+        }
+        if isMagicMouse(vendor: num("VendorID"), product: num("ProductID"), family: num("Family ID")) { return true }
+      }
+    }
+    return false
   }
 
   private func lastResult() -> [String: Any] {
