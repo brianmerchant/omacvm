@@ -55,7 +55,7 @@ boot() {   # boot [share]: start the clone, with the Mac folder when asked
     -drive "if=none,id=disk,file=$(qe "$VMD/disk.img"),format=raw,cache=writeback,discard=unmap" \
     -device nvme,serial=omacvm,drive=disk,bootindex=0 \
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$PORT-:22" -device virtio-net-pci,netdev=net0,romfile= \
-    -device virtio-rng-pci -qmp "unix:$W/qmp,server=on,wait=off" "${share[@]}" \
+    -device virtio-rng-pci -qmp "unix:$W/qmp,server=on,wait=off" ${share[@]+"${share[@]}"} \
     -device virtio-serial-pci -chardev "socket,id=qga0,path=$W/qga,server=on,wait=off" \
     -device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0 > "$W/qemu.log" 2>&1 &
   echo $! > "$W/pid"
