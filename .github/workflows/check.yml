@@ -74,6 +74,10 @@ jobs:
         working-directory: app/app
         run: swift run usb-tests
 
+      - name: OmacVM.app Mac folder arguments
+        working-directory: app/app
+        run: swift run folder-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 

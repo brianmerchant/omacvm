@@ -294,6 +294,8 @@ struct ReadyView: View {
     @State private var fastNetStatus = ""
     @State private var graphics = GraphicsChoice.auto
     @State private var graphicsNote: String?
+    @State private var macFolder: String?
+    @State private var macFolderNote: String?
 
     /// The create screen's tiers; resources set some other way show as Custom.
     private var tier: Binding<Int> {
@@ -371,6 +373,7 @@ struct ReadyView: View {
             }
             fastNetwork
             USBSection(folder: state.config.folder)
+            macFolderRow
             Divider()
             StorageSection(storage: state.storage)
             Divider()
@@ -388,8 +391,45 @@ struct ReadyView: View {
                     .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
             }
         }
-        .onAppear { refreshFastNetwork(); graphics = Graphics.read(folder: state.config.folder) }
-        .onChange(of: state.config) { _, c in refreshFastNetwork(); graphics = Graphics.read(folder: c.folder); graphicsNote = nil }
+        .onAppear {
+            refreshFastNetwork(); graphics = Graphics.read(folder: state.config.folder)
+            macFolder = MacFolder.path(state.config)
+        }
+        .onChange(of: state.config) { _, c in
+            refreshFastNetwork(); graphics = Graphics.read(folder: c.folder); graphicsNote = nil
+            macFolder = MacFolder.path(c); macFolderNote = nil
+        }
+    }
+
+    /// One folder of the Mac at ~/Mac in the VM (MacFolder), off by default.
+    private var macFolderRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Mac folder")
+                Spacer()
+                if macFolder != nil { Button("Turn Off") { setMacFolder(nil) } }
+                Button(macFolder == nil ? "Choose…" : "Change…") {
+                    if let url = MacFolder.choose(current: macFolder) { setMacFolder(url) }
+                }
+            }
+            Text(macFolder.map { "\($0) at ~/Mac in the VM. The VM can read and change everything in it." }
+                 ?? "Off. On: one folder of the Mac at ~/Mac in the VM.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let n = macFolderNote {
+                Text(n).font(.caption).foregroundStyle(n.hasPrefix("Could not") ? .red : .secondary)
+            }
+        }
+    }
+
+    private func setMacFolder(_ url: URL?) {
+        do {
+            try MacFolder.set(url, for: state.config)
+            macFolder = MacFolder.path(state.config)
+            macFolderNote = "Applies on the next start."
+        } catch {
+            macFolderNote = "Could not save: \(error.localizedDescription)"
+        }
     }
 
     private func setGraphics(_ g: GraphicsChoice) {
