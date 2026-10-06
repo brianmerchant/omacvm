@@ -56,6 +56,7 @@ class FakeMac:
         self.graphics: dict | None = None   # an OmacVM.app VM's Graphics (omacvm graphics --json)
         self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
+        self.refuse_theme: tuple | None = None   # (status, code, error) for POST /omacvm/theme (Touch ID off: 403 off)
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -185,6 +186,11 @@ class FakeMac:
                 if self.path == "/omacvm/settings/update-checks":
                     fake.checks_enabled = bool(b["enabled"])
                     return self.send(200, fake.updates())
+                if self.path == "/omacvm/theme":   # the Touch ID panel's colours (touchid_theme.swift)
+                    if fake.refuse_theme:
+                        st, code, err = fake.refuse_theme
+                        return self.send(st, {"error": err, "code": code})
+                    return self.send(200, {"ok": True, "dark": True})
                 if self.path == "/omacvm/updates/check":
                     fake.checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     return self.send(200, fake.updates())

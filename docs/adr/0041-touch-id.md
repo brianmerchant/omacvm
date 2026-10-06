@@ -446,7 +446,8 @@ Still to do:
 
 ## Addendum (3.0.2): the Mac's own Touch ID panel
 
-Status: proposed (`touch-id-panel`, design 2026-10-06). The feature stays
+Status: built (`touch-id-panel`, 2026-10-06; "Built" at the end of this
+addendum). The feature stays
 opt-in and off by default; this only changes what the Mac shows once it is on.
 
 ![The panel, Tokyo Night](../images/touchid-panel.png)
@@ -581,8 +582,9 @@ POST /omacvm/theme
 ```
 
 It runs from a user path unit on `~/.local/state/omarchy/current` (as
-`omacvm-wallpaper.path`), from Omarchy's `theme-set` hook, and once at
-login. No control key in the VM, or the port busy: retried at the next
+`omacvm-wallpaper.path`) and once at login. (Omarchy's `theme-set` hook was
+planned too; the path unit already fires on every theme change, so it is
+not used.) No control key in the VM, or the port busy: retried at the next
 change; the panel meanwhile uses the last theme or Tokyo Night.
 
 Mac: `/omacvm/theme` only for a VM with its Touch ID key on the Mac (else
@@ -636,3 +638,43 @@ readable whatever a VM sends:
 - MacBook Air (Touch ID, notch, test identity): the panel shows over a test
   VM windowed and full screen, Cancel, Esc, timeout, Ctrl+C in the VM. The
   finger check is for the person.
+
+### Built (2026-10-06)
+
+- Mac: `touchid_theme.swift` (the theme's rules and the Mac's copy),
+  `touchid_panel_model.swift` (words, placement, keys, panel or alert, one
+  end), `touchid_panel.swift` (the view, the window, `TouchIDPanelFlow`),
+  `LAPanelTouchID` in `touchid.swift`, `POST /omacvm/theme` in
+  `control.swift`. The flow takes the LocalAuthentication parts as
+  closures, so the same code runs with a mock.
+- Apple's view pins its own size: 16, 32, 64 or 128 pt for mini, small,
+  regular and large, and draws at that size whatever frame it gets (at
+  `.large` it spilled out of the panel on the Air). The panel uses
+  `.regular` in a 64 pt slot.
+- Guest: `omacvm-touchid-theme` with `omacvm-touchid-theme.path` and
+  `.service` (user units, from `touchid.sh on <user>`), a row in `omacvm
+  check`; `omacvm apply` removes the Mac's copy with the Touch ID key.
+- Tests: `tests/run.sh` (theme rules with the 22 stock themes and hostile
+  bodies, the store, panel words == alert words, placement, keys, gate,
+  one end; 194), `tests/panel/build.sh` + `panel-tests mock` (the flow with
+  a mock evaluation: Cancel, Esc, Cmd-., Return and a marked Esc do
+  nothing, timeout, client gone, not front, locked, fast error, no window;
+  never on screen; 29) and off-screen snapshots, pytest for the guest
+  sender against the fake Mac (8), `touchid-client.sh` (units in and out).
+- MacBook Air (macOS 26.6.2, notch, 2026-10-06 20:36-21:02): my Bridge
+  build (test identity) from the internal disk (from the SD card macOS asks
+  about removable volumes), requests as OmacVM.app's relay sends them, a
+  diskless QEMU window in front (full screen with `full-grab=on`, or
+  windowed). The panel showed in every run with Apple's real view: under
+  the notch in full screen (centred on the notch, top at the safe area),
+  22 % down the window when windowed; light and dark. Escape (also while
+  QEMU grabs the keyboard), a Cancel click (the first click counts, the
+  panel never activates the Bridge: QEMU stayed in front), the 30 s
+  timeout, the caller going away (Ctrl+C) and Finder coming to the front
+  each closed it with the right signed no (`cancelled`, `timeout`,
+  `not-front`). Open check 1 (the view in a non-activating panel of an
+  accessory app) and 2 (Esc under QEMU's key grab): both work. Not tested:
+  a finger (needs a person), Parallels' keyboard capture, the lid closed
+  with a Magic Keyboard with Touch ID, the theme sent from a real VM over
+  `/omacvm/theme` (unit- and fake-tested only).
+

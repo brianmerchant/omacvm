@@ -24,6 +24,7 @@ enum ControlRoute: Equatable {
   case setUpdateChecks(Bool)
   case startJob(JobRequest)
   case job(String)
+  case theme(Data)   // the Touch ID panel's colours (touchid_theme.swift checks the body)
 }
 
 struct PolicyError: Error, Equatable {
@@ -104,12 +105,14 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
         names.append(n)
       }
       return .success(.startJob(JobRequest(action: action, features: names)))
+    case ("POST", "theme"):
+      return .success(.theme(body))
     case ("GET", let s) where s.hasPrefix("jobs/"):
       let id = String(s.dropFirst(5))
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
     case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
-         (_, "gpu-memory"):
+         (_, "gpu-memory"), (_, "theme"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")

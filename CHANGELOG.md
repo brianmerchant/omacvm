@@ -14,7 +14,10 @@ in more words.
   person at the VM's screen: never over SSH or for a program without a
   terminal. Parallels, UTM, VMware Fusion and OmacVM.app (there through
   its own port: shut the VM down and start it again once after turning it
-  on) (ADR 0041).
+  on) (ADR 0041). The Mac asks in its own panel, drawn in your Omarchy
+  theme (colours, border, rounding, JetBrains Mono) over the VM's window,
+  or hanging from the notch in full screen, with Apple's Touch ID sensor
+  view in the middle; the VM sends its theme when it changes.
 
 ## 3.0.1 (unreleased)
 

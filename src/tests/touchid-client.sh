@@ -250,6 +250,8 @@ expect "... still with one line of ours" 1 "$(grep -c pam_exec "$P/polkit-1")"
 cp "$V/polkit-1" "$T/vendor.orig/polkit-1"
 expect "the client, the note writer and the rule installed" yes \
   "$([[ -x $T/root/usr/lib/omacvm/omacvm-touchid && -x $T/root/usr/lib/omacvm/omacvm-touchid-note && -f $T/root/etc/polkit-1/rules.d/00-omacvm-touchid.rules ]] && echo yes)"
+expect "the theme sender and its user units installed (the Touch ID panel's colours)" yes \
+  "$([[ -x $T/root/usr/lib/omacvm/omacvm-touchid-theme && -f $T/root/etc/systemd/user/omacvm-touchid-theme.path && -f $T/root/etc/systemd/user/omacvm-touchid-theme.service ]] && echo yes)"
 D=$T/root/etc/systemd/system/polkit-agent-helper@.service.d/omacvm-touchid.conf
 expect "polkit's helper may reach the Bridge (no env: the default address), nothing else" \
   "PrivateNetwork=no RestrictAddressFamilies=AF_UNIX AF_INET IPAddressDeny=any IPAddressAllow=10.211.55.2" "$(grep -v '^[#[]' "$D" | tr '\n' ' ' | sed 's/ $//')"
@@ -266,6 +268,6 @@ touch "$T/root/etc/omacvm/touchid-key" "$T/root/etc/omacvm/touchid-token"
 OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" off
 expect "off: sudo as before" "" "$(diff "$T/pam.orig/sudo" "$P/sudo")"
 expect "off: our polkit-1 copy gone, the vendor's counts again" no "$([[ -e $P/polkit-1 ]] && echo yes || echo no)"
-expect "off: client, rule, drop-in and keys gone" "" \
-  "$(ls "$T/root/usr/lib/omacvm" "$T/root/etc/polkit-1/rules.d" "$T/root/etc/systemd/system" "$T/root/etc/omacvm" "$T/root/etc/udev/rules.d" 2>/dev/null | grep -v ':$' | grep -vx env | grep .)"
+expect "off: client, rule, drop-in, theme sender, its units and keys gone" "" \
+  "$(ls "$T/root/usr/lib/omacvm" "$T/root/etc/polkit-1/rules.d" "$T/root/etc/systemd/system" "$T/root/etc/systemd/user" "$T/root/etc/omacvm" "$T/root/etc/udev/rules.d" 2>/dev/null | grep -v ':$' | grep -vx env | grep .)"
 exit $fail

@@ -5,6 +5,7 @@
 import AppKit
 import Darwin
 import LocalAuthentication
+import LocalAuthenticationEmbeddedUI
 
 /// LocalAuthentication: a fresh LAContext per request, never reused.
 final class LATouchID: TouchIDAuthenticator {
@@ -12,7 +13,7 @@ final class LATouchID: TouchIDAuthenticator {
     fallback ? .deviceOwnerAuthentication : .deviceOwnerAuthenticationWithBiometrics
   }
 
-  private static func no(_ e: Error?) -> TouchIDNo {
+  static func no(_ e: Error?) -> TouchIDNo {
     guard let e = e as? LAError else { return .failed }
     switch e.code {
     case .userCancel, .appCancel, .systemCancel, .userFallback: return .cancelled
@@ -30,7 +31,8 @@ final class LATouchID: TouchIDAuthenticator {
     return LATouchID.no(e)
   }
 
-  func evaluate(reason: String, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
+  func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
+    let reason = p.reason
     let c = LAContext()
     c.touchIDAuthenticationAllowableReuseDuration = 0
     if !passwordFallback { c.localizedFallbackTitle = "" }   // no "Use Password" button
@@ -54,6 +56,92 @@ final class LATouchID: TouchIDAuthenticator {
     return result
   }
 }
+
+/// The Bridge's own panel (touchid_panel.swift) in the VM's Omarchy theme,
+/// with Apple's embedded Touch ID view for a fresh LAContext; macOS's alert
+/// (LATouchID) when the panel cannot be used (TouchIDPanelGate): the Mac
+/// password offered, "touch_id_panel": false, no VM window on a screen, or
+/// the embedded view failed fast once in this run.
+final class LAPanelTouchID: TouchIDAuthenticator {
+  private let alert = LATouchID()
+  private let lock = NSLock()
+  private var gate = TouchIDPanelGate()
+  let themes: TouchIDThemeStore
+  let mac: TouchIDMacState
+  init(themes: TouchIDThemeStore, mac: TouchIDMacState) { self.themes = themes; self.mac = mac }
+
+  /// The bundled fonts, once (Contents/Resources).
+  private static let fonts: Void = { if let r = Bundle.main.resourcePath { TouchIDPanelFonts.register(r) } }()
+
+  func unavailable(passwordFallback: Bool) -> TouchIDNo? { alert.unavailable(passwordFallback: passwordFallback) }
+
+  private func locked<T>(_ f: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return f() }
+
+  static func end(_ ok: Bool, _ e: Error?) -> TouchIDLAEnd {
+    if ok { return .yes }
+    guard let e = e as? LAError else { return .other }
+    switch e.code {
+    case .userCancel, .appCancel, .systemCancel, .userFallback: return .cancelled
+    case .biometryLockout: return .lockout
+    case .biometryNotAvailable, .biometryNotEnrolled, .passcodeNotSet: return .notAvailable
+    case .authenticationFailed: return .failed
+    default: return .other
+    }
+  }
+
+  func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
+    let show = locked { gate.show(passwordFallback: passwordFallback, setting: touchIDPanelSetting(), windowFound: true) }
+    guard show == .panel else { return alert.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone) }
+    _ = LAPanelTouchID.fonts
+    let theme = p.theme.flatMap { themes.load($0) } ?? .tokyoNight
+    let c = LAContext()
+    c.touchIDAuthenticationAllowableReuseDuration = 0
+    c.localizedFallbackTitle = ""   // no "Use Password" (that needs the alert)
+    let flow = TouchIDPanelFlow(theme: theme, text: touchIDPanelText(p.request, vm: p.vmLabel),
+                                icon: NSApp.applicationIconImage, marker: VMKeys.marker)
+    flow.place = { size in
+      // The VM's app is in front (the decider checked): its frontmost window.
+      guard let app = NSWorkspace.shared.frontmostApplication, let w = touchIDFrontWindow(pid: app.processIdentifier),
+            let pl = touchIDPanelPlacement(window: w, screens: touchIDPanelScreens(), size: size) else { return nil }
+      log("touchid: panel \(pl.style == .notch ? "under the notch" : "over the VM's window") (theme \(theme.background.hex))")
+      return pl
+    }
+    flow.authView = { LAAuthenticationView(context: c, controlSize: .regular) }   // 64 pt, the panel's slot
+    flow.start = { done in
+      c.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: p.reason) { ok, e in done(LAPanelTouchID.end(ok, e)) }
+    }
+    flow.stop = { c.invalidate() }
+    let mac = self.mac
+    flow.interrupt = { mac.locked ? .locked : mac.frontType != p.vmType ? .notFront : nil }
+    let began = Date()
+    let r = flow.run(timeout: timeout, gone: gone)
+    c.invalidate()
+    switch r {
+    case .done(let o): return o
+    case .noWindow:
+      log("touchid: the VM's window is not on a screen: macOS's alert instead of the panel")
+      return alert.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone)
+    case .ended(let e, let after):
+      if locked({ gate.ended(e, after: after) }) {
+        log("touchid: the panel's Touch ID view did not work (it ended at once): macOS's alert until the Bridge restarts")
+        let left = max(5, timeout - Date().timeIntervalSince(began))
+        return alert.evaluate(p, passwordFallback: passwordFallback, timeout: left, gone: gone)
+      }
+      return touchIDOutcome(e)
+    }
+  }
+}
+
+/// "touch_id_panel": false in the Bridge's config.json: macOS's alert instead
+/// of the panel (on unless set; read at each request).
+func touchIDPanelSetting() -> Bool {
+  guard let d = FileManager.default.contents(atPath: config.path),
+        let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return true }
+  return strictBool(o["touch_id_panel"]) ?? true
+}
+
+/// The themes VMs sent (POST /omacvm/theme), kept per VM in the Bridge's folder.
+let touchIDThemes = TouchIDThemeStore(dir: supportDir + "/touchid-theme")
 
 /// The Mac's state as macOS says it now, read on the main thread (requests
 /// come on their own threads; NSWorkspace is the main thread's, as in
@@ -85,7 +173,7 @@ func touchIDPasswordFallback() -> Bool {
   return strictBool(o["touch_id_password_fallback"]) ?? false
 }
 
-let touchID = TouchIDDecider(auth: LATouchID(), mac: LiveMacState())
+let touchID = TouchIDDecider(auth: LAPanelTouchID(themes: touchIDThemes, mac: LiveMacState()), mac: LiveMacState())
 
 /// True once the VM's client closed its end (Ctrl+C in sudo).
 func peerGone(_ fd: Int32) -> Bool {
@@ -122,7 +210,8 @@ func touchIDRequest(fd: Int32, peer: String, method: String, path: String, heade
   }
   let label = control.setUpVMCount() > 1 ? vm.name : nil
   let o = touchID.decide(vm: VMListCache.key(vm), type: vm.type, on: true, request: r, vmLabel: label,
-                         passwordFallback: touchIDPasswordFallback(), gone: { peerGone(fd) })
+                         passwordFallback: touchIDPasswordFallback(), theme: vmKeyName(type: vm.type, name: vm.name),
+                         gone: { peerGone(fd) })
   let result: String
   if case .no(let n) = o { result = "no " + n.rawValue } else { result = "yes" }
   var fast = false
