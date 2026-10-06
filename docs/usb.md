@@ -64,6 +64,9 @@ Until then, other ways work for some of these:
 ### Safety
 
 - With no device on, QEMU gets no USB controller and never uses USB.
+- A device you switch on belongs to the VM while it runs: Linux can do
+  anything with it, firmware updates included. Give a VM only devices you
+  would plug into that Linux machine.
 - The app lists devices by reading macOS's device list only; it opens no
   device.
 - Only a device nothing on the Mac uses can be switched on.
