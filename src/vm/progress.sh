@@ -21,8 +21,9 @@ pac_progress() {
     }
     { gsub(/\033\[[0-9;]*[A-Za-z]/, "") }
     /^OMACVM_CACHE [0-9]+$/ { cache = $2 + 0; if (phase == "download") emit("download", last); next }
-    { print > raw; fflush(raw); print "| " $0; fflush() }
-    /^==> / { print; fflush() }
+    { print > raw; fflush(raw) }
+    /^==> / { print; fflush(); next }       # to the app and the log as it is
+    { print "| " $0; fflush() }
     # "Packages (190) ..." or, with VerbosePkgLists, "Package (190)  New Version ..."
     /^Packages? \([0-9]+\)/ { s = $0; sub(/^Packages? \(/, "", s); sub(/\).*/, "", s); of = s + 0; dl = 0; inst = 0; total = 0; phase = ""; last = ""; next }
     /^:: Synchronizing package databases/ { of = 0; phase = ""; next }
