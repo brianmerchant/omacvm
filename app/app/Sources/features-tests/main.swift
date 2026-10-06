@@ -27,10 +27,13 @@ var a = notch, b = parse(NewVMFeatures.string(hasBattery: true, hasNotch: false)
 a["omanotch"] = nil; b["omanotch"] = nil
 expect(a == b, "the notch changes only omanotch")
 
-// The same string as before 3.0.0 apart from omanotch (vm.env, apply).
+// The same string as before 3.0.0 apart from omanotch (vm.env, apply), and
+// idle-lock=on now no-idle-lock=off (3.0.1: the same screensaver and lock).
 expect(NewVMFeatures.string(hasBattery: false, hasNotch: false)
-       == "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=off external-brightness=on chromium-video=on idle-lock=on autologin=off thp-kernel=off",
+       == "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=off external-brightness=on chromium-video=on no-idle-lock=off autologin=off thp-kernel=off",
        "the rest as before")
+expect(noNotch["no-idle-lock"] == "off" && noNotch["idle-lock"] == nil,
+       "Omarchy's screensaver and lock as it comes, under the new name only")
 
 // The setup screen's switches.
 let off = parse(NewVMFeatures.string(bridge: false, gestures: false, autologin: true, hasBattery: true, hasNotch: true))

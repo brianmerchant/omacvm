@@ -81,6 +81,13 @@ jobs:
         working-directory: app/app
         run: swift run folder-tests
 
+      - name: OmacVM.app build window tests (progress lines from the VM, speed, time left, log tail)
+        working-directory: app/app
+        run: swift run build-progress-tests
+
+      - name: Package progress filter (src/vm/progress.sh on pacman output)
+        run: src/tests/build-progress.sh
+
       - name: OmacVM.app new VM features (Omanotch on with a notch)
         working-directory: app/app
         run: swift run features-tests
@@ -121,6 +128,8 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: The control centre opened from the Mac (the VM's script, a made-up Hyprland)
+        run: src/tests/cc-open.sh
       - name: omacvm check's media keys line (normal Bridge log lines are not failures)
         run: src/tests/media-keys-check.sh
 
@@ -177,6 +186,9 @@ jobs:
       - name: The note when macOS refuses the VM's keyboard tap
         run: src/tests/app-key-access.sh
 
+      - name: The desktop restarts by itself after a lost GPU context (app rules, VM script)
+        run: src/tests/app-desktop-recovery.sh
+
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
 
@@ -198,6 +210,9 @@ jobs:
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
+      - name: The Bridge runs omacvm for the app's VMs through the app (only the Bridge, only the app's omacvm)
+        run: src/tests/app-control-run.sh
+
       - name: Display sync (scales at 4K and 5K, nothing sent twice, the loop guard)
         run: |
           # The VM side runs on Arch's bash 5; macOS's own is 3.2.
@@ -212,6 +227,9 @@ jobs:
 
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh
+
+      - name: Mac pointer for the VM (experimental hardware cursor rules, guest image checks)
+        run: app/runtime/Tests/display/test-hw-cursor.sh
 
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh

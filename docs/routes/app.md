@@ -84,8 +84,9 @@ VM runs, and goes back by itself when a new version does not start
   as up to 2.9. Vulkan: the same, plus Vulkan on the Mac's GPU (Venus) for
   Vulkan apps: on KosmicKrisp on macOS 26 and newer (in the app since 3.0.0),
   on MoltenVK before (fewer Vulkan features). OpenGL stays on virgl either
-  way, so Vulkan only adds Vulkan apps; Vulkan windows are copied through
-  the CPU (slow in full screen). Automatic is OpenGL on every Mac in 3.0.0
+  way, so Vulkan only adds Vulkan apps; Vulkan windows show through the
+  Mac's GPU (on KosmicKrisp since 3.0.1, before through the CPU, slow in
+  full screen). Automatic is OpenGL on every Mac in 3.0.0
   ([numbers and why](../benchmarks/README.md#graphics-automatic-2026-10-05)).
   A change applies at the
   VM's next start; `omacvm check` shows what the start got ("Graphics" row)
@@ -93,12 +94,16 @@ VM runs, and goes back by itself when a new version does not start
   MoltenVK when KosmicKrisp cannot run on that Mac, logged).
   The VM needs a Venus driver that sizes GPU memory to the Mac's 16 KiB
   pages (Mesa 26.2.4 or newer; with Arch Linux ARM's 26.2.3 every Vulkan app
-  fails with `ERROR_OUT_OF_HOST_MEMORY`). While Arch Linux ARM has 26.2.3,
-  apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
-  package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
-  minutes the first time) when the setting gives the VM Vulkan (also
-  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's 26.2.4
-  replaces it on an update. Until the driver is there the VM starts with
+  fails with `ERROR_OUT_OF_HOST_MEMORY`). Apply builds Mesa 26.2.4's Venus
+  driver as Arch's own `vulkan-virtio` package, with OmacVM's patch for the
+  shared semaphores Chrome's WebGPU needs (version `26.2.4.omacvm1`,
+  [`src/app/guest/venus`](../../src/app/guest/venus), a few minutes the
+  first time) when the setting gives the VM Vulkan (also
+  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's own builds of
+  26.2.4 do not replace it; a newer Mesa from Arch does (Vulkan keeps
+  working, WebGPU in Chrome waits for OmacVM's next build of it; the check
+  says so). VMs from 3.0.0 rebuild it once, after the next start or with
+  `omacvm apply`. Until the driver is there the VM starts with
   OpenGL only, and the app, `omacvm graphics` and the control centre say
   "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the
   VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
@@ -112,8 +117,12 @@ VM runs, and goes back by itself when a new version does not start
   OpenGL turns the switch off again). That works on KosmicKrisp (macOS 26
   and newer). On MoltenVK Zink refuses the device (no `nullDescriptor`):
   there OpenCL needs the vulkan feature below. `omacvm check` has an
-  "OpenCL (rusticl on Zink)" row. WebGPU in Chrome needs the feature too
-  (its Venus driver has the semaphores Chrome's WebGPU asks for).
+  "OpenCL (rusticl on Zink)" row. WebGPU in Chromium comes with it too: a
+  "Chromium (WebGPU)" menu entry ([`venus/webgpu.sh`](../../src/app/guest/venus/webgpu.sh))
+  starts Chromium (`omacvm-chrome-webgpu`: Google Chrome) with its
+  compositor on Vulkan, which Chrome needs before it gives pages the Mac's
+  GPU for WebGPU; the normal Chromium entry stays as it is (that mode costs
+  WebGL about a fifth). `omacvm check` has a "WebGPU in Chromium" row.
   Vulkan's host memory window (Venus' `hostmem`) comes from the VM's memory
   plan: what the Mac has beyond the VM's memory and macOS's reserve (4 GB up
   to 16 GB of memory, 6 GB up to 36 GB, 8 GB above), 1 to 32 GB; what Vulkan
@@ -353,6 +362,30 @@ the VM's SSH on `127.0.0.1:<port>`.
   `src/tests/pointer-start-vm.sh`). QEMU's log says which way it takes
   ("cocoa: pointer: ..."). Off (QEMU's own way, on entering the window or a
   click): `defaults write org.omacvm.app pointerStart -bool false`.
+- Mac pointer for the VM (experimental, off, no switch in the window yet:
+  `defaults write org.omacvm.app macPointer -bool true`, from the VM's
+  next start): Omarchy is asked to put its pointer on virtio-gpu's cursor
+  plane (Hyprland's hardware cursor) and QEMU makes that image the Mac's
+  own cursor over the VM's windows, so the pointer would move with the
+  Mac's cursor instead of waiting for the next guest frame (about 25 ms at
+  60 Hz, see `docs/architecture/graphics.md`) and stay one cursor over the
+  VM, Omanotch's strip and every display. The app sets
+  `OMACVM_HW_CURSOR=1` for QEMU and the OEM string `omacvm.hwcursor=1`
+  (`/run/omacvm/host.env`; `omacvm_app.lua` turns `no_hardware_cursors`
+  off, notchcast stops hiding the guest's pointer at the strip). Not working
+  yet: Hyprland 0.56.2 keeps drawing a software cursor on OmacVM's
+  virtio-gpu (no cursor command reaches QEMU, also with `use_cpu_buffer`),
+  so today nothing changes. Why: since Linux 6.8 a virtual GPU's cursor
+  plane is hidden from atomic clients that do not ask for cursor hotspots
+  (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT); the guest kernel has it (plane 36,
+  unused) but Hyprland's aquamarine only sees the primary plane. Next:
+  aquamarine with that cap, or its legacy (non-atomic) path for this
+  mode. Until the guest's first image after a reset and with a relative
+  pointer (games) QEMU keeps its own way anyway.
+  `omacvm-cocoa-hw-cursor.patch`, rules in
+  `omacvm-cocoa-hw-cursor-logic.patch` (unit test
+  `app/runtime/Tests/display/test-hw-cursor.sh`); in a VM:
+  `src/tests/input-latency-vm.sh --hw-cursor`.
 
 ## Fast network (experimental, off by default)
 
@@ -863,11 +896,22 @@ QEMU's environment sets another, 0 turns it off; for tests).
 (the VM's graphics driver cannot hand back an "out of memory" for it). A
 browser starts its GPU process again. Hyprland cannot: the VM's Mesa does
 not report a lost context, and Hyprland 0.56, when told, stops ("Cannot
-continue until proper GPU reset handling is implemented"). The app then
-shows "The VM's desktop stopped drawing" with a button that restarts the
-desktop session (SDDM logs you in again; apps open in the VM close),
-instead of leaving a black window. `logs/qemu.log` says which app lost its
-context and why.
+continue until proper GPU reset handling is implemented"). So the app tells
+the VM through its guest agent, and the VM's `omacvm-desktop-recover`
+restarts the desktop session by itself, a few seconds after the loss (on
+the Mac mini the desktop drew again 2 to 3 seconds after QEMU reported it):
+SDDM logs you in again (or shows its login screen when autologin is off).
+**Apps open in the VM close, and what was not saved in them is lost.** The
+new session shows a notification that says so and names the apps that
+closed. A session that was locked locks itself again. At most once in 10 minutes: when the desktop is lost again that
+soon (macOS still short of memory), the app shows "The VM's desktop
+stopped drawing" with a button that restarts it, as it always did with
+the automatic restart off (`defaults write org.omacvm.app
+desktopAutoRestart -bool false`). When only the shell (Omarchy's bar and
+launcher, Quickshell) is lost, only the shell starts again, and no app
+closes. `logs/qemu.log` says which app lost its context and why, and each
+restart the app made; `journalctl -t omacvm-desktop-recover` in the VM
+says what was closed (ADR 0038).
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses

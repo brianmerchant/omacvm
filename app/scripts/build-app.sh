@@ -148,6 +148,7 @@ mkdir -p "$C/Resources/fonts"
 install -m644 "$ROOT/fonts/JetBrainsMono-Regular.ttf" "$ROOT/fonts/JetBrainsMono-Bold.ttf" "$ROOT/fonts/OFL.txt" "$C/Resources/fonts/"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$RT/firmware/firmware-source" "$C/Resources/firmware/"
 install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/prebuilt-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" \
+  "$ROOT/scripts/update-vm.sh" \
   "$ROOT/scripts/update-swap.sh" "$C/Resources/scripts/"
 # The complete omacvm (entry script + src, as a release checkout): apply-vm.sh
 # runs its src/, and the Bridge runs it for the control centre when there is no
@@ -214,6 +215,8 @@ while IFS= read -r -d '' f; do
 done < <(find "$C" -type f -perm -u+x -print0)
 
 # The app carries the version of the OmacVM it is part of.
+# OmacVMControlRun: OmacVM Bridge may run the control centre's omacvm through
+# this app (OmacVM --control-run, ControlRun.swift); an older app has no key.
 # Bluetooth: macOS charges Bluetooth, the camera and the microphone of a
 # helper run from inside this bundle (Contents/Helpers) to the app, and kills
 # the helper if the app's Info.plist has no reason for it (OS_REASON_TCC).
@@ -240,10 +243,12 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>OmacVMCommit</key><string>$COMMIT</string>
+  <key>OmacVMControlRun</key><true/>
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
+  <key>NSLocalNetworkUsageDescription</key><string>OmacVM reaches your VM on the Mac's own VM network: to set it up, for the control centre and for the fast network.</string>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
   <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
   <key>NSDocumentsFolderUsageDescription</key><string>Your Mac folder setting shares this folder with the VM at ~/Mac.</string>

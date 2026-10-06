@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OmacVMUpdate
 import OmacVMFeatures
 
 enum HelperError: LocalizedError, Equatable {
@@ -170,6 +171,14 @@ struct VMConfig: Equatable {
     var readyMarker: URL { folder.appendingPathComponent("ready") }
     var isReady: Bool { FileManager.default.fileExists(atPath: readyMarker.path) }
 
+    /// The OmacVM the VM got at its last apply (omacvm apply writes it from
+    /// 3.0.1 on); nil for a VM last set up by an older app.
+    var guestVersion: String? {
+        guard let s = try? String(contentsOf: folder.appendingPathComponent("omacvm-version"), encoding: .utf8) else { return nil }
+        let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Version(v) == nil ? nil : v
+    }
+
     /// Same id as scripts/vm-common.sh: the first 8 hex digits of SHA-1 of the folder path.
     var id: String {
         let p = Process()
@@ -293,6 +302,14 @@ enum Mac {
         return Int(value)
     }
     static var memoryGB: Int { sysctlInt("hw.memsize") / 1_073_741_824 }
+    /// The address space macOS gives a VM, in bits (M1/M2: 36, M4: 40-42;
+    /// nil when macOS does not say). The smaller of the two page sizes' values,
+    /// as QEMU may use either. Graphics.hostmemMB needs it.
+    static var vmAddressBits: Int? {
+        let sizes = ["kern.hv.ipa_size_16k", "kern.hv.ipa_size_4k"].map(sysctlInt).filter { $0 > 0 }
+        guard let s = sizes.min() else { return nil }
+        return Int.bitWidth - 1 - s.leadingZeroBitCount
+    }
     static var performanceCores: Int { max(2, sysctlInt("hw.perflevel0.physicalcpu")) }
     static var efficiencyCores: Int { sysctlInt("hw.perflevel1.physicalcpu") }
     static var cores: Int { max(2, sysctlInt("hw.ncpu")) }
@@ -462,6 +479,15 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
+    /// Experimental, off by default, no switch in the window yet: the VM
+    /// puts its pointer on virtio-gpu's cursor plane and the Mac's own cursor
+    /// shows it (QEMU's OMACVM_HW_CURSOR, the guest's omacvm.hwcursor), so it
+    /// moves without waiting for a guest frame and does not flicker between
+    /// the VM, Omanotch and other displays. Hyprland 0.56 in Omarchy does not
+    /// use the cursor plane yet (docs/routes/app.md), so it changes nothing
+    /// there today. From the VM's next start.
+    /// Hidden: defaults write org.omacvm.app macPointer -bool true
+    static var macPointer: Bool { UserDefaults.standard.bool(forKey: "macPointer") }
 }
 
 extension Mac {
@@ -486,4 +512,21 @@ extension Mac {
 
     /// A MacBook: its battery shows in Omarchy's bar.
     static let hasBattery: Bool = HostBatterySnapshot.capture().present
+}
+
+/// OmacVM's own version (src/VERSION in the app) and the VM's, for Update VM.
+enum OmacVMVersion {
+    static var app: String? {
+        let url = Paths.resources.appendingPathComponent(Mac.omacvmSrc + "/VERSION")
+        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Version(v) == nil ? nil : v
+    }
+
+    /// The VM has an older OmacVM than the app (none recorded counts as older).
+    static func vmIsBehind(_ vm: String?, app: String) -> Bool {
+        guard let a = Version(app) else { return false }
+        guard let v = vm.flatMap(Version.init) else { return true }
+        return v < a
+    }
 }

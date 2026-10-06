@@ -342,8 +342,12 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   lost=$(grep -o 'context error reported [0-9]* "[^"]*"' "$miclog" | sed 's/.*"\(.*\)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
   # Not a failure by itself: the app may have been restarted since (the VM's
   # "desktop" line says whether the shell draws now).
+  # The app restarts the desktop (and the shell) by itself (DesktopRecovery).
+  restarts=$(grep -ac "restarting the VM's desktop by itself" "$miclog")
+  again=""
+  (( restarts > 0 )) && again="; the app restarted the desktop by itself $restarts time(s), closing the apps open in it"
   if [[ -n $lost ]]; then
-    skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
+    skip "GPU contexts" "lost earlier in this run by: $lost$again (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
   # The VM's graphics memory on the Mac (on top of its VM memory): now and
   # the peak of this run from QEMU's status file (logs/gpu-memory, written
@@ -392,6 +396,13 @@ if [[ $TYPE == app ]] && gd=$(app_dir "$VM" 2>/dev/null); then
   gc=$(graphics_choice "$gd"); gn=$(graphics_next_start "$gd"); gs=$(graphics_summary "$gd")
   if [[ -z $gl ]]; then
     skip "Graphics" "$(graphics_title "$gc"): $gs from the VM's next start (an app from before 3.0.0 has OpenGL only)"
+  elif gf=$(graphics_fallback "$gd") && [[ $(graphics_wants "$gd") == vulkan ]]; then
+    # Vulkan fell back and stays off until chosen again (graphics-fallback).
+    # Choosing the same setting again clears it (graphics.sh), whatever it is.
+    warn "Graphics" "$GRAPHICS_DID_NOT_START ($gf; choose the setting again to try Vulkan once more: omacvm graphics --vm \"$VM\" $gc)"
+  elif [[ $gl == *"(${GRAPHICS_DID_NOT_START%%:*}"* ]]; then
+    # Vulkan fell back for this start only; the next start tries it again.
+    warn "Graphics" "this start: $gl"
   elif [[ ${gl%% *} != "$gc" || $gl != *"-> $gn "* ]]; then
     skip "Graphics" "this start: $gl; $(graphics_title "$gc") gives $gs from the VM's next start"
   elif graphics_waiting_for_driver "$gd"; then

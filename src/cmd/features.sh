@@ -1,16 +1,21 @@
 #!/bin/bash
 # omacvm features / enable / disable: a VM's OmacVM features.
 #   omacvm features [--vm NAME] [--json]     list them; in a terminal, switch them
+#   omacvm features [--vm NAME] --in-vm      open the control centre on the VM's desktop
+#                                            (one window; in front if it is open already)
 #   (--vm-type parallels|utm|fusion|app when two apps have a VM of that name)
 #   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
 #   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre
-# fast-network vulkan x86-apps. A feature that needs another one brings it
+# mac-clock camera battery external-brightness chromium-video no-idle-lock autologin thp-kernel control-centre
+# fast-network vulkan x86-apps (idle-lock, its name before 3.0.1, still works the other way round:
+# disable idle-lock = enable no-idle-lock). A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
-# also disables wallpaper). Changes go through omacvm apply: the Mac side
-# they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
-# started.
+# also disables wallpaper). Changes go through omacvm apply --transaction: the
+# Mac side they need, then the VM; if a feature it switches does not set up,
+# the VM goes back to what it had and the run ends with exit code 4, so the
+# record never says on for a feature that is not there. (--transaction is
+# still taken, for older callers.) A stopped VM is started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "reason", "needs", "title", "summary",
 # "fixed"}]}; reason: why this Mac or VM cannot have it ("" when available);
@@ -18,7 +23,10 @@
 # OmacVM's record had wrong and that it was fixed ("" when it was right).
 # Without --vm it starts nothing: the state of the VM it would pick if that
 # one runs, else the defaults ("vm": null).
-# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
+# --in-vm: the VM must run with someone logged in to its desktop, and have the
+# control centre (on by default); else it says what is missing (exit 3).
+# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person, 4 failed and
+# rolled back.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -27,24 +35,46 @@ source "$R/src/lib/setup.sh"
 source "$R/src/lib/features.sh"
 features_load
 MODE=$1; shift
-VM=""; TYPE=""; JSON=0; YES=0; WANT=(); APPLY_ARGS=()
+VM=""; TYPE=""; JSON=0; YES=0; INVM=0; WANT=(); WANTV=(); APPLY_ARGS=()
 usage() { echo "omacvm $MODE: $*" >&2; exit 2; }
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --json) JSON=1; shift ;;
+    --in-vm) INVM=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,21s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,29s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
-    *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
-       WANT+=("$1"); shift ;;
+    *) read -r f v <<<"$(feature_alias "$1" "$( [[ $MODE == enable ]] && echo on || echo off)")"
+       feature_index "$f" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
+       WANT+=("$f"); WANTV+=("$v"); shift ;;
   esac
 done
 [[ $MODE == features || ${#WANT[@]} -gt 0 ]] || usage "which feature? (omacvm features lists them)"
 [[ $MODE != features || ${#WANT[@]} == 0 ]] || usage "features takes no feature names (enable/disable do)"
+(( ! INVM )) || [[ $MODE == features ]] || usage "--in-vm goes with omacvm features"
+(( ! INVM || ! JSON )) || usage "--in-vm or --json, not both"
 export OMA_KEY=~/.ssh/omacvm
+# The control centre in the VM (src/control/guest/open.sh): opened in the
+# desktop session of a running VM; a stopped one is not started (nobody would
+# be logged in to see it).
+if (( INVM )); then
+  resolve_vm
+  [[ -n $IP ]] || { echo "omacvm features: '$VM' is not running: start it and log in, then try again" >&2; exit 3; }
+  rc=0
+  out=$(gssh "$IP" "if [ -x /usr/local/share/omacvm/control/guest/open.sh ]; then /usr/local/share/omacvm/control/guest/open.sh; else echo old; exit 64; fi" < /dev/null 2>/dev/null) || rc=$?
+  out=$(tail -1 <<<"$out" | tr -cd '[:print:]' | cut -c1-200)   # the VM's line, printable and short
+  case $rc in
+    0) echo "  '$VM': the control centre is $out." ;;
+    3|5) echo "omacvm features: '$VM': $out" >&2; exit 3 ;;
+    64) echo "omacvm features: '$VM' has an older OmacVM: omacvm apply --vm \"$VM\" brings it up to date (then try again)" >&2; exit 3 ;;
+    255) echo "omacvm features: no SSH answer from '$VM' ($IP)" >&2; exit 1 ;;
+    *) echo "omacvm features: '$VM': ${out:-it did not open}" >&2; exit 1 ;;
+  esac
+  exit 0
+fi
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 if [[ $MODE == features && -z $VM ]] && (( JSON )); then
   resolve_vm soft || { VM=""; TYPE=""; IP=""; }
@@ -118,7 +148,8 @@ label() {   # INDEX -> one line for the list
   local i=$1 tag="" dim="" pink="" off=""
   if [[ -t 1 ]] || (( interactive )); then dim=$'\033[2m'; pink=$'\033[35m'; off=$'\033[0m'; fi
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
-  feature_has_tag "$i" slow && tag=" $dim($(feature_slow_hint))$off"
+  # Slow is about switching it on: nothing more while it is on.
+  feature_has_tag "$i" slow && [[ ${OLD[$i]} != on ]] && tag=" $dim($(feature_slow_hint))$off"
   available "$i" || tag=" $dim($REASON)$off"
   # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
   [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"
@@ -167,10 +198,10 @@ if [[ $MODE == features ]]; then
     esac
   done
 else
-  for f in "${WANT[@]}"; do
-    i=$(feature_index "$f")
-    if [[ $MODE == enable ]] && ! available "$i"; then usage "${FTITLE[$i]} $REASON"; fi
-    set_on "$i" "$( [[ $MODE == enable ]] && echo on || echo off)"
+  for ((w = 0; w < ${#WANT[@]}; w++)); do
+    i=$(feature_index "${WANT[$w]}")
+    if [[ ${WANTV[$w]} == on ]] && ! available "$i"; then usage "${FTITLE[$i]} $REASON"; fi
+    set_on "$i" "${WANTV[$w]}"
   done
 fi
 
@@ -191,4 +222,6 @@ if (( ! YES )) && (( interactive )); then
 fi
 # --yes: apply asks nothing either (its control centre question).
 (( YES )) && APPLY_ARGS+=(--yes)
+# Strict for the features it switches, also from a terminal (see the top).
+[[ " ${APPLY_ARGS[*]:-} " == *" --transaction "* ]] || APPLY_ARGS+=(--transaction)
 exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}" ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}

@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with its live status, on or off with space, plus updates and "report a problem".
 
 <p align="center">
-  <img src="docs/images/control-centre.svg" alt="The OmacVM control centre, a floating terminal window in Omarchy's Tokyo Night colours, titled OmacVM 3.0.0. A list of features with green ticks: OmacVM Bridge, wallpaper, trackpad gestures, scroll momentum, Omanotch, the Mac's clock, camera and battery, external display brightness, Chromium video, screensaver and lock, the control centre and the fast network. Autologin, the memory-optimized kernel and WebGPU are off. Graphics says Automatic: OpenGL; Graphics memory says 1.1 GB, peak 1.6 GB. At the bottom: OmacVM.app, Mac linked, and the keys space on/off, r repair, u update, enter details, U updates, ! report, esc quit." width="80%">
+  <img src="docs/images/control-centre.svg" alt="The OmacVM control centre, a floating terminal window in Omarchy's Tokyo Night colours, titled OmacVM 3.0.0. A list of features with green ticks: OmacVM Bridge, wallpaper, trackpad gestures, scroll momentum, Omanotch, the Mac's clock, camera and battery, external display brightness, Chromium video, screensaver and lock disabled, the control centre and the fast network. Autologin, the memory-optimized kernel and WebGPU are off. Graphics says Automatic: OpenGL; Graphics memory says 1.1 GB, peak 1.6 GB. At the bottom: OmacVM.app, Mac linked, and the keys space on/off, r repair, u update, enter details, U updates, ! report, esc quit." width="80%">
 </p>
 
 <a name="four-ways-parallels-utm-vmware-fusion-or-omacvmapp"></a>
@@ -80,7 +80,7 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 | x86 Linux apps (optional, slower) | ✅ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL in 3.0.0); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows are copied through the CPU, so full-screen Vulkan is slow; OpenGL and browsers are the same either way; WebGPU and OpenCL opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL in 3.0.0); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows show through the Mac's GPU (on KosmicKrisp since 3.0.1); OpenGL and browsers are the same either way; WebGPU and OpenCL opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
 
 <!-- 3.0.0 benchmark chart: the final round (bare macOS = 100 %, OmacVM.app first) replaces docs/images/benchmarks.svg and this alt text. -->
 <p align="center">
@@ -144,7 +144,8 @@ omacvm resources --vm NAME      # change its CPUs and memory
 omacvm graphics --vm NAME       # OmacVM.app: OpenGL, Vulkan or Automatic
 ```
 
-In Omarchy, `omacvm` (also in the Omarchy menu and the bar) opens the control
+In Omarchy, `omacvm` (also in the Omarchy menu and the bar; from the Mac,
+OmacVM.app's *Features…* or `omacvm features --in-vm`) opens the control
 centre: every feature with its status, on or off with space, repair, updates,
 and "report a problem" without personal data.
 

@@ -40,6 +40,11 @@ if [[ -n $SET && $SET != "$(graphics_choice "$d")" ]]; then
   CHANGED=true
   NOTE="from the VM's next start"
 fi
+# A choice made by hand clears the app's Vulkan fallback (as the app does).
+if [[ -n $SET ]] && graphics_fallback "$d" >/dev/null; then
+  rm -f "$d/graphics-fallback"; CHANGED=true
+  if [[ $(graphics_wants "$d") == vulkan ]]; then NOTE="Vulkan is tried again from the VM's next start"; fi
+fi
 # A running VM that gets Vulkan builds its Venus driver now (also when the
 # setting stays: the control centre's repair).
 if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d/venus-ready ]]; }; then
@@ -52,6 +57,9 @@ if [[ -n $SET && $(graphics_wants "$d") == vulkan ]] && { $CHANGED || [[ ! -e $d
       # OpenCL on it (an older guest side has no opencl.sh: omacvm apply brings it).
       gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/opencl.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 ||
         NOTE="${NOTE:+$NOTE; }OpenCL is not set up (see /var/log/omacvm-opencl.log in the VM)"
+      # WebGPU in Chromium (the launcher; an older guest side has no webgpu.sh).
+      gssh "$ip" "f=/usr/local/share/omacvm/app/guest/venus/webgpu.sh; [ ! -x \$f ] || \$f" < /dev/null >&2 ||
+        NOTE="${NOTE:+$NOTE; }WebGPU in Chromium is not set up"
     else
       rm -f "$d/venus-ready"
       NOTE="${NOTE:+$NOTE; }its Vulkan driver did not build (the VM tries again at each start)"

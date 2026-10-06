@@ -14,6 +14,7 @@ final class Runner {
     private(set) var process: Process?
     private let sleep = VMHostSleepCoordinator()
     private var gpuMemory: GPUMemoryWatch?
+    private var featuresRoute: ControlCentreRoute?
     private var observers: [NSObjectProtocol] = []
     var onExit: ((Int32) -> Void)?
 
@@ -32,11 +33,14 @@ final class Runner {
         // older VMs keep the Mac's pointer.
         let guestPointer = FileManager.default.fileExists(
             atPath: c.folder.appendingPathComponent("guest-pointer").path)
-        let g = Runner.graphicsPlan(c)
+        let g = Runner.graphicsPlan(c, fallbackOnce: openGLOnce)
         graphics = g
         var a: [String] = [
             "-name", q(c.name),
-            "-machine", "virt,gic-version=3",
+            // M1/M2 with Vulkan: a high PCI window that fits their address
+            // space, for Venus's host memory window (Graphics.highWindowGB;
+            // only with a QEMU that takes it: runtimeHasSmallHighWindow).
+            "-machine", "virt,gic-version=3" + (g.highWindowGB.map { ",highmem-mmio-size=\($0)G" } ?? ""),
             "-accel", "hvf",
             // HVF has no usable guest PMU on Apple Silicon.
             "-cpu", "host,pmu=off",
@@ -57,7 +61,7 @@ final class Runner {
             // QEMU's window code opens the others): the built-in and four more.
             // Venus (Vulkan: the VM's Graphics setting, see Graphics.swift)
             // needs blobs and a host memory window for them.
-            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(g.venus ? ",blob=true,venus=true,hostmem=\(g.hostmemGB)G" : "")",
+            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(g.venus ? ",blob=true,venus=true,hostmem=\(g.hostmemMB)M" : "")",
             "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
@@ -77,16 +81,18 @@ final class Runner {
             "-monitor", "none",
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
-        // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch):
-        // the guest then presents Vulkan on the GPU, not through a CPU copy (omacvm-vulkan-present).
-        if Graphics.vulkanWindowsOnGPU(macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-                                       kosmicKrisp: Runner.runtimeHasKosmicKrisp,
-                                       driver: ProcessInfo.processInfo.environment["OMACVM_VULKAN_DRIVER"]) {
-            a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
-        }
+        // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch),
+        // with MoltenVK and with KosmicKrisp: the guest then presents Vulkan on the GPU, not
+        // through a CPU copy (omacvm-vulkan-present).
+        a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
+        }
+        // Experimental: the guest's pointer on the cursor plane, shown by the
+        // Mac's cursor (omacvm_app.lua reads it from host.env; QEMU: OMACVM_HW_CURSOR).
+        if Settings.macPointer {
+            a += ["-smbios", "type=11,value=omacvm.hwcursor=1"]
         }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
@@ -169,15 +175,110 @@ final class Runner {
         return FileManager.default.fileExists(atPath: lib.path)
     }
 
+    /// The runtime's QEMU takes a small high PCI window (our patch; an app
+    /// with an older runtime keeps 256 MB on M1/M2).
+    static var runtimeHasSmallHighWindow: Bool { RuntimeQEMU.takesSmallHighWindow }
+
     /// The VM's Graphics setting on this Mac now: the macOS version, whether
     /// the runtime has KosmicKrisp, whether the VM has its Venus driver.
-    static func graphicsPlan(_ c: VMConfig) -> GraphicsPlan {
+    /// `fallbackOnce`: this start's Vulkan try just fell back (OpenGL once).
+    static func graphicsPlan(_ c: VMConfig, fallbackOnce: String? = nil) -> GraphicsPlan {
+        // QEMU's binary is read only where the window matters (M1/M2).
+        let bits = Mac.vmAddressBits
+        let small = (bits ?? Graphics.highPCIWindowBits) >= Graphics.highPCIWindowBits || runtimeHasSmallHighWindow
         let forced = FileManager.default.fileExists(atPath: c.folder.appendingPathComponent("vulkan").path)
         return Graphics.plan(choice: Graphics.read(folder: c.folder),
                              macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
                              kosmicKrisp: runtimeHasKosmicKrisp,
                              driverReady: Graphics.driverReady(folder: c.folder), forced: forced,
-                             macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024)
+                             macMemoryGB: Mac.memoryGB, vmMemoryGB: c.memoryMB / 1024,
+                             ipaBits: bits, smallHighWindow: small,
+                             fallback: Graphics.fallback(folder: c.folder), fallbackOnce: fallbackOnce)
+    }
+
+    // MARK: A Vulkan start that shows nothing (VenusStartWatch)
+
+    /// Set when this start with Vulkan showed nothing and QEMU is being
+    /// stopped for it (or QEMU exited at once): the caller (main.swift
+    /// onExit) starts the VM again on OpenGL. keep: record it in
+    /// graphics-fallback (OpenGL until Vulkan is chosen again); else
+    /// openGLOnce for that start only.
+    private(set) var venusFallback: (why: String, keep: Bool)?
+    /// Set by the caller before start: Vulkan just fell back for this start.
+    var openGLOnce: String?
+    /// The user (or the app) asked QEMU to stop: an exit is no Vulkan failure.
+    private var stopAsked = false
+    private var startedAt = Date()
+    private var venusWatch = VenusStartWatch()
+    private var hostAsleep = false
+
+    /// Polls QMP and the VM's logs every 3 s while VenusStartWatch says
+    /// wait; QMP off the main thread (it blocks up to 2 s per call).
+    private func watchVenusStart() {
+        let c = config
+        venusWatch = VenusStartWatch(smallAddressSpace:
+            (Mac.vmAddressBits ?? Graphics.highPCIWindowBits) < Graphics.highPCIWindowBits)
+        let qmpPath = c.qmpSocket.path
+        let console = c.folder.appendingPathComponent("logs/console.log").path
+        let qemuLog = c.folder.appendingPathComponent("logs/qemu.log").path
+        let pid = process?.processIdentifier
+        Task { [weak self] in
+            var last = Date()
+            while true {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, self.isRun(pid) else { return }
+                if self.hostAsleep { last = Date(); continue }
+                let poll = await Task.detached(operation: {
+                    Runner.venusPoll(qmpPath: qmpPath, console: console, qemuLog: qemuLog)
+                }).value
+                guard self.isRun(pid) else { return }
+                if self.hostAsleep { last = Date(); continue }
+                let now = Date()
+                let verdict = self.venusWatch.poll(poll, seconds: now.timeIntervalSince(last))
+                last = now
+                switch verdict {
+                case .wait: continue
+                case .fine: return
+                case .note(let line):
+                    // Not "OmacVM: graphics:": omacvm check and the control
+                    // centre read the last such line as this start's record.
+                    self.appendLog("OmacVM: Vulkan start: \(line)")
+                case .fallBack(let why, let graceful, let keep):
+                    // The user stopped the VM already: no OpenGL start.
+                    if self.stopAsked { return }
+                    self.venusFallback = (why, keep)
+                    self.appendLog("OmacVM: Vulkan start: \(Graphics.didNotStart): \(why); stopping this start and starting again on OpenGL")
+                    if graceful {
+                        self.powerDown(byApp: true)
+                        try? await Task.sleep(nanoseconds: 60_000_000_000)
+                        if self.isRun(pid) { self.forceStop(byApp: true) }
+                    } else {
+                        self.forceStop(byApp: true)
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    nonisolated static func venusPoll(qmpPath: String, console: String, qemuLog: String) -> VenusStartWatch.Poll {
+        var p = VenusStartWatch.Poll(answered: false)
+        let size = (try? FileManager.default.attributesOfItem(atPath: console)[.size] as? Int) ?? 0
+        p.consoleOutput = size > 0
+        // qemu.log stays small while starting (a few KB).
+        if let log = try? String(contentsOfFile: qemuLog, encoding: .utf8) {
+            p.noPicture = log.contains("no picture from the guest")
+        }
+        guard let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-venus") else { return p }
+        defer { qmp.close() }
+        guard let status = try? qmp.execute("query-status") else { return p }
+        p.answered = true
+        p.paused = status["status"] as? String == "paused"
+        if let r = try? qmp.execute("human-monitor-command", arguments: ["command-line": "info pci"]),
+           let text = r["text"] as? String {
+            p.pciMapped = VenusStartWatch.pciMapped(text)
+        }
+        return p
     }
 
     /// The path the network took at the last start (FastNetwork).
@@ -206,6 +307,9 @@ final class Runner {
                                                 withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: c.qmpSocket)
         try? FileManager.default.removeItem(at: c.displaySocket)
+        // QEMU empties the console log only when it opens it: the last
+        // boot's text would tell the Vulkan start watch the firmware ran.
+        try? FileManager.default.removeItem(at: c.folder.appendingPathComponent("logs/console.log"))
         try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
         let p = Process()
         p.executableURL = Paths.qemu
@@ -228,6 +332,7 @@ final class Runner {
         env["OMACVM_SLIRP_HOST_PORTS"] = proxy.addingPorts(to: links.hostPorts)
         if Settings.macShortcuts { env["OMACVM_MAC_SHORTCUTS"] = "1" }
         if !Settings.pointerStart { env["OMACVM_POINTER_START"] = "0" }
+        if Settings.macPointer { env["OMACVM_HW_CURSOR"] = "1" }
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
@@ -237,6 +342,12 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // "Features…" in QEMU's app menu asks this app to open the control
+        // centre in the VM (ControlCentreRoute).
+        let route = ControlCentreRoute(agentPath: c.agentSocket.path, vmName: c.name) { [weak self] line in
+            self?.appendLog(line)
+        }
+        env["OMACVM_FEATURES_REQUEST"] = route.requestName
         // Touch ID's panel in QEMU's own window process (omacvm-cocoa-touchid-panel.patch):
         // macOS reads the finger only for the app in front.
         if links.touchID, let panel = Paths.touchIDPanel {
@@ -302,12 +413,15 @@ final class Runner {
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
             GuestAgent.release(socketPath: agentPath)
+            let reason = proc.terminationReason
             Task { @MainActor in
+                self?.noteEarlyExit(status: status, reason: reason)
                 self?.stopObserving()
                 self?.gpuMemory?.stop()
                 self?.clipboard?.stop()
                 self?.battery?.stop()
                 self?.control?.stop()
+                self?.featuresRoute?.stop()
                 self?.auth?.stop()
                 self?.onExit?(status)
             }
@@ -324,7 +438,11 @@ final class Runner {
         }
         try p.run()
         process = p
+        route.start()
+        featuresRoute = route
+        startedAt = Date()
         if network.vmnet { watchFastNetwork() }
+        if graphics?.venus == true { watchVenusStart() }
         observeSleep()
         let watch = GPUMemoryWatch(config: c) { [weak self] line in self?.appendLog(line) }
         watch.start()
@@ -504,8 +622,11 @@ final class Runner {
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
 
     /// Asks the guest to shut down: the power button, then the guest agent
-    /// if Omarchy is still up after 20 seconds.
-    func powerDown() {
+    /// if Omarchy is still up after 20 seconds. byApp: the Vulkan start
+    /// watch; else the user asked, and no OpenGL start follows.
+    func powerDown(byApp: Bool = false) {
+        stopAsked = true
+        if !byApp { venusFallback = nil }
         let qmpPath = config.qmpSocket.path, agentPath = config.agentSocket.path
         Task.detached {
             if let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-power") {
@@ -521,8 +642,31 @@ final class Runner {
         }
     }
 
-    /// Stops QEMU at once (the guest gets no chance to save anything).
-    func forceStop() { process?.terminate() }
+    /// Stops QEMU at once (the guest gets no chance to save anything):
+    /// SIGTERM, then SIGKILL after 5 s if QEMU is still there (its main loop
+    /// may hang, and only that loop handles SIGTERM).
+    func forceStop(byApp: Bool = false) {
+        guard let p = process, p.isRunning else { return }
+        stopAsked = true
+        if !byApp { venusFallback = nil }
+        let pid = p.processIdentifier
+        p.terminate()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard let self, self.isRun(pid) else { return }
+            self.appendLog("OmacVM: QEMU did not stop in 5 s: killed")
+            kill(pid, SIGKILL)
+        }
+    }
+
+    /// QEMU of a Vulkan start ended with an error within 15 s, unasked (an
+    /// option this QEMU refuses, Venus failing to set up): start once more on
+    /// OpenGL. If that fails too, the error is not Vulkan's and shows as usual.
+    private func noteEarlyExit(status: Int32, reason: Process.TerminationReason) {
+        guard venusFallback == nil, graphics?.venus == true, !stopAsked,
+              reason == .exit, status != 0, Date().timeIntervalSince(startedAt) < 15 else { return }
+        venusFallback = ("QEMU stopped at once with Vulkan (exit \(status))", false)
+    }
 
     // MARK: Mac sleep: pause the VM before, resume after (from try-omarchy).
 
@@ -576,13 +720,13 @@ final class Runner {
     private var control: NativeControlBridge?
 
     private func startControl() {
-        let path = config.controlSocket.path, name = config.name
+        let path = config.controlSocket.path, name = config.name, gpuMemory = GPUMemory.file(for: config)
         Thread.detachNewThread { [weak self] in
             while true {
                 let running = DispatchQueue.main.sync { self?.isRunning ?? false }
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
-                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name) {
+                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name, gpuMemoryFile: gpuMemory) {
                     DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()
@@ -687,10 +831,13 @@ final class Runner {
     }
 
     private func willSleep() {
+        hostAsleep = true
         try? sleep.prepareForHostSleep(vmIsRunning: isRunning, isStopping: false)
     }
 
     private func didWake() {
+        hostAsleep = false
+        venusWatch.woke()
         do {
             try sleep.resumeAfterHostWake(vmIsRunning: isRunning, isStopping: false)
             syncClock()
@@ -739,4 +886,11 @@ final class Runner {
         observers.removeAll()
         sleep.disconnect()
     }
+}
+
+/// The runtime's QEMU binary, read once per app run. Not on the main actor:
+/// the app reads it at launch on a background queue (M1/M2 only), so the
+/// window never waits for it.
+enum RuntimeQEMU {
+    static let takesSmallHighWindow = Graphics.qemuTakesSmallHighWindow(binary: Paths.qemu)
 }

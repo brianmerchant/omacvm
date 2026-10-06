@@ -19,6 +19,11 @@ NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 # env does not name it (as features_read_env in src/lib/features.sh).
 OFF_WHEN_UNNAMED = {"omanotch", "scroll-momentum", "autologin", "thp-kernel", "control-centre"}
 
+# Renamed features: new name -> the old one, whose on and off are the other
+# way round (as feature_old_value in src/lib/features.sh). idle-lock (on:
+# Omarchy's screensaver and lock) became no-idle-lock in 3.0.1.
+FLIPPED_OLD_NAMES = {"no-idle-lock": "idle-lock"}
+
 
 class Status(str, Enum):
     BUSY = "busy"
@@ -124,6 +129,9 @@ def desired(features: list[Feature], env: dict[str, str]) -> dict[str, bool]:
     out = {}
     for f in features:
         v = env.get(env_key(f.name))
+        old = env.get(env_key(FLIPPED_OLD_NAMES[f.name])) if f.name in FLIPPED_OLD_NAMES else None
+        if v is None and old in ("on", "off"):
+            v = "off" if old == "on" else "on"
         if v is None:
             v = "off" if f.name in OFF_WHEN_UNNAMED or f.default != "on" else "on"
         out[f.name] = v == "on"
@@ -148,13 +156,19 @@ def sddm_autologin_user(texts: list[str]) -> str:
 
 # What a tag means, in words (never a bare tag; src/lib/features.sh says the
 # same in feature_slow_hint). NOTE: short, for the table's note column.
-TAG_NOTES = {"experimental": "experimental", "slow": "about 10 min to switch on"}
+# "slow" is about switching it on: nothing is said about it while it is on.
+TAG_NOTES = {"experimental": "experimental", "slow": "a build to switch on, up to 1 h+"}
 TAG_HINTS = {"experimental": "experimental: it may change or be removed",
-             "slow": "switching it on takes about 10 minutes: a build in the VM, then a restart"}
+             "slow": "a build in the VM to switch it on, then a restart: minutes to over an hour, faster with more CPUs"}
+ON_SILENT = {"slow"}
 
 
-def tag_note(f: Feature) -> str:
-    return ", ".join(TAG_NOTES[t] for t in f.tags if t in TAG_NOTES)
+def tag_note(f: Feature, on: bool = False) -> str:
+    return ", ".join(TAG_NOTES[t] for t in f.tags if t in TAG_NOTES and not (on and t in ON_SILENT))
+
+
+def tag_hints(f: Feature, on: bool = False) -> list[str]:
+    return [TAG_HINTS[t] for t in f.tags if t in TAG_HINTS and not (on and t in ON_SILENT)]
 
 
 def fixed_note(on: bool) -> str:
@@ -350,6 +364,8 @@ def counts(rows: list[Row]) -> dict[str, int]:
 # ---- OmacVM.app's Graphics setting (src/cmd/graphics.sh) ----
 GRAPHICS_CHOICES = ("auto", "opengl", "vulkan")
 GRAPHICS_TITLES = {"auto": "Automatic", "opengl": "OpenGL", "vulkan": "Vulkan"}
+# The Mac's words when Vulkan fell back (Graphics.didNotStart, src/lib/graphics.sh).
+GRAPHICS_DID_NOT_START = "Vulkan did not start on this Mac: using OpenGL"
 GRAPHICS_FEATURE = Feature(
     name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
     summary="OpenGL, Vulkan, or Automatic (OpenGL on every Mac in 3.0.0); from the VM's next start")
@@ -382,6 +398,10 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
         # Vulkan chosen, no Venus driver for the Mac's pages yet: OpenGL until
         # an apply (or Space on this row while the VM runs) builds it.
         note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until the next apply)")
+    elif str(g.get("summary") or "").startswith(GRAPHICS_DID_NOT_START):
+        # A Vulkan start showed nothing on this Mac; the app started it on
+        # OpenGL and stays there until Vulkan is chosen again (Space here).
+        note = str(g["summary"])
     if any(c.status == "fail" for c in mine):
         bad = next(c for c in mine if c.status == "fail")
         return Row(GRAPHICS_FEATURE, True, Status.NEEDS_PERSON if bad.human else Status.FAILING,

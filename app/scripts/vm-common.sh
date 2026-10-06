@@ -106,8 +106,8 @@ live_fetch() {
   # ../build-live and deletes its files when done.
   if [[ ! -f $dmg ]]; then
     log "downloading try-omarchy $LIVE_RELEASE (1.4 GB)"
-    curl -fL --retry 3 --progress-bar -o "$dmg.part" \
-      "https://github.com/omacom/try-omarchy/releases/download/$LIVE_RELEASE/TryOmarchy.dmg"
+    download "https://github.com/omacom/try-omarchy/releases/download/$LIVE_RELEASE/TryOmarchy.dmg" \
+      "$dmg.part" try-omarchy
     mv "$dmg.part" "$dmg"
   fi
   # The DMG must be the pinned one (src/vm/live/release.sh), then its own
@@ -131,6 +131,44 @@ live_fetch() {
   hdiutil detach "$vol" >/dev/null
   touch "$d/ok-$LIVE_RELEASE"
   rm -f "$dmg"
+}
+
+# progress_line PHASE NOW DONE TOTAL: a progress line for the app (Creator.swift).
+# Only when the app asks (OMACVM_PROGRESS=1): omacvm build runs these scripts
+# in a terminal too.
+progress_line() {
+  [[ ${OMACVM_PROGRESS:-} == 1 ]] || return 0
+  printf '{"omacvm_progress": 1, "phase": "%s", "now": "%s", "done": %d, "total": %d}\n' "$1" "$2" "$3" "$4"
+}
+
+# bytes_watch NOW TOTAL FILE...: every second a progress line with how many
+# bytes of the FILEs are there, until killed or the script ($$) is gone (the
+# app's Cancel stops only the script).
+bytes_watch() {
+  local now=$1 total=$2 f n sz; shift 2
+  [[ ${OMACVM_PROGRESS:-} == 1 ]] || return 0
+  while kill -0 $$ 2>/dev/null; do
+    n=0
+    for f in "$@"; do sz=$(stat -f %z "$f" 2>/dev/null || echo 0); n=$((n + sz)); done
+    progress_line download "$now" "$n" "$total"
+    sleep 1
+  done
+}
+
+# download URL FILE NOW: curl with a progress line every second for the app
+# (size from the server; 0 when it gives none), else curl's own bar.
+download() {
+  local url=$1 out=$2 total w rc=0
+  if [[ ${OMACVM_PROGRESS:-} != 1 ]]; then
+    curl -fL --retry 3 --progress-bar -o "$out" "$url"; return
+  fi
+  total=$(curl -fsIL --max-time 20 "$url" 2>/dev/null | tr -d '\r' |
+    awk 'tolower($1) == "content-length:" && $2 ~ /^[0-9]+$/ { n = $2 } END { print n + 0 }') || total=0
+  bytes_watch "$3" "${total:-0}" "$out" & w=$!
+  curl -fsSL --retry 3 -o "$out" "$url" || rc=$?
+  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null || true
+  [[ $rc == 0 ]] && progress_line download "$3" "$(stat -f %z "$out")" "${total:-0}"
+  return "$rc"
 }
 
 # qemu_headless NAME ARGS...: QEMU without a window, serial console in
@@ -184,11 +222,14 @@ printable() {
   LC_ALL=C sed -l -e $'s/\x1b\\[[0-9;]*m//g' -e 's/[^[:print:][:blank:]]//g' -e 's/^\(.\{240\}\).*/\1/'
 }
 
-# run_logged LOGFILE CMD...: CMD's output to LOGFILE, its "==>" lines to us.
+# run_logged LOGFILE CMD...: CMD's output to LOGFILE, its "==>" and progress
+# lines to us. Lines starting with "| " are raw output (src/vm/progress.sh):
+# only for the log, the app shows its tail.
 run_logged() {
   local f=$1 rc; shift
   set +e
-  "$@" 2>&1 | tee "$f" | printable | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
+  "$@" 2>&1 | tee "$f" | printable | grep --line-buffered -v '^| ' |
+    grep --line-buffered -E '^==>|^\{"omacvm_progress": 1, |ERROR|[Ee]rror:|failed'
   rc=${PIPESTATUS[0]}
   set -e
   return "$rc"

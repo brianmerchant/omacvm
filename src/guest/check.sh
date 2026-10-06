@@ -89,7 +89,9 @@ FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
-GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
+GESTURES=${OMACVM_FEATURE_gestures:-on}
+# no-idle-lock was idle-lock before 3.0.1, on and off the other way round.
+NO_IDLE_LOCK=${OMACVM_FEATURE_no_idle_lock:-$( [[ ${OMACVM_FEATURE_idle_lock:-on} == off ]] && echo on || echo off)}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 CONTROL=${OMACVM_FEATURE_control_centre:-off}
@@ -380,6 +382,14 @@ app)
     else
       bad "OpenCL (rusticl on Zink)" "no device: on MoltenVK (macOS 15) Zink needs OmacVM's Mesa (omacvm enable vulkan)"
     fi
+    # WebGPU in Chromium: the launcher, on a Venus driver with shared semaphores (OmacVM's vulkan-virtio build).
+    if [[ ! -x /usr/local/bin/omacvm-chromium-webgpu ]]; then
+      bad "WebGPU in Chromium" "no \"Chromium (WebGPU)\" launcher: omacvm apply"
+    elif [[ $(pacman -Q vulkan-virtio 2>/dev/null) == *omacvm* ]]; then
+      ok "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)"
+    else
+      skip "WebGPU in Chromium" "after OmacVM's Venus driver build ($(pacman -Q vulkan-virtio 2>/dev/null || echo "no vulkan-virtio") now; the VM builds it after its next start)"
+    fi
   else skip "Vulkan, WebGPU, GPU compute" "off (experimental: omacvm enable vulkan)"; fi
   FEATURE=""
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
@@ -428,6 +438,8 @@ app)
     omacvm) ;;
     ok) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* }"
         else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
+    update) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* } (built after the VM's next start, or omacvm apply)"
+            else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
     needed) bad "Vulkan (Venus)" "${vk#* }: omacvm apply" ;;
     no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
     *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
@@ -528,10 +540,10 @@ if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH fro
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 
 section "Choices"
-FEATURE=idle-lock
-if [[ $IDLE_LOCK == off ]]; then
-  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock" "off: the Mac's lock protects the VM"
-  else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
+FEATURE=no-idle-lock
+if [[ $NO_IDLE_LOCK == on ]]; then
+  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock disabled" "the Mac's lock protects the VM"
+  else bad "screensaver and lock disabled" "chosen, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 FEATURE=autologin
 # As SDDM does it, whoever wrote the file (the Mac's omacvm check fixes OmacVM's record to match).

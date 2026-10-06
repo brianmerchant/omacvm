@@ -7,7 +7,7 @@
 #                    [--vm-name-b64 NAME] [--only F,...] [--strict F,...|all]
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, external-brightness,
+# omanotch, mac-clock, camera, no-idle-lock, autologin, thp-kernel, battery, external-brightness,
 # control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
@@ -42,7 +42,10 @@ while (( $# )); do
     --host) HOST_GIVEN=$2; shift 2 ;;
     --clock-format-b64) CLOCK_FMT=$(base64 -d <<<"$2"); shift 2 ;;
     --vm-name-b64) NAME64=$2; shift 2 ;;
-    --feature) SET[${2%%=*}]=${2#*=}; shift 2 ;;
+    --feature) f=${2%%=*} v=${2#*=}
+               # idle-lock was renamed no-idle-lock in 3.0.1, on and off the other way round.
+               if [[ $f == idle-lock ]]; then f=no-idle-lock; case $v in on) v=off ;; off) v=on ;; esac; fi
+               SET[$f]=$v; shift 2 ;;
     --only) ONLY=",$2,"; shift 2 ;;
     --graphics) [[ $2 == opengl || $2 == vulkan ]] || { echo "guest/install.sh: --graphics opengl|vulkan" >&2; exit 2; }
                 GRAPHICS=$2; shift 2 ;;
@@ -104,6 +107,9 @@ if [[ -r $ENV ]]; then
   [[ -n $GRAPHICS ]] || GRAPHICS=$(sed -n 's/^OMACVM_GRAPHICS=//p' "$ENV" | tail -1)
   # scroll-momentum was called glide in the experiment: keep an old VM's choice.
   v=$(sed -n "s/^OMACVM_FEATURE_glide=//p" "$ENV" | tail -1); [[ -n $v ]] && F[scroll-momentum]=$v
+  # idle-lock before 3.0.1: off is no-idle-lock on.
+  v=$(sed -n "s/^OMACVM_FEATURE_idle_lock=//p" "$ENV" | tail -1)
+  case $v in on) F[no-idle-lock]=off ;; off) F[no-idle-lock]=on ;; esac
   for f in "${FEATURES[@]}"; do
     v=$(sed -n "s/^OMACVM_FEATURE_${f//-/_}=//p" "$ENV" | tail -1)
     [[ -n $v ]] && F[$f]=$v
@@ -238,7 +244,7 @@ if ! want autologin; then
   :
 elif [[ ${F[autologin]} == on ]]; then
   # The Mac is FileVault-encrypted and locked already; hyprlock still locks
-  # the session after idle (unless idle-lock is off).
+  # the session after idle (unless no-idle-lock is on).
   install -Dm644 /dev/stdin "$AUTOLOGIN_CONF" <<EOF
 [Autologin]
 User=$U
@@ -270,10 +276,10 @@ else
   "$R/clock/guest/clock.sh" "$U" off
 fi
 
-if ! want idle-lock; then
+if ! want no-idle-lock; then
   :
-elif [[ ${F[idle-lock]} == off ]]; then
-  log "idle screensaver and lock: off (the Mac's lock protects the VM)"
+elif [[ ${F[no-idle-lock]} == on ]]; then
+  log "idle screensaver and lock: disabled (the Mac's lock protects the VM)"
   install -d -o "$U" -g "$U" "$(dirname "$STAY")" "$(dirname "$MARK")"
   sudo -u "$U" touch "$STAY" "$MARK"
 elif [[ -f $MARK ]]; then
@@ -490,7 +496,7 @@ if ! want thp-kernel; then
   :
 elif [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
-    log "memory-optimized kernel (about 10 minutes)"
+    log "memory-optimized kernel: a kernel build on $(nproc) CPUs (about 10 minutes with 16, over an hour with 4)"
     "$R/kernel/build-thp-kernel.sh" "$U" || not_set_up thp-kernel "memory-optimized kernel"
   else
     log "memory-optimized kernel skipped: this VM does not boot with GRUB"
