@@ -6,3 +6,15 @@ hl.config({ cursor = { no_hardware_cursors = 1 } })
 hl.on("config.reloaded", function()
   hl.exec_cmd("/usr/local/bin/omacvm-display-sync --once")
 end)
+-- An output that only moves (display-sync, Omanotch, a reload's "auto") sends
+-- no event to omacvm-displays, which tells the Mac where the outputs are for
+-- the pointer: poke it. At most one poke per 100 ms.
+local displays_poke_pending = false
+hl.on("monitor.layout_changed", function()
+  if displays_poke_pending then return end
+  displays_poke_pending = true
+  hl.timer(function()
+    displays_poke_pending = false
+    hl.exec_cmd("/usr/local/bin/omacvm-displays poke")
+  end, { timeout = 100, type = "oneshot" })
+end)
