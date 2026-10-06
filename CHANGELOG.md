@@ -5,6 +5,13 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- The memory-optimized kernel says how long it really takes: a kernel build
+  in the VM, about 10 minutes with 16 CPUs, over an hour with 4 (it said
+  about 10 minutes). The control centre and `omacvm features` say it only
+  while it is off. A control centre job may now run 4 hours (it was 1 hour,
+  which could stop a kernel build on a 4-CPU VM).
+- OmacVM.app: a VM build, and each apply in a VM without a window, is about
+  a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer
@@ -47,6 +54,14 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- Graphics Vulkan: WebGPU in Chromium on the Mac's GPU, without the
+  experimental vulkan feature. The VM's Venus driver (OmacVM's build of
+  Mesa 26.2.4) now shares the semaphores Chrome asks for before it offers
+  pages a WebGPU adapter (before: "no adapter"), and a "Chromium (WebGPU)"
+  menu entry starts Chromium with its compositor on Vulkan. VMs set to
+  Vulkan rebuild the driver once (a few minutes, in the background after
+  the next start, or with `omacvm apply`). `omacvm check` has a "WebGPU in
+  Chromium" row.
 - **x86 Linux apps** (experimental, off by default): `omacvm enable
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (on an M4: about 85 % of native speed for
@@ -58,6 +73,13 @@ in more words.
   MacBook's built-in display, not somewhere on an external monitor. With
   the lid closed or on a Mac without a built-in display, it opens centred
   on the main display. The VM's window still opens where you are.
+- The feature "Screensaver and lock" is now "Screensaver and lock
+  disabled" (`no-idle-lock`), ticked when OmacVM keeps Omarchy's own
+  screensaver and lock off. Before, switching them off showed an empty
+  row, as if something was missing. Nothing changes on a VM: its old
+  choice is read the other way round, and `omacvm enable/disable
+  idle-lock` still works as before. New VMs keep Omarchy's own screensaver
+  and lock, as before.
 - Omanotch: the right bar from the first frame after login. The bar no
   longer shows up on the display right under the notch strip for a few
   seconds at boot (a second copy came back for 3 s about 8 s after login),

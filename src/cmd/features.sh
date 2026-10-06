@@ -5,8 +5,9 @@
 #   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
 #   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre
-# fast-network vulkan x86-apps. A feature that needs another one brings it
+# mac-clock camera battery external-brightness chromium-video no-idle-lock autologin thp-kernel control-centre
+# fast-network vulkan x86-apps (idle-lock, its name before 3.0.1, still works the other way round:
+# disable idle-lock = enable no-idle-lock). A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
@@ -27,7 +28,7 @@ source "$R/src/lib/setup.sh"
 source "$R/src/lib/features.sh"
 features_load
 MODE=$1; shift
-VM=""; TYPE=""; JSON=0; YES=0; WANT=(); APPLY_ARGS=()
+VM=""; TYPE=""; JSON=0; YES=0; WANT=(); WANTV=(); APPLY_ARGS=()
 usage() { echo "omacvm $MODE: $*" >&2; exit 2; }
 while (( $# )); do
   case $1 in
@@ -36,10 +37,11 @@ while (( $# )); do
     --json) JSON=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,21s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
-    *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
-       WANT+=("$1"); shift ;;
+    *) read -r f v <<<"$(feature_alias "$1" "$( [[ $MODE == enable ]] && echo on || echo off)")"
+       feature_index "$f" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
+       WANT+=("$f"); WANTV+=("$v"); shift ;;
   esac
 done
 [[ $MODE == features || ${#WANT[@]} -gt 0 ]] || usage "which feature? (omacvm features lists them)"
@@ -118,7 +120,8 @@ label() {   # INDEX -> one line for the list
   local i=$1 tag="" dim="" pink="" off=""
   if [[ -t 1 ]] || (( interactive )); then dim=$'\033[2m'; pink=$'\033[35m'; off=$'\033[0m'; fi
   feature_has_tag "$i" experimental && tag=" $pink(experimental)$off"
-  feature_has_tag "$i" slow && tag=" $dim($(feature_slow_hint))$off"
+  # Slow is about switching it on: nothing more while it is on.
+  feature_has_tag "$i" slow && [[ ${OLD[$i]} != on ]] && tag=" $dim($(feature_slow_hint))$off"
   available "$i" || tag=" $dim($REASON)$off"
   # Scroll momentum acts only on a trackpad's scrolling, never a mouse's.
   [[ ${FN[$i]} == scroll-momentum && ${FV[$i]} == on ]] && tag=" $dim(trackpad only)$off$tag"
@@ -167,10 +170,10 @@ if [[ $MODE == features ]]; then
     esac
   done
 else
-  for f in "${WANT[@]}"; do
-    i=$(feature_index "$f")
-    if [[ $MODE == enable ]] && ! available "$i"; then usage "${FTITLE[$i]} $REASON"; fi
-    set_on "$i" "$( [[ $MODE == enable ]] && echo on || echo off)"
+  for ((w = 0; w < ${#WANT[@]}; w++)); do
+    i=$(feature_index "${WANT[$w]}")
+    if [[ ${WANTV[$w]} == on ]] && ! available "$i"; then usage "${FTITLE[$i]} $REASON"; fi
+    set_on "$i" "${WANTV[$w]}"
   done
 fi
 
