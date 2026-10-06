@@ -85,9 +85,11 @@ source "$R/guest/off.sh"
 
 # Earlier choices, then this run's.
 ENV=/etc/omacvm/env
-AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
-# Set up before choices were kept:
-[[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on
+source "$R/guest/autologin.sh"
+AUTOLOGIN_CONF=$OMACVM_AUTOLOGIN_CONF
+# Set up before choices were kept, or by someone else (an Omarchy install, a
+# migration): SDDM logs someone in.
+[[ -n $(sddm_autologin_user) ]] && F[autologin]=on
 [[ -x $H/.local/bin/notchcast ]] && F[omanotch]=on
 [[ $NAME64 =~ ^[A-Za-z0-9+/=]*$ ]] || { echo "guest/install.sh: --vm-name-b64: not base64" >&2; exit 2; }
 if [[ -r $ENV ]]; then
@@ -235,6 +237,13 @@ Relogin=false
 EOF
 else
   rm -f "$AUTOLOGIN_CONF"
+  # Off means off: another file that logs someone in (an Omarchy install, a
+  # migration) is kept beside, as NAME.omacvm-off, which SDDM does not read.
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    mv -f "$f" "$f.omacvm-off" && log "autologin: off ($f kept as $f.omacvm-off)"
+  done < <(sddm_autologin_others)
+  [[ -z $(sddm_autologin_user) ]] || log "autologin: SDDM still logs $(sddm_autologin_user) in (/etc/sddm.conf or /usr/lib/sddm/sddm.conf.d): remove [Autologin] there"
 fi
 
 # Omarchy's idle screensaver and lock: its own "Stay Awake" switch turns both

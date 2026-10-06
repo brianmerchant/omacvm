@@ -495,7 +495,13 @@ if [[ $IDLE_LOCK == off ]]; then
   else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 FEATURE=autologin
-[[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
+# As SDDM does it, whoever wrote the file (the Mac's omacvm check fixes OmacVM's record to match).
+# Run with bash -s from the Mac: the VM's copy (an older one has OmacVM's own file only).
+if [[ -f /usr/local/share/omacvm/guest/autologin.sh ]]; then
+  source /usr/local/share/omacvm/guest/autologin.sh; al=$(sddm_autologin_user)
+else al=""; [[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && al=$U; fi
+if [[ -n $al ]]; then ok "autologin" "on: SDDM logs $al in"
+else ok "autologin" "off"; fi
 FEATURE=mac-clock
 if [[ $MAC_CLOCK == on ]]; then
   f=$(jq -r '.bar.layout.right[-1] | select(.id == "omarchy.clock") | .format' "$H/.config/omarchy/shell.json" 2>/dev/null)
