@@ -29,7 +29,9 @@ screen.
   plays the clips again (expected: about minus the device's latency, since
   avcap takes the sound before the device). `QPART` sets QEMU's part,
   `TAG` a label suffix; `mini/confirm.sh` waits for the mini lock and runs
-  it twice with 115 ms.
+  it twice with 115 ms. `mini/review.sh`: the review runs (other players,
+  10 minutes for drift, the crackle tool with and without the offset);
+  `mini/runp.sh` plays the clip with any player in the guest.
 
 ## Results (Mac mini M4, LG UltraFine 12.8 ms, 2026-10-06)
 
@@ -53,3 +55,29 @@ for a few seconds.
 ScreenCaptureKit takes the sound before the output device and the picture
 before the display's scan-out: add the device latency `outlat` prints for
 what you hear.
+
+### Review runs (2026-10-06 evening, same Mac mini, at the mixer)
+
+Other players, the same VM, offset 0 (as 3.0.0) and then 128 (115 + 12.8):
+
+| player | offset 0 | offset 128 |
+|---|---|---|
+| mpv (PipeWire output), H.264 | +136.0 | +0.1 |
+| mpv `--ao=pulse`, H.264 | | +14.6 |
+| Firefox 157, VP9 | +136.7 | +10.1 |
+
+All three take PipeWire's latency offset: the shift is the 128 ms that were
+set. Within a run sd 7-13 ms; the first minute is often 15-20 ms later than
+the rest, then steady.
+
+Crackles (`../audio/measure.sh 300 both 4`: 8 busy vCPUs, glmark2, 4 busy
+loops on the Mac): offset 0: 41 breaks per 10 min, 0 sink xruns; offset 286
+(AirPods-sized): 25 breaks, 0 sink xruns. The offset changes no buffer:
+quantum 2048 (sink) / 8192 (pacat), ALSA period 1024 and buffer 32768 in
+both, and the same in the Chromium runs with and without it.
+
+Two things that are not this fix, seen on the way: WirePlumber came up
+broken at one boot (no stream linked to the sink, every player silent, fixed
+by restarting WirePlumber; `review.sh` checks for it), and Chromium's loop of
+the 180 s H.264 clip with hardware decode hung at its end (t=180.000, not
+paused), so long runs use a 700 s clip.
