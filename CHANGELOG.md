@@ -76,6 +76,12 @@ in more words.
   in the first setup. The keyboard note goes grey ("allowed, takes effect at
   the next VM start") once OmacVM is allowed, checked again when the app
   comes to the front.
+- One OmacVM in the Dock. A running VM showed as a second app next to
+  OmacVM, and "Keep in Dock" on it kept a bare program from inside the app
+  (blank icon, starts nothing once the VM is off). The VM now shows in
+  OmacVM's own Dock icon: a click on it brings the VM to the front, and
+  "Keep in Dock" keeps OmacVM. If you pinned the old blank icon, remove it
+  from the Dock and pin OmacVM again.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).

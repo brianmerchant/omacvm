@@ -230,6 +230,9 @@ jobs:
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
+      - name: One OmacVM in the Dock (QEMU started as the app, found by its kernel path)
+        run: src/tests/app-dock-one-app.sh
+
       - name: Keyboard light steps (offline)
         run: src/tests/keyboard-light.sh
 

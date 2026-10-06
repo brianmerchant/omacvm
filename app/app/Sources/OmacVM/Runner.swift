@@ -363,6 +363,9 @@ final class Runner {
             env["OMACVM_GL_PRESENT_ON_TICK"] = "1"
         }
         p.environment = env
+        // One OmacVM in the Dock: QEMU counts as this app (DockIdentity).
+        let launch = DockIdentity.launchPath(qemu: Paths.qemu.path, bundle: Bundle.main.bundlePath, env: env)
+        p.executableURL = URL(fileURLWithPath: launch)
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         // Append mode: this app adds "OmacVM: ..." lines while QEMU writes
         // (appendLog); without O_APPEND QEMU's next write lands at its own
@@ -386,6 +389,7 @@ final class Runner {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
         }
         log.write(Data("OmacVM: \(KeyAccess.record)\n".utf8))
+        log.write(Data("OmacVM: \(DockIdentity.record(launch: launch, qemu: Paths.qemu.path))\n".utf8))
         if Settings.hdr && !Mac.hasHDRDisplay {
             log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
         }
