@@ -10,6 +10,12 @@ in more words.
   not through the slow CPU copy (vkmark full screen at 5K on a Mac mini M4:
   about 260; 203 with the CPU copy in 3.0.0, other scenes). Automatic stays
   OpenGL.
+- `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
+  VM goes back to what it had and the command fails (exit 4), as in the
+  control centre. Before, it ended with 0 and the record said Vulkan was on,
+  so a second `omacvm enable vulkan` said "Nothing to change". `omacvm
+  enable` and `disable` now always work this way. An apply that finds no
+  OmacVM Mesa also keeps the record at off.
 - The memory-optimized kernel says how long it really takes: a kernel build
   in the VM, about 10 minutes with 16 CPUs, over an hour with 4 (it said
   about 10 minutes). The control centre and `omacvm features` say it only
@@ -85,6 +91,16 @@ in more words.
   choice is read the other way round, and `omacvm enable/disable
   idle-lock` still works as before. New VMs keep Omarchy's own screensaver
   and lock, as before.
+- Omanotch: the right bar from the first frame after login. The bar no
+  longer shows up on the display right under the notch strip for a few
+  seconds at boot (a second copy came back for 3 s about 8 s after login),
+  and the strip no longer shows a stretched or empty frame first. When the
+  strip showed at the end of the last session, or Omanotch sees the VM full
+  screen when it connects (also the first full-screen start after a windowed
+  one), the bar starts in the strip with the notch layout of then. A Mac
+  restart or an Omanotch quit with the VM running keeps that. If the VM is
+  windowed now, Omanotch gives the bar back as soon as it connects (an older
+  Omanotch, or none running: after 8 s).
 
 ## 3.0.0
 
