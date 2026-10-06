@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.1 (unreleased)
+
+- In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
+  which gives them real-time priority, took a VM that had been stopped for
+  a runaway thread and put them back to normal priority for the rest of the
+  session; after that the sound broke whenever the VM was busy (on a Mac
+  mini: 81 breaks in a test tone in 5 minutes instead of 2). `omacvm apply`
+  now runs RTKit without that watchdog, and `omacvm check` shows "sound
+  priority".
+
 ## 3.0.0 (unreleased)
 
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
