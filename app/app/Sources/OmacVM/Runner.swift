@@ -552,13 +552,13 @@ final class Runner {
     private var control: NativeControlBridge?
 
     private func startControl() {
-        let path = config.controlSocket.path, name = config.name
+        let path = config.controlSocket.path, name = config.name, gpuMemory = GPUMemory.file(for: config)
         Thread.detachNewThread { [weak self] in
             while true {
                 let running = DispatchQueue.main.sync { self?.isRunning ?? false }
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
-                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name) {
+                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name, gpuMemoryFile: gpuMemory) {
                     DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()

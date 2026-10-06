@@ -10,6 +10,15 @@ in more words.
   not through the slow CPU copy (vkmark full screen at 5K on a Mac mini M4:
   about 260; 203 with the CPU copy in 3.0.0, other scenes). Automatic stays
   OpenGL.
+- OmacVM.app VMs on an external drive: the control centre in the VM said
+  "no such OmacVM.app VM" and could not switch features, update, change
+  Graphics or show the Mac's checks. OmacVM Bridge ran omacvm as a program
+  of its own, and macOS refused it the drive without asking: the VMs folder
+  looked empty. The Bridge now runs omacvm for the app's VMs through the app
+  (`OmacVM --control-run`), which already has the access, so nothing new is
+  asked. The app also sends the VM's graphics memory numbers with the
+  request. Listing the app's VMs no longer misses one on an external drive
+  now and then (a glob in bash could see the folder as empty, #151).
 - `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
   VM goes back to what it had and the command fails (exit 4), as in the
   control centre. Before, it ended with 0 and the record said Vulkan was on,
