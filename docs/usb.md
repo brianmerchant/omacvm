@@ -20,7 +20,7 @@ list (point at it to see why). Switch a device on, then start the VM.
 - `omacvm check` on the Mac shows which devices this start passed. QEMU's log
   (`logs/qemu.log`) has the line `OmacVM: USB devices: ...`, and
   `usb-host: VVVV:PPPP ... is in use on the host: not taken` when macOS had a
-  chosen device.
+  chosen device, `usb-host: VVVV:PPPP ... taken` when QEMU took it.
 
 In the VM, `lsusb` (`sudo pacman -S usbutils`) lists the device. Linux needs
 its driver as usual (most are in Arch's kernel; some tools want a udev rule
@@ -30,9 +30,10 @@ for your user).
 
 | Device | In the VM? | Why |
 |---|---|---|
-| Debug probes: ST-Link, J-Link, CMSIS-DAP v2, Black Magic Probe's debug part | yes | No macOS driver uses them |
+| Debug probes with only a debug part: ST-Link V2 (`0483:3748`), J-Link without its serial port, CMSIS-DAP v2 probes without a serial port | yes | No macOS driver uses them |
+| Debug probes with a serial port or a drive: Black Magic Probe, Raspberry Pi Debug Probe, DAPLink, ST-Link V2-1 and V3 (Nucleo, Discovery boards) | no | macOS's serial (and storage) driver has those parts, so the whole device stays with the Mac |
 | SDR sticks (RTL-SDR, HackRF, Airspy), logic analysers (Saleae, fx2lafw) | yes | No macOS driver |
-| Phones in fastboot or ADB-only mode, boards in DFU mode | yes | No macOS driver |
+| Phones in fastboot or ADB-only mode, boards in DFU mode | yes | No macOS driver. A board that switches to DFU mode often gets another product id there: switch both on |
 | USB Wi-Fi sticks with no Mac driver | yes | No macOS driver (Linux needs one) |
 | Security keys (YubiKey, SoloKey, Titan) | no | macOS's HID driver has them |
 | Keyboards, mice, game controllers | no | macOS's HID driver has them |
@@ -74,8 +75,9 @@ Until then, other ways work for some of these:
   it does not reset it (on macOS a reset reconnects the device, which would
   pull a mounted disk) and logs `is in use on the host: not taken` once
   (patch `qemu-usb-host-busy-device.patch`).
-- QEMU never resets a device for the guest (`guest-reset=off`): on macOS that
-  would reconnect it.
+- On macOS a reset reconnects a device. QEMU resets only a device it really
+  has (the VM uses it): when Linux asks (DFU and firmware tools need that),
+  and when the VM stops. A device macOS holds as a whole is never reset.
 
 ## How it was tested
 
@@ -102,6 +104,6 @@ Until then, other ways work for some of these:
   VM gets the first one QEMU finds.
 - A VM that is running does not get a device switched on meanwhile; that
   applies on its next start.
-- A chosen device that macOS used when the VM looked for it stays with the
-  Mac until it is unplugged and plugged in again (QEMU tries three times per
-  plug).
+- A chosen device that macOS (or a Mac app) used when the VM looked for it
+  stays with the Mac until it is unplugged and plugged in again (QEMU tries
+  three times per plug).
