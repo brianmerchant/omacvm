@@ -204,6 +204,14 @@ grep -q 'watchVenusStart()' "$R/app/app/Sources/OmacVM/Runner.swift" && grep -q 
   ok "the app watches Vulkan starts and starts again on OpenGL" || bad "no Vulkan start watch in the app"
 grep -q 'kill(pid, SIGKILL)' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   ok "a QEMU that ignores SIGTERM is killed (forceStop)" || bad "forceStop sends no SIGKILL"
+python3 - "$R/app/app/Sources/OmacVM/main.swift" <<'PY' && ok "Quit waits for forceStop's SIGKILL (no hung QEMU left)" || bad "Quit replies before forceStop can kill QEMU"
+import re, sys
+s = open(sys.argv[1]).read()
+b = s[s.index("asyncAfter(deadline: .now() + 90)"):]
+b = b[:b.index("return .terminateLater")]
+i, j = b.index("forceStop()"), b.index("NSApp.reply(toApplicationShouldTerminate: true)")
+sys.exit(0 if i < j and "asyncAfter(deadline: .now() + 10)" in b[i:j] else 1)
+PY
 grep -q 'self?.noteEarlyExit(status: status, reason: reason)' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   grep -q 'r.openGLOnce = openGLOnce' "$R/app/app/Sources/OmacVM/main.swift" &&
   ok "a Vulkan start whose QEMU stops at once starts again on OpenGL" || bad "no OpenGL retry after an early QEMU exit"
