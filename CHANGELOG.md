@@ -116,6 +116,17 @@ in more words.
   choice is read the other way round, and `omacvm enable/disable
   idle-lock` still works as before. New VMs keep Omarchy's own screensaver
   and lock, as before.
+- Graphics Vulkan on an M1 or M2 Mac no longer leaves a VM that never
+  boots (a black window). macOS gives VMs less address space there, and
+  Vulkan's host memory window did not fit, so the firmware found no
+  devices. OmacVM's QEMU now puts a small PCI window right above the VM's
+  memory, and the host memory window is 1 GB or more there (256 MB for a
+  VM near 64 GB). If a Vulkan start still shows nothing, OmacVM.app stops
+  it and starts the VM on OpenGL, and the app, `omacvm graphics`,
+  `omacvm check` and the control centre say "Vulkan did not start on this
+  Mac: using OpenGL" with the reason. When the firmware found no devices,
+  OpenGL stays until Vulkan is chosen again ("Try Vulkan again" in the
+  app); otherwise the next start tries Vulkan again.
 
 ## 3.0.0
 

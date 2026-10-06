@@ -12,6 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var runner: Runner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // M1/M2: read QEMU's binary for the small PCI window now, off the
+        // main thread, so the window never waits for it (Runner.graphicsPlan).
+        if (Mac.vmAddressBits ?? Graphics.highPCIWindowBits) < Graphics.highPCIWindowBits {
+            DispatchQueue.global(qos: .utility).async { _ = RuntimeQEMU.takesSmallHighWindow }
+        }
         // Scripted install: --install-as NAME [--into FOLDER]
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--install-as"), i + 1 < args.count {
@@ -167,8 +172,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runner?.powerDown()
             DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
                 guard let self, self.quitting else { return }
+                // QEMU's exit replies (see the termination handler); forceStop
+                // kills it after 5 s if SIGTERM does nothing, so the app does
+                // not leave a hung QEMU behind. Quit anyway 10 s later.
                 self.runner?.forceStop()
-                NSApp.reply(toApplicationShouldTerminate: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                    guard let self, self.quitting else { return }
+                    self.quitting = false
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                }
             }
             return .terminateLater
         }
@@ -232,7 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
-    private func startVM() {
+    private func startVM(openGLOnce: String? = nil) {
         // A build or an update runs the VM without a window: a second QEMU on
         // its disk (a start from the Dock or `omacvm start`) would corrupt it.
         if state.screen == .building {
@@ -251,9 +263,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let r = Runner(config: state.config)
-        r.onExit = { [weak self] status in
+        r.openGLOnce = openGLOnce
+        r.onExit = { [weak self, weak r] status in
             guard let self else { return }
+            let fellBack = r?.venusFallback
             self.runner = nil
+            // Vulkan showed nothing (Runner.watchVenusStart, or QEMU stopped
+            // at once): start once more on OpenGL. keep: from now on OpenGL
+            // until Vulkan is chosen again; else for that start only. The
+            // plan then has no Venus, so no second watch and no loop.
+            if let fb = fellBack {
+                let folder = self.state.config.folder
+                if fb.keep { Graphics.recordFallback(fb.why, folder: folder) }
+                // The next start empties qemu.log: keep this one's.
+                let logs = folder.appendingPathComponent("logs")
+                try? FileManager.default.removeItem(at: logs.appendingPathComponent("qemu-vulkan-fallback.log"))
+                try? FileManager.default.copyItem(at: logs.appendingPathComponent("qemu.log"),
+                                                  to: logs.appendingPathComponent("qemu-vulkan-fallback.log"))
+                if !self.quitting {
+                    self.startVM(openGLOnce: fb.keep ? nil : fb.why)
+                    if self.runner != nil {
+                        self.state.message = fb.keep
+                            ? "\(Graphics.didNotStart) (\(fb.why)). \"Try Vulkan again\" under Graphics tries it once more."
+                            : "\(Graphics.didNotStart) for this start (\(fb.why)). The next start tries Vulkan again."
+                        self.tellFallback(fb.keep
+                            ? "\(fb.why). \(Product.name) started the VM again on OpenGL and keeps OpenGL until you click \"Try Vulkan again\" under Graphics."
+                            : "\(fb.why). \(Product.name) started the VM again on OpenGL for this start; the next start tries Vulkan again.")
+                    }
+                    return
+                }
+            }
             if self.quitting {
                 self.quitting = false
                 // An update asked for while the VM ran goes in now, quietly:
@@ -286,6 +325,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             state.message = "Could not start the VM: \(error.localizedDescription)"
             showWindow()
+        }
+    }
+
+    /// The app's window is hidden while the VM runs: say why the VM just
+    /// started again, then give the VM its window back.
+    private func tellFallback(_ text: String) {
+        if ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil { return }
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = Graphics.didNotStartOnMac
+            alert.informativeText = text
+            alert.addButton(withTitle: "OK")
+            NSApp.activate()
+            alert.runModal()
+            Self.qemuApp?.activate()
         }
     }
 
