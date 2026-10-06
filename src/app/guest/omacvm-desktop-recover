@@ -37,7 +37,7 @@ import json, sys
 seen = []
 try:
     for c in json.load(sys.stdin):
-        n = (c.get("class") or c.get("initialClass") or "").strip()
+        n = " ".join(str(c.get("class") or c.get("initialClass") or "").split())[:40]
         if n and n not in seen:
             seen.append(n)
 except Exception:
@@ -51,9 +51,10 @@ desktop)
   [[ $why == memory ]] || why=graphics
   apps=""
   [[ -n $U ]] && apps=$(open_apps)
+  # Written as the user: root never writes into a folder the user owns.
   if [[ -n $U ]] && install -d -m 700 -o "$U" -g "$(id -gn "$U")" "$(dirname "$NOTE")"; then
-    printf 'why=%s\napps=%s\nat=%s\n' "$why" "$apps" "$(date +%H:%M)" > "$NOTE.tmp" &&
-      chown "$U" "$NOTE.tmp" && mv "$NOTE.tmp" "$NOTE"
+    printf 'why=%s\napps=%s\nat=%s\n' "$why" "$apps" "$(date +%H:%M)" |
+      sudo -u "$U" sh -c 'cat > "$1.tmp" && mv -f "$1.tmp" "$1"' _ "$NOTE"
   fi
   say "the desktop lost its GPU context on the Mac ($why): restarting the session; closing: ${apps:-no app windows}"
   # The login manager logs the user in again (autologin) or shows its screen.

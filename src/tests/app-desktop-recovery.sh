@@ -72,7 +72,13 @@ export CALLS=$T/calls
 printf '#!/bin/bash\necho "systemctl $*" >> "$CALLS"\n' > "$S/systemctl"
 printf '#!/bin/bash\necho "logger $*" >> "$CALLS"\n' > "$S/logger"
 # sudo -u USER env ... bash -c '...' _ CMD...: run CMD (the part after "_").
-printf '#!/bin/bash\nwhile [[ $# -gt 0 && $1 != _ ]]; do shift; done; shift; "$@"\n' > "$S/sudo"
+cat > "$S/sudo" <<'STUB'
+#!/bin/bash
+# sudo -u USER sh -c SCRIPT _ ARGS: run SCRIPT; sudo -u USER env ... bash -c '...' _ CMD...: run CMD.
+shift 2
+if [[ $1 == sh && $2 == -c ]]; then exec sh -c "$3" "${@:4}"; fi
+while [[ $# -gt 0 && $1 != _ ]]; do shift; done; shift; "$@"
+STUB
 printf '#!/bin/bash\nshift; "$@"\n' > "$S/timeout"
 printf '#!/bin/bash\n[[ $1 == -f ]] && shift; "$@"\n' > "$S/setsid"
 printf '#!/bin/bash\necho omarchy-restart-shell >> "$CALLS"\n' > "$S/omarchy-restart-shell"
@@ -88,21 +94,21 @@ export PATH="$S:$PATH"
 export OMACVM_RECOVER_ENV=$T/env OMACVM_RECOVER_NOTE=$T/run/desktop/restarted CLIENTS=$T/clients NOTIFY_FAILS=$T/notify-fails
 printf 'OMACVM_VM_TYPE=app\nOMACVM_USER=tester\n' > "$T/env"
 cat > "$CLIENTS" <<'JSON'
-[{"class": "chromium", "title": "a"}, {"class": "Alacritty"}, {"class": "chromium"}, {"class": "", "initialClass": "obsidian"}]
+[{"class": "chromium", "title": "a"}, {"class": "Alacritty"}, {"class": "chromium"}, {"class": "", "initialClass": "obsidian"}, {"class": "bad\nwhy=x"}]
 JSON
 G=$R/src/app/guest/omacvm-desktop-recover
 : > "$CALLS"
 "$G" desktop memory > /dev/null
 expect "desktop: the login manager restarts"     "systemctl restart sddm" "$(grep '^systemctl' "$CALLS")"
 expect "desktop: the note says why"              memory                   "$(sed -n 's/^why=//p' "$T/run/desktop/restarted")"
-expect "desktop: the note names the apps once"   "chromium, Alacritty, obsidian" "$(sed -n 's/^apps=//p' "$T/run/desktop/restarted")"
-grep -q "closing: chromium, Alacritty, obsidian" "$CALLS" && expect "desktop: logged to the journal" yes yes \
+expect "desktop: the note names the apps once, on one line"   "chromium, Alacritty, obsidian, bad why=x" "$(sed -n 's/^apps=//p' "$T/run/desktop/restarted")"
+grep -q "closing: chromium, Alacritty, obsidian, bad why=x" "$CALLS" && expect "desktop: logged to the journal" yes yes \
   || expect "desktop: logged to the journal" yes no
 : > "$CALLS"
 "$G" notify
 n=$(grep -c '^notify-send' "$CALLS")
 expect "notify: shown once"                      1 "$n"
-grep -q "These apps were closed: chromium, Alacritty, obsidian. Anything not saved in them is lost." "$CALLS" \
+grep -q "These apps were closed: chromium, Alacritty, obsidian, bad why=x. Anything not saved in them is lost." "$CALLS" \
   && expect "notify: says which apps closed and that unsaved work is lost" yes yes \
   || { expect "notify: says which apps closed and that unsaved work is lost" yes no; cat "$CALLS"; }
 grep -q "macOS ran short of memory" "$CALLS" && expect "notify: says why (memory)" yes yes || expect "notify: says why (memory)" yes no
