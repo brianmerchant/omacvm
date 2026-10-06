@@ -244,4 +244,5 @@ jobs:
         run: |
           python3 src/app/guest/tests/test_omacvm_displays.py -v
           python3 src/app/guest/tests/test_idle_waits.py -v
+          python3 src/app/guest/tests/test_monitor_widget.py -v
           python3 src/omanotch/guest/tests/test_display_panel.py -v

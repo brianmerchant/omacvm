@@ -124,15 +124,22 @@ class Clone(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.enabled = []
+        self.disabled = []
+        self.no_shell = False
         patcher = mock.patch.object(dp, "run", side_effect=self.fake_run)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def fake_run(self, *cmd):
+    def fake_run(self, *cmd, timeout=None):
         self.calls.append(cmd)
+        if self.no_shell:
+            return ""
         if cmd[0] == "omarchy-plugin-enable":
             self.enabled.append(cmd[1])
             return f"Enabled {cmd[1]}\n"
+        if cmd[0] == "omarchy-plugin-disable":
+            self.disabled.append(cmd[1])
+            return f"Disabled {cmd[1]}\n"
         if cmd[0] == "omarchy-plugin-list":
             return json.dumps([{"id": i, "enabled": True} for i in self.enabled[-1:]])
         return ""
@@ -179,7 +186,62 @@ class Clone(unittest.TestCase):
         (self.source / "Panel.qml").write_text(PANEL.replace("Quickshell.screens.length", "screens.count"))
         self.main("--refresh")
         self.assertFalse(self.clone.exists())
-        self.assertEqual(self.enabled[-1], "omarchy.monitor")
+        self.assertEqual(self.disabled, ["omanotch.monitor"])
+
+    def test_model_change_rebuilds(self):
+        self.main()
+        (self.source / "Model.js").write_text("function parseDisplays(raw) { return 2 }\n")
+        self.main("--refresh")
+        self.assertIn("return 2", (self.clone / "Model.js").read_text())
+
+    def test_subfolder_copied(self):
+        (self.source / "parts").mkdir()
+        (self.source / "parts/Row.qml").write_text("Item {}\n")
+        self.main()
+        self.assertTrue((self.clone / "parts/Row.qml").is_file())
+
+    def test_new_patch_version_rebuilds(self):
+        self.main()
+        self.calls.clear()
+        v2 = "// omarchy-notch-bar display panel patch v2"
+        edits = [(a, r.replace(dp.VERSION_LINE, v2)) for a, r in dp.EDITS]
+        with mock.patch.object(dp, "VERSION", 2), mock.patch.object(dp, "VERSION_LINE", v2), \
+             mock.patch.object(dp, "EDITS", edits):
+            self.main("--refresh")
+            self.assertIn("patch v2", (self.clone / "Panel.qml").read_text())
+        self.assertIn(("omarchy-shell", "-q", "shell", "rescanPlugins"), self.calls)
+
+    def test_leftover_stage(self):
+        # A build cut off before its rename: the stage looks like a clone.
+        self.main()
+        stage = self.plugins / ".omanotch.monitor.new"
+        shutil.copytree(self.clone, stage)
+        (self.source / "Panel.qml").write_text(PANEL.replace('id: root', 'id: root\n  // new'))
+        self.main("--refresh")
+        self.assertIn("// new", (self.clone / "Panel.qml").read_text())
+        self.assertFalse(stage.exists())
+
+    def test_omarchy_clone_under_way(self):
+        # `omarchy plugin clone` stages in .clone.XXXXXX: not a clone of the user's yet.
+        stage = self.plugins / ".clone.abc123"
+        stage.mkdir()
+        (stage / "manifest.json").write_text(json.dumps({**MANIFEST, "id": "gilles.monitor",
+                                                         "omarchy": {"clonedFrom": "omarchy.monitor"}}))
+        self.main()
+        self.assertTrue(self.clone.is_dir())
+
+    def test_cut_off_between_renames(self):
+        self.main()
+        self.clone.rename(self.plugins / ".omanotch.monitor.old")
+        self.main("--refresh")
+        self.assertTrue((self.clone / "Panel.qml").is_file())
+        self.assertFalse(list(self.plugins.glob(".*")))
+
+    def test_leftover_stage_removed(self):
+        self.main()
+        (self.plugins / ".omanotch.monitor.new").mkdir()
+        self.main("--remove")
+        self.assertFalse(list(self.plugins.iterdir()))
 
     def test_omacvm_app_panel(self):
         (self.plugins / "omacvm.monitor").mkdir()
@@ -200,7 +262,47 @@ class Clone(unittest.TestCase):
         self.main()
         self.main("--remove")
         self.assertFalse(self.clone.exists())
-        self.assertEqual(self.enabled[-1], "omarchy.monitor")
+        # Disabling the clone puts omarchy.monitor in its place (Omarchy's
+        # restoreCloneSource); enabling omarchy.monitor would also replace a
+        # display panel the user cloned later.
+        self.assertEqual(self.disabled, ["omanotch.monitor"])
+        self.assertNotIn("omarchy.monitor", self.enabled)
+
+    def write_shell_json(self, right):
+        shell_json = self.tmp / "config/omarchy/shell.json"
+        shell_json.write_text(json.dumps({"bar": {"layout": {"left": [], "right": right}}}))
+        return shell_json
+
+    def test_remove_without_shell(self):
+        self.main()
+        shell_json = self.write_shell_json([{"id": "omarchy.clock"}, {"id": "omanotch.monitor", "x": 1}])
+        self.no_shell = True
+        self.main("--remove")
+        self.assertFalse(self.clone.exists())
+        self.assertEqual(json.loads(shell_json.read_text())["bar"]["layout"]["right"],
+                         [{"id": "omarchy.clock"}, {"id": "omarchy.monitor", "x": 1}])
+
+    def test_drop(self):
+        # guest/off.sh with nobody logged in: no shell calls at all.
+        self.main()
+        shell_json = self.write_shell_json(["omanotch.monitor"])
+        self.calls.clear()
+        self.main("--drop")
+        self.assertFalse(self.clone.exists())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(json.loads(shell_json.read_text())["bar"]["layout"]["right"], ["omarchy.monitor"])
+
+    def test_drop_keeps_users_own_panel(self):
+        # The user cloned Omarchy's panel after Omanotch: both are in the bar.
+        self.main()
+        own = self.plugins / "gilles.monitor"
+        own.mkdir()
+        (own / "manifest.json").write_text(json.dumps({**MANIFEST, "id": "gilles.monitor",
+                                                       "omarchy": {"clonedFrom": "omarchy.monitor"}}))
+        shell_json = self.write_shell_json([{"id": "gilles.monitor"}, {"id": "omanotch.monitor"}])
+        self.main("--drop")
+        self.assertEqual(json.loads(shell_json.read_text())["bar"]["layout"]["right"],
+                         [{"id": "gilles.monitor"}])
 
     def test_patch_file(self):
         f = self.tmp / "Panel.qml"

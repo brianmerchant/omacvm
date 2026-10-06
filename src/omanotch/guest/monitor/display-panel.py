@@ -92,28 +92,52 @@ def source_dir():
     return pathlib.Path(omarchy) / "shell/plugins/panels/monitor"
 
 
-def run(*cmd):
+def run(*cmd, timeout=10):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False).stdout
     except (OSError, subprocess.SubprocessError):
         return ""
 
 
+def source_digest(source):
+    """Omarchy's whole panel folder and this patch's version, as one hash."""
+    h = hashlib.sha256(f"patch v{VERSION}\n".encode())
+    for item in sorted(source.rglob("*")):
+        if item.is_file():
+            h.update(str(item.relative_to(source)).encode() + b"\0")
+            h.update(item.read_bytes() + b"\0")
+    return h.hexdigest()
+
+
+def staged(clone):
+    """The folder a build goes into, and the one the old clone moves to."""
+    return clone.with_name(f".{clone.name}.new"), clone.with_name(f".{clone.name}.old")
+
+
+def tidy(clone):
+    """After a build that was cut off: the stage goes, and the old clone gets
+    its place back if the new one never got there."""
+    new, old = staged(clone)
+    shutil.rmtree(new, ignore_errors=True)
+    if old.is_dir():
+        if clone.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+        else:
+            old.rename(clone)
+
+
 def build(clone, source):
     """Fill the clone from Omarchy's panel, patched. Returns what it did."""
-    panel = (source / "Panel.qml").read_bytes()
-    digest = hashlib.sha256(panel).hexdigest()
+    digest = source_digest(source)
     stamp = clone / ".source-sha256"
     if stamp.exists() and stamp.read_text().strip() == digest:
         return "already patched"
-    patched = patch(panel.decode())
-    stage = clone.with_name(f".{clone.name}.new")
-    shutil.rmtree(stage, ignore_errors=True)
-    stage.mkdir(parents=True)
-    for item in source.iterdir():
-        if item.is_file() and item.name not in ("Panel.qml", "manifest.json"):
-            shutil.copy2(item, stage / item.name)
-    (stage / "Panel.qml").write_text(patched)
+    patched = patch((source / "Panel.qml").read_text())
+    new, old = staged(clone)
+    shutil.rmtree(new, ignore_errors=True)
+    # The whole folder, as `omarchy plugin clone` copies it.
+    shutil.copytree(source, new)
+    (new / "Panel.qml").write_text(patched)
     # Omarchy's manifest as a clone (what `omarchy plugin clone` writes): it
     # takes the place of omarchy.monitor in the bar.
     manifest = json.loads((source / "manifest.json").read_text())
@@ -124,10 +148,14 @@ def build(clone, source):
     extra = manifest.get("omarchy") if isinstance(manifest.get("omarchy"), dict) else {}
     extra.pop("clonePaths", None)
     manifest["omarchy"] = {**extra, "clonedFrom": "omarchy.monitor"}
-    (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-    (stage / ".source-sha256").write_text(digest + "\n")
-    shutil.rmtree(clone, ignore_errors=True)
-    stage.rename(clone)
+    (new / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    (new / ".source-sha256").write_text(digest + "\n")
+    # The clone is missing only between these two renames; if a build is cut
+    # off there, tidy() puts the old one back.
+    if clone.is_dir():
+        clone.rename(old)
+    new.rename(clone)
+    shutil.rmtree(old, ignore_errors=True)
     return "patched"
 
 
@@ -142,7 +170,8 @@ def enabled(plugin_id):
 def other_clone(plugins):
     """The id of a clone of Omarchy's display panel that is not ours, or None."""
     for manifest in sorted(plugins.glob("*/manifest.json")):
-        if manifest.parent.name == CLONE_ID:
+        # Hidden folders are builds under way (ours, `omarchy plugin clone`'s).
+        if manifest.parent.name == CLONE_ID or manifest.parent.name.startswith("."):
             continue
         try:
             data = json.loads(manifest.read_text())
@@ -154,10 +183,50 @@ def other_clone(plugins):
     return None
 
 
-def remove(clone):
-    if clone.exists():
-        run("omarchy-plugin-enable", "omarchy.monitor")
-        shutil.rmtree(clone, ignore_errors=True)
+def bar_back(shell_json, own=None):
+    """omarchy.monitor back in the clone's place in the bar, in shell.json
+    itself (no shell to ask); only the clone goes when the bar has a display
+    panel already (the user's own: OWN). The file keeps its owner and mode."""
+    try:
+        config = json.loads(shell_json.read_text())
+        layout = config["bar"]["layout"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    if not isinstance(layout, dict):
+        return
+
+    def entry_id(entry):
+        return entry.get("id") if isinstance(entry, dict) else entry
+
+    sections = [v for v in layout.values() if isinstance(v, list)]
+    if not any(entry_id(e) == CLONE_ID for v in sections for e in v):
+        return
+    stock = any(entry_id(e) in ("omarchy.monitor", own) for v in sections for e in v)
+    for v in sections:
+        for i in range(len(v) - 1, -1, -1):
+            if entry_id(v[i]) != CLONE_ID:
+                continue
+            if stock:
+                del v[i]
+            elif isinstance(v[i], dict):
+                v[i]["id"] = "omarchy.monitor"
+            else:
+                v[i] = "omarchy.monitor"
+            stock = True
+    with open(shell_json, "w") as f:
+        f.write(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+
+
+def remove(clone, shell=True):
+    """Back to Omarchy's panel. Disabling the clone puts omarchy.monitor in its
+    place only, so a display panel of the user's own stays where it is."""
+    tidy(clone)
+    if not clone.exists():
+        return
+    if not (shell and run("omarchy-plugin-disable", CLONE_ID).startswith("Disabled")):
+        bar_back(clone.parent.parent / "shell.json", other_clone(clone.parent))
+    shutil.rmtree(clone, ignore_errors=True)
+    if shell:
         run("omarchy-shell", "-q", "shell", "rescanPlugins")
 
 
@@ -169,9 +238,10 @@ def main(argv):
     mode = argv[1] if len(argv) > 1 else ""
     plugins = plugins_dir()
     clone = plugins / CLONE_ID
-    if mode == "--remove":
-        remove(clone)
+    if mode in ("--remove", "--drop"):
+        remove(clone, shell=mode == "--remove")
         return 0
+    tidy(clone)
     if (plugins / "omacvm.monitor").is_dir():
         print("OmacVM.app's display panel leaves NOTCH out already")
         return 0
@@ -194,10 +264,12 @@ def main(argv):
     result = build(clone, source)
     # --refresh runs at every notchcast start: no shell calls when nothing changed.
     if result == "patched" or (mode != "--refresh" and not enabled(CLONE_ID)):
-        run("omarchy-shell", "-q", "shell", "rescanPlugins")
+        # Seconds at most: notchcast's start waits for this.
+        deadline = time.monotonic() + 8
+        run("omarchy-shell", "-q", "shell", "rescanPlugins", timeout=4)
         # A new plugin needs a moment before the shell knows it.
-        for _ in range(40):
-            if run("omarchy-plugin-enable", CLONE_ID).startswith("Enabled"):
+        while time.monotonic() < deadline:
+            if run("omarchy-plugin-enable", CLONE_ID, timeout=2).startswith("Enabled"):
                 break
             time.sleep(0.05)
     print(result)
