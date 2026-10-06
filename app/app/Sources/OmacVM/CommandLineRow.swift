@@ -1,0 +1,142 @@
+import AppKit
+import Foundation
+import OmacVMWindow
+import SwiftUI
+
+/// "omacvm in Terminal": a link to this app's own omacvm (rules and tests in
+/// OmacVMWindow/CommandLineInstall.swift).
+enum TerminalCommand {
+    static var appCLI: String {
+        Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/omacvm/omacvm").path
+    }
+
+    /// The app has its own omacvm (not in a `swift run` from the source tree).
+    static var available: Bool { FileManager.default.isExecutableFile(atPath: appCLI) }
+
+    /// The PATH of a new Terminal window: the user's login shell asked once
+    /// (five seconds at most), else macOS's default PATH (/etc/paths).
+    static func userPath() -> String {
+        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-ilc", "printf '\\n@@PATH=%s@@\\n' \"$PATH\""]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        var text = ""
+        if (try? p.run()) != nil {
+            let done = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                done.signal()
+            }
+            if done.wait(timeout: .now() + 5) == .timedOut { p.terminate(); _ = done.wait(timeout: .now() + 1) }
+        }
+        if let r = text.range(of: "@@PATH="), let e = text.range(of: "@@", range: r.upperBound..<text.endIndex) {
+            return String(text[r.upperBound..<e.lowerBound])
+        }
+        let etc = (try? String(contentsOfFile: "/etc/paths", encoding: .utf8)) ?? "/usr/local/bin\n/usr/bin\n/bin\n/usr/sbin\n/sbin"
+        return etc.split(whereSeparator: \.isNewline).joined(separator: ":")
+    }
+
+    static func entry(_ path: String) -> CommandLineInstall.Entry {
+        let fm = FileManager.default
+        if let to = try? fm.destinationOfSymbolicLink(atPath: path) {
+            return .link(to: to.hasPrefix("/") ? to : ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(to))
+        }
+        var isDir: ObjCBool = false
+        return fm.fileExists(atPath: path, isDirectory: &isDir) ? .other : .none
+    }
+
+    static func resolve(_ path: String) -> String? {
+        guard let r = realpath(path, nil) else { return nil }
+        defer { free(r) }
+        return String(cString: r)
+    }
+
+    /// Off the main thread (asks the login shell).
+    static func state() -> CommandLineInstall.State {
+        CommandLineInstall.state(path: userPath(), home: VMsFolder.home.path, appCLI: appCLI,
+                                 entry: entry, resolve: resolve)
+    }
+
+    /// Makes the link; nil when it worked, else why not. Looks again first:
+    /// never over another omacvm.
+    static func install() -> String? {
+        guard case .available(let target, let admin) = state() else { return "Nothing to do: look again." }
+        let cmd = CommandLineInstall.linkCommand(target: target, appCLI: appCLI)
+        let p = Process()
+        if admin {
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            p.arguments = ["-e", "do shell script \(CommandLineInstall.appleScriptString(cmd)) with administrator privileges"]
+        } else {
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", cmd]
+        }
+        let err = Pipe()
+        p.standardError = err
+        p.standardOutput = FileHandle.nullDevice
+        do { try p.run() } catch { return error.localizedDescription }
+        let msg = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        if p.terminationStatus != 0 {
+            // osascript: -128 is Cancel in the password prompt.
+            return msg.contains("-128") ? "Cancelled." : "Could not install: \(msg.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        if case .installed = state() { return nil }
+        return "Installed in \(target), but a new Terminal window does not find it first."
+    }
+}
+
+/// The row in the VM window (and once in the first setup).
+struct CommandLineRow: View {
+    @State private var cli: CommandLineInstall.State?
+    @State private var busy = false
+    @State private var note: String?
+
+    var body: some View {
+        if TerminalCommand.available {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("omacvm in Terminal")
+                    Spacer()
+                    if busy { ProgressView().controlSize(.small) }
+                    if let s = cli {
+                        if case .available = s {
+                            Button("Install") { install() }.disabled(busy)
+                        } else {
+                            Text(CommandLineInstall.text(s)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if let s = cli, case .available = s {
+                    Text(CommandLineInstall.text(s)).font(.caption).foregroundStyle(.secondary)
+                }
+                if let n = note { Text(n).font(.caption).foregroundStyle(.red) }
+            }
+            .onAppear(perform: refresh)
+        }
+    }
+
+    private func refresh() {
+        Task.detached {
+            let s = TerminalCommand.state()
+            await MainActor.run { cli = s }
+        }
+    }
+
+    private func install() {
+        busy = true
+        note = nil
+        Task.detached {
+            let err = TerminalCommand.install()
+            let s = TerminalCommand.state()
+            await MainActor.run {
+                busy = false
+                note = err
+                cli = s
+            }
+        }
+    }
+}

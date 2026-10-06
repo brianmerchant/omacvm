@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The control centre's Mac jobs run this app's omacvm when there is no checkout.
         ControlCLI.refresh()
         state.startVM = { [weak self] in self?.startVM() }
+        state.vmRunning = { [weak self] in self?.runner?.isRunning == true || Self.qemuApp != nil }
         state.storage.appBusy = { [weak self] in
             guard let self else { return false }
             return self.runner?.isRunning == true || self.state.screen == .building || Self.qemuApp != nil

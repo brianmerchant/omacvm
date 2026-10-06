@@ -82,6 +82,10 @@ jobs:
         working-directory: app/app
         run: swift run features-tests
 
+      - name: OmacVM.app window rules (custom resources, disk, omacvm in Terminal, keyboard note)
+        working-directory: app/app
+        run: swift run window-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
