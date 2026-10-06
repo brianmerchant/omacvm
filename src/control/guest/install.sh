@@ -57,9 +57,31 @@ PY
   chown "$U:$U" "$MENU"
 }
 
+# Textual from pacman: waits for another pacman (Omarchy's first-boot setup or
+# an update holds the lock), refreshes a stale package list (a prebuilt image's
+# names files the mirrors no longer have), tries three times, and says which
+# of these it was. Python comes along so it matches the new packages.
+textual() {
+  local i out
+  python3 -c 'import textual' >/dev/null 2>&1 && return 0
+  for i in 1 2 3; do
+    for _ in $(seq 60); do [[ -e /var/lib/pacman/db.lck ]] || break; sleep 1; done
+    if out=$(pacman -S --needed --noconfirm python python-textual 2>&1) && python3 -c 'import textual' >/dev/null 2>&1; then
+      return 0
+    fi
+    # Not found or a 404: the package list is stale (or was never fetched).
+    pacman -Sy --noconfirm >/dev/null 2>&1 || true
+    sleep $((i * 2))
+  done
+  if grep -qiE 'could not resolve|failed to connect|connection timed out|network is unreachable' <<<"$out"; then
+    echo "  python-textual not installed: the VM has no internet now. omacvm shows a plain table; a repair of the control centre installs it later"
+  else
+    echo "  python-textual not installed: pacman says: $(tail -n1 <<<"$out" | cut -c1-160)"
+  fi
+}
+
 if [[ $WANT == on ]]; then
-  pacman -S --needed --noconfirm python python-textual >/dev/null 2>&1 ||
-    echo "  python-textual not installed (no network?): omacvm shows its plain text table until the next omacvm apply"
+  textual || true
   ln -sfn "$SHARE/control/omacvm" /usr/local/bin/omacvm
   # The guest checks run as root (they read services, the firewall, other
   # users' processes); the desktop user may ask for them through this socket.

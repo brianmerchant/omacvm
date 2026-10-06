@@ -139,8 +139,13 @@ mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/Omac
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$RT/firmware/firmware-source" "$C/Resources/firmware/"
 install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/prebuilt-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" \
   "$ROOT/scripts/update-swap.sh" "$C/Resources/scripts/"
-git -C "$REPO" archive "$COMMIT" src | tar -x -C "$C/Resources/omacvm"
+# The complete omacvm (entry script + src, as a release checkout): apply-vm.sh
+# runs its src/, and the Bridge runs it for the control centre when there is no
+# checkout (src/lib/mac.sh cli_file_app). The Bridge runs it only when nobody
+# else can write it (control.swift controlCLI): no group/other write bits.
+git -C "$REPO" archive "$COMMIT" omacvm src | tar -x -C "$C/Resources/omacvm"
 echo "$COMMIT" > "$C/Resources/omacvm/COMMIT"
+chmod -R go-w "$C/Resources/omacvm"
 install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
 install -m644 "$ROOT/THIRD_PARTY_NOTICES.md" "$C/Resources/licenses/"
 install -m644 "$ROOT/runtime/LICENSE.try-omarchy" "$C/Resources/licenses/"

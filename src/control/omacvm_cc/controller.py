@@ -218,7 +218,8 @@ class Controller:
         rows = S.build_rows(self.local.features, self.local.on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
                             offer=self.offer(), mac_features=mac_features, show_updates=with_updates)
-        g = S.graphics_row(self.mac_status, self.local.vm_type, list(self.jobs.values()), checks)
+        g = S.graphics_row(self.mac_status, self.local.vm_type, list(self.jobs.values()), checks,
+                           offline=self.mac_error is not None)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
                              offline=self.mac_error is not None)
         return rows + [r for r in (g, m) if r is not None]
