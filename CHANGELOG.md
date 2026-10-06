@@ -5,6 +5,10 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app: a VM made by an older app (2.9.x and earlier, or 3.0.0) gets
+  this app's OmacVM with Update VM in the app's window. Before, replacing
+  the app left the VM's side as it was, and a VM from before 3.0.0 has no
+  control centre to ask for it.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
