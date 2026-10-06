@@ -7,6 +7,14 @@ in more words.
 
 - Omanotch: Omarchy's display panel no longer lists the hidden NOTCH output
   as a display (it could be scaled or switched off there).
+- OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
+  with external displays: after a Hyprland config reload (a theme change, a
+  saved hypr file, a feature switched in the control centre) the pointer
+  could reach only the left or the right half of the screen for up to 30
+  seconds. The VM told the Mac where its outputs were from a moment when
+  they were still moving. It now hears every move and tells the Mac within
+  half a second. In the VM, a reinstall of the guest files no longer stops
+  the display agent.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
@@ -23,6 +31,12 @@ in more words.
   VM start. pacman and git clone try a failed download again (3 tries)
   while Omarchy installs. PAC files are not read. Details: docs/guide.md,
   "Behind a proxy".
+- Fast network: a VPN whose interface is up before it gets its address (an
+  IKEv2 connection's `ipsec0`, a tunnel brought up first) now gets the VPN
+  NAT within a second. For such an address the service saw only a new
+  route, and waited for the next other change. It also missed IPv4 address
+  messages (shorter than it expected). Tested with a real WireGuard client
+  (docs/routes/app.md).
 - In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
   which gives them real-time priority, took a VM that had been stopped for
   a runaway thread and put them back to normal priority for the rest of the
@@ -30,6 +44,13 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- **x86 Linux apps** (experimental, off by default): `omacvm enable
+  x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
+  start like ARM ones, slower (on an M4: about 85 % of native speed for
+  plain code, under half for vector-heavy code, plus a start-up cost;
+  tested with 7-Zip and ripgrep; Obsidian's AppImage opens on an ARM64
+  Linux server, not yet tried in a VM; Node.js is not reliable). `omacvm disable x86-apps` removes it. Every route.
+  ([details](docs/features.md#x86-linux-apps))
 
 ## 3.0.0
 
