@@ -5,14 +5,20 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
+  desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
+  key before it boots (the wait was hidden under the boot logo).
+  `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- USB devices (experimental, OmacVM.app, off by default): give a VM a USB
+  device macOS does not use itself (debug probes, SDR sticks, boards in DFU
+  mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
 - In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
   which gives them real-time priority, took a VM that had been stopped for
   a runaway thread and put them back to normal priority for the rest of the
   session; after that the sound could break while the VM and the Mac were
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
-  0-6 with real-time PipeWire). `omacvm apply`
-  now runs RTKit without that watchdog, and `omacvm check` shows "sound
-  priority".
+  0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
+  watchdog, and `omacvm check` shows "sound priority".
 
 ## 3.0.0 (unreleased)
 

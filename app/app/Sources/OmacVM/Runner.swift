@@ -3,6 +3,7 @@ import AVFoundation
 import Foundation
 import OmacVMNet
 import OmacVMUpdate
+import OmacVMUSB
 
 /// Runs one VM: QEMU with its own Cocoa window (VirGL), a QMP socket for
 /// power and pause, and the Mac's sleep and wake.
@@ -42,6 +43,9 @@ final class Runner {
             "-m", "\(c.memoryMB)M",
             "-nodefaults",
             "-action", "reboot=reset,shutdown=poweroff",
+            // The firmware boots at once instead of waiting 5 s for a key
+            // (Settings.firmwareWait; it sets the VM's Timeout variable each start).
+            "-boot", "menu=on,splash-time=\(Settings.firmwareWait * 1000)",
             // UEFI firmware (read-only) and this VM's own boot variables.
             "-drive", "if=pflash,format=raw,readonly=on,file=\(q(Paths.firmware.path))",
             "-drive", "if=pflash,format=raw,file=\(q(c.efiVars.path))",
@@ -118,8 +122,15 @@ final class Runner {
         // should vmnet fail while the VM runs (useUserNetwork). Last,
         // so no other device moves.
         if network.vmnet { a += ["-device", "pcie-root-port,id=netfb"] }
+        // The VM's USB devices (off by default; docs/usb.md): only then an
+        // xHCI controller. After everything else, so no other device moves.
+        usb = USBChoice.load(folder: c.folder)
+        a += USBChoice.arguments(usb)
         return a
     }
+
+    /// The USB devices this start passes to QEMU (USBChoice).
+    private(set) var usb: [USBChoice.Entry] = []
 
     /// The display for the VM's window: under the pointer, else the one with
     /// the active menu bar; nil with one display.
@@ -248,6 +259,10 @@ final class Runner {
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
+        log.write(Data("OmacVM: USB devices: \(USBChoice.record(usb))\n".utf8))
+        if Settings.firmwareWait > 0 {
+            log.write(Data("OmacVM: the firmware waits \(Settings.firmwareWait) s for a key (firmwareWait)\n".utf8))
+        }
         try? Data("\(network.record)\n".utf8).write(to: c.folder.appendingPathComponent("logs/network"))
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
