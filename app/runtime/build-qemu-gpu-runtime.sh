@@ -797,6 +797,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-inpu
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-globe-key.patch"
 grep -q '^    omacvm_globe_init();$' "$source_dir/ui/cocoa.m" && grep -q 'if (omacvm_globe_event(event)) {' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not hand the globe key to the VM (globe-key patch)"
+# OmacVM: no quit when AppKit's last window goes (a hidden full-screen run quit
+# after a minute); a quit while the guest starts presses the power button again.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-clean.patch"
+"$native_dir/Tests/display/test-quit-clean.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: quits by itself or presses the power button once (test-quit-clean.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

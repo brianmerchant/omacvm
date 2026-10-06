@@ -187,6 +187,12 @@ in more words.
   Omanotch, or none running: after 8 s).
 - Chromium video: the decoder service comes back by itself after a broken
   Mesa is fixed or FFmpeg is updated, and `omacvm check` says why it is down.
+- OmacVM.app: Quit in the VM's window right after the VM starts (while it
+  still boots) shuts it down cleanly. The Mac pressed the VM's power button
+  once, the VM was not listening yet, and it was stopped after a minute.
+  In the first 2 minutes after a start or restart the button is now pressed
+  again every 10 seconds, up to 40 seconds; qemu.log says each step. A
+  hidden VM in full screen (test runs) no longer quits by itself.
 
 ## 3.0.0
 

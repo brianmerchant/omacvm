@@ -6,7 +6,9 @@
 #     nor tells the guest it covers the strip (omacvm.notch), and has no switch;
 #   - the runtime build applies both patches after the boot splash and checks
 #     the patched ui/cocoa.m (test-fullscreen-space.sh, its self-test here);
-#   - `omacvm check` no longer reads the old switch.
+#   - `omacvm check` no longer reads the old switch;
+#   - the shutdown, full-screen start and quit patches come after them, pinned
+#     and checked (their tests' self-tests here).
 #   src/tests/app-fullscreen-space.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -53,4 +55,17 @@ for t in test-shutdown-events.sh test-fullscreen-start.sh; do
   echo "$out" | sed 's/^/     /'
   expect "$t catches the old code" 0 "$rc"
 done
+
+# No quit by itself (a hidden full-screen run quit after a minute); a quit
+# presses the power button again: last, after the full-screen start.
+p=omacvm-cocoa-quit-clean.patch
+expect "$p pinned" yes \
+  "$(cd "$R/app/runtime/patches" && grep -q " $p\$" SHA256SUMS && shasum -a 256 -c --status <(grep " $p\$" SHA256SUMS) && echo yes || echo no)"
+quit=$(line 'patches/omacvm-cocoa-quit-clean.patch"')
+qtest=$(line 'Tests/display/test-quit-clean.sh" "$source_dir/ui/cocoa.m"')
+expect "the build applies it after the full-screen start, then tests" yes \
+  "$([[ -n $quit && -n $qtest ]] && (( start < quit && quit < qtest )) && echo yes || echo no)"
+out=$("$R/app/runtime/Tests/display/test-quit-clean.sh" --self-test 2>&1); rc=$?
+echo "$out" | sed 's/^/     /'
+expect "test-quit-clean.sh catches the old code" 0 "$rc"
 exit $fail
