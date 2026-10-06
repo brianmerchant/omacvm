@@ -339,24 +339,29 @@ the VM's SSH on `127.0.0.1:<port>`.
   `src/tests/pointer-start-vm.sh`). QEMU's log says which way it takes
   ("cocoa: pointer: ..."). Off (QEMU's own way, on entering the window or a
   click): `defaults write org.omacvm.app pointerStart -bool false`.
-- *Mac pointer for the VM* (experimental, off by default, from the VM's
-  next start): Omarchy puts its pointer on virtio-gpu's cursor plane
-  (Hyprland's hardware cursor) and QEMU makes that image the Mac's own
-  cursor over the VM's windows. The pointer then moves with the Mac's
-  cursor instead of waiting for the next guest frame, and there is one
-  cursor over the VM, Omanotch's strip and every display (only its shape
-  changes), so it no longer flickers at those edges. The app sets
+- Mac pointer for the VM (experimental, off, no switch in the window yet:
+  `defaults write org.omacvm.app macPointer -bool true`, from the VM's
+  next start): Omarchy is asked to put its pointer on virtio-gpu's cursor
+  plane (Hyprland's hardware cursor) and QEMU makes that image the Mac's
+  own cursor over the VM's windows, so the pointer would move with the
+  Mac's cursor instead of waiting for the next guest frame (about 25 ms at
+  60 Hz, see `docs/architecture/graphics.md`) and stay one cursor over the
+  VM, Omanotch's strip and every display. The app sets
   `OMACVM_HW_CURSOR=1` for QEMU and the OEM string `omacvm.hwcursor=1`
   (`/run/omacvm/host.env`; `omacvm_app.lua` turns `no_hardware_cursors`
-  off, notchcast stops hiding the guest's pointer at the strip). Until the
-  guest's first image after a reset (boot, or a VM whose `omacvm_app.lua`
-  is older than this) and with a relative pointer (games) nothing changes.
-  QEMU's log: "cocoa: the guest's pointer is the Mac's cursor now".
+  off, notchcast stops hiding the guest's pointer at the strip). Not working
+  yet: Hyprland 0.56.2 keeps drawing a software cursor on OmacVM's
+  virtio-gpu (no cursor command reaches QEMU, also with `use_cpu_buffer`),
+  so today nothing changes. Why: since Linux 6.8 a virtual GPU's cursor
+  plane is hidden from atomic clients that do not ask for cursor hotspots
+  (DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT); the guest kernel has it (plane 36,
+  unused) but Hyprland's aquamarine only sees the primary plane. Next:
+  aquamarine with that cap, or its legacy (non-atomic) path for this mode. Until the guest's first image after a reset and
+  with a relative pointer (games) QEMU keeps its own way anyway.
   `omacvm-cocoa-hw-cursor.patch`, rules in
   `omacvm-cocoa-hw-cursor-logic.patch` (unit test
   `app/runtime/Tests/display/test-hw-cursor.sh`); in a VM:
-  `src/tests/input-latency-vm.sh --hw-cursor`. Same switch by hand:
-  `defaults write org.omacvm.app macPointer -bool true`.
+  `src/tests/input-latency-vm.sh --hw-cursor`.
 
 ## Fast network (experimental, off by default)
 

@@ -286,7 +286,6 @@ struct ReadyView: View {
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
     @State private var keepDockAway = Settings.keepDockAway
-    @State private var macPointer = Settings.macPointer
     @State private var escape = EscapeSetting.current()
     @State private var resourcesNote: String?
     @State private var fastNetOn = false
@@ -355,9 +354,6 @@ struct ReadyView: View {
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
             Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
                 .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
-            Toggle("Mac pointer for the VM (experimental)", isOn: $macPointer)
-                .help("The VM's pointer is shown by the Mac's own cursor: it moves without waiting for the VM's next frame and does not flicker between the VM, Omanotch and other displays. From the VM's next start.")
-                .onChange(of: macPointer) { _, v in Settings.macPointer = v }
             Picker("Escape combo (⌃⌥ Esc)", selection: $escape) {
                 ForEach(EscapeSetting.Choice.allCases, id: \.self) { Text($0.title).tag($0) }
             }

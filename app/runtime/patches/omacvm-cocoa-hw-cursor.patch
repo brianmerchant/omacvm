@@ -1,8 +1,8 @@
 From: OmacVM
 Subject: [PATCH] cocoa: the guest's pointer as the Mac's cursor (experimental)
 
-What: with OMACVM_HW_CURSOR=1 (OmacVM.app: "Mac pointer for the VM",
-off by default) the image the guest puts on virtio-gpu's cursor plane
+What: with OMACVM_HW_CURSOR=1 (OmacVM.app: the hidden macPointer
+setting, off by default) the image the guest puts on virtio-gpu's cursor plane
 becomes the Mac's own cursor over the VM's windows (an NSCursor in the
 image's size in points, hot spot from the guest). The Mac's cursor is not
 hidden then; an empty cursor stands in while the guest hides its pointer
@@ -23,8 +23,12 @@ Until the guest's first image after a reset, and with a relative pointer
 show-cursor decide as before. The full-screen pointer guard sees a shown
 Mac cursor and follows the guest's pointer (as with show-cursor=on).
 Image updates are coalesced: only the newest queued one makes a cursor.
-Known limit: a guest that warps its pointer (Hyprland's warps are off in
-Omarchy) is back under the Mac's cursor at the next motion.
+Known limits: a guest that warps its pointer (Hyprland's warps are off in
+Omarchy) is back under the Mac's cursor at the next motion. Hyprland 0.56.2
+in Omarchy does not use the cursor plane on virtio-gpu yet (no cursor
+command reaches QEMU: Linux hides a virtual GPU's cursor plane from atomic
+clients without DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, which aquamarine does
+not set), so with it this changes nothing today.
 
 Upstream: not sent (OmacVM's pointer policy; upstream draws the image in
 a layer at the guest's place).
