@@ -52,7 +52,7 @@ class FrameTimes(unittest.TestCase):
     def test_many_uses_never_go_back(self):
         clock = camera.FrameClock()
         last, now = clock.time(10.0), 10.0
-        for gap in (0.01, 5.0, 600.0, 0.0):
+        for gap in (0.01, 5.0, 600.0, 0.001):
             now += 2.0
             self.assertGreater(clock.time(now), last)
             last = clock.time(now)
@@ -62,6 +62,20 @@ class FrameTimes(unittest.TestCase):
             self.assertGreater(clock.time(now), last)
             self.assertLess(clock.time(now) - last, 0.05)
             last = clock.time(now)
+
+    def test_never_ahead_of_the_monotonic_clock(self):
+        clock = camera.FrameClock()
+        now = 50.0
+        for _ in range(100):   # apps that stop and start within a frame
+            clock.stop(now)
+            now += 0.001
+            clock.go(now)
+            self.assertLessEqual(clock.time(now), now)
+            now += 0.001
+        last = clock.time(now)
+        clock.stop(now)
+        clock.go(now + 0.001)   # a frame after a short stop is still later
+        self.assertGreater(clock.time(now + 0.001), last)
 
     def test_stop_and_go_twice_change_nothing(self):
         clock = camera.FrameClock()

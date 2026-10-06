@@ -209,7 +209,9 @@ def write_frame(descriptor: int, frame: bytes | bytearray | memoryview) -> None:
 class FrameClock:
     """The time each frame carries: the monotonic clock, stopped while no app
     reads. A new reader's first frame is the one left from the last use; the
-    next one then comes FRAME_TIME after it, not hours later."""
+    next one then comes FRAME_TIME after it, not hours later. It never runs
+    ahead of the monotonic clock (after a short stop it just goes on), so a
+    restarted service's first frame never goes back in time."""
 
     def __init__(self) -> None:
         self.offset = 0.0
@@ -224,7 +226,7 @@ class FrameClock:
 
     def go(self, now: float) -> None:
         if self.stopped_at is not None:
-            self.offset = now - self.stopped_at - FRAME_TIME
+            self.offset = max(self.offset, now - self.stopped_at - FRAME_TIME)
             self.stopped_at = None
 
 
