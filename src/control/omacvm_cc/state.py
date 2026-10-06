@@ -275,6 +275,37 @@ def update_offered(release, vm, mac=None) -> bool:
     return m is None or r >= m
 
 
+# What u does (Controller.update_plan): nothing, this VM only (the Mac is
+# current), OmacVM.app first and then this VM (the app restarts the VM once),
+# the app only, a Mac checkout and this VM in one job, or the app by hand.
+PLANS = ("none", "vm", "app+vm", "app", "mac-checkout", "manual")
+
+
+def update_plan(release, vm, mac, mac_app: bool, app_vm: bool, app_update: bool) -> str:
+    """mac_app: the Mac's omacvm is OmacVM.app's copy (the app updates it).
+    app_vm: this VM runs in OmacVM.app. app_update: the Mac takes
+    POST /omacvm/app-update (3.0.1 on). Forward only."""
+    r, v, m = version_tuple(release), version_tuple(vm), version_tuple(mac)
+    if r is None or (m is not None and r < m):
+        return "none"   # no release, or the Mac is ahead of it
+    vm_older = v is None or v < r
+    mac_older = m is None or m < r
+    if not mac_older:
+        return "vm" if vm_older else "none"
+    if not mac_app:
+        return "mac-checkout"
+    if app_vm and app_update:
+        return "app+vm" if vm_older else "app"
+    return "manual"
+
+
+def update_line(plan: str, version) -> str:
+    """The top line when an update is there ("" for none)."""
+    who = {"vm": "this VM", "app+vm": "Mac app and this VM", "app": "Mac app",
+           "mac-checkout": "the Mac and this VM", "manual": "Mac app and this VM"}.get(plan)
+    return f"Update available: {version} ({who}) · u updates" if who else ""
+
+
 def part_changed(name: str, installed: dict, offer: dict) -> bool:
     """An update changes this part: the offered digest is not the installed one."""
     o = (offer or {}).get(name)

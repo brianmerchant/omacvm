@@ -193,6 +193,23 @@ class Controller:
         m = self.manifest()
         return m is not None and S.update_offered(m.get("version"), self.local.version, self.mac_version())
 
+    def update_plan(self) -> tuple[str, str]:
+        """What u does now (state.PLANS) and the release's version."""
+        m = self.manifest()
+        if m is None:
+            return "none", ""
+        u = self.updates or {}
+        app_update = self.hello is not None and "app-update" in self.hello.requests
+        plan = S.update_plan(m.get("version"), self.local.version, self.mac_version(), u.get("mac_app") is True,
+                             self.local.vm_type == "app", app_update)
+        return plan, str(m.get("version") or "")
+
+    def update_line(self) -> str:
+        """The top line: only with update checks on, or after a check in the last hour."""
+        if not (self.checks_enabled or self.manifest_fresh()):
+            return ""
+        return S.update_line(*self.update_plan())
+
     def offer(self) -> dict:
         """The release's parts, only when it is an update for this VM."""
         m = self.manifest()

@@ -43,6 +43,35 @@ def check_socket() -> str:
     return os.environ.get("OMACVM_CHECK_SOCKET", "/run/omacvm/check.sock")
 
 
+def resume_file() -> str:
+    """Written before OmacVM.app restarts this VM for an update: after the
+    restart, this VM's part follows (the control centre, opened by omacvm notify)."""
+    return os.path.join(os.path.dirname(cache_file()), "update-after-restart")
+
+
+RESUME_SECONDS = 3600
+
+
+def write_resume(version: str) -> None:
+    os.makedirs(os.path.dirname(resume_file()), exist_ok=True)
+    with open(resume_file(), "w", encoding="utf-8") as f:
+        json.dump({"version": version, "at": time.time()}, f)
+
+
+def take_resume(remove: bool = True) -> str | None:
+    """The version from a marker under an hour old (removed: it is used once), else None."""
+    d = read_json(resume_file())
+    if remove:
+        try:
+            os.remove(resume_file())
+        except OSError:
+            pass
+    at, v = d.get("at"), d.get("version")
+    if not isinstance(at, (int, float)) or not isinstance(v, str) or not -60 < time.time() - at < RESUME_SECONDS:
+        return None
+    return v
+
+
 def cache_file() -> str:
     return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "omacvm", "state.json")
 

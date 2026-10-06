@@ -56,6 +56,8 @@ class FakeMac:
         self.graphics: dict | None = None   # an OmacVM.app VM's Graphics (omacvm graphics --json)
         self.gpu_memory: dict | None = None  # an OmacVM.app VM's graphics memory (None: an older Mac without it)
         self.gpu_memory_at: list[float] = []  # when each gpu-memory request came
+        self.mac_app: bool | None = None  # the Mac's omacvm is OmacVM.app's copy (None: an older Mac says nothing)
+        self.app_update: tuple | None = None  # (status, body) for POST /omacvm/app-update (None: an older Mac)
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -126,7 +128,8 @@ class FakeMac:
                     time.sleep(fake.hello_delay)
                     names = [l.split("\t")[0] for l in open(os.path.join(SRC, "features.tsv"), encoding="utf-8")
                              if l.strip() and not l.startswith("#")]
-                    reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else [])
+                    reqs = ["hello", "status", "updates", "jobs"] + (["gpu-memory"] if fake.gpu_memory is not None else []) \
+                        + (["app-update"] if fake.app_update is not None else [])
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
                                            "requests": reqs, "macos": "15.7.4", "chip": "Apple M4 Max"})
                 if p == "/omacvm/gpu-memory" and fake.gpu_memory is not None:
@@ -182,6 +185,8 @@ class FakeMac:
                                       "state": "running", "step": 1, "of": 4, "text": "the Mac side",
                                       "lines": ["==> OmacVM Bridge on the Mac"], "polls": 0}
                     return self.send(202, {k: v for k, v in fake.jobs[jid].items() if k != "polls"})
+                if self.path == "/omacvm/app-update" and fake.app_update is not None:
+                    return self.send(*fake.app_update)
                 if self.path == "/omacvm/settings/update-checks":
                     fake.checks_enabled = bool(b["enabled"])
                     return self.send(200, fake.updates())
@@ -195,8 +200,11 @@ class FakeMac:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def updates(self) -> dict:
-        return {"checks_enabled": self.checks_enabled, "omacvm": self.version, "checked_at": self.checked_at,
-                "ok": self.manifest is not None, "offline": False, "error": None, "manifest": self.manifest}
+        u = {"checks_enabled": self.checks_enabled, "omacvm": self.version, "checked_at": self.checked_at,
+             "ok": self.manifest is not None, "offline": False, "error": None, "manifest": self.manifest}
+        if self.mac_app is not None:
+            u["mac_app"] = self.mac_app
+        return u
 
     def stop(self) -> None:
         self.server.shutdown()

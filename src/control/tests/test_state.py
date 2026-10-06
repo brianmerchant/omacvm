@@ -317,3 +317,20 @@ def test_gpu_memory_row_carries_the_macs_check():
     c = S.Check("mac", "ok", "graphics memory", "1.1 GB now (peak 1.6 GB)", False, "")
     other = S.Check("mac", "ok", "microphone", "", False, "")
     assert S.gpu_memory_row(GM, "app", checks=[c, other]).checks == (c,)
+
+
+def test_update_plan():
+    from omacvm_cc.state import update_line, update_plan
+    # release, vm, mac, mac_app, app_vm, app_update
+    assert update_plan("3.0.2", "3.0.1", "3.0.1", True, True, True) == "app+vm"
+    assert update_plan("3.0.2", "3.0.2", "3.0.1", True, True, True) == "app"
+    assert update_plan("3.0.2", "3.0.1", "3.0.2", True, True, True) == "vm"
+    assert update_plan("3.0.2", "3.0.2", "3.0.2", True, True, True) == "none"
+    assert update_plan("3.0.2", "3.0.1", "3.0.1", False, False, True) == "mac-checkout"
+    assert update_plan("3.0.2", "3.0.1", "3.0.1", True, False, True) == "manual"   # a Parallels VM, the app's omacvm
+    assert update_plan("3.0.2", "3.0.1", "3.0.1", True, True, False) == "manual"   # an older Mac
+    assert update_plan("3.0.1", "3.0.1", "3.0.2", True, True, True) == "none"     # the Mac is ahead: never down
+    assert update_plan(None, "3.0.1", "3.0.1", True, True, True) == "none"
+    assert update_line("app+vm", "3.0.2") == "Update available: 3.0.2 (Mac app and this VM) · u updates"
+    assert update_line("vm", "3.0.2") == "Update available: 3.0.2 (this VM) · u updates"
+    assert update_line("none", "3.0.2") == ""

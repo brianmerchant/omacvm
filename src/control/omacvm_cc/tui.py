@@ -25,7 +25,7 @@ from . import collect, look, report, system
 from . import state as S
 from .bridge import BridgeError
 from .controller import ACTION_FOR, Controller, local_time
-from .local import log_tail
+from .local import log_tail, take_resume, write_resume
 
 # Job polls (one a second) that may fail in a row before the job counts as
 # lost: an update restarts the Bridge, which takes a while.
@@ -81,6 +81,23 @@ ConfirmScreen { align: center middle; background: ansi_default 0%; }
 ConfirmScreen > Vertical { width: 72; max-width: 95%; height: auto; border: round ansi_yellow;
                            border-title-color: ansi_yellow; padding: 1 2; background: ansi_default; }
 """
+
+
+# The only place that sends the user to the Mac for an update: the Mac's
+# OmacVM.app cannot be asked from this VM (another app's VM, an older Mac).
+MANUAL_APP_UPDATE = ("Update OmacVM.app first: shut this VM down, open OmacVM on the Mac and click Check Now. "
+                     "Then u here updates this VM.")
+
+
+def app_update_error(e: BridgeError) -> str:
+    """A refused app-update in plain words, with the next step."""
+    if e.code in ("not-app", "old-bridge", "app-cannot-update"):
+        return f"{e}. {MANUAL_APP_UPDATE}" if e.code != "old-bridge" else MANUAL_APP_UPDATE
+    if e.code == "not-app-copy":
+        return "this Mac has an OmacVM checkout: u updates the Mac and this VM in one go (try u again)"
+    if e.kind == "offline":
+        return f"{e} (the VM keeps running; u tries again)"
+    return str(e)
 
 
 def keys_line(*pairs: tuple[str, str]) -> Text:
@@ -442,7 +459,7 @@ class UpdatesScreen(Screen):
             t.append("No update information yet: c checks now.\n")
         on_ = app.c.checks_enabled
         if m and not on_ and not app.c.manifest_fresh():
-            t.append("\n  Update checks are off: this result may be old. c checks now, then i installs.\n", style="yellow")
+            t.append("\n  Update checks are off: this result may be old. u checks and updates.\n", style="yellow")
         t.append("\n  Update checks  ", style="bright_black")
         t.append("[x] weekly" if on_ else "[ ] off", style="bold" if on_ else "yellow")
         t.append("     (off: no checks, no prompts; c still checks when you ask)\n", style="bright_black")
@@ -667,6 +684,11 @@ class ControlCentre(App):
             self.c.refresh_updates()
             self.c.refresh_gpu_memory()
         self.call_from_thread(self.refresh_all)
+        # OmacVM.app restarted this VM for an update: this VM's part now.
+        if self.c.linked:
+            version = take_resume()
+            if version:
+                self.call_from_thread(self.resume_update, version)
 
     def look_gpu_memory(self) -> None:
         """Every 2 s while open: one look at a time, only on OmacVM.app VMs the Mac answers for."""
@@ -739,9 +761,9 @@ class ControlCentre(App):
         if self.last_result:
             return self.last_result
         if c.mac_error is None:
-            return ""
+            return c.update_line() if c.linked else ""
         if c.mac_error.kind == "old":
-            return "The Mac runs an older OmacVM: run omacvm update on the Mac to switch features from here."
+            return "The Mac runs an older OmacVM: update OmacVM on the Mac to switch features from here."
         if c.mac_error.kind == "offline":
             if c.local.vm_type == "app":
                 return "OmacVM.app does not answer on this VM's control port: showing this VM's side."
@@ -803,6 +825,9 @@ class ControlCentre(App):
                 where = f"This VM has OmacVM {vm} now, as the Mac; the helper's last build keeps running on the Mac."
             else:
                 where = "This VM was not changed."
+            if (self.c.updates or {}).get("mac_app") is True:
+                # OmacVM.app's own copy: the app updates it, never omacvm update.
+                return f"{head} {where} Update OmacVM.app first: u does it from here (! reports the problem)."
             return f"{head} {where} On the Mac, omacvm update tries it again and shows why (! reports the problem)."
         mac_newer = bool(job.mac_omacvm) and job.mac_omacvm != vm
         # Turning the control centre off from inside it is no way on: it would close.
@@ -902,26 +927,103 @@ class ControlCentre(App):
             self.run_job("reinstall", [name])
 
     def install_update(self) -> None:
-        m = self.c.manifest()
-        if m is None:
-            self.notify("no update known: U, then c checks", severity="warning")
-            return
-        if not self.c.update_offered():
-            self.notify(f"nothing newer to install: the latest release is OmacVM {m.get('version')}, "
-                        f"this VM has {self.c.local.version}", severity="warning")
-            return
-        if not self.c.checks_enabled and not self.c.manifest_fresh():
-            # Checks off: no prompts, and nothing installed from a result that may be old.
-            self.notify("update checks are off and the last result may be old: U, then c checks now", severity="warning")
+        """u: one key for the whole update. It checks first (when the last
+        check is over an hour old), then updates what is older: this VM, or
+        OmacVM.app on the Mac and then this VM (the app restarts the VM once)."""
+        from textual.worker import WorkerState
+        if any(w.group == "job" and w.state in (WorkerState.PENDING, WorkerState.RUNNING) for w in self.workers):
+            self.notify("an update runs: wait for it", severity="warning")
             return
         if not self.can_ask():
             return
+        self.plan_update()
+
+    @work(thread=True, exclusive=True, group="job")
+    def plan_update(self) -> None:
+        c = self.c
+        if c.manifest() is None or not c.manifest_fresh():
+            self.call_from_thread(self.notify, "checking for updates …", timeout=3)
+            try:
+                c.refresh_updates(check=True)
+            except BridgeError as e:
+                # Checked a moment ago (from here or another window): that result counts.
+                if not (e.code == "rate" and c.manifest() is not None):
+                    self.call_from_thread(self.notify, f"Update: {e}", severity="warning", timeout=8)
+                    self.call_from_thread(self.refresh_all)
+                    return
+        plan, version = c.update_plan()
+        self.call_from_thread(self.refresh_all)
+        self.call_from_thread(self.confirm_update, plan, version)
+
+    def confirm_update(self, plan: str, version: str) -> None:
+        vm = self.c.local.version
+        if plan == "none":
+            if version:
+                self.notify(f"Up to date: OmacVM {version} is the latest release (this VM has {vm})", timeout=6)
+            else:
+                self.notify("Update: the Mac has no update information yet", severity="warning")
+            return
+        if plan == "manual":
+            self.notify(MANUAL_APP_UPDATE, severity="warning", timeout=12)
+            return
+        if plan in ("app", "app+vm"):
+            what = "OmacVM.app on the Mac" + (" and this VM get " if plan == "app+vm" else " gets ") + version
+            self.push_screen(ConfirmScreen(f"Update to OmacVM {version}",
+                                           f"{what}.\nYour VM restarts once for the update: save your work.\n"
+                                           "OmacVM.app shuts this VM down, updates itself and starts the VM again; "
+                                           "this VM's part follows after you log in. "
+                                           "If the new app does not start, the old one comes back by itself."),
+                             lambda yes: yes and self.app_update(version))
+            return
         n = sum(1 for r in self.c.rows(with_updates=True) if r.update)
-        self.push_screen(ConfirmScreen(f"OmacVM {m.get('version')}",
-                                       f"Install OmacVM {m.get('version')} on the Mac and in this VM"
+        where = "on the Mac and in this VM" if plan == "mac-checkout" else "in this VM"
+        self.push_screen(ConfirmScreen(f"OmacVM {version}",
+                                       f"Install OmacVM {version} {where}"
                                        f" ({n} feature{'s' if n != 1 else ''} change)?\n"
                                        "Your feature choices stay. Some changes apply after a reboot of the VM."),
                          lambda yes: yes and self.run_job("update", []))
+
+    @work(thread=True, exclusive=True, group="job")
+    def app_update(self, version: str) -> None:
+        """Asks the Mac to update OmacVM.app; it then restarts this VM. A
+        marker says to do this VM's part after the restart."""
+        try:
+            write_resume(version)
+        except OSError:
+            pass
+        self.last_result = f"The Mac gets OmacVM.app {version} … (a download may take a few minutes)"
+        self.call_from_thread(self.refresh_all)
+        try:
+            self.c.bridge.app_update()
+        except BridgeError as e:
+            take_resume()
+            self.last_result = ""
+            self.call_from_thread(self.notify, f"Update: {app_update_error(e)}", severity="error", timeout=12)
+            self.call_from_thread(self.refresh_all)
+            return
+        self.last_result = (f"OmacVM.app {version} is ready: this VM shuts down in a moment and starts again "
+                            "with the update.")
+        self.call_from_thread(self.refresh_all)
+
+    @work(thread=True, exclusive=True, group="job")
+    def resume_update(self, version: str) -> None:
+        """After OmacVM.app restarted this VM for an update: this VM's part,
+        without asking again (the user confirmed before the restart)."""
+        c = self.c
+        try:
+            c.refresh_updates()
+        except BridgeError:
+            pass
+        plan, now = c.update_plan()
+        if plan in ("vm", "mac-checkout"):
+            self.call_from_thread(self.notify, f"OmacVM.app is updated: now this VM's part of {now or version}", timeout=6)
+            self.call_from_thread(self.run_job, "update", [])
+        elif plan in ("app", "app+vm", "manual"):
+            self.last_result = ("OmacVM.app was not updated on the Mac. On the Mac: open OmacVM and click Check Now "
+                                "to see why.")
+            self.call_from_thread(self.refresh_all)
+        else:
+            self.call_from_thread(self.notify, f"Updated to OmacVM {c.mac_version() or version}", timeout=8)
 
     @work(thread=True, exclusive=True, group="job")
     def run_job(self, action: str, features: list[str]) -> None:
@@ -934,9 +1036,9 @@ class ControlCentre(App):
                 msg = ("the Mac has a newer OmacVM: u updates this VM first" if self.c.update_offered() else
                        f"the Mac has a newer OmacVM: on the Mac, {self.on_the_mac('apply')} brings this VM up to it")
             elif e.code == "mac-older":
-                msg = "this VM has a newer OmacVM than the Mac: run omacvm update on the Mac first"
+                msg = "this VM has a newer OmacVM than the Mac: u updates the Mac first"
             elif e.code == "stale-update":
-                msg = "update checks are off and the last result may be old: U, then c checks now"
+                msg = "update checks are off and the last result may be old: u checks and updates"
             self.call_from_thread(self.notify, f"{what}: {msg}", severity="error", timeout=8)
             return
         self.last_result = ""
