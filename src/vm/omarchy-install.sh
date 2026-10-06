@@ -43,12 +43,17 @@ systemd-run --uid="$U" --gid="$U" --unit=omacvm-omarchy-install -p WorkingDirect
 # with its package progress), until the installer is done.
 declare -F pac_progress >/dev/null || pac_progress() { sed -u 's/\x1b\[[0-9;]*m//g' | grep --line-buffered -E '^==>' || true; }
 declare -F cache_watch >/dev/null || cache_watch() { :; }
+# sed -u passes whole lines only, so cache_watch's lines never land in the
+# middle of one (tail writes what it reads, also half lines).
 {
-  tail -n +1 -F "$H/.omacvm-install.log" 2>/dev/null & t=$!
+  ( tail -n +1 -F "$H/.omacvm-install.log" 2>/dev/null & echo $! > /run/omacvm-install-tail.pid; wait ) | sed -u '' &
   cache_watch /var/cache/pacman/pkg & w=$!
   while systemctl is-active -q omacvm-omarchy-install; do sleep 2; done
-  sleep 1; kill "$t" "$w" 2>/dev/null || true
+  sleep 1; kill "$w" 2>/dev/null || true
+  kill "$(cat /run/omacvm-install-tail.pid 2>/dev/null)" 2>/dev/null ||
+    pkill -f "tail .*-F $H/.omacvm-install.log" || true
 } | pac_progress /dev/null
+rm -f /run/omacvm-install-tail.pid
 mv "$H/.omacvm-install.log" "$L"; rm -f "$H/.omacvm-install.sh"
 grep -q 'INSTALL-EXIT=0' "$L" || { tail -30 "$L"; echo "omarchy-mac install failed, full log: $L" >&2; exit 1; }
 # Omarchy turns on its firewall (deny inbound). This SSH session survives, the

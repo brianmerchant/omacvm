@@ -115,8 +115,10 @@ declare -F cache_watch >/dev/null || cache_watch() { :; }
 pacstrap_run() {   # try number; output to $PACLOG.try, appended to $PACLOG
   local rc
   set +e
+  # sed -u passes whole lines only: pacman writes in blocks, and cache_watch's
+  # lines must not land in the middle of one (seen in a real build).
   ( cache_watch /mnt/var/cache/pacman/pkg & w=$!
-    pacstrap -C /root/pacman.alarm.conf /mnt "${PKGS[@]}" 2>&1; rc=$?
+    pacstrap -C /root/pacman.alarm.conf /mnt "${PKGS[@]}" 2>&1 | sed -u ''; rc=${PIPESTATUS[0]}
     kill "$w" 2>/dev/null; exit "$rc" ) | pac_progress "$PACLOG.try"
   rc=${PIPESTATUS[0]}
   set -e
