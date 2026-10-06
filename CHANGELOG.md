@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.2 (unreleased)
+
+- The Mac's camera in ffmpeg (and other apps that go by the frame times):
+  a recording was all black, and `ffmpeg -t 10` ended at once. A new reader
+  gets the last frame first, and that frame carried the time of the
+  camera's last use, maybe an hour back; ffmpeg filled the hour with copies
+  of it. The frames now carry a clock that stops while no app reads, so the
+  next frame follows right after. Browsers and `v4l2-ctl` worked before and
+  still do.
+
 ## 3.0.1 (unreleased)
 
 - OmacVM.app VMs on an external drive: the control centre in the VM said
