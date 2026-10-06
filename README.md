@@ -147,9 +147,10 @@ In Omarchy, `omacvm` (also in the Omarchy menu and the bar) opens the control
 centre: every feature with its status, on or off with space, repair, updates,
 and "report a problem" without personal data.
 
-OmacVM.app looks for a new version once a week and installs it once the VM
-is shut down (OmacVM › Check for Updates…, Go Back; off in its settings or the
-control centre).
+OmacVM.app looks for a new version once a week (Check Now in its window asks
+at once; Go Back in its menu; off in its settings or the control centre). `u`
+in the control centre updates everything: OmacVM.app on the Mac first (the VM
+restarts once, after one confirm), then the VM.
 
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
 omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.

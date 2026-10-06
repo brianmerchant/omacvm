@@ -5,6 +5,17 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- Updates in one step. `u` in the control centre checks, then updates what
+  is older: with OmacVM.app on the Mac, the app first (it shuts the VM down
+  cleanly, updates, restarts and starts the VM again; one confirm, "save your
+  work"), then the VM's part right after the restart. The top line says
+  what: "Update available: 3.0.2 (Mac app and this VM) · u updates". No
+  more U, then c, then i. The app's window gets **Check Now** and "Update to
+  X…". From 3.0.0, update the app once by hand (shut the VM down, then
+  OmacVM › Check for Updates…): the one-step update works from 3.0.1 on.
+- Error texts say the next step: "update OmacVM.app first: u in the control
+  centre does it, or Check Now in OmacVM on the Mac" instead of
+  "OmacVM.app is older than this release".
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).

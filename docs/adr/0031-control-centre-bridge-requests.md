@@ -92,6 +92,28 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
   127.0.0.1 to a Bridge older than the socket. The Bridge applies the same
   list; without the relay key 127.0.0.1 still gets `hello` only (the app's
   guests reach the Mac from there too).
+- `app-update` (3.0.1, `POST`, empty body; listed in `hello`): OmacVM.app
+  updates itself for its own VM, so `u` in the control centre updates the
+  Mac and the VM in one step. The Bridge only says yes (200 `{"go": true,
+  "release", "mac"}`), and only when the request came through the app's
+  relay from one of its VMs (409 `not-app`), the Mac's `omacvm` is the app's
+  own copy (409 `not-app-copy`: a checkout updates with the `update` job), a
+  verified release is newer than the Mac's (409 `no-update`, `not-newer`;
+  never down), the checks-off rule holds (`stale-update`), no job runs for
+  the VM and the job rate allows it. The VM never names a version. On the
+  yes the app's relay (never the 127.0.0.1 fallback: 409 `old-bridge`)
+  checks its own signed feed and Developer ID as for any update (ADR 0033)
+  and downloads; then it answers 202 `restarting` and shuts the VM down 5 s
+  later, or answers `busy`, `app-cannot-update`, `not-newer`, `needs-macos`
+  or `app-check` with the next step in plain words. The control centre
+  waits up to 5 minutes; past 4 the app answers "try again" and nothing
+  shuts down. Before asking, the control centre writes
+  `~/.cache/omacvm/update-after-restart`; after the restart `omacvm notify`
+  (2 minutes after login) opens it and it runs the VM's `update` job without
+  asking again (the marker counts for an hour), or says the app was not
+  updated. `updates` answers `mac_app` so the control centre knows the plan
+  before it asks. A 3.0.0 Mac knows none of this: the control centre then
+  says to update OmacVM.app on the Mac first.
 
 ## Consequences
 
