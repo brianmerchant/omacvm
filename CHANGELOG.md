@@ -8,8 +8,9 @@ in more words.
 - **x86 Linux apps** (experimental, off by default): `omacvm enable
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (about three quarters of native speed for
-  plain code, half for vector-heavy code, plus a start-up cost). Electron
-  apps do not run yet. `omacvm disable x86-apps` removes it. Every route.
+  plain code, half for vector-heavy code, plus a start-up cost; tested
+  with 7-Zip, ripgrep, Node.js and Obsidian's AppImage). `omacvm disable
+  x86-apps` removes it. Every route.
   ([details](docs/features.md#x86-linux-apps))
 
 ## 3.0.0 (unreleased)
