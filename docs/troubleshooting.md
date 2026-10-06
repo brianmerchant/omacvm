@@ -33,8 +33,8 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   the VM's on that monitor (System Settings › Desktop & Dock › Mission
   Control: "Displays have separate Spaces" decides whether each monitor has
   its own) and macOS's "Move left/right a space" shortcuts (System Settings ›
-  Keyboard › Keyboard Shortcuts › Mission Control). Without them, OmacVM
-  tries a Dock swipe, then opens Mission Control so you pick a Space (below).
+  Keyboard › Keyboard Shortcuts › Mission Control). Without them, Omarchy
+  shows a notice ("No way to macOS: turn on ...") and nothing else happens.
   The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
   "escape combo: ...") says which way it took.
 - **A macOS shortcut still does its macOS thing in the VM** (a screenshot,
@@ -60,13 +60,13 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Monitor › OmacVM › Force Quit; Activity Monitor opens from Finder ›
   Applications › Utilities). The shortcuts work again at once. From the
   Terminal: `pkill -9 -f 'Contents/Resources/runtime/bin/OmacVM'`.
-- **⌃⌥ Esc opened Mission Control instead of moving to the next Space**:
-  neither macOS's "Move left/right a space" shortcut nor a Dock swipe moved
-  the Space, so OmacVM opened Mission Control to let you pick one (the VM
-  stays full screen). Check that the shortcuts are on in System Settings ›
-  Keyboard › Keyboard Shortcuts › Mission Control. The Gestures log
-  (`~/Library/Logs/omacvm-gestures.log`) says which step did what
-  ("escape combo: ..."); please send those lines.
+- **⌃⌥ Esc showed "macOS did not switch the Space"**: macOS's "Move
+  left/right a space" shortcut did not move the Space (the VM stays full
+  screen; OmacVM never opens Mission Control). Check that the shortcuts are
+  on in System Settings › Keyboard › Keyboard Shortcuts › Mission Control;
+  a trackpad swipe works meanwhile. The Gestures log
+  (`~/Library/Logs/omacvm-gestures.log`) says what happened ("escape combo:
+  ..."); please send those lines.
 - **Brightness keys do nothing with the VM in front**: OmacVM Bridge reads
   them from the keyboard and needs Input Monitoring (System Settings › Privacy
   & Security › Input Monitoring › OmacVM Bridge). Its log says

@@ -78,10 +78,10 @@ pointer, the default) or *All monitors*, every monitor that shows the VM. For
 Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
 EscapeSwipe all` (or `pointer`).
 
-Never stuck, and never out of full screen: every move is checked. If the
-shortcut is off or the Space did not change, OmacVM tries a Dock swipe (the
-events a three-finger swipe makes); if that does not land either, or macOS
-gives no Spaces information, Mission Control opens and you pick a Space.
+Never out of full screen, and never Mission Control: every move is checked.
+If the shortcut is off, the Space did not change or macOS gives no Spaces
+information, Omarchy shows a short notice (which setting to turn on) and
+nothing else happens; the trackpad is macOS's, so a swipe still works.
 Back in, if the shortcut does not land, the VM's window comes to the front
 and macOS shows its Space.
 

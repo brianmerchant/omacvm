@@ -187,8 +187,8 @@ itself. Details below.
   › Keyboard › Keyboard Shortcuts, ⌃← and ⌃→ by default), with macOS's own
   animation; pressed again in macOS, it moves back into the VM. On macOS 27
   the swipe OmacVM made before did nothing on a Mac mini. If the shortcut
-  is off or does not move, a Dock swipe is tried, then Mission Control
-  opens so you pick a Space. The VM is never hidden.
+  is off or does not move, Omarchy says so and nothing else happens (never
+  Mission Control). The VM is never hidden.
 - OmacVM.app: when a VM's window opens, OMACVM turns into Omarchy's logo
   (about 3.5 s; just the logo with Reduce motion). The logo then stays until
   Omarchy's desktop (or its login or lock screen) is there, over the
