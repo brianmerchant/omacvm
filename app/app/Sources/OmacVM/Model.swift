@@ -452,6 +452,11 @@ enum Settings {
     /// working in macOS), so it waits for a fix.
     /// Hidden: defaults write org.omacvm.app macShortcuts -bool false
     static var macShortcuts: Bool { UserDefaults.standard.object(forKey: "macShortcuts") as? Bool ?? true }
+    /// The globe (fn) key pressed on its own goes to the VM while it has the
+    /// keyboard (Omarchy's emoji picker there), not to macOS's Emoji & Symbols
+    /// (omacvm-cocoa-globe-key.patch). Off: macOS keeps it.
+    /// Hidden: defaults write org.omacvm.app globeKeyToVM -bool false
+    static var globeKeyToVM: Bool { UserDefaults.standard.object(forKey: "globeKeyToVM") as? Bool ?? true }
     /// The VM's window takes the pointer without a click (after a start, a
     /// guest reboot, or the window becoming key with the pointer on it).
     /// Off: QEMU's own way, on entering the window or a click.
