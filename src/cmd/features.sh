@@ -1,6 +1,8 @@
 #!/bin/bash
 # omacvm features / enable / disable: a VM's OmacVM features.
 #   omacvm features [--vm NAME] [--json]     list them; in a terminal, switch them
+#   omacvm features [--vm NAME] --in-vm      open the control centre on the VM's desktop
+#                                            (one window; in front if it is open already)
 #   (--vm-type parallels|utm|fusion|app when two apps have a VM of that name)
 #   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
 #   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
@@ -15,6 +17,8 @@
 # reason: why this Mac or VM cannot have it ("" when available).
 # Without --vm it starts nothing: the state of the VM it would pick if that
 # one runs, else the defaults ("vm": null).
+# --in-vm: the VM must run with someone logged in to its desktop, and have the
+# control centre (on by default); else it says what is missing (exit 3).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -24,16 +28,17 @@ source "$R/src/lib/setup.sh"
 source "$R/src/lib/features.sh"
 features_load
 MODE=$1; shift
-VM=""; TYPE=""; JSON=0; YES=0; WANT=(); APPLY_ARGS=()
+VM=""; TYPE=""; JSON=0; YES=0; INVM=0; WANT=(); APPLY_ARGS=()
 usage() { echo "omacvm $MODE: $*" >&2; exit 2; }
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --json) JSON=1; shift ;;
+    --in-vm) INVM=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,18s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
        WANT+=("$1"); shift ;;
@@ -41,7 +46,27 @@ while (( $# )); do
 done
 [[ $MODE == features || ${#WANT[@]} -gt 0 ]] || usage "which feature? (omacvm features lists them)"
 [[ $MODE != features || ${#WANT[@]} == 0 ]] || usage "features takes no feature names (enable/disable do)"
+(( ! INVM )) || [[ $MODE == features ]] || usage "--in-vm goes with omacvm features"
+(( ! INVM || ! JSON )) || usage "--in-vm or --json, not both"
 export OMA_KEY=~/.ssh/omacvm
+# The control centre in the VM (src/control/guest/open.sh): opened in the
+# desktop session of a running VM; a stopped one is not started (nobody would
+# be logged in to see it).
+if (( INVM )); then
+  resolve_vm
+  [[ -n $IP ]] || { echo "omacvm features: '$VM' is not running: start it and log in, then try again" >&2; exit 3; }
+  rc=0
+  out=$(gssh "$IP" "if [ -x /usr/local/share/omacvm/control/guest/open.sh ]; then /usr/local/share/omacvm/control/guest/open.sh; else echo old; exit 64; fi" < /dev/null 2>/dev/null) || rc=$?
+  out=$(tail -1 <<<"$out" | tr -cd '[:print:]' | cut -c1-200)   # the VM's line, printable and short
+  case $rc in
+    0) echo "  '$VM': the control centre is $out." ;;
+    3|5) echo "omacvm features: '$VM': $out" >&2; exit 3 ;;
+    64) echo "omacvm features: '$VM' has an older OmacVM: omacvm apply --vm \"$VM\" brings it up to date (then try again)" >&2; exit 3 ;;
+    255) echo "omacvm features: no SSH answer from '$VM' ($IP)" >&2; exit 1 ;;
+    *) echo "omacvm features: '$VM': ${out:-it did not open}" >&2; exit 1 ;;
+  esac
+  exit 0
+fi
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 if [[ $MODE == features && -z $VM ]] && (( JSON )); then
   resolve_vm soft || { VM=""; TYPE=""; IP=""; }
