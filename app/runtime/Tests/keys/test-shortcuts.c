@@ -279,6 +279,41 @@ int main(int argc, char **argv)
     CHECK(omacvm_globe_action(0, 1, 0) == OMACVM_GLOBE_KEEP, "not ours: never switched on by us");
     CHECK(omacvm_globe_action(0, 0, 0) == OMACVM_GLOBE_KEEP, "a user's off stays off");
 
+    /* One globe press, one KEY_PROG3, whichever way macOS shows it. */
+    {
+        enum { D = OMACVM_GLOBE_EV_FN_DOWN, U = OMACVM_GLOBE_EV_FN_UP, BD = OMACVM_GLOBE_EV_B3_DOWN,
+               BU = OMACVM_GLOBE_EV_B3_UP, O = OMACVM_GLOBE_EV_OTHER, R = OMACVM_GLOBE_EV_RESET };
+        static const struct { const char *what; int n; int ev[8]; int ms[8]; int keys; } cases[] = {
+            { "fn alone", 2, { D, U }, { 0, 90 }, 1 },
+            { "fn alone, twice", 4, { D, U, D, U }, { 0, 90, 200, 290 }, 2 },
+            { "0xb3 alone", 2, { BD, BU }, { 0, 20 }, 1 },
+            { "fn, 0xb3 while held, fn up", 4, { D, BD, BU, U }, { 0, 10, 30, 90 }, 1 },
+            { "fn tap, then its 0xb3", 4, { D, U, BD, BU }, { 0, 90, 100, 120 }, 1 },
+            { "fn tap, a 0xb3 much later is a new press", 4, { D, U, BD, BU }, { 0, 90, 900, 920 }, 2 },
+            { "fn+F1 (another key)", 3, { D, O, U }, { 0, 50, 90 }, 0 },
+            { "fn+click / fn+Ctrl", 3, { D, O, U }, { 0, 50, 90 }, 0 },
+            { "fn up without a down (VM got the keyboard mid-press)", 1, { U }, { 0 }, 0 },
+            { "VM lost the globe key mid-press", 3, { D, R, U }, { 0, 50, 90 }, 0 },
+            { "a key before fn does not spoil the tap", 3, { O, D, U }, { 0, 10, 90 }, 1 },
+        };
+        for (size_t c = 0; c < sizeof cases / sizeof cases[0]; c++) {
+            OmacVMGlobeTap t = OMACVM_GLOBE_TAP_INIT;
+            int keys = 0, downs = 0, ups = 0;
+            for (int i = 0; i < cases[c].n; i++) {
+                int ev = cases[c].ev[i], what = omacvm_globe_tap_step(&t, ev, cases[c].ms[i]);
+                if (what == OMACVM_GLOBE_DO_TAP) keys++;
+                if (ev == OMACVM_GLOBE_EV_B3_DOWN && what == OMACVM_GLOBE_DO_PASS) { keys++; downs++; }
+                if (ev == OMACVM_GLOBE_EV_B3_UP && what == OMACVM_GLOBE_DO_PASS) ups++;
+                CHECK(what != OMACVM_GLOBE_DO_TAP || ev == OMACVM_GLOBE_EV_FN_UP, "%s: a tap only at fn up", cases[c].what);
+                CHECK(ev == OMACVM_GLOBE_EV_B3_DOWN || ev == OMACVM_GLOBE_EV_B3_UP ||
+                      (what != OMACVM_GLOBE_DO_PASS && what != OMACVM_GLOBE_DO_DROP),
+                      "%s: only a 0xb3 is passed or dropped", cases[c].what);
+            }
+            CHECK(keys == cases[c].keys, "%s: %d KEY_PROG3 presses to the VM, want %d", cases[c].what, keys, cases[c].keys);
+            CHECK(downs == ups, "%s: every 0xb3 down passed has its up passed (%d downs, %d ups)", cases[c].what, downs, ups);
+        }
+    }
+
     int enabled = 0, live_enabled = 0;
     int rows = check_list(argv[1], 0, &enabled);
     CHECK(rows > 100, "%s: only %d shortcuts", argv[1], rows);

@@ -8,6 +8,9 @@ What: while the VM window has the keyboard, macOS's globe-key shortcut (188:
 the globe key pressed on its own, key code 0xb3) is switched off, and on again
 the moment it has not. A lone globe press then reaches the VM as KEY_PROG3
 (XF86Launch3), which OmacVM's guest part binds to Omarchy's emoji picker.
+macOS may show that press to the app as fn down and up with nothing
+between, as key code 0xb3, or both: either way one KEY_PROG3 goes to the VM
+(omacvm_globe_tap_step), and qemu.log names how the first presses came.
 Only this one shortcut: macOS keeps all its others (the default), fn as a
 modifier (fn+F1..F12, fn+arrows) works as before, and so do the globe
 shortcuts outside the VM.
@@ -34,7 +37,7 @@ Mac (macOS's shortcut 188 and key code 179).
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -675,7 +675,167 @@
+@@ -675,7 +675,229 @@
          pthread_detach(watchdog);
      }
      omacvm_shortcuts_update();
@@ -60,6 +63,9 @@ Mac (macOS's shortcut 188 and key code 179).
 +static bool omacvm_globe_ours;          /* under the lock */
 +static int omacvm_globe_said;           /* under the lock: log lines so far */
 +static int64_t omacvm_globe_heartbeat;  /* ms; qatomic */
++static bool omacvm_globe_live;          /* qatomic: the VM has the globe key now */
++static OmacVMGlobeTap omacvm_globe_tap = OMACVM_GLOBE_TAP_INIT;  /* main thread */
++static int omacvm_globe_seen[2];        /* main thread: log lines (fn tap, 0xb3) */
 +static char omacvm_globe_note[1024];
 +
 +static pid_t omacvm_globe_note_pid(void)
@@ -74,7 +80,7 @@ Mac (macOS's shortcut 188 and key code 179).
 +    }
 +    fclose(f);
 +    return (pid_t)atoi(line);
-+}
+ }
 +
 +/* Under the lock: switch the shortcut and keep the note in step. */
 +static void omacvm_globe_apply_locked(bool want_vm, const char *why)
@@ -82,10 +88,13 @@ Mac (macOS's shortcut 188 and key code 179).
 +    bool mac_on = want_vm ? omacvm_globe_is_on(OMACVM_GLOBE_HOTKEY) != 0 : true;
 +    int action = omacvm_globe_action(want_vm, mac_on, omacvm_globe_ours);
 +    if (action == OMACVM_GLOBE_KEEP) {
++        /* Ours off, or a user's off: the press is the VM's either way. */
++        qatomic_set(&omacvm_globe_live, want_vm && !mac_on);
 +        return;
 +    }
 +    bool take = action == OMACVM_GLOBE_TAKE;
 +    int32_t err = omacvm_globe_set_on(OMACVM_GLOBE_HOTKEY, !take);
++    qatomic_set(&omacvm_globe_live, take && err == 0);
 +    if (err == 0) {
 +        omacvm_globe_ours = take;
 +        if (take) {
@@ -105,7 +114,7 @@ Mac (macOS's shortcut 188 and key code 179).
 +                     : "is macOS's again",
 +                why ? why : "", err != 0 ? ": FAILED" : "");
 +    }
- }
++}
 +
 +static void omacvm_globe_apply(bool want_vm, const char *why)
 +{
@@ -145,6 +154,62 @@ Mac (macOS's shortcut 188 and key code 179).
 +    pthread_mutex_lock(&omacvm_globe_lock);
 +    omacvm_globe_apply_locked(false, NULL);
 +    pthread_mutex_unlock(&omacvm_globe_lock);
++}
++
++/*
++ * Main thread, every key and click event before QEMU's own handling (the
++ * logic is omacvm_globe_tap_step). True: the event is used up. While the VM
++ * does not have the globe key a 0xb3 goes nowhere, as before.
++ */
++static bool omacvm_globe_event(NSEvent *event)
++{
++    NSEventType type = [event type];
++    bool b3 = (type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) &&
++              [event keyCode] == 0xb3;
++    int ev;
++
++    if (!qatomic_read(&omacvm_globe_live)) {
++        omacvm_globe_tap_step(&omacvm_globe_tap, OMACVM_GLOBE_EV_RESET, 0);
++        return b3;
++    }
++    switch (type) {
++    case NSEventTypeFlagsChanged:
++        ev = [event keyCode] != kVK_Function ? OMACVM_GLOBE_EV_OTHER :
++             ([event modifierFlags] & NSEventModifierFlagFunction) ? OMACVM_GLOBE_EV_FN_DOWN
++                                                                   : OMACVM_GLOBE_EV_FN_UP;
++        break;
++    case NSEventTypeKeyDown:
++        ev = b3 ? OMACVM_GLOBE_EV_B3_DOWN : OMACVM_GLOBE_EV_OTHER;
++        break;
++    case NSEventTypeKeyUp:
++        if (!b3) {
++            return false;
++        }
++        ev = OMACVM_GLOBE_EV_B3_UP;
++        break;
++    case NSEventTypeLeftMouseDown:
++    case NSEventTypeRightMouseDown:
++    case NSEventTypeOtherMouseDown:
++        ev = OMACVM_GLOBE_EV_OTHER;
++        break;
++    default:
++        return false;
++    }
++    int what = omacvm_globe_tap_step(&omacvm_globe_tap, ev, omacvm_now_ms());
++    if (what == OMACVM_GLOBE_DO_TAP && qemu_console_is_graphic(dcl.con)) {
++        qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, true);
++        qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, false);
++    }
++    /* The first presses of each kind, for qemu.log (`omacvm check`). */
++    if ((what == OMACVM_GLOBE_DO_TAP || ev == OMACVM_GLOBE_EV_B3_DOWN) &&
++        omacvm_globe_seen[b3] < 2) {
++        omacvm_globe_seen[b3]++;
++        fprintf(stderr, "omacvm: globe key pressed: %s\n",
++                !b3 ? "fn alone, KEY_PROG3 to the VM" :
++                what == OMACVM_GLOBE_DO_DROP ? "key code 0xb3 after the fn tap, dropped (same press)" :
++                "key code 0xb3, KEY_PROG3 to the VM");
++    }
++    return what == OMACVM_GLOBE_DO_DROP;
 +}
 +
 +static void omacvm_globe_init(void)
@@ -202,7 +267,18 @@ Mac (macOS's shortcut 188 and key code 179).
  static VMChangeStateEntry *pinch_vm_change;
  
  /* OmacVM: one window per Mac display (the code is further down). */
-@@ -7448,6 +7608,7 @@
+@@ -1726,6 +1948,10 @@
+     }
+ 
+     if (qemu_console_is_graphic(dcl.con) && [self handleInjectedText:event]) {
++        return true;
++    }
++    /* OmacVM: a lone globe press (the globe-key patch). */
++    if (omacvm_globe_event(event)) {
+         return true;
+     }
+ 
+@@ -7448,6 +7674,7 @@
          [controller setFullGrab: nil];
      }
      omacvm_shortcuts_init();

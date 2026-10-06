@@ -776,7 +776,7 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-st
   die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
 # The globe key on its own goes to the VM (not Emoji & Symbols) while it has the keyboard.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-globe-key.patch"
-grep -q '^    omacvm_globe_init();$' "$source_dir/ui/cocoa.m" || \
+grep -q '^    omacvm_globe_init();$' "$source_dir/ui/cocoa.m" && grep -q 'if (omacvm_globe_event(event)) {' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not hand the globe key to the VM (globe-key patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"

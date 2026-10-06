@@ -19,10 +19,10 @@ Test: app/runtime/Tests/keys/test-shortcuts.c.
 
 diff --git a/ui/omacvm-shortcuts.h b/ui/omacvm-shortcuts.h
 new file mode 100644
-index 0000000..d485605
+index 0000000..c83889e
 --- /dev/null
 +++ b/ui/omacvm-shortcuts.h
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,206 @@
 +/*
 + * OmacVM: macOS's own shortcuts while the VM has the keyboard.
 + *
@@ -36,6 +36,7 @@ index 0000000..d485605
 +#define OMACVM_SHORTCUTS_H
 +
 +#include <stdbool.h>
++#include <stdint.h>
 +
 +/* macOS's global shortcut switch (CGSSetGlobalHotKeyOperatingMode). */
 +enum { OMACVM_HOTKEYS_ON = 0, OMACVM_HOTKEYS_OFF = 1 };
@@ -91,6 +92,88 @@ index 0000000..d485605
 +        return mac_on ? OMACVM_GLOBE_TAKE : OMACVM_GLOBE_KEEP;
 +    }
 +    return ours ? OMACVM_GLOBE_GIVE_BACK : OMACVM_GLOBE_KEEP;
++}
++
++/*
++ * One globe press, one KEY_PROG3. With macOS's shortcut off, an app may see
++ * the press as fn going down and up with nothing between (a flagsChanged
++ * pair), as key code 0xb3, or as both. So a lone fn tap is sent as a
++ * KEY_PROG3 tap, a 0xb3 is passed on as KEY_PROG3, and when both come for
++ * one press only one goes to the VM: a 0xb3 while fn is held makes the fn
++ * tap no lone tap; a 0xb3 just after a sent fn tap (and its key-up) is
++ * dropped. fn with another key, modifier or click (fn+F1, fn+arrow) is no
++ * tap. Only while the VM has the globe key (macOS's shortcut off).
++ */
++typedef struct OmacVMGlobeTap {
++    bool fn_down;       /* fn is held */
++    bool spoiled;       /* something else came while fn was held */
++    bool got_b3;        /* a 0xb3 came while fn was held */
++    bool b3_dropped;    /* the last 0xb3 down was dropped: drop its up too */
++    int64_t tap_ms;     /* when a fn tap was sent; -1: none waiting */
++} OmacVMGlobeTap;
++
++#define OMACVM_GLOBE_TAP_INIT { false, false, false, false, -1 }
++#define OMACVM_GLOBE_SAME_PRESS_MS 500
++
++enum {
++    OMACVM_GLOBE_EV_FN_DOWN, OMACVM_GLOBE_EV_FN_UP,
++    OMACVM_GLOBE_EV_B3_DOWN, OMACVM_GLOBE_EV_B3_UP,
++    OMACVM_GLOBE_EV_OTHER,  /* another key down, modifier or click */
++    OMACVM_GLOBE_EV_RESET,  /* the VM lost the globe key */
++};
++enum {
++    OMACVM_GLOBE_DO_NOTHING,  /* the event goes on as it would */
++    OMACVM_GLOBE_DO_TAP,      /* send a KEY_PROG3 down and up */
++    OMACVM_GLOBE_DO_PASS,     /* the 0xb3 goes on as KEY_PROG3 */
++    OMACVM_GLOBE_DO_DROP,     /* the 0xb3 is used up: nothing to the VM */
++};
++
++static inline int omacvm_globe_tap_step(OmacVMGlobeTap *t, int ev, int64_t now_ms)
++{
++    switch (ev) {
++    case OMACVM_GLOBE_EV_FN_DOWN:
++        t->fn_down = true;
++        t->spoiled = false;
++        t->got_b3 = false;
++        return OMACVM_GLOBE_DO_NOTHING;
++    case OMACVM_GLOBE_EV_FN_UP:
++        if (!t->fn_down) {
++            return OMACVM_GLOBE_DO_NOTHING;
++        }
++        t->fn_down = false;
++        if (t->spoiled || t->got_b3) {
++            return OMACVM_GLOBE_DO_NOTHING;
++        }
++        t->tap_ms = now_ms;
++        return OMACVM_GLOBE_DO_TAP;
++    case OMACVM_GLOBE_EV_B3_DOWN:
++        if (t->fn_down) {
++            t->got_b3 = true;
++            t->b3_dropped = false;
++            return OMACVM_GLOBE_DO_PASS;
++        }
++        if (t->tap_ms >= 0 && now_ms - t->tap_ms < OMACVM_GLOBE_SAME_PRESS_MS) {
++            t->tap_ms = -1;
++            t->b3_dropped = true;
++            return OMACVM_GLOBE_DO_DROP;
++        }
++        t->b3_dropped = false;
++        return OMACVM_GLOBE_DO_PASS;
++    case OMACVM_GLOBE_EV_B3_UP:
++        if (t->b3_dropped) {
++            t->b3_dropped = false;
++            return OMACVM_GLOBE_DO_DROP;
++        }
++        return OMACVM_GLOBE_DO_PASS;
++    case OMACVM_GLOBE_EV_OTHER:
++        if (t->fn_down) {
++            t->spoiled = true;
++        }
++        return OMACVM_GLOBE_DO_NOTHING;
++    default:
++        *t = (OmacVMGlobeTap)OMACVM_GLOBE_TAP_INIT;
++        return OMACVM_GLOBE_DO_NOTHING;
++    }
 +}
 +
 +/*

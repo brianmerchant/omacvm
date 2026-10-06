@@ -49,7 +49,9 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   keyboard (Omarchy's emoji picker; the key is XF86Launch3 there, for your
   own bindings). Only that one macOS shortcut is switched off, only while the
   VM has the keyboard; fn+F1..F12 and fn as a modifier work as before.
-  `qemu.log` says "globe key goes to the VM". To leave it with macOS:
+  `qemu.log` says "globe key goes to the VM", and for the first presses
+  how macOS showed them ("globe key pressed: fn alone" or "key code 0xb3";
+  none at all means the press never reached the VM). To leave it with macOS:
   `defaults write org.omacvm.app globeKeyToVM -bool false` and a VM restart.
   If the globe key ever does nothing in macOS after a VM crashed: start and
   quit any OmacVM VM (it gives macOS's shortcut back), or log out and in.
