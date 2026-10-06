@@ -37,23 +37,20 @@ each() {   # test: one rec per JSON line on stdin
 }
 if want throughput; then
   say "mac: GPU throughput page x$RUNS"
-  i=0
-  while [ $i -lt "$RUNS" ]; do
-    for m in timer wall; do python3 "$REPO/tests/bench/gpu-throughput/run.py" --method $m $HEADLESS | each gpu-throughput; done
-    i=$((i + 1))
-  done
+  tp_runs() { local i m; for ((i = 0; i < RUNS; i++)); do for m in timer wall; do python3 "$REPO/tests/bench/gpu-throughput/run.py" --method $m $HEADLESS; done; done; }
+  capped throughput tp_runs | each gpu-throughput
 fi
-want vkpeak && { say "mac: vkpeak x$RUNS"; bash "$REPO/tests/bench/vkpeak/vkpeak.sh" --runs "$RUNS" 2>/dev/null | each vkpeak; }
+want vkpeak && { say "mac: vkpeak x$RUNS"; capped vkpeak bash "$REPO/tests/bench/vkpeak/vkpeak.sh" --runs "$RUNS" 2>/dev/null | each vkpeak; }
 if want geekbench; then
   say "mac: Geekbench GPU (Metal, OpenCL) x$RUNS"
   tmp=$FR_TMP/geekbench.jsonl
-  bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only gpu "$tmp" >/dev/null 2>&1
+  capped geekbench bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only gpu "$tmp" >/dev/null 2>&1
   each geekbench < "$tmp"
 fi
 if want browser; then
   say "mac: Aquarium 30k + Basemark Web 3.0 x$RUNS"
   tmp=$FR_TMP/browser.jsonl
-  bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only aquarium,basemark "$tmp" >/dev/null 2>&1
+  capped browser bash "$REPO/src/bench/bench.sh" --runs "$RUNS" --only aquarium,basemark "$tmp" >/dev/null 2>&1
   each browser < "$tmp"
 fi
 say "mac: done, $OUT"

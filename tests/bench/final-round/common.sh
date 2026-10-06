@@ -12,6 +12,9 @@ GLMARK2_VERSION=${GLMARK2_VERSION:-2023.01}   # the same glmark2 in every VM
 # full screen gives every page 1728x1080 at 2x.
 MIN_GUEST_WIDTH=${FINAL_ROUND_MIN_GUEST_WIDTH:-3000}
 VIEWPORT=${FINAL_ROUND_VIEWPORT:-1728x1080 at 2x}
+# One test (all its runs together) gets at most this long per system (user, 2026-10-05 21:57:
+# "per vm 15 mins per each text max"); a test cut short keeps the runs it finished.
+TEST_CAP=${FINAL_ROUND_TEST_CAP:-900}
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 jstr() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
@@ -147,4 +150,18 @@ vm_running() {   # app|utm|fusion|parallels NAME [PORT]
         { echo "VMware Fusion runs no VM named \"$name\"" >&2; return 1; } ;;
     *) echo "unknown target $t" >&2; return 1 ;;
   esac
+}
+kill_tree() {   # pid: it and everything it started
+  local c; for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
+  kill -TERM "$1" 2>/dev/null
+}
+capped() {   # test cmd...: run it, stop it after TEST_CAP seconds; exit 124 when stopped
+  local t=$1 p w rc; shift
+  "$@" & p=$!
+  ( sleep "$TEST_CAP" & s=$!; trap 'kill $s 2>/dev/null; exit 0' TERM; wait $s
+    kill -0 $p 2>/dev/null && { say "$t: stopped at the ${TEST_CAP}s cap"; kill_tree $p; } ) >&2 & w=$!
+  wait $p; rc=$?
+  kill_tree $w; wait $w 2>/dev/null
+  [ $rc -ge 128 ] && ! kill -0 $p 2>/dev/null && rc=124
+  return $rc
 }

@@ -59,6 +59,13 @@ K=(-i "$HOME/.ssh/omacvm" -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 -o Se
    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 G=/opt/omacvm-final-round
 in_vm() { ssh "${K[@]}" "$DEST" "GLMARK2_VERSION=$GLMARK2_VERSION GLMARK2_DURATION=${GLMARK2_DURATION:-} bash $G/tests/bench/final-round/guest.sh $*"; }
+# A test in the guest, under the cap (GNU timeout stops its whole process group, Chrome too).
+in_vm_capped() { ssh "${K[@]}" "$DEST" "GLMARK2_VERSION=$GLMARK2_VERSION GLMARK2_DURATION=${GLMARK2_DURATION:-} timeout -k 20 $TEST_CAP bash $G/tests/bench/final-round/guest.sh $*"; }
+test_in_vm() {   # test runs name: the guest's lines as records; notes a cut-short test
+  in_vm_capped "$1" "$2" </dev/null | each "$3"
+  [ "${PIPESTATUS[0]}" = 124 ] && say "$TARGET: $1 stopped at the ${TEST_CAP}s cap (the finished runs are kept)"
+  return 0
+}
 ssh "${K[@]}" "$DEST" true </dev/null || die "no SSH to $DEST"
 copy_tools() {   # the scripts only; $G/state (what prepare found) stays
   COPYFILE_DISABLE=1 tar -C "$REPO" --no-xattrs -cf - src/bench tests/bench |
@@ -124,11 +131,11 @@ each() {   # test: one vrec per JSON line on stdin
   local l
   while IFS= read -r l; do case $l in '{'*) vrec "$1" "$l" ;; esac; done
 }
-want throughput && { say "$TARGET: GPU throughput page x$RUNS (timer, then wall)"; in_vm throughput "$RUNS" </dev/null | each gpu-throughput; }
-want vkpeak && { say "$TARGET: vkpeak x$RUNS"; in_vm vkpeak "$RUNS" </dev/null | each vkpeak; }
-want geekbench && { say "$TARGET: Geekbench GPU x$RUNS"; in_vm geekbench "$RUNS" </dev/null | each geekbench; }
-want vkmark && { say "$TARGET: vkmark x$RUNS"; in_vm vkmark "$RUNS" </dev/null | each vkmark; }
-want glmark2 && { say "$TARGET: glmark2 x$RUNS"; in_vm glmark2 "$RUNS" </dev/null | each glmark2; }
-want browser && { say "$TARGET: Aquarium 30k + Basemark Web 3.0 x$RUNS"; in_vm browser "$RUNS" </dev/null | each browser; }
+want throughput && { say "$TARGET: GPU throughput page x$RUNS (timer, then wall)"; test_in_vm throughput "$RUNS" gpu-throughput; }
+want vkpeak && { say "$TARGET: vkpeak x$RUNS"; test_in_vm vkpeak "$RUNS" vkpeak; }
+want geekbench && { say "$TARGET: Geekbench GPU x$RUNS"; test_in_vm geekbench "$RUNS" geekbench; }
+want vkmark && { say "$TARGET: vkmark x$RUNS"; test_in_vm vkmark "$RUNS" vkmark; }
+want glmark2 && { say "$TARGET: glmark2 x$RUNS"; test_in_vm glmark2 "$RUNS" glmark2; }
+want browser && { say "$TARGET: Aquarium 30k + Basemark Web 3.0 x$RUNS"; test_in_vm browser "$RUNS" browser; }
 in_vm check "$MIN_GUEST_WIDTH" </dev/null >/dev/null || say "warning: $NAME changed during the round (see guest.sh check)"
 say "$TARGET: done, $OUT"

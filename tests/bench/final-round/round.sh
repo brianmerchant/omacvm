@@ -1,7 +1,8 @@
 #!/bin/bash
 # The whole final round in one command, on the quiet Mac, inside a time budget.
-#   round.sh [--dir DIR] [--budget MINUTES] [--skip STEPS] [--only STEPS] [--no-wait-idle] [--dry-run]
-#   round.sh --plan [--budget MINUTES]          the steps, their times and what the budget leaves out
+#   round.sh [--dir DIR] [--budget MINUTES] [--skip STEPS] [--only STEPS] [--drop TESTS] [--no-wait-idle] [--dry-run]
+#   round.sh --plan [--budget MINUTES] [--drop TESTS]   the steps, their times and what the budget leaves out
+#   --drop glmark2,vkmark: those tests left out of every GPU step (the lowest-value rows, dropped first)
 #   round.sh --fullscreen TARGET [--keep]       start that Bench VM in full screen, check its width, stop it (no numbers)
 #   round.sh --summary [--dir DIR]              table, chart.json, gpu.svg and gpu.png from what is there
 #   round.sh --prepare-rc2                      before the round: the RC2's Bench VM (see below)
@@ -19,8 +20,8 @@
 # and DIR/chart.json, chart.py -> DIR/gpu.svg and DIR/gpu.png.
 #
 # Budget (default 180 min): the GPU steps come first. Idle windows get one
-# length for every system, fixed at the start (10 min, down to 5 when the
-# budget is short); when the round runs late, idle rows are dropped (noted),
+# length for every system, fixed at the start (3 min); each test stops at
+# 15 min per system (TEST_CAP in common.sh, the runs it finished kept); when the round runs late, idle rows are dropped (noted),
 # never shortened. RC2's OpenGL rows run only when there is time to spare.
 #
 # --prepare-rc2 (RC2_APP and RC2_SRC, the RC2's source tree, set): an APFS clone
@@ -43,13 +44,14 @@ REPO=$(cd "$FR/../../.." && pwd)
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-DIR=~/bench/final-$(date +%Y%m%d) BUDGET="" SKIP="" ONLY="" WAIT_IDLE=1 DRY=0 MODE=round FS_TARGET="" KEEP=0
+DIR=~/bench/final-$(date +%Y%m%d) BUDGET="" SKIP="" ONLY="" DROP="" WAIT_IDLE=1 DRY=0 MODE=round FS_TARGET="" KEEP=0
 while [ $# -gt 0 ]; do
   case $1 in
     --dir) DIR=$2; shift 2 ;;
     --budget) BUDGET=$2; shift 2 ;;
     --skip) SKIP=$2; shift 2 ;;
     --only) ONLY=$2; shift 2 ;;
+    --drop) DROP=$2; shift 2 ;;
     --no-wait-idle) WAIT_IDLE=0; shift ;;
     --dry-run) DRY=1; shift ;;
     --plan) MODE=plan; shift ;;
@@ -91,15 +93,23 @@ fusion-gpu fusion gpu 27
 fusion-idle fusion idle 6
 parallels-gpu parallels gpu 27
 parallels-idle parallels idle 6"
-UP_MIN=3 DOWN_MIN=1 IDLE_MAX=600 IDLE_MIN=300 SETTLE=${FINAL_ROUND_SETTLE:-45}
+# Idle windows: 3 min each, the same for every system (user, 2026-10-05 21:57).
+UP_MIN=3 DOWN_MIN=1 IDLE_MAX=${FINAL_ROUND_IDLE_MAX:-180} IDLE_MIN=${FINAL_ROUND_IDLE_MIN:-180} SETTLE=${FINAL_ROUND_SETTLE:-45}
 # glmark2's scenes at 5 s instead of 10 (the same for every VM; the score is
 # the mean fps, so it barely moves): 3 runs in 9 minutes, not 18.
 export GLMARK2_DURATION=${GLMARK2_DURATION:-5}
+# Minutes a dropped test saves in a VM's GPU step (glmark2: 3 runs of 34 scenes at 5 s;
+# vkmark: 3 runs where there is Vulkan, seconds elsewhere).
+drop_min() { case $1:$2 in glmark2:*-gpu|glmark2:rc2-gl) echo 9 ;; vkmark:app-gpu|vkmark:rc2-vulkan) echo 3 ;; *) echo 0 ;; esac; }
 est() {   # step -> minutes (EST_<step> overrides, "-" as "_")
-  local v; v=$(eval echo "\${EST_$(echo "$1" | tr '-' '_'):-}")
+  local v d m; v=$(eval echo "\${EST_$(echo "$1" | tr '-' '_'):-}")
   [ -n "$v" ] && { echo "$v"; return; }
-  echo "$STEPS" | awk -v s="$1" '$1 == s { print $4 }'
+  m=$(echo "$STEPS" | awk -v s="$1" '$1 == s { print $4 }')
+  [ "$1" = mac-gpu ] || for d in ${DROP//,/ }; do m=$(( m - $(drop_min "$d" "$1") )); done
+  echo "$m"
 }
+# A GPU step's tests, without the dropped ones.
+tests_of() { local t out=""; for t in ${1//,/ }; do listed "$DROP" "$t" || out="$out,$t"; done; echo "${out#,}"; }
 field() { echo "$STEPS" | awk -v s="$1" -v f="$2" '$1 == s { print $f }'; }
 listed() { case ,$1, in *,$2,*) return 0 ;; esac; return 1; }
 wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 app
@@ -117,7 +127,7 @@ mark() { echo "$1 $2 $(date +%FT%T) ${3:-}" >> "$STATE"; }   # step status [why]
 pending() { [ "$(status "$1")" != "done" ]; }
 
 # The idle windows: one length for every system, from the budget at the start.
-idle_seconds() {   # budget minutes -> seconds per idle window, 5 to 10 min
+idle_seconds() {   # budget minutes -> seconds per idle window, IDLE_MIN to IDLE_MAX
   local gpu=0 n=0 targets="" s t k
   while read -r s t k _; do
     wanted "$s" || continue
@@ -132,13 +142,14 @@ idle_seconds() {   # budget minutes -> seconds per idle window, 5 to 10 min
 
 if [ "$MODE" = plan ]; then
   b=${BUDGET:-180}; i=$(idle_seconds "$b")
-  echo "budget $b min; idle windows ${i}s each (+$((SETTLE + 30))s settle)"
+  echo "budget $b min; idle windows ${i}s each (+$((SETTLE + 30))s settle)${DROP:+; dropped: $DROP}"
   while read -r s t k m; do
     if wanted "$s"; then w=run; else w="not run"; fi
+    m=$(est "$s")
     [ "$k" = idle ] && m=$(( (i + SETTLE + 30 + 59) / 60 ))
     printf '  %-15s %-10s %-5s %3s min  %s\n' "$s" "$t" "$k" "$m" "$w"
   done <<<"$STEPS"
-  tot=$(while read -r s t k m; do wanted "$s" || continue; [ "$k" = idle ] && m=$(( (i + SETTLE + 30 + 59) / 60 )); [ "$k" = extra ] || echo "$m"; done <<<"$STEPS" | awk '{ t += $1 } END { print t }')
+  tot=$(while read -r s t k m; do wanted "$s" || continue; m=$(est "$s"); [ "$k" = idle ] && m=$(( (i + SETTLE + 30 + 59) / 60 )); [ "$k" = extra ] || echo "$m"; done <<<"$STEPS" | awk '{ t += $1 } END { print t }')
   n=$(for t in app app-rc2 utm fusion parallels; do echo "$STEPS" | awk -v t="$t" '$2 == t { print $1 }' | while read -r s; do wanted "$s" && echo "$t"; done | head -1; done | grep -c .)
   echo "  + ${UP_MIN} min start and ${DOWN_MIN} min stop per VM ($n VMs); RC2 steps need RC2_APP"
   echo "  total about $(( tot + n * (UP_MIN + DOWN_MIN) )) min without the extra step; over the budget, the idle rows of the last systems are dropped first"
@@ -285,6 +296,7 @@ run_step() {   # step
       local only=throughput,vkpeak,geekbench,vkmark,glmark2,browser
       [ "$s" = rc2-vulkan ] && only=vkpeak,geekbench,vkmark
       [ "$s" = rc2-gl ] && only=throughput,glmark2
+      only=$(tests_of "$only")
       OMACVM_APP=$(app_of "$t") bash "$FR/vm.sh" "$t" --vm "$(name_of "$t")" "root@$HOST" --only "$only" "$out" ;;
     *-idle)
       bash "$FR/vm.sh" "$t" --vm "$(name_of "$t")" "root@$HOST" --desktop "$PIC" >/dev/null &&
@@ -430,7 +442,8 @@ DEADLINE=$(cat "$DIR/deadline") IDLE_S=$(cat "$DIR/idle-seconds")
 SIM=""   # the dry run's clock: each step takes its estimate
 now() { if [ -n "$SIM" ]; then echo "$SIM"; else date +%s; fi; }
 left() { echo $(( (DEADLINE - $(now)) / 60 )); }
-log "round in $DIR: budget until $(date -r "$DEADLINE" +%H:%M) ($(left) min), idle windows ${IDLE_S}s, wallpaper $PIC"
+log "round in $DIR: budget until $(date -r "$DEADLINE" +%H:%M) ($(left) min), idle windows ${IDLE_S}s, test cap $(. "$FR/common.sh" >/dev/null 2>&1; echo "$TEST_CAP")s${DROP:+, dropped: $DROP}, wallpaper $PIC"
+[ -n "$DROP" ] && echo "$(date +%FT%T) $DROP" >> "$DIR/dropped"
 if [ -z "$RC2_APP" ]; then
   log "RC2_APP not set: the OmacVM 3.0.0 RC2 rows are skipped"
   for s in rc2-vulkan rc2-gl; do pending "$s" && mark "$s" skipped "RC2_APP not set"; done
