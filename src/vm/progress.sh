@@ -15,7 +15,8 @@ pac_progress() {
     function mib(v, u) { v += 0; if (u == "KiB") return v * 1024; if (u == "GiB") return v * 1073741824; if (u == "B") return v; return v * 1048576 }
     function emit(ph, now) {
       printf "{\"omacvm_progress\": 1, \"phase\": \"%s\", \"now\": \"%s\", \"n\": %d, \"of\": %d", ph, j(now), (ph == "download" ? dl : inst), of
-      if (ph == "download" && total > 0) printf ", \"done\": %.0f, \"total\": %.0f", (cache > base ? cache - base : 0), total
+      # Bytes only once the cache grows (pacman may download into another cache: then the count alone).
+      if (ph == "download" && total > 0 && cache > base) printf ", \"done\": %.0f, \"total\": %.0f", (cache > base ? cache - base : 0), total
       print "}"; fflush()
     }
     { gsub(/\033\[[0-9;]*[A-Za-z]/, "") }
@@ -23,7 +24,7 @@ pac_progress() {
     { print > raw; fflush(raw); print "| " $0; fflush() }
     /^==> / { print; fflush() }
     # "Packages (190) ..." or, with VerbosePkgLists, "Package (190)  New Version ..."
-    /^Packages? \([0-9]+\)/ { s = $0; sub(/^Packages? \(/, "", s); sub(/\).*/, "", s); of = s + 0; dl = 0; inst = 0; total = 0; phase = ""; next }
+    /^Packages? \([0-9]+\)/ { s = $0; sub(/^Packages? \(/, "", s); sub(/\).*/, "", s); of = s + 0; dl = 0; inst = 0; total = 0; phase = ""; last = ""; next }
     /^:: Synchronizing package databases/ { of = 0; phase = ""; next }
     /^checking keyring|^:: Processing package changes/ { phase = ""; next }
     /^Total Download Size:/ { total = mib($4, $5); base = cache; next }

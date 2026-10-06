@@ -54,12 +54,9 @@ public struct ProgressUpdate: Equatable, Sendable {
 
     /// The plain line: "Installing gum (27 of 190 packages)".
     public var text: String {
-        let what = now.isEmpty ? "" : " \(now)"
-        let count = of > 0 ? " (\(n) of \(of) packages)" : ""
-        switch phase {
-        case .download: return "Downloading\(what)\(count)"
-        case .install: return "Installing\(what)\(count)"
-        }
+        let verb = phase == .download ? "Downloading" : "Installing"
+        if now.isEmpty { return of > 0 ? "\(verb) packages (\(n) of \(of))" : verb }
+        return of > 0 ? "\(verb) \(now) (\(n) of \(of) packages)" : "\(verb) \(now)"
     }
 
     /// 0...1 for the bar: bytes when known, else the package count.

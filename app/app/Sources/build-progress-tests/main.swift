@@ -19,6 +19,8 @@ expect(inst?.text == "Installing linux-aarch64 (312 of 1104 packages)", "install
 expect(inst?.fraction.map { abs($0 - 312.0 / 1104) < 1e-9 } == true, "install fraction from the count")
 let live = P.parse(#"{"omacvm_progress": 1, "phase": "download", "now": "try-omarchy", "done": 500, "total": 1000}"#)
 expect(live?.text == "Downloading try-omarchy" && live?.fraction == 0.5, "Mac download: bytes")
+expect(P.parse(#"{"omacvm_progress": 1, "phase": "download", "now": "", "n": 0, "of": 213}"#)?.text == "Downloading packages (0 of 213)",
+       "a download before its first package")
 expect(P.parse(#"{"omacvm_progress": 1, "phase": "download", "now": "prebuilt VM", "done": 2000, "total": 1000}"#)?.done == 1000, "done capped at total")
 
 // The VM is untrusted: anything odd is dropped.
