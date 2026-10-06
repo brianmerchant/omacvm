@@ -47,6 +47,8 @@ in more words.
   this app's OmacVM with Update VM in the app's window. Before, replacing
   the app left the VM's side as it was, and a VM from before 3.0.0 has no
   control centre to ask for it.
+- Omanotch: Omarchy's display panel no longer lists the hidden NOTCH output
+  as a display (it could be scaled or switched off there).
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer
