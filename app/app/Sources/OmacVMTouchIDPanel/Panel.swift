@@ -394,9 +394,11 @@ final class PanelController: NSObject {
                                                                              object: nil, queue: .main) { [weak self] _ in
             self?.finish(.no("locked"), look: nil)
         })
-        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(prompt.timeout), repeats: false) { [weak self] _ in
+        let t = Timer(timeInterval: TimeInterval(prompt.timeout), repeats: false) { [weak self] _ in
             self?.finish(.no("timeout"), look: nil)
         }
+        RunLoop.main.add(t, forMode: .common)   // also while a menu or a drag tracks
+        timer = t
         let reason = prompt.box.map { "\(prompt.line): \($0)" } ?? prompt.line
         c.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { ok, err in
             DispatchQueue.main.async { [weak self, weak c] in
