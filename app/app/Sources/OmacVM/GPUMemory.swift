@@ -55,10 +55,6 @@ struct GPUMemory: Equatable {
     /// "Graphics memory: 1.6 GB (peak 2.6 GB)"
     var line: String { "Graphics memory: \(GPUMemory.gb(inUseMB)) (peak \(GPUMemory.gb(peakMB)))" }
 
-    /// The compositor draws the whole desktop: when its GPU context is lost
-    /// the VM shows black until the desktop session starts again.
-    static let compositors: Set<String> = ["Hyprland"]
-
     static let explanation = """
         VM memory is the Mac memory the VM gets as its RAM (set above). Graphics memory \
         is extra: the textures and buffers the VM's desktop and apps draw with, taken \
@@ -71,8 +67,9 @@ struct GPUMemory: Equatable {
 /// - When macOS warns that memory is short, the VM is asked to drop its file
 ///   cache (at most every 10 minutes): Linux then reports the pages free and
 ///   the Mac gets them back (virtio-balloon free page reporting).
-/// - When the desktop's GPU context is lost (the VM would stay black), a
-///   window says so and offers to restart the desktop session.
+/// - When the desktop's GPU context is lost (the VM would stay black), the
+///   desktop session starts again by itself, or a window says so and offers
+///   to restart it (DesktopRecovery says which).
 @MainActor
 final class GPUMemoryWatch {
     private let config: VMConfig
@@ -83,6 +80,9 @@ final class GPUMemoryWatch {
     private var trimming = false
     private var lostSeen = 0
     private var alert: NSAlert?
+    private var lastDesktopRestart: Date?
+    private var lastShellRestart: Date?
+    private var restarting = false
 
     init(config: VMConfig, log: @escaping (String) -> Void) {
         self.config = config
@@ -144,24 +144,70 @@ final class GPUMemoryWatch {
             // Several can be lost between two looks (the desktop, then a browser).
             let new = m.lostRecent.suffix(min(m.lost - lostSeen, m.lostRecent.count))
             lostSeen = m.lost
-            if new.contains(where: GPUMemory.compositors.contains) { desktopLost(m) }
+            lost(Array(new), m)
+        }
+    }
+
+    private func lost(_ names: [String], _ m: GPUMemory) {
+        guard alert == nil, !restarting else { return }
+        let now = Date()
+        let action = DesktopRecovery.action(lost: names, enabled: DesktopRecovery.enabled(),
+                                            lastDesktop: lastDesktopRestart, lastShell: lastShellRestart, now: now)
+        switch action {
+        case .none:
+            return
+        case .restartShell:
+            lastShellRestart = now
+            log("OmacVM: the VM's shell (Quickshell) lost its GPU context: restarting the shell by itself")
+            guest("/usr/local/bin/omacvm-desktop-recover", ["shell"]) { _ in }
+        case .restartDesktop:
+            lastDesktopRestart = now
+            restarting = true
+            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
+            log("OmacVM: restarting the VM's desktop by itself: apps open in the VM close (once per 10 min, else the app asks)")
+            let why = DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)
+            guest("/usr/local/bin/omacvm-desktop-recover", ["desktop", why]) { [weak self] ok in
+                guard let self else { return }
+                self.restarting = false
+                if !ok {
+                    self.log("OmacVM: the VM's agent did not restart the desktop: asking")
+                    self.desktopLost(m, again: false)
+                }
+            }
+        case .ask(let again):
+            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
+            desktopLost(m, again: again)
+        }
+    }
+
+    /// Runs a program in the VM off the main thread. A VM set up before
+    /// omacvm-desktop-recover (3.0.0) has no such program: the login manager
+    /// is restarted directly there (no note in the new session).
+    private func guest(_ path: String, _ args: [String], done: @escaping @MainActor (Bool) -> Void) {
+        let socket = config.agentSocket.path
+        DispatchQueue.global(qos: .userInitiated).async {
+            var ok = GuestAgent.run(socketPath: socket, path, args)
+            if !ok, args.first == "desktop" {
+                ok = GuestAgent.run(socketPath: socket, "/usr/bin/systemctl", ["restart", "sddm"])
+            }
+            Task { @MainActor in done(ok) }
         }
     }
 
     /// The compositor is not told about a lost context: the VM's Mesa does not
     /// report resets, and Hyprland 0.56 would only stop ("Cannot continue until
-    /// proper GPU reset handling is implemented") if it were. Say so instead of
-    /// leaving a black window.
-    private func desktopLost(_ m: GPUMemory) {
+    /// proper GPU reset handling is implemented") if it were. Asked when the
+    /// automatic restart is off, did not work, or was done shortly before.
+    private func desktopLost(_ m: GPUMemory, again: Bool) {
         guard alert == nil else { return }
-        log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
         let a = NSAlert()
-        a.messageText = "The VM's desktop stopped drawing"
-        a.informativeText = (m.pressure == "normal" && m.refused == 0
+        a.messageText = again ? "The VM's desktop stopped drawing again" : "The VM's desktop stopped drawing"
+        a.informativeText = (again ? "It was restarted a few minutes ago. " : "") +
+            (DesktopRecovery.reason(pressure: m.pressure, refused: m.refused) == "graphics"
             ? "Its graphics on the Mac failed. "
             : "macOS ran short of memory for its graphics. ") +
             "The VM still runs, but its screen stays black until the desktop starts again. " +
-            "Restarting the desktop closes the apps open in the VM."
+            "Restarting the desktop closes the apps open in the VM; anything not saved in them is lost."
         a.addButton(withTitle: "Restart the Desktop")
         a.addButton(withTitle: "Later")
         a.window.level = .floating
@@ -174,12 +220,11 @@ final class GPUMemoryWatch {
             log("OmacVM: the desktop stays black for now (Later)")
             return
         }
-        let socket = config.agentSocket.path
         log("OmacVM: restarting the VM's desktop session")
-        DispatchQueue.global(qos: .userInitiated).async {
-            // The login manager starts again and logs the user in again
-            // (Omarchy's SDDM autologin runs when SDDM starts).
-            GuestAgent.run(socketPath: socket, "/usr/bin/systemctl", ["restart", "sddm"])
-        }
+        // Counts as a restart: lost again soon after, the app asks again.
+        lastDesktopRestart = Date()
+        // The login manager starts again and logs the user in again (SDDM's
+        // autologin), or shows its login screen.
+        guest("/usr/local/bin/omacvm-desktop-recover", ["desktop", DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)]) { _ in }
     }
 }
