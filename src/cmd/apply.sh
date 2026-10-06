@@ -37,10 +37,12 @@ features_load
 VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
 YES=0; NEWKEY=0; REINSTALL=()
 SETN=(); SETV=()
-set_feature() {   # NAME on|off
-  feature_index "$1" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
+set_feature() {   # NAME on|off (an old name too: idle-lock=off is no-idle-lock=on)
+  local n v
   [[ $2 == on || $2 == off ]] || { echo "omacvm apply: --feature $1=$2: on or off" >&2; exit 2; }
-  SETN+=("$1"); SETV+=("$2")
+  read -r n v <<<"$(feature_alias "$1" "$2")"
+  feature_index "$n" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
+  SETN+=("$n"); SETV+=("$v")
 }
 while (( $# )); do
   case $1 in
@@ -55,15 +57,16 @@ while (( $# )); do
     --reset-host-key) export OMA_PIN_RESET=1; NEWKEY=1; shift ;;
     --transaction) TRANSACTION=1; shift ;;
     --yes|-y) YES=1; shift ;;
-    --reinstall) feature_index "${2:-}" >/dev/null || { echo "omacvm apply: --reinstall: unknown feature '${2:-}' (omacvm features lists them)" >&2; exit 2; }
-                 REINSTALL+=("$2"); shift 2 ;;
+    --reinstall) f=$(feature_alias "${2:-}"); f=${f%% *}
+                 feature_index "$f" >/dev/null || { echo "omacvm apply: --reinstall: unknown feature '${2:-}' (omacvm features lists them)" >&2; exit 2; }
+                 REINSTALL+=("$f"); shift 2 ;;
     --no-token) TOKEN=0; shift ;;   # prebuilt images: no Bridge token in the VM
     --no-tools) TOOLS=0; shift ;;   # prebuilt images: no Parallels Tools
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
     --no-*) set_feature "${1#--no-}" off; shift ;;
     -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    --*) f=${1#--}; feature_index "$f" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }
-         set_feature "$f" on; shift ;;
+    --*) f=$(feature_alias "${1#--}"); feature_index "${f%% *}" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }
+         set_feature "${1#--}" on; shift ;;
     *) echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -305,7 +308,12 @@ GI_ARGS=""; KNOWN=""
 guest_install() {
   local fargs="" i v=("$@")
   for ((i = 0; i < ${#FN[@]}; i++)); do
-    [[ -z $KNOWN || $'\n'$KNOWN$'\n' == *$'\n'${FN[$i]}$'\n'* ]] || continue
+    if [[ -n $KNOWN && $'\n'$KNOWN$'\n' != *$'\n'${FN[$i]}$'\n'* ]]; then
+      # A copy from before 3.0.1 knows no-idle-lock by its old name.
+      [[ ${FN[$i]} == no-idle-lock && $'\n'$KNOWN$'\n' == *$'\n'idle-lock$'\n'* ]] &&
+        fargs+=" --feature idle-lock=$(feature_flip "${v[$i]}")"
+      continue
+    fi
     fargs+=" --feature ${FN[$i]}=${v[$i]}"
   done
   [[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"

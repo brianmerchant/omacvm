@@ -7,6 +7,6 @@ public enum NewVMFeatures {
     public static func string(bridge: Bool = true, gestures: Bool = true, autologin: Bool = false,
                               hasBattery: Bool, hasNotch: Bool) -> String {
         let on = { (b: Bool) in b ? "on" : "off" }
-        return "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=\(on(gestures)) omanotch=\(on(hasNotch)) mac-clock=on camera=on battery=\(on(hasBattery)) external-brightness=\(on(bridge)) chromium-video=on idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        return "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=\(on(gestures)) omanotch=\(on(hasNotch)) mac-clock=on camera=on battery=\(on(hasBattery)) external-brightness=\(on(bridge)) chromium-video=on no-idle-lock=off autologin=\(on(autologin)) thp-kernel=off"
     }
 }

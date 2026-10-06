@@ -234,7 +234,7 @@ def vm_env(tmp: str, mac_port: int, check_sock: str, extra: str = "") -> dict:
         f.write("OMACVM_VM_TYPE=parallels\nOMACVM_HOST=127.0.0.1\nOMACVM_USER=zorro\n"
                 "OMACVM_FEATURE_bridge=on\nOMACVM_FEATURE_wallpaper=on\nOMACVM_FEATURE_gestures=off\n"
                 "OMACVM_FEATURE_scroll_momentum=off\nOMACVM_FEATURE_omanotch=off\nOMACVM_FEATURE_mac_clock=on\n"
-                "OMACVM_FEATURE_camera=on\nOMACVM_FEATURE_battery=off\nOMACVM_FEATURE_idle_lock=on\n"
+                "OMACVM_FEATURE_camera=on\nOMACVM_FEATURE_battery=off\nOMACVM_FEATURE_no_idle_lock=off\n"
                 "OMACVM_FEATURE_autologin=off\nOMACVM_FEATURE_thp_kernel=off\nOMACVM_FEATURE_control_centre=on\n" + extra)
     token = os.path.join(tmp, "token")
     with open(token, "wb") as f:

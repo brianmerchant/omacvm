@@ -32,7 +32,7 @@ TOKYO_NIGHT = TerminalTheme(
 )
 
 ON = ("bridge wallpaper gestures scroll-momentum omanotch mac-clock camera battery external-brightness "
-      "chromium-video idle-lock control-centre fast-network").split()
+      "chromium-video no-idle-lock control-centre fast-network").split()
 OFF = "autologin thp-kernel vulkan".split()
 
 CHECKS = "".join(f"ok\t{f}\tworks\t\t{f}\n" for f in ON)
