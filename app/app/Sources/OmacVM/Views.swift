@@ -17,22 +17,14 @@ final class AppState: ObservableObject {
     @Published var screen: Screen = .setup
     @Published var config: VMConfig
     @Published var message: String?
-    /// This Mac's built-in display has a notch right now (follows displays
-    /// being plugged in, the lid and resolution changes).
-    @Published var hasNotch = Mac.hasNotch
     let creator = Creator()
     let storage = StorageModel()
     var startVM: () -> Void = {}
-    private var screensObserver: NSObjectProtocol?
 
     init() {
         (config, screen) = Self.start()
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
-        screensObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hasNotch = Mac.hasNotch }
-        }
         storage.onMoved = { [weak self] in self?.reload() }
         // The views read the storage through this state too (Start waits for a move).
         storageChanges = storage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
@@ -284,7 +276,6 @@ extension ReadyView {
 struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
-    @State private var notch = Settings.useNotch
     @State private var keepDockAway = Settings.keepDockAway
     @State private var escape = EscapeSetting.current()
     @State private var resourcesNote: String?
@@ -359,11 +350,6 @@ struct ReadyView: View {
             }
             .help("In a full-screen VM, Control-Option-Esc moves the monitor under the pointer (or all monitors) to the Space beside the VM's with macOS's own animation; the VM stays full screen. Pressed in macOS, it goes back into the VM. The keyboard follows the pointer's monitor.")
             .onChange(of: escape) { _, v in EscapeSetting.set(v) }
-            if state.hasNotch {
-                Toggle("Use the notch for the menu bar", isOn: $notch)
-                    .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
-                    .onChange(of: notch) { _, v in Settings.useNotch = v }
-            }
             GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
                 .onChange(of: graphics) { _, v in setGraphics(v) }
             if let n = graphicsNote {

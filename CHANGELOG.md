@@ -12,6 +12,14 @@ a boot splash, any Omarchy scale on 5K and larger displays, less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
+- OmacVM.app's full screen always gets a Space of its own, on every
+  display, the MacBook's too. Before, on a Mac with a notch, full screen
+  was a window over the Space you were on: other windows could share it,
+  and the escape combo opened Mission Control instead of moving to macOS.
+  macOS keeps a full-screen window below the camera, so Omanotch now fills
+  the strip beside the notch (as with Parallels and UTM); the switch "Use
+  the notch for the menu bar" is gone. With two displays the escape combo
+  no longer jumps back into the VM a moment after leaving it.
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy
