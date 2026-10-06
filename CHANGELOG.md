@@ -9,6 +9,18 @@ in more words.
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
   `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- USB devices (experimental, OmacVM.app, off by default): give a VM a USB
+  device macOS does not use itself (debug probes, SDR sticks, boards in DFU
+  mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
+- Building a VM behind a proxy (Vocllum, #122). The build takes the Mac's
+  proxy (http_proxy/https_proxy/all_proxy in the terminal, else the fixed
+  proxies in macOS's network settings) into the VM: pacman, git and the
+  Omarchy installer use it, through sudo and the installer's systemd unit
+  too. A proxy on the Mac's 127.0.0.1 (Clash and the like) is reached as
+  10.0.2.2 in OmacVM.app: its port gets through at the build and at every
+  VM start. pacman and git clone try a failed download again (3 tries)
+  while Omarchy installs. PAC files are not read. Details: docs/guide.md,
+  "Behind a proxy".
 - Fast network: a VPN whose interface is up before it gets its address (an
   IKEv2 connection's `ipsec0`, a tunnel brought up first) now gets the VPN
   NAT within a second. macOS announces such an address only as a new
