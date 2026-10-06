@@ -199,6 +199,9 @@ jobs:
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
+      - name: The Bridge runs omacvm for the app's VMs through the app (only the Bridge, only the app's omacvm)
+        run: src/tests/app-control-run.sh
+
       - name: Display sync (scales at 4K and 5K, nothing sent twice, the loop guard)
         run: |
           # The VM side runs on Arch's bash 5; macOS's own is 3.2.

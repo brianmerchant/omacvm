@@ -535,6 +535,49 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(feedFetch(manifest: some, manifestError: nil, sig: nil, sigError: "HTTP 503") == .offline("HTTP 503"), ".sig 503: offline")
     expect(feedFetch(manifest: nil, manifestError: "HTTP 404", sig: nil, sigError: "HTTP 404") == .offline("HTTP 404"), "no manifest: offline")
 
+    // ---- OmacVM.app's VMs through the app (an external drive) ----
+    let appCLI = "/Users/max/Applications/OmacVM.app/Contents/Resources/omacvm/omacvm"
+    let info: [String: Any] = ["OmacVMControlRun": true, "CFBundleExecutable": "OmacVM", "CFBundleIdentifier": "org.omacvm.app"]
+    let tApp = "org.omacvm.app.test"
+    expect(appRunnerPath(cli: appCLI, info: info, testIdentity: false, testApp: tApp)
+           == "/Users/max/Applications/OmacVM.app/Contents/MacOS/OmacVM", "the app's own omacvm: its executable")
+    expect(appRunnerPath(cli: "/Users/max/omacvm/omacvm", info: info, testIdentity: false, testApp: tApp) == nil, "a checkout: on its own")
+    expect(appRunnerPath(cli: appCLI, info: nil, testIdentity: false, testApp: tApp) == nil, "no Info.plist")
+    var old = info; old["OmacVMControlRun"] = nil
+    expect(appRunnerPath(cli: appCLI, info: old, testIdentity: false, testApp: tApp) == nil, "an older app (no key): would open its window")
+    var one = info; one["OmacVMControlRun"] = 1
+    expect(appRunnerPath(cli: appCLI, info: one, testIdentity: false, testApp: tApp) == nil, "the key must be a plist true")
+    var slash = info; slash["CFBundleExecutable"] = "../../bin/sh"
+    expect(appRunnerPath(cli: appCLI, info: slash, testIdentity: false, testApp: tApp) == nil, "an executable name with a path")
+    expect(appRunnerPath(cli: appCLI, info: info, testIdentity: true, testApp: tApp) == nil, "the test Bridge: not the installed app")
+    var test = info; test["CFBundleIdentifier"] = tApp
+    expect(appRunnerPath(cli: appCLI, info: test, testIdentity: false, testApp: tApp) == nil, "the installed Bridge: not the test app")
+    expect(appRunnerPath(cli: appCLI, info: test, testIdentity: true, testApp: tApp) != nil, "the test Bridge: the test app")
+    expect(appRunnerPath(cli: "/a/../b/OmacVM.app/Contents/Resources/omacvm/omacvm", info: info, testIdentity: false, testApp: tApp) == nil, "..")
+    expect(appRunnerPath(cli: "Applications/OmacVM.app/Contents/Resources/omacvm/omacvm", info: info, testIdentity: false, testApp: tApp) == nil, "relative")
+
+    let prl = VMEntry(name: "P", type: "parallels", state: "running", ip: "10.211.55.5", omacvm: "3.0.1", setup: true)
+    let inside = VMEntry(name: "In", type: "app", state: "running", ip: "127.0.0.1:52000", omacvm: "3.0.1", setup: true, dir: "/Users/max/VMs/In")
+    let ext = VMEntry(name: "SD", type: "app", state: "running", ip: "127.0.0.1:52612", omacvm: "3.0.1", setup: true, dir: "/Volumes/SD/VMs/SD")
+    let stale = VMEntry(name: "In", type: "app", state: "running", ip: "127.0.0.1:52000", omacvm: "3.0.0", setup: false, dir: "/Users/max/VMs/In")
+    expect(mergeVMLists(all: [prl, stale], app: [inside, ext]) == [prl, inside, ext], "app VMs from the app's run, the others from the Bridge's")
+    expect(mergeVMLists(all: [prl, inside], app: nil) == [prl, inside], "the app's run failed: the Bridge's list as it is")
+    expect(mergeVMLists(all: nil, app: [ext]) == nil, "the Bridge's run failed: none (asked again)")
+    expect(mergeVMLists(all: [prl], app: []) == [prl], "the app has no VM")
+    expect(mergeVMLists(all: [prl], app: [prl, ext]) == [prl, ext], "the app's run lists only app VMs")
+
+    expect(gpuMemoryFromApp(nil) == nil, "no header (an older app): the Bridge reads the file")
+    expect(gpuMemoryFromApp("-") == .some(nil), "-: the app has no file")
+    expect(gpuMemoryFromApp(Data("in_use_mb=12\n".utf8).base64EncodedString()) == .some("in_use_mb=12\n"), "the file's text")
+    expect(gpuMemoryFromApp("not base64!") == nil, "not base64: read it here")
+    expect(gpuMemoryFromApp(Data(repeating: 65, count: 4097).base64EncodedString()) == nil, "over 4 KB: no")
+    expect(gpuMemoryAnswer(gpuMemoryFromApp("-") ?? "x") as NSDictionary == ["measured": false] as NSDictionary, "no file: not measured")
+
+    var c4 = VMListCache()
+    _ = c4.shouldRefresh(known: false, now: t0); _ = c4.finished([ext], now: t0)
+    _ = c4.jobEnded(vm: "app/SD", version: "3.0.2")
+    expect(c4.list.first?.dir == "/Volumes/SD/VMs/SD" && c4.list.first?.omacvm == "3.0.2", "a job ended: the folder stays")
+
     print("control policy: \(passed) passed, \(failures) failed")
     exit(failures == 0 ? 0 : 1)
   }

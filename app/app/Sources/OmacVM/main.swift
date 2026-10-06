@@ -539,6 +539,12 @@ extension AppDelegate: NSMenuDelegate {
     }
 }
 
+// `OmacVM --control-run CLI ...`: OmacVM Bridge runs the control centre's
+// omacvm for this app's VMs through the app (ControlRun.swift). No window.
+if CommandLine.arguments.dropFirst().first == ControlRun.flag {
+    ControlRun.main(Array(CommandLine.arguments.dropFirst(2)), test: TestIdentity.isOn)
+}
+
 // `OmacVM --vms-folder`: print where the VMs are and quit (no window), for
 // `omacvm check` and the tests.
 if CommandLine.arguments.dropFirst().first == "--vms-folder" {
