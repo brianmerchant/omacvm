@@ -1,0 +1,17 @@
+# OmacVM.app, Chromium video: omacvm-vdecd built again for a new FFmpeg
+# soname, and started again when it was down (a Mesa that works again).
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = ffmpeg
+Target = libva
+Target = mesa
+Target = llvm-libs
+Target = libdrm
+Target = libglvnd
+
+[Action]
+Description = OmacVM: Chromium's video decoder after a library update
+When = PostTransaction
+Exec = /usr/local/share/omacvm/vdec/guest/vdecd.sh hook

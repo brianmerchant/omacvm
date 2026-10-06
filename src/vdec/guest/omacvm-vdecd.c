@@ -974,15 +974,18 @@ static uint32_t va_codecs(void)
 	return codecs;
 }
 
-static bool gpu_init(void)
+/* NULL when the GPU is ready, else the part that failed. */
+static const char *gpu_init(void)
 {
 	int drm = open(RENDER_NODE, O_RDWR | O_CLOEXEC);
 	EGLint ctx_attr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
 	PFNEGLGETPLATFORMDISPLAYEXTPROC get_display;
 	EGLContext ctx;
 
-	if (drm < 0 || !(gbm = gbm_create_device(drm)))
-		return false;
+	if (drm < 0)
+		return "open";
+	if (!(gbm = gbm_create_device(drm)))
+		return "GBM";
 	get_display = (void *)eglGetProcAddress("eglGetPlatformDisplayEXT");
 	create_image = (void *)eglGetProcAddress("eglCreateImageKHR");
 	destroy_image = (void *)eglGetProcAddress("eglDestroyImageKHR");
@@ -992,17 +995,17 @@ static bool gpu_init(void)
 	destroy_sync = (void *)eglGetProcAddress("eglDestroySyncKHR");
 	if (!get_display || !create_image || !destroy_image || !image_target ||
 	    !create_sync || !wait_sync || !destroy_sync)
-		return false;
+		return "EGL";
 	egl = get_display(EGL_PLATFORM_GBM_KHR, gbm, NULL);
 	if (!egl || !eglInitialize(egl, NULL, NULL) || !eglBindAPI(EGL_OPENGL_ES_API))
-		return false;
+		return "EGL";
 	ctx = eglCreateContext(egl, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, ctx_attr);
 	if (!ctx || !eglMakeCurrent(egl, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx))
-		return false;
+		return "EGL";
 	if (av_hwdevice_ctx_create(&hwdev, AV_HWDEVICE_TYPE_VAAPI, RENDER_NODE, NULL, 0) < 0)
-		return false;
+		return "VA-API";
 	va = ((AVVAAPIDeviceContext *)((AVHWDeviceContext *)hwdev->data)->hwctx)->display;
-	return prog_init();
+	return prog_init() ? NULL : "GL";
 }
 
 /* What omacvm check reports: the codecs on offer (systemd's runtime folder). */
@@ -1034,15 +1037,19 @@ int main(void)
 	uint64_t wd_usec = 0;
 	int wd_ms = -1;		/* systemd's watchdog: ping every third of it */
 	double pinged = 0;
+	const char *gpu_fail;
 
 	debug = getenv("OMACVM_VDEC_DEBUG") && *getenv("OMACVM_VDEC_DEBUG") == '1';
 	signal(SIGPIPE, SIG_IGN);
 	if (!pool)
 		return 1;
-	if (!gpu_init()) {
-		log_msg("vdecd: no GPU video (VA-API, EGL or GBM on %s): exiting, apps decode on the CPU",
-		     RENDER_NODE);
-		return 0;
+	/* The GPU can come later (a broken Mesa fixed by an update): exit 4,
+	 * systemd starts it again, less often each time (the unit). */
+	gpu_fail = gpu_init();
+	if (gpu_fail) {
+		log_msg("vdecd: the GPU is not usable (%s on %s failed): apps decode on the CPU, trying again",
+			gpu_fail, RENDER_NODE);
+		return 4;
 	}
 	caps.codecs = va_codecs();
 	if (!caps.codecs) {

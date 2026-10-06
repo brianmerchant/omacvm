@@ -152,8 +152,15 @@ Chromium ◀─ its GPU buffer (ARGB) ◀─ GPU pass in omacvm-vdecd
   merged into Omarchy's last `--enable-features` and `--load-extension` (Chromium
   takes only the last of each). The extension tells YouTube that AV1 is not
   supported, so YouTube sends VP9: this Chromium decodes AV1 only on the CPU.
-- Check: `omacvm check` shows *video decoding in Chromium*, and
-  `chrome://media-internals` *V4L2VideoDecoder*.
+- When the GPU is not usable (a Mesa update that broke GBM), the daemon
+  exits and systemd starts it again: after 2 seconds at first, then less
+  often, up to every 2 minutes. A pacman hook starts it at once after an
+  update of Mesa, FFmpeg or libva, and builds it again when a new FFmpeg
+  changed its library name (`libavcodec.so.N`): `src/vdec/guest/vdecd.sh`.
+  Chromium looks for decoders when it starts: restart it once after that.
+- Check: `omacvm check` shows *video decoding in Chromium* (and why the
+  daemon is down when it is), and `chrome://media-internals`
+  *V4L2VideoDecoder*.
 
 YouTube *Big Buck Bunny* at 60 fps, Arch Linux ARM's Chromium 153, 60
 seconds with `src/bench/video-bench.py` (`--quality hd1080` for 1080p), in a

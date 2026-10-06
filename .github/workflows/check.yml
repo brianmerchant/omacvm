@@ -230,6 +230,9 @@ jobs:
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
 
+      - name: Chromium's video decoder comes back (GPU retry, pacman hook, check says why)
+        run: src/tests/vdecd-down.sh
+
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.
   guest:

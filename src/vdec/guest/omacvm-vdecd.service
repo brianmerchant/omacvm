@@ -11,9 +11,14 @@ Before=display-manager.service getty@tty1.service
 ExecStart=/usr/local/bin/omacvm-vdecd
 # Exit 0 = no VA-API decoding here (another hypervisor, or OMACVM_VIDEO_DECODE=0
 # on the Mac): stay down, Chromium decodes on the CPU. Exit 3 = the module
-# loaded is from another build: it loads at the next VM start.
+# loaded is from another build: it loads at the next VM start. Exit 4 = the
+# GPU is not usable (a broken Mesa): tried again, 2 s at first, then less
+# often up to every 2 minutes; the pacman hook starts it at once after a
+# Mesa, FFmpeg or libva update (vdecd.sh hook).
 Restart=on-failure
 RestartSec=2
+RestartSteps=6
+RestartMaxDelaySec=2min
 RestartPreventExitStatus=3
 # A daemon stuck as a whole (the GPU, VA-API) stops pinging: killed and
 # restarted, the module fails the open videos and apps decode on the CPU.

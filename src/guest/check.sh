@@ -422,8 +422,11 @@ app)
       OMACVM_VA_DEBUG=1 vainfo --display drm 2>&1)
   v=$(sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' <<<"$va" | tr '\n' ' ')
   lim=$(sed -n 's/^omacvm_drv_video: the Mac keeps at most \([1-9][0-9]*\) decoders.*/\1/p' <<<"$va" | head -1)
+  # VA-API that does not start: the GPU driver (Mesa) is broken, say how.
+  vafail=$(grep -m1 -E 'MESA-LOADER|vaInitialize failed' <<<"$va" || true)
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
+  elif [[ -n $vafail ]]; then bad "video decoding" "VA-API does not start, videos decode on the CPU: $vafail"
   else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
   # Arch Linux ARM's Chromium decodes through V4L2 (omacvm-vdec + omacvm-vdecd).
   FEATURE=chromium-video
@@ -434,10 +437,13 @@ app)
     [[ -n $m && -e /sys/module/omacvm_vdec && $(cat /sys/module/omacvm_vdec/srcversion 2>/dev/null) != "$m" ]] &&
       pend=" (an update waits: restart the VM)"
     if [[ $CHROMIUM_VIDEO != on ]]; then skip "video decoding in Chromium" "off (omacvm enable chromium-video)"
+    elif [[ -z $v && -n $vafail ]]; then skip "video decoding in Chromium" "VA-API does not start (see video decoding)"
     elif [[ -z $v ]]; then skip "video decoding in Chromium" "no decoders on the Mac's side"
     elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then bad "video decoding in Chromium" "not set up: omacvm apply"
     elif [[ ! -e /dev/omacvm-vdec ]]; then bad "video decoding in Chromium" "no module for kernel $(uname -r) yet: omacvm apply, or reboot after an update"
-    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then bad "video decoding in Chromium" "omacvm-vdecd not running (journalctl -u omacvm-vdecd)$pend"
+    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then
+      w=$(/usr/local/share/omacvm/vdec/guest/vdecd.sh why 2>/dev/null)
+      bad "video decoding in Chromium" "omacvm-vdecd down: ${w:-not running (journalctl -u omacvm-vdecd)}$pend"
     elif ! as_user /usr/local/lib/omacvm/chromium-flags.py check; then bad "video decoding in Chromium" "AcceleratedVideoDecoder missing in Chromium's flags: omacvm apply"
     else ok "video decoding in Chromium" "V4L2 -> the Mac's media engine: $s$pend"; fi
   fi

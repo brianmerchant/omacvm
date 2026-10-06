@@ -42,6 +42,8 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- Chromium video: the decoder service comes back by itself after a broken
+  Mesa is fixed or FFmpeg is updated, and `omacvm check` says why it is down.
 
 ## 3.0.0
 
