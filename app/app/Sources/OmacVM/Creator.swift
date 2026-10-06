@@ -155,6 +155,8 @@ final class Creator: ObservableObject {
             endStep()
             let parts = line.dropFirst(5).split(separator: " ", maxSplits: 1)
             if let nums = parts.first?.split(separator: "/"), nums.count == 2 {
+                // prebuilt-vm.sh found no image and builds it here: its steps from 1 again.
+                if route == .prebuilt, let n = Int(nums[0]), n <= step { route = .build; stepSeconds = [:] }
                 step = Int(nums[0]) ?? step
                 steps = Int(nums[1]) ?? steps
             }
