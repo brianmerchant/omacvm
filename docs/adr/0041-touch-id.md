@@ -378,6 +378,11 @@ sensor) and the last result.
   open", the app not relaying: "OmacVM.app does not answer", SSH never
   asked, no Bridge token in the VM. A helper without the port still asks
   for the password.
+- The same pass through the real app (2026-10-06, MacBook Pro, OmacVM
+  Test.app built from this branch, hidden, its relay pointed at the
+  stand-in Bridge): the app gave the VM the port (`Mac links: ... Touch ID
+  on`), sudo let in in 46-76 ms, `pkexec true` in 100-106 ms; no, Ctrl+C,
+  `kill -9` (dropped after 3.0 s), port busy, SSH as above.
 - Real dialog through the app's path (2026-10-06, MacBook Air M2, macOS
   26.6.2): the Bridge built from this branch (test identity), `AuthRelay`
   as the app runs it, the VM's request signed with a Touch ID key the Mac
