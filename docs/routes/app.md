@@ -539,8 +539,36 @@ What is missing before it can become the default: [below](#fast-network-not-done
     tunnel too (no VM, no service), and not without it: Parallels' (or
     macOS's) doing with a tunnel present, not the NAT. Quit and reopen
     Parallels Desktop, or `sudo killall prl_naptd`, brings them back.
-- Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
-  VM runs (the test tunnel is a `utun` as theirs), real trackpad gestures over the fast network
+- A real WireGuard client on the Mac mini (macOS 27, 2026-10-06):
+  `wireguard-go` on a `utun`, set up as a VPN app does (addresses, MTU
+  1420, split routes), and a WireGuard server in userspace that takes only
+  the tunnel's own address as source, as a real one does. A stand-in VM on
+  the fast network (the daemon's socket, ARP and pings): the NAT is on
+  about a second after the tunnel; the VM's pings reach the server as
+  `10.99.0.1`. With the service's anchor emptied by hand the server drops
+  them ("packet with disallowed source address"): what VMs got before the
+  VPN NAT. Down and up again, the VM leaving: as with the test tunnel.
+  An IKEv2-style `ipsec0` (macOS's own kernel interface for IKEv2, here
+  without a security association) got no NAT at first: for an IPv4
+  address added to an interface that was already up, the service saw only
+  a new route (its local route), which it did not count. Fixed: it
+  follows route changes too (not ARP entries or per-destination routes);
+  `ipsec0` now gets its rule within a second, and pf translates to its
+  address. It also missed IPv4 address messages, which are shorter than
+  it expected; it counts them now.
+  Then an app VM's QEMU (headless clone of a test VM) on the fast network
+  with the fixed service and the same client: NAT on 1.1 s after the
+  tunnel; the VM reaches the server over IPv4 and IPv6 (seen as
+  `10.99.0.1` and `2001:db8:99::1`), 20 MiB down and 20 MiB up through the
+  tunnel's MTU of 1420 (VM 1500) at about 70 MB/s each; anchor emptied by
+  hand: dropped by the server, back 1.1 s later on the next change. A full
+  tunnel for 25 s: the VM's requests to `1.1.1.1` and `9.9.9.9` went
+  through it as `10.99.0.1`; internet as before after. The VM restarting
+  with the tunnel up: NAT in the same second, all of the above again.
+  pf outside the service's anchor, Parallels and Tailscale unchanged.
+- Not tested yet: a VPN app's own tunnel (WireGuard app, an IKEv2 profile in
+  System Settings; the tests above use the same kernel interfaces without
+  touching the Mac's VPN settings), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
@@ -548,6 +576,76 @@ What is missing before it can become the default: [below](#fast-network-not-done
   numbers).
 - SMAppService would give macOS's own approval (System Settings) instead of
   a password dialog; not done.
+
+## Mac folder (off by default)
+
+**Mac folder › Choose…** in the VM's settings shares one folder of the Mac
+with the VM. From the VM's next start it is at `~/Mac` in Omarchy. **Turn
+Off** stops it from the next start.
+
+- The VM can read and change everything in that folder, as your Mac user,
+  and nothing outside it. Share a project folder: the app refuses your home
+  folder and the folders above it (your keys and every app's data would be
+  in the VM).
+- Your files show as your Omarchy user's in the VM; files the VM makes are
+  yours on the Mac. `chown` in the VM fails (as root too): the Mac keeps the
+  owner.
+- How: QEMU's virtio-9p, run as your Mac user. No system service, no
+  password. The VM mounts it with `cache=mmap,msize=512000`
+  (`omacvm-mac-folder`).
+- A change on either side shows on the other at once (tested: rewrite,
+  grow, create, delete, rename on the Mac; write in the VM).
+- A folder that is not there at a start (a drive not connected), or that
+  OmacVM may not open (denied in System Settings > Privacy & Security >
+  Files and Folders, or no permission), is left out for that start, and the
+  VM starts as usual. `omacvm check` says what the start shared and why not.
+- A folder in Documents, Desktop, Downloads or iCloud Drive: macOS may ask
+  once whether OmacVM may open it (not tested yet).
+- The Mac's disk ignores case by default: two files whose names differ only
+  in case (some git repos, such as the Linux kernel) are one file there.
+- File locks are not passed to the Mac: do not use one SQLite database or
+  lock file from the Mac and the VM at the same time.
+- VMs from before 3.0.1 need the VM side once: `omacvm apply` (or the
+  control centre's update).
+- Git in one repo from both sides: each side's git re-reads every file once
+  after the other ran (the two record files differently; 57 s for 30,000
+  files the first time below). `git config core.checkStat minimal` in that
+  repo avoids most of it.
+
+Speed (Mac mini M4, macOS 27, a 4-CPU VM, one run each; small files: 12,000
+files of 0.5-16 KB; git: `git status` in a 30,000-file repo made on the Mac):
+
+| | 1 GiB write | 1 GiB read | unpack 12k files | read them | `git status` |
+|---|---|---|---|---|---|
+| VM's own disk | 1991 MB/s | 5224 MB/s | 0.7 s | 0.8 s | 0.02 s |
+| Mac folder (`cache=mmap`) | 1747 MB/s | 3135 MB/s | 18 s | 16 s | 8.1 s |
+| 9p without cache (QEMU's usual) | 123 MB/s | 114 MB/s | 19 s | 18 s | 8.1 s |
+| 9p `cache=loose` (not used) | 1670 MB/s | 3551 MB/s | 13 s | 7.5 s | 1.8 s |
+
+Big files are fast. Many small files are slow: every file operation is a
+round trip to QEMU (about 0.4 ms), and only `cache=loose` saves those, but
+it shows old content after the Mac changes a file. Build in the VM's own
+disk, keep sources on the Mac if you like.
+
+NFS instead of 9p (a user-space NFS server on the Mac, over QEMU's network,
+for comparison only): unpacking was 3x faster (5.6 s), the rest no better
+(big files 315/1227 MB/s, reading the small files 12 s, `stat` 5.6 s). It
+would need a server program, a port and its own access control, so the Mac
+folder stays on 9p. virtio-fs needs a Linux host daemon; QEMU on macOS has
+none.
+
+Tested on the Mac mini (M4, macOS 27; a throwaway copy of a test VM,
+`tests/share/rig.sh`): the VM's unit mounts `~/Mac` at boot and the desktop
+user can write there; without a share it does nothing (18 ms) and leaves no
+`~/Mac`. Not tested on macOS 15 or 26, nor on another Mac.
+
+### Mac folder: not done yet
+
+- One folder per VM, read and write; no read-only switch.
+- It changes only at the VM's next start.
+- Not measured: Parallels' and UTM's shared folders on the same Mac.
+- QEMU cannot save a VM's state while the folder is mounted (9p blocks it):
+  matters once instant resume comes.
 
 ## Every Mac display
 
@@ -573,6 +671,12 @@ window per guest screen:
   around all its outputs. `omacvm-displays` reports where Hyprland put each
   output, and QEMU points the tablet at the matching spot of that box, so
   the pointer lands where it is on the Mac, also with Omarchy's zoom.
+  Hyprland sends no event when an output only moves (display-sync and
+  Omanotch move them, and a config reload puts them back to "auto" for a
+  moment), and a stale report kept the pointer in half the screen for up
+  to 30 s. So a Lua hook (`monitor.layout_changed`) pokes the agent, which
+  also compares the layout twice a second for 15 s after any change and
+  every 10 s otherwise (a report goes out only when it changed).
   The other displays' windows take the pointer (and with it the keyboard)
   only while OmacVM.app is in front, or on a click; another app coming to
   the front gets both back.

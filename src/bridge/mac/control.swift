@@ -13,7 +13,7 @@ import Foundation
 /// The test identity's Bridge (org.omacvm.test.bridge, from app/scripts/build-app.sh
 /// --test-identity) keeps its own port and folders: it never meets the installed Bridge
 /// or runs the installed omacvm.
-let testIdentity = Bundle.main.bundleIdentifier == "org.omacvm.test.bridge"
+let testIdentity = Bundle.main.bundleIdentifier == VMOwner.testBridge
 let omacvmSupport = FileManager.default.homeDirectoryForCurrentUser.path
   + (testIdentity ? "/Library/Application Support/omacvm-test" : "/Library/Application Support/omacvm")
 let jobsDir = supportDir + "/jobs"

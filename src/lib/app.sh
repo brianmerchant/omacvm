@@ -14,7 +14,8 @@
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
 #   app_bundle          the installed OmacVM.app (any name it was installed under;
-#                       ~/Applications first, then /Applications)
+#                       the app whose bundled omacvm runs first, then
+#                       ~/Applications, then /Applications)
 #   app_create [--prebuilt] DIR KEY=VALUE...  a new VM in DIR through the app's
 #                       own create script (the password on stdin), as when built
 #                       in the app; --prebuilt: from a prebuilt image
@@ -221,8 +222,15 @@ app_start() {
   app_ip "$1" 60
 }
 
-app_bundle() {   # in ~/Applications, else /Applications, by its bundle id
+app_bundle() {   # the app whose own copy of omacvm runs, else in ~/Applications, else /Applications, by its bundle id
   local a
+  # OmacVM.app's bundled omacvm (and its apply-vm.sh) set OMACVM_APP_RUNTIME
+  # to the app's runtime: that app, wherever it is (another drive, Downloads).
+  if [[ ${OMACVM_APP_RUNTIME:-} == */Contents/Resources/runtime ]]; then
+    a=${OMACVM_APP_RUNTIME%/Contents/Resources/runtime}
+    [[ -f $a/Contents/Resources/scripts/create-vm.sh &&
+       $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == "$APP_BUNDLE_ID" ]] && { echo "$a"; return 0; }
+  fi
   for a in "$HOME"/Applications/*.app /Applications/*.app; do
     [[ -f $a/Contents/Resources/scripts/create-vm.sh ]] || continue
     [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == "$APP_BUNDLE_ID" ]] && { echo "$a"; return 0; }
