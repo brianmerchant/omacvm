@@ -16,8 +16,8 @@ in more words.
   half a second. In the VM, a reinstall of the guest files no longer stops
   the display agent.
 - OmacVM.app's VM window: Resources › Custom… sets CPUs and memory one by
-  one (the limits of `omacvm resources`; a warning when the Mac keeps too
-  little). Disk shows what it takes on the Mac and its max: Grow… makes the
+  one (from 4 GB; macOS always keeps an eighth of the memory, at least
+  2 GB, and a warning shows when it keeps too little). Disk shows what it takes on the Mac and its max: Grow… makes the
   max larger with the VM off, and Omarchy grows into it at the next start;
   Compact… gives the Mac back the space the VM no longer uses (the max
   stays; making it smaller is not offered, it could lose the VM).

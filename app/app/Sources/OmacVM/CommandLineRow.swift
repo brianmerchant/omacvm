@@ -48,6 +48,8 @@ enum TerminalCommand {
     /// Makes the link; nil when it worked, else why not. Looks again first:
     /// never over another omacvm.
     static func install() -> String? {
+        let readOnly = (try? Bundle.main.bundleURL.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly ?? false
+        if let p = CommandLineInstall.placeProblem(appCLI: appCLI, readOnlyVolume: readOnly) { return p }
         guard case .available(let target, let admin) = state() else { return "Nothing to do: look again." }
         let cmd = CommandLineInstall.linkCommand(target: target, appCLI: appCLI)
         let p = Process()

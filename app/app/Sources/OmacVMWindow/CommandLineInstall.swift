@@ -65,6 +65,17 @@ public enum CommandLineInstall {
         return fm.fileExists(atPath: path) ? .other : .none
     }
 
+    /// Why the app's own place is no good to link to, or nil: a copy macOS
+    /// runs from a random temporary folder (App Translocation, the app was
+    /// opened from Downloads) or from the disk image goes away and leaves a
+    /// dead link.
+    public static func placeProblem(appCLI: String, readOnlyVolume: Bool) -> String? {
+        if appCLI.contains("/AppTranslocation/") || readOnlyVolume {
+            return "Move OmacVM to Applications and open it from there first."
+        }
+        return nil
+    }
+
     /// `path` with every link followed; nil when it leads nowhere.
     public static func resolve(_ path: String) -> String? {
         guard let r = realpath(path, nil) else { return nil }

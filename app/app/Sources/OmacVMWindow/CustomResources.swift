@@ -1,9 +1,11 @@
 import Foundation
 
 /// The Custom resources choice in the VM window: the same limits as
-/// `omacvm resources` (src/cmd/resources.sh): 1 CPU up to the Mac's, 4 GB up
-/// to the Mac's memory. Above what the Best tier gives (the Mac keeps
-/// max(8 GB, a quarter) for macOS and the GPU) it warns but allows.
+/// `omacvm resources` (src/cmd/resources.sh) for CPUs (1 up to the Mac's) and
+/// from 4 GB memory, but the window never gives the VM all of the Mac's
+/// memory: macOS keeps max(2 GB, an eighth), or the Mac swaps itself to a
+/// stop. Above what the Best tier gives (the Mac keeps max(8 GB, a quarter)
+/// for macOS and the GPU) it warns but allows.
 public struct ResourceLimits: Equatable {
     public let macCores: Int
     public let macMemoryGB: Int
@@ -14,7 +16,7 @@ public struct ResourceLimits: Equatable {
     }
 
     public var cpus: ClosedRange<Int> { 1...max(1, macCores) }
-    public var memoryGB: ClosedRange<Int> { 4...max(4, macMemoryGB) }
+    public var memoryGB: ClosedRange<Int> { 4...max(4, macMemoryGB - max(2, macMemoryGB / 8)) }
 
     /// The most memory that leaves the Mac enough: the Best tier's.
     public var safeMemoryGB: Int { max(macMemoryGB - max(macMemoryGB / 4, 8), 4) }

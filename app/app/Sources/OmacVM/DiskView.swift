@@ -47,11 +47,16 @@ enum VMDisk {
         if !Mac.run("/usr/sbin/lsof", ["-t", "--", c.disk.path]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw HelperError.io("disk.img is in use (the VM runs?): shut the VM down first.")
         }
+        // The job first: a power cut after the truncate still has the guest
+        // grow into the new end (a grow job on an unchanged disk does nothing).
+        let hadGrow = jobs(c).contains(.grow)
+        try setJobs(jobs(c) + [.grow], c)
         guard truncate(c.disk.path, off_t(newBytes)) == 0 else {
-            throw HelperError.io("Could not grow disk.img: \(String(cString: strerror(errno))).")
+            let why = String(cString: strerror(errno))
+            if !hadGrow, (info(c)?.maxBytes ?? 0) < newBytes { try? setJobs(jobs(c).filter { $0 != .grow }, c) }
+            throw HelperError.io("Could not grow disk.img: \(why).")
         }
         try c.writeEnv(["DISK_GB": "\(newGB)"])
-        try setJobs(jobs(c) + [.grow], c)
     }
 
     static func compact(_ c: VMConfig) throws {
