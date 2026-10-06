@@ -175,7 +175,12 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   signature with the VM's Touch ID key (`touchIDCaller`, relay path) and
   shows the same system dialog as for the other routes; the app passes the
   signed answer back byte for byte. The app checks no signature and holds
-  no Touch ID key. The VM needs no Bridge token for the port.
+  no Touch ID key. The VM needs no Bridge token for the port (apply keeps
+  none there). No 127.0.0.1 fallback as for the control centre: a Bridge
+  with Touch ID always has the relay socket; without it the app logs
+  "OmacVM Bridge does not answer" and the VM gets the password. Requests
+  closer than 0.5 s get status 0; a VM that stops reading its port is
+  dropped after 2 s.
 - Lines, one JSON object each. VM to app: `{"op":"touchid","id":N,
   "auth":"1 T N SIG","proto":1,"body":"<base64>"}` (N the request's nonce),
   then `{"op":"ping","id":N}` every 0.5 s and `{"op":"cancel","id":N}` on

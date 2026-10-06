@@ -292,7 +292,9 @@ fi
 if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
-  gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"
+  # OmacVM.app's VMs ask through the app's port: the app adds the token, the VM keeps none.
+  if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token" < /dev/null
+  else gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"; fi
 else
   if (( NAMED )); then rm -f "$(vm_key_file "$TYPE" "$VM").touchid"; fi
   # On without a key: the VM's PAM line gets 403 and the password comes.

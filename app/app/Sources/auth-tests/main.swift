@@ -132,6 +132,7 @@ func relay(_ fb: FakeBridge, headers h: @escaping () -> [(String, String)]? = he
     let (vm, app) = pair()
     let r = AuthRelay(guest: app, connectBridge: connect ?? { fb.connect() }, headers: h)
     r.pingTimeout = 0.6
+    r.minimumGap = 0
     Thread.detachNewThread { try? r.run() }
     return (vm, r)
 }
@@ -226,6 +227,39 @@ do {
     let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
     expect(o["status"] as? Int == 200 && fb.connects == 1, "relay: junk and a bad line dropped, the good one relayed")
     r.stop(); close(vm)
+}
+
+// A VM that floods: requests closer than the gap get status 0, no Bridge connection.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    Thread.detachNewThread { try? r.run() }
+    send(vm, requestLine())
+    _ = readAll(vm, timeout: 5, untilNewline: true)
+    send(vm, requestLine(id: other))
+    let (got, _) = readAll(vm, timeout: 2, untilNewline: true)
+    let o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
+    expect(o["id"] as? String == other && o["status"] as? Int == 0 && fb.connects == 1, "relay: a request right after another: status 0, not to the Bridge")
+    usleep(600_000)
+    send(vm, requestLine())
+    let (got2, _) = readAll(vm, timeout: 5, untilNewline: true)
+    let o2 = (try? JSONSerialization.jsonObject(with: got2.dropLast())) as? [String: Any] ?? [:]
+    expect(o2["status"] as? Int == 200 && fb.connects == 2, "relay: after the gap, relayed again")
+    r.stop(); close(vm)
+}
+
+// stop() from another thread: run() returns and closes the socket itself.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread { try? r.run(); done.signal() }
+    usleep(100_000)
+    r.stop()
+    expect(done.wait(timeout: .now() + 2) == .success && fcntl(app, F_GETFD) == -1, "relay: stop() ends run(), which closes the socket")
+    close(vm)
 }
 
 // The VM side closes (QEMU quits): run() returns, an open request is dropped.

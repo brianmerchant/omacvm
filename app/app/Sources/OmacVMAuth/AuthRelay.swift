@@ -123,6 +123,9 @@ public final class AuthRelay: @unchecked Sendable {
     public var pingTimeout: TimeInterval = 3
     /// The Bridge's dialog waits 30 s; the client gives up at 40 s.
     public var answerTimeout: TimeInterval = 45
+    /// Requests closer than this are refused (status 0).
+    public var minimumGap: TimeInterval = 0.5
+    private var lastRequest: Date?   // the read thread's alone
     private let lock = NSLock()
     private var current: (id: String, fd: Int32, lastPing: Date, cancelled: Bool)?
     private let writeLock = NSLock()
@@ -135,16 +138,19 @@ public final class AuthRelay: @unchecked Sendable {
     public init(guest: Int32, connectBridge: @escaping () -> Int32?, headers: @escaping () -> [(String, String)]?,
                 log: @escaping (String) -> Void = { _ in }) {
         self.guest = guest
+        // A guest that stops reading never holds a write for long (it is dropped).
+        var tv = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(guest, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         self.connectBridge = connectBridge
         self.headers = headers
         self.log = log
     }
 
-    /// Reads the VM's lines until the port's socket closes.
+    /// Reads the VM's lines until the port's socket closes (or stop()), then closes it.
     public func run() throws {
         var line = Data(), skipping = false
         var chunk = [UInt8](repeating: 0, count: 4096)
-        defer { drop(nil) }
+        defer { drop(nil); closeGuest() }
         while true {
             let count = chunk.withUnsafeMutableBytes { Darwin.read(guest, $0.baseAddress, $0.count) }
             if count > 0 {
@@ -177,9 +183,13 @@ public final class AuthRelay: @unchecked Sendable {
         stopped = true
         lock.unlock()
         drop(nil)
+        Darwin.shutdown(guest, SHUT_RDWR)   // run() sees the end and closes it
+    }
+
+    private func closeGuest() {
         writeLock.lock(); defer { writeLock.unlock() }
+        guard !closed else { return }
         closed = true
-        Darwin.shutdown(guest, SHUT_RDWR)
         Darwin.close(guest)
     }
 
@@ -200,6 +210,13 @@ public final class AuthRelay: @unchecked Sendable {
         case .cancel(let id):
             drop(id)
         case .request(let r):
+            // A VM that floods gets status 0 (the password) for requests closer
+            // than minimumGap; the Bridge's own limits come after.
+            let now = Date()
+            if let last = lastRequest, now.timeIntervalSince(last) < minimumGap {
+                return answer(r.id, nil, note: "Touch ID: requests too close together, refused")
+            }
+            lastRequest = now
             drop(nil)   // one opener at a time: the client of the old one is gone
             guard let h = headers() else {
                 return answer(r.id, nil, note: "OmacVM Bridge is not set up on this Mac (or is older)")
@@ -218,13 +235,17 @@ public final class AuthRelay: @unchecked Sendable {
         writeLock.lock(); defer { writeLock.unlock() }
         guard !closed else { return }
         let d = Self.answerLine(id: id, a)
-        _ = d.withUnsafeBytes { b -> Bool in
+        let wrote = d.withUnsafeBytes { b -> Bool in
             var off = 0
             while off < b.count {
                 let n = Darwin.write(guest, b.baseAddress!.advanced(by: off), b.count - off)
                 if n > 0 { off += n } else if n < 0 && errno == EINTR { continue } else { return false }
             }
             return true
+        }
+        if !wrote {   // timed out or failed: the guest does not read, it is dropped
+            log("Touch ID: the VM does not read its port, dropped")
+            Darwin.shutdown(guest, SHUT_RDWR)
         }
     }
 
