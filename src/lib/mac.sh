@@ -52,6 +52,21 @@ cli_for_bridge() {
   (( ! links ))
 }
 
+# cli_file_app OMACVM: OmacVM.app's copy of omacvm (OMACVM, inside the app)
+# becomes what the Bridge runs, unless the file names a checkout that is still
+# there (a CLI install keeps its own). So the app's setup, and each app start
+# (app/app/Sources/OmacVM/ControlCLI.swift, the same rule), point it at the
+# current app after an update or a move.
+cli_file_app() {
+  local f="$OMA_SUPPORT/cli" cur
+  [[ $1 == /*/Contents/Resources/omacvm/omacvm && -f $1 ]] || return 0
+  cur=$(head -n1 "$f" 2>/dev/null || true)
+  [[ $cur == "$1" ]] && return 0
+  if [[ -n $cur && -f $cur && $cur != */Contents/Resources/omacvm/omacvm ]]; then return 0; fi
+  mkdir -p "$OMA_SUPPORT"
+  (umask 077; printf '%s\n' "$1" > "$f.new" && mv -f "$f.new" "$f")
+}
+
 PRLCTL=${PRLCTL:-/usr/local/bin/prlctl}   # tests: a stand-in
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 

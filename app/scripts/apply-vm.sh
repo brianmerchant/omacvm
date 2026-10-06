@@ -33,6 +33,12 @@ if [[ -d $HERE/../../Helpers ]]; then
   OMACVM_HELPERS=$(cd "$HERE/../../Helpers" && pwd)
   export OMACVM_HELPERS
 fi
+# The app's complete omacvm (Contents/Resources/omacvm): what the Bridge runs
+# for the control centre's Mac jobs when there is no checkout (apply.sh).
+if [[ -x $HERE/../omacvm/omacvm ]]; then
+  OMACVM_APP_CLI=$(cd "$HERE/../omacvm" && pwd)/omacvm
+  export OMACVM_APP_CLI
+fi
 # This app's runtime: whether it has KosmicKrisp decides Graphics' Automatic
 # (src/lib/graphics.sh).
 for rt in "$HERE/../runtime/.build/qemu-gpu-runtime" "$HERE/../runtime"; do   # a dev tree, the app
