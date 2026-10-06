@@ -48,6 +48,16 @@ static int notch_place(NotchRect screen, double lh, const NotchRect *others, int
     return 1;
 }
 
+// The screen sits right beside NOTCH, level with it: Hyprland put it there
+// by itself (its place is "auto", e.g. right after the first login's config
+// reload, before omacvm-display-sync placed it again). Moving NOTCH after it
+// would move the screen on again, every 2 s, without end (Air, 2026-10-06).
+// screen and notch in logical px.
+static int notch_screen_pushed(NotchRect screen, NotchRect notch) {
+    double dx = screen.x - (notch.x + notch.w), dy = notch.y + notch.h - screen.y;
+    return dx > -1 && dx < 1 && dy > -1 && dy < 1;
+}
+
 // The enabled outputs of a `j/monitors all` reply but `skip_a` and `skip_b`,
 // in logical px (width / scale; a transform of 90/270 swaps them). Returns
 // how many (at most `max`).

@@ -57,6 +57,19 @@ int main(void) {
     up = notch_place(alone, 32, &beside, 1, 1, &x, &y);
     CHECK(up == 1, "a display beside the screen does not block the place above");
 
+    // The first-login loop (Air, 2026-10-06): NOTCH right above Virtual-1,
+    // then a config reload put Virtual-1 ("auto") right beside NOTCH.
+    NotchRect air_notch = {0, -33, 1470, 33}, air_v1 = {1470, 0, 1470, 919};
+    CHECK(notch_screen_pushed(air_v1, air_notch), "screen pushed right of NOTCH: seen (do not follow it)");
+    NotchRect air_notch2 = {23520, -33, 1470, 33}, air_v1b = {24990, 0, 1470, 919};
+    CHECK(notch_screen_pushed(air_v1b, air_notch2), "the same far to the right: seen");
+    NotchRect air_v1_ok = {0, 0, 1470, 919};
+    CHECK(!notch_screen_pushed(air_v1_ok, air_notch), "NOTCH right above the screen: normal");
+    NotchRect v2_beside = {1470, 100, 1920, 1080};
+    CHECK(!notch_screen_pushed(v2_beside, air_notch), "a display beside, lower down: not this case");
+    NotchRect scaled_v1 = {1470.4, 0, 1470, 919};
+    CHECK(notch_screen_pushed(scaled_v1, air_notch), "scaled sizes: half a px off still counts");
+
     // Cursor masking (Air layout: Virtual-1 at 0x0, NOTCH 1470x33 at 0x-33).
     NotchRect strip = {0, -33, 1470, 33};
     CHECK(notch_cursor_masked(strip, 700, -10, 0), "cursor on NOTCH, shown: masked");
