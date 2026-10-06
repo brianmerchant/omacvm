@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // A restart-update shut a VM down for this version (or the old one
         // came back): start it again, once.
-        let again = args.contains("--update-now") ? nil : u.takeRestartVM()
+        let again = args.contains("--update-now") ? nil : u.takeRestartVM(afterSwap: args.contains("--update-check"))
         let starting = again != nil || (state.config.isReady && args.contains("--start"))
         Updater.shared.start(pending: args.contains("--update-now") || args.contains("--update-check") ? .leave
                              : starting ? .waitUntilIdle : .installNow)
@@ -254,6 +254,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startVM() {
+        // Start in the window while an update with a VM restart waits: it stops.
+        Updater.shared.vmStarting()
         reloadConfig()
         if state.storage.moving != nil {
             state.message = "A VM is being moved; start once that is done."

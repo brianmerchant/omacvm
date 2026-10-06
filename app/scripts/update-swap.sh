@@ -119,7 +119,7 @@ log "swapped $OLD_V -> $NEW_V, starting it"
 # The result goes first: the new app reads it right after its check, while
 # this script may not have seen the marker yet. A failure overwrites it.
 if [[ $MODE == install ]]; then result "installed $OLD_V $NEW_V"; else result "went-back $OLD_V"; fi
-rm -f "$MARKER"
+rm -f "$MARKER" "$HOME_DIR/restart-vm.taken"
 why="no answer within ${WAIT} s"
 CHECK=(--update-check "$TOKEN")
 (( QUIET )) && CHECK+=(--update-quiet)
@@ -158,6 +158,10 @@ fi
 "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
 keep_old
 rm -rf "$FAILED" "$WORK_DIR/incoming"
+# An update with a VM restart: the new app may have taken the VM to start
+# before it was stopped (its copy restart-vm.taken, from this launch: the
+# old one was removed before it). The old app starts the VM instead.
+[[ -f $HOME_DIR/restart-vm.taken && ! -e $HOME_DIR/restart-vm ]] && mv "$HOME_DIR/restart-vm.taken" "$HOME_DIR/restart-vm"
 result "rolled-back $NEW_V $why"
 reopen
 exit 1

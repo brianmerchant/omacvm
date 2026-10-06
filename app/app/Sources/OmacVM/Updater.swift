@@ -695,6 +695,7 @@ final class Updater: ObservableObject {
     /// A restart-update runs (from the check to the swap).
     @Published private(set) var restarting = false
     private var restartTimer: Timer?
+    private var restartPolls = 0
 
     /// Checks (as by hand: the signed feed, the download, the Developer ID)
     /// and, when an update is ready, notes the VM to start again. The VM is
@@ -816,8 +817,21 @@ final class Updater: ObservableObject {
         restartTimer = nil
         log("restart-update: the VM has ended, installing")
         install(quit: true, quiet: false)
-        // Swapping, or waiting a moment for QEMU's process to go (idle timer).
-        if swapping || installWhenIdle { return true }
+        if swapping { return true }
+        // QEMU's process takes a moment to go: look each second for a minute
+        // (the idle timer's 30 s after that).
+        if installWhenIdle {
+            restartPolls = 0
+            restartTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
+                MainActor.assumeIsolated {
+                    guard let self, self.restarting, self.installWhenIdle else { t.invalidate(); return }
+                    self.restartPolls += 1
+                    if self.busyNow == nil { t.invalidate(); self.install(quit: true, quiet: false) }
+                    else if self.restartPolls >= 60 { t.invalidate() }
+                }
+            }
+            return true
+        }
         // Nothing swapped (the notice says why): the VM comes back at once.
         let folder = state("restart-vm").flatMap(RestartVM.parse)?.folder
         cancelRestart("the install did not start")
@@ -825,11 +839,32 @@ final class Updater: ObservableObject {
         return true
     }
 
+    /// A VM starts from this launcher while a restart-update waits for the
+    /// old QEMU to go (Start in the window): the update stops, so it never
+    /// goes in at that VM's next shutdown by surprise.
+    func vmStarting() {
+        guard restarting else { return }
+        stopWaiting()
+        cancelRestart("the VM was started again before the update went in")
+        notice = "The update stopped: the VM was started again. Check Now updates later."
+    }
+
     /// At launch: the VM a restart-update shut down, to start once (only when
-    /// fresh: a late or stray launch never starts a VM by surprise).
-    func takeRestartVM() -> URL? {
+    /// fresh: a late or stray launch never starts a VM by surprise). After a
+    /// swap (afterSwap) a copy stays as restart-vm.taken for 2 minutes: if
+    /// update-swap.sh still puts the old version back (its launch check gave
+    /// up just before this app answered), it moves the copy back and the old
+    /// version starts the VM.
+    func takeRestartVM(afterSwap: Bool = false) -> URL? {
+        if !afterSwap { setState("restart-vm.taken", nil) }
         guard let text = state("restart-vm") else { return nil }
         setState("restart-vm", nil)
+        if afterSwap {
+            setState("restart-vm.taken", text)
+            Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setState("restart-vm.taken", nil) }
+            }
+        }
         guard let r = RestartVM.parse(text), r.fresh(now: Date()) else {
             log("restart-vm: old or unreadable, the VM is not started")
             return nil
