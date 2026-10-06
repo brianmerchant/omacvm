@@ -93,6 +93,9 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: The control centre opened from the Mac (the VM's script, a made-up Hyprland)
+        run: src/tests/cc-open.sh
+
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null
 
