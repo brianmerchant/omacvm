@@ -762,6 +762,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-hw-cursor.pat
 "$native_dir/Tests/display/test-hw-cursor.sh"
 grep -q 'omacvm_hwc_take(0, qemu_console_get_cursor(dcl->con), cocoaView,' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not hand the guest's pointer image to the Mac's cursor (hw-cursor patch)"
+# While input comes, the newest frame goes on screen (input latency).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-input-first.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

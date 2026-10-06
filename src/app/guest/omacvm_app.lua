@@ -14,7 +14,11 @@ local function mac_pointer()
   f:close()
   return on
 end
-hl.config({ cursor = { no_hardware_cursors = mac_pointer() and 0 or 1 } })
+local mac = mac_pointer()
+hl.config({ cursor = { no_hardware_cursors = mac and 0 or 1 } })
+-- The cursor plane from a CPU buffer (a dumb buffer: virtio-gpu copies it to
+-- the Mac with the plane update); pcall: an older Hyprland lacks the option.
+if mac then pcall(hl.config, { cursor = { use_cpu_buffer = 1 } }) end
 -- A config reload brings back the cached mode; apply the window's again.
 hl.on("config.reloaded", function()
   hl.exec_cmd("/usr/local/bin/omacvm-display-sync --once")

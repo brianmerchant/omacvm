@@ -7,7 +7,7 @@
 # ScreenCaptureKit. QEMU's trace (-msg timestamp=on) splits each event into
 # Mac -> QEMU input, QEMU input -> the guest's next flush, flush -> screen.
 #   src/tests/input-latency-vm.sh --runtime DIR --vm DIR --ssh-port PORT [--hz 60|120]
-#        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--native] [--out DIR]
+#        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--native] [--pause S] [--out DIR]
 # MODES (default all; spaces or commas): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
 # no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP).
 # DIR (vm): a COPY of an OmacVM.app VM made by omacvm apply (disk.img,
@@ -21,7 +21,7 @@
 # the breakdown (breakdown.json).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0; NATIVE=0
+RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0; NATIVE=0; PAUSE=0
 FW=$R/app/runtime/.build/firmware/edk2-aarch64-code.fd
 QENV=()
 while (( $# )); do
@@ -36,6 +36,7 @@ while (( $# )); do
     --env) QENV+=("$2"); shift 2 ;;
     --hw-cursor) HWC=1; shift ;;
     --native) NATIVE=1; shift ;;
+    --pause) PAUSE=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
     *) sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
@@ -96,7 +97,7 @@ if ((NATIVE)); then
   "$W/nativelat" "$VD" 60 > "$W/native.out" 2>&1 &
   NPID=$!
   sleep 2
-  for m in key pointer; do
+  for m in key pointer keymove; do
     "$W/inputlat" "$NPID" "$m" "$COUNT" "$OUT/native-$m.jsonl" | sed 's/^{/{"app":"native",/' | tee "$OUT/native-$m.summary"
   done
   kill "$NPID" 2>/dev/null
@@ -177,6 +178,8 @@ echo "guest: $(hc -j clients | python3 -c 'import json,sys; print([c["class"] fo
 echo "guest: no_hardware_cursors $(hc getoption cursor:no_hardware_cursors 2>/dev/null | head -1)"
 GUEST
 sleep 2
+# --pause: S seconds with the VM up before the runs (to look at it by hand).
+[[ $PAUSE =~ ^[0-9]+$ ]] && (( PAUSE > 0 )) && { echo "paused $PAUSE s (ssh port $PORT)"; sleep "$PAUSE"; }
 
 for m in $MODES; do
   case $m in
