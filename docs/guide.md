@@ -204,6 +204,12 @@ and an update is installed only right after `c` checked again. (Releases do
 not carry their signed update list yet: until then the control centre says
 "no release key yet" and `omacvm update` on the Mac is the way.)
 
+The VM's own system (Omarchy and its Arch packages) is a separate update:
+`o` on the same screen, or `omacvm update-system` in the VM. It runs
+`omarchy update` in its own window and then checks that the graphics still
+start, before you restart. Do not run `pacman -Sy` alone: a partial update
+can leave the VM at a black screen.
+
 ## Check
 
 ```bash
