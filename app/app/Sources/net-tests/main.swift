@@ -85,5 +85,15 @@ expect(w.poll(true) == .none, "then nothing")
 w = W()
 expect(run(&w, back + back).allSatisfy { $0 == .none }, "vmnet from the start: no steps")
 
+// The features file the Fast network button switches (FeaturesRecord).
+let rec = "bridge=on autologin=off fast-network=off vulkan=off\n"
+expect(FeaturesRecord.set(rec, "fast-network", on: true) == "bridge=on autologin=off fast-network=on vulkan=off\n",
+       "record: fast-network on, the rest as it was")
+expect(FeaturesRecord.set(rec, "fast-network", on: false) == rec, "record: off again is the same text")
+expect(FeaturesRecord.set("bridge=on\n", "fast-network", on: true) == "bridge=on fast-network=on\n",
+       "record: a fast-network the record does not name is added")
+expect(FeaturesRecord.set("bridge=on fast-network-x=on\n", "fast-network", on: true) == "bridge=on fast-network-x=on fast-network=on\n",
+       "record: only that name, not one that starts with it")
+
 if failures > 0 { print("\(failures) failed"); exit(1) }
 print("all passed")
