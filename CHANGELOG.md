@@ -28,6 +28,8 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- Control centre: a Magic Mouse swipe row (3 or 4 fingers) while the Mac
+  has a Magic Mouse, on every route.
 
 ## 3.0.0
 
