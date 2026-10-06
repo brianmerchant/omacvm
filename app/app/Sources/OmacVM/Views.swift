@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Combine
+import OmacVMFeatures
 import SwiftUI
 import OmacVMBuildProgress
 
@@ -18,22 +19,14 @@ final class AppState: ObservableObject {
     @Published var screen: Screen = .setup
     @Published var config: VMConfig
     @Published var message: String?
-    /// This Mac's built-in display has a notch right now (follows displays
-    /// being plugged in, the lid and resolution changes).
-    @Published var hasNotch = Mac.hasNotch
     let creator = Creator()
     let storage = StorageModel()
     var startVM: () -> Void = {}
-    private var screensObserver: NSObjectProtocol?
 
     init() {
         (config, screen) = Self.start()
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
-        screensObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hasNotch = Mac.hasNotch }
-        }
         storage.onMoved = { [weak self] in self?.reload() }
         // The views read the storage through this state too (Start waits for a move).
         storageChanges = storage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
@@ -106,6 +99,7 @@ struct SetupView: View {
     @State private var prebuilt = PrebuiltImage.Lookup.checking
     @State private var usePrebuilt = true
     @State private var graphics = GraphicsChoice.auto
+    @StateObject private var mouse = MagicMouseWatch()
 
     private var userOK: Bool {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
@@ -163,6 +157,7 @@ struct SetupView: View {
                 }
                 Toggle("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar", isOn: $bridge)
                 Toggle("Trackpad gestures in full screen", isOn: $gestures)
+                if gestures && mouse.connected { MagicMouseRow() }
                 Toggle("Log in automatically (the Mac's own lock protects Omarchy)", isOn: $autologin)
                 GraphicsPicker(choice: $graphics)
                 Picker("Disk", selection: $state.config.diskGB) {
@@ -208,9 +203,10 @@ struct SetupView: View {
         state.config.memoryMB = t.memoryGB * 1024
         state.config.sshPort = Mac.freePort(from: 52222)
         state.config.hostname = "omarchy"
-        let on = { (b: Bool) in b ? "on" : "off" }
-        // Omanotch off for now: see VMConfig.features.
-        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=\(on(gestures)) omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) chromium-video=on idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        // Omanotch on with a notch: full screen sits below the camera and
+        // Omanotch fills the strip beside it.
+        state.config.features = NewVMFeatures.string(bridge: bridge, gestures: gestures, autologin: autologin,
+                                                     hasBattery: Mac.hasBattery, hasNotch: Mac.hasNotch)
         locationProblem = nil
         // A new VM goes into the VMs folder as it is now, under its name; the
         // folder is kept (a default that changes later must not hide the VM).
@@ -348,36 +344,12 @@ struct BuildLogView: View {
     }
 }
 
-extension ReadyView {
-    /// Moves the VM's folder to the Trash after a plain confirmation.
-    func deleteVM() {
-        let alert = NSAlert()
-        alert.messageText = "Delete \(state.config.name)?"
-        alert.informativeText = "The VM's disk and everything in Omarchy goes to the Trash."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Delete")
-        alert.buttons[1].hasDestructiveAction = true
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-        guard state.config.folderIsSafe else {
-            state.message = "Not deleted: \(state.config.folder.path) is not a VM folder of this app."
-            return
-        }
-        do {
-            try FileManager.default.trashItem(at: state.config.folder, resultingItemURL: nil)
-            state.config.location = nil
-            state.reload()
-        } catch {
-            state.message = "Could not delete: \(error.localizedDescription)"
-        }
-    }
-}
-
 struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
-    @State private var notch = Settings.useNotch
     @State private var keepDockAway = Settings.keepDockAway
     @State private var escape = EscapeSetting.current()
+    @StateObject private var mouse = MagicMouseWatch()
     @State private var resourcesNote: String?
     @State private var fastNetOn = false
     @State private var fastNetBusy = false
@@ -450,11 +422,8 @@ struct ReadyView: View {
             }
             .help("In a full-screen VM, Control-Option-Esc moves the monitor under the pointer (or all monitors) to the Space beside the VM's with macOS's own animation; the VM stays full screen. Pressed in macOS, it goes back into the VM. The keyboard follows the pointer's monitor.")
             .onChange(of: escape) { _, v in EscapeSetting.set(v) }
-            if state.hasNotch {
-                Toggle("Use the notch for the menu bar", isOn: $notch)
-                    .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
-                    .onChange(of: notch) { _, v in Settings.useNotch = v }
-            }
+            if mouse.connected { MagicMouseRow(inForm: false) }
+            keyAccess
             GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
                 .onChange(of: graphics) { _, v in setGraphics(v) }
             if let n = graphicsNote {
@@ -463,7 +432,7 @@ struct ReadyView: View {
             fastNetwork
             USBSection(folder: state.config.folder)
             Divider()
-            StorageSection(storage: state.storage)
+            StorageSection(storage: state.storage, selected: state.config.location == nil ? nil : state.config.folder)
             Divider()
             if let m = state.message { Text(m).foregroundStyle(.red) }
             if let p = state.config.filesProblem {
@@ -471,7 +440,7 @@ struct ReadyView: View {
             }
             UpdateSection(updater: Updater.shared)
             HStack {
-                Button("Delete…") { deleteVM() }
+                Button("Delete…") { state.storage.delete(state.config) }
                     .disabled(state.storage.moving != nil)
                 Spacer()
                 Button("Start") { state.startVM() }
@@ -481,6 +450,24 @@ struct ReadyView: View {
         }
         .onAppear { refreshFastNetwork(); graphics = Graphics.read(folder: state.config.folder) }
         .onChange(of: state.config) { _, c in refreshFastNetwork(); graphics = Graphics.read(folder: c.folder); graphicsNote = nil }
+    }
+
+    /// Shown only when the VM's keyboard tap is refused (KeyAccess); checked
+    /// again every few seconds, so it goes once OmacVM is allowed.
+    private var keyAccess: some View {
+        TimelineView(.periodic(from: .now, by: 3)) { _ in
+            if KeyAccess.needsUser(folder: state.config.folder) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Keyboard: OmacVM is not allowed to read it").foregroundStyle(.red)
+                        Spacer()
+                        Button("Allow…") { KeyAccess.request() }
+                    }
+                    Text(KeyAccess.missingText).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private func setGraphics(_ g: GraphicsChoice) {

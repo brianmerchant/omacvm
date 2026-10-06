@@ -175,6 +175,37 @@ BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "
 FAST_NET=$(feat fast_network off)
 if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then [[ -s $d/fast-network ]] && FAST_NET=on || FAST_NET=off; fi
 
+# OmacVM's record of the features against the VM as it is (src/lib/features.sh):
+# what was switched outside OmacVM (the app's Fast network button, an SDDM
+# autologin file OmacVM did not write) keeps its real state, and the record
+# is fixed to match; an OmacVM.app VM's record (its features file) and the
+# VM's copy (/etc/omacvm/env) should say the same.
+probe=$(vm_probe "$IP")
+if [[ -n $(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe") ]]; then
+  features_load
+  rd=""; [[ $TYPE == app && -n ${VM:-} ]] && { rd=$(app_dir "$VM" 2>/dev/null) || rd=""; }
+  features_read_env "$probe"; COPY=("${FV[@]}")
+  features_read_record "$rd"; REC=("${FV[@]}")
+  features_real "$probe" "$rd"
+  if [[ -n ${DRIFT[*]+x} ]]; then
+    if features_record_fix "$IP" "$rd"; then fx="fixed the record"; else fx="could not fix the VM's copy (/etc/omacvm/env)"; fi
+    for d in "${DRIFT[@]}"; do
+      FEATURE=${d%%$'\t'*}
+      if [[ $fx == fixed* ]]; then ok "record" "$(DRIFT=("$d"); features_drift_lines "$fx")"
+      else warn "record" "$(DRIFT=("$d"); features_drift_lines "$fx")"; fi
+    done
+    COPY=("${FV[@]}"); REC=("${FV[@]}")
+  fi
+  if [[ -n $rd && -f $rd/features ]]; then
+    for ((i = 0; i < ${#FN[@]}; i++)); do
+      [[ ${REC[$i]} == "${COPY[$i]}" ]] && continue
+      FEATURE=${FN[$i]}
+      warn "record" "${FTITLE[$i]}: ${REC[$i]} in OmacVM's record (the VM's features file), ${COPY[$i]} in the VM's copy: omacvm apply --vm \"$VM\" brings them together"
+    done
+  fi
+  FEATURE=""
+fi
+
 FEATURE=fast-network
 # OmacVM.app's fast network: the service on the Mac, and which network this
 # start of the VM took (the app writes it to logs/network).
@@ -244,8 +275,10 @@ if [[ $BRIDGE == on ]]; then
   m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
   if [[ $(jq -r '.capture_keys == false' "$OMA_BRIDGE_SUPPORT/config.json" 2>/dev/null) == true ]]; then
     skip "media keys" "off: macOS keeps them (capture_keys false in config.json)"
-  elif [[ $m == *installed* ]]; then ok "media keys" "event tap installed"
-  else bad "media keys" "${m:-no event tap yet}"; fi
+  else
+    IFS=$'\t' read -r st d <<<"$(media_keys_state "$m")"
+    case $st in ok) ok "media keys" "$d" ;; warn) warn "media keys" "$d" ;; *) bad "media keys" "$d" ;; esac
+  fi
   # The Bridge says which permissions it has (at start and on each change).
   pm=$(last_line "$BRIDGE_LOG" 'omacvm-bridge: permissions: ')
   case $pm in
@@ -392,6 +425,11 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     warn "macOS shortcuts" "some stay with macOS: macOS refused to switch them off (logs/qemu.log)"
   elif grep -q 'macOS shortcuts off' "$miclog"; then
     ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥ Esc is macOS's)"
+  fi
+  # QEMU's keyboard tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to the VM) needs Input Monitoring
+  # or Accessibility for OmacVM; without it QEMU says so once at the start.
+  if grep -q 'Could not create event tap' "$miclog"; then
+    warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security: OmacVM on under Input Monitoring and Accessibility (on already: remove it with − and add it again), then restart the VM"
   fi
 fi
 # Sound on a busy Mac: QEMU's main loop (the sound card's timers) at
@@ -577,12 +615,11 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
 fi
 FEATURE=""
 if [[ $TYPE == app ]]; then
-  # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
-  # (Omanotch then leaves the strip alone).
-  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 1)
+  # OmacVM.app's full screen is macOS's own, in its own Space, below the notch;
+  # Omanotch fills the strip beside it.
   if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
-  elif [[ $n == 1 ]]; then skip "notch strip (app)" "on: Omarchy's bar beside the notch (full screen has no Space of its own)"
-  else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
+  elif [[ $(feat omanotch off) == on ]]; then skip "notch strip (app)" "full screen in its own Space; Omanotch fills the strip"
+  else skip "notch strip (app)" "full screen in its own Space; the strip stays black (Omanotch is off for this VM: omacvm enable omanotch)"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
 if (( MAC_ONLY )); then

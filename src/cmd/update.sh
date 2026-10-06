@@ -36,7 +36,14 @@ OMA_STEPS=$(( ${#COMMIT} ? 3 : 2 ))
 
 # ---------- this checkout ----------
 [[ -n $COMMIT ]] && step release "the release"
-if [[ -n $COMMIT && $(git -C "$R" rev-parse HEAD) != "$COMMIT" ]]; then
+# OmacVM.app's copy (no checkout; COMMIT from build-app.sh): the app updates
+# itself, and this copy with it.
+if [[ ! -e $R/.git && -f $R/COMMIT ]]; then
+  if [[ -n $COMMIT && $(cat "$R/COMMIT") != "$COMMIT" ]]; then
+    failed_part "" "OmacVM.app is older than this release" mac
+    die "this Mac's OmacVM is OmacVM.app's own: update OmacVM.app (OmacVM › Check for Updates…), then the VM gets it"
+  fi
+elif [[ -n $COMMIT && $(git -C "$R" rev-parse HEAD) != "$COMMIT" ]]; then
   [[ -z $(git -C "$R" status --porcelain --untracked-files=no) ]] || die "this checkout has local changes: not moved to the release ($R)"
   log "OmacVM: the release (${COMMIT:0:12})"
   git -C "$R" fetch -q origin || die "git fetch failed in $R"

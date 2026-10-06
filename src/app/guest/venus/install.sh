@@ -18,6 +18,8 @@
 # ./install.sh --remove undoes all of it.
 set -euo pipefail
 cd "$(dirname "$0")"
+# Packages only through guest/pkg-add: never an update of one the VM has.
+PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../../guest/pkg-add}
 MESA_VERSION=26.2.4
 MESA_SHA256=bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9
 PREFIX=/opt/omacvm-mesa
@@ -56,7 +58,7 @@ case ${1:-} in
 esac
 
 # The loader and the tools omacvm check uses (small; also when Mesa is built).
-pacman -S --needed --noconfirm vulkan-icd-loader vulkan-tools ocl-icd clinfo >/dev/null 2>&1 ||
+"$PKG_ADD" vulkan-icd-loader vulkan-tools ocl-icd clinfo ||
   echo "OmacVM Venus extras: vulkan-tools/clinfo not installed (omacvm check cannot test Vulkan)"
 # Rusticl and Zink link the distro's LLVM: a new LLVM major version (an Arch
 # update) needs a rebuild, which the next omacvm apply does.
@@ -66,8 +68,8 @@ if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
   # What the built Mesa links stays; build tools this VM lacks (on a stock
   # Omarchy: Rust, meson, ninja, bindgen) come for the build and go after it.
   # A rebuild (an LLVM update) downloads them again.
-  pacman -S --needed --noconfirm spirv-tools spirv-llvm-translator llvm-libs clang libclc \
-    libdrm wayland libx11 libxext libxrandr libxshmfence libxxf86vm ocl-icd zstd expat >/dev/null 2>&1 ||
+  "$PKG_ADD" spirv-tools spirv-llvm-translator llvm-libs clang libclc \
+    libdrm wayland libx11 libxext libxrandr libxshmfence libxxf86vm ocl-icd zstd expat ||
     { echo "OmacVM Venus extras: pacman could not install Mesa's libraries"; exit 1; }
   BUILD_TOOLS=$(pacman -T meson ninja pkgconf python-mako python-yaml python-packaging glslang \
     wayland-protocols llvm rust rust-bindgen cbindgen || true)
@@ -77,7 +79,7 @@ if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
     echo "OmacVM Venus extras: build tools left installed (pacman -Rns did not take them all)"' EXIT
   if [[ -n $BUILD_TOOLS ]]; then
     # shellcheck disable=SC2086
-    pacman -S --needed --noconfirm --asdeps $BUILD_TOOLS >/dev/null 2>&1 ||
+    "$PKG_ADD" --asdeps $BUILD_TOOLS ||
       { echo "OmacVM Venus extras: pacman could not install Mesa's build tools"; exit 1; }
   fi
   rm -rf "$B"; mkdir -p "$B"

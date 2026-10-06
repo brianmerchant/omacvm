@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMBuildProgress"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFeatures", "OmacVMBuildProgress"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -21,6 +21,10 @@ let package = Package(
         // choice and QEMU's arguments, without a VM: `swift run usb-tests`.
         .target(name: "OmacVMUSB"),
         .executableTarget(name: "usb-tests", dependencies: ["OmacVMUSB"]),
+        // The features a new VM starts with (Omanotch on with a notch):
+        // `swift run features-tests`.
+        .target(name: "OmacVMFeatures"),
+        .executableTarget(name: "features-tests", dependencies: ["OmacVMFeatures"]),
         // The build window's progress lines, speed, time left and log tail,
         // without a VM: `swift run build-progress-tests`.
         .target(name: "OmacVMBuildProgress"),

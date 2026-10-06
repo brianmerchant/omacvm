@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OmacVMFeatures
 
 enum HelperError: LocalizedError, Equatable {
     case io(String)
@@ -53,7 +54,7 @@ enum Paths {
         return roots
     }
 
-    /// OmacVM.app's downloads (try-omarchy, prebuilt VMs); "Clear Downloads" empties it.
+    /// The Omarchy images OmacVM.app downloaded to set up VMs (try-omarchy, prebuilt VMs); Storage > Downloaded images > Remove empties it.
     static let downloads = VMsFolder.home.appendingPathComponent("Library/Caches/omacvm")
 
     /// The app's resources: Contents/Resources in the app, the source tree when
@@ -116,9 +117,10 @@ struct VMConfig: Equatable {
     var timeZone = "UTC"
     var language = "en_US.UTF-8"
     var keyboard = "us"
-    // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
-    // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on chromium-video=on idle-lock=on autologin=off thp-kernel=off"
+    // A new VM gets its own from the setup screen (SetupView). This one is
+    // for a vm.env without FEATURES: no screens asked here (VMConfig is
+    // also made off the main thread), so Omanotch only with a notch then.
+    var features = NewVMFeatures.string(hasBattery: Mac.hasBattery, hasNotch: false)
 
     /// The folder of a VM that exists (it may be in an older VMs folder);
     /// nil for a new one, which goes into the VMs folder under its name.
@@ -444,16 +446,6 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// "Use the notch for the menu bar" (see NotchSetting): on unless the
-    /// user switched it off.
-    static var useNotch: Bool {
-        get { NotchSetting.choice(stored: UserDefaults.standard.object(forKey: NotchSetting.key)) }
-        set { UserDefaults.standard.set(newValue, forKey: NotchSetting.key) }
-    }
-    /// What a VM start gets: off on a Mac without a notch.
-    static var notchActive: Bool {
-        NotchSetting.active(choice: useNotch, hasNotch: Mac.hasNotch)
-    }
     /// Full screen hides the Dock and the menu bar on every display and keeps
     /// the Mac's cursor off the screen corners and the Dock's edge, so neither
     /// the Dock nor a hot corner comes up from inside the VM (QEMU's
@@ -465,17 +457,17 @@ enum Settings {
 }
 
 extension Mac {
-    /// The built-in display, when it has a camera notch. Asked at run time
-    /// from the display itself (no model list); nil with the lid closed, on a
-    /// Mac without a notch, or at a resolution that ends below the notch.
-    static var notchScreen: NSScreen? {
-        NSScreen.screens.first { s in
+    /// The built-in display has a camera notch. Asked at run time from the
+    /// display itself (no model list); false with the lid closed, on a Mac
+    /// without a notch, or at a resolution that ends below the notch.
+    /// Main thread (NSScreen).
+    static var hasNotch: Bool {
+        NSScreen.screens.contains { s in
             guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
                   CGDisplayIsBuiltin(id) != 0 else { return false }
             return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
         }
     }
-    static var hasNotch: Bool { notchScreen != nil }
 
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs
