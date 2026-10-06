@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.0 (unreleased)
+## 3.0.0
 
 In short: OmacVM.app updates itself, the control centre in Omarchy (a
 floating window, also on a Mac with only the app), a prebuilt VM for the
