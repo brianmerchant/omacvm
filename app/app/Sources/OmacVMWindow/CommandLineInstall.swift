@@ -56,6 +56,27 @@ public enum CommandLineInstall {
         }
     }
 
+    /// What `path` holds on disk.
+    public static func entry(_ path: String) -> Entry {
+        let fm = FileManager.default
+        if let to = try? fm.destinationOfSymbolicLink(atPath: path) {
+            return .link(to: to.hasPrefix("/") ? to : ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(to))
+        }
+        return fm.fileExists(atPath: path) ? .other : .none
+    }
+
+    /// `path` with every link followed; nil when it leads nowhere.
+    public static func resolve(_ path: String) -> String? {
+        guard let r = realpath(path, nil) else { return nil }
+        defer { free(r) }
+        return String(cString: r)
+    }
+
+    /// `state` on this Mac's disk.
+    public static func state(path: String, home: String, appCLI: String) -> State {
+        state(path: path, home: home, appCLI: appCLI, entry: entry, resolve: resolve)
+    }
+
     static func userDir(_ dir: String, home: String) -> Bool { dir == home || dir.hasPrefix(home + "/") }
 
     /// The shell command that makes the link (run with administrator rights

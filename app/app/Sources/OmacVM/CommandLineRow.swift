@@ -40,25 +40,9 @@ enum TerminalCommand {
         return etc.split(whereSeparator: \.isNewline).joined(separator: ":")
     }
 
-    static func entry(_ path: String) -> CommandLineInstall.Entry {
-        let fm = FileManager.default
-        if let to = try? fm.destinationOfSymbolicLink(atPath: path) {
-            return .link(to: to.hasPrefix("/") ? to : ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(to))
-        }
-        var isDir: ObjCBool = false
-        return fm.fileExists(atPath: path, isDirectory: &isDir) ? .other : .none
-    }
-
-    static func resolve(_ path: String) -> String? {
-        guard let r = realpath(path, nil) else { return nil }
-        defer { free(r) }
-        return String(cString: r)
-    }
-
     /// Off the main thread (asks the login shell).
     static func state() -> CommandLineInstall.State {
-        CommandLineInstall.state(path: userPath(), home: VMsFolder.home.path, appCLI: appCLI,
-                                 entry: entry, resolve: resolve)
+        CommandLineInstall.state(path: userPath(), home: VMsFolder.home.path, appCLI: appCLI)
     }
 
     /// Makes the link; nil when it worked, else why not. Looks again first:

@@ -95,6 +95,40 @@ expect(CommandLineInstall.linkCommand(target: "/usr/local/bin/omacvm", appCLI: "
        == "/bin/mkdir -p '/usr/local/bin' && /bin/ln -sfn '/A B/it'\\''s/omacvm' '/usr/local/bin/omacvm'", "link command quoted")
 expect(CommandLineInstall.appleScriptString("a \"b\" \\c") == "\"a \\\"b\\\" \\\\c\"", "AppleScript string quoted")
 
+// On a real disk: a throwaway HOME, the link made with linkCommand.
+do {
+    let fm = FileManager.default
+    let tmp = (fm.temporaryDirectory.appendingPathComponent("window-tests-\(getpid())").path as NSString).resolvingSymlinksInPath
+    try? fm.removeItem(atPath: tmp)
+    let h = tmp + "/home", cli = tmp + "/A B.app/Contents/Resources/omacvm/omacvm", bin = h + "/.local/bin"
+    try fm.createDirectory(atPath: (cli as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    fm.createFile(atPath: cli, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+    let p = bin + ":/usr/bin:/bin"
+    let s1 = CommandLineInstall.state(path: p, home: h, appCLI: cli)
+    expect(s1 == .available(target: bin + "/omacvm", needsAdmin: false), "disk: ~/.local/bin offered (\(s1))")
+    let sh = Process()
+    sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+    sh.arguments = ["-c", CommandLineInstall.linkCommand(target: bin + "/omacvm", appCLI: cli)]
+    try sh.run(); sh.waitUntilExit()
+    expect(sh.terminationStatus == 0, "disk: link made (mkdir -p too)")
+    expect(CommandLineInstall.state(path: p, home: h, appCLI: cli) == .installed(at: bin + "/omacvm"), "disk: Installed")
+    try fm.removeItem(atPath: bin + "/omacvm")
+    try fm.createSymbolicLink(atPath: bin + "/omacvm", withDestinationPath: h + "/.omacvm/omacvm")
+    expect(CommandLineInstall.state(path: p, home: h, appCLI: cli) == .other(at: bin + "/omacvm"), "disk: a checkout's dangling link kept")
+    try fm.removeItem(atPath: tmp)
+} catch {
+    expect(false, "disk test: \(error)")
+}
+
+// MARK: Disk scripts parse as shell
+for (name, script) in [("grow", DiskSize.growScript), ("compact", DiskSize.compactScript)] {
+    let sh = Process()
+    sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+    sh.arguments = ["-n", "-c", script]
+    try? sh.run(); sh.waitUntilExit()
+    expect(sh.terminationStatus == 0, "\(name) script: sh -n")
+}
+
 // MARK: Keyboard note
 
 let refused = "OmacVM: keys: Input Monitoring NOT allowed, Accessibility (keys) NOT allowed for OmacVM\nCould not create event tap\n"
