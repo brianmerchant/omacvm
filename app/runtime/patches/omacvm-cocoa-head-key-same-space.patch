@@ -1,0 +1,38 @@
+From: OmacVM
+Subject: [PATCH] ui/cocoa: a display leaving the VM's Space stays left
+
+What: an extra display's window that becomes key hands the keyboard back
+to the main window only while the main window's Space shows.
+
+Why: with two displays, the escape combo moved the pointer's display to
+the macOS Space beside the VM's, then it flicked straight back (user
+report, 3.0.0 candidate, 2026-10-06). When the main window's Space leaves
+its display, macOS makes the app's other window (on the other display)
+key; that window gave the key back to the main window, which is on a Space
+not shown, and macOS switched the display back to it to show it.
+
+Upstream: not applicable (OmacVM's omacvm-cocoa-displays.patch).
+Test: Tests/display/test-fullscreen-space.sh (build time) and the live
+two-display check on the Mac mini (tracks: fullscreen-space). Applies
+after omacvm-cocoa-fullscreen-own-space.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -6557,12 +6557,16 @@ - (NSApplicationPresentationOptions)window:(NSWindow *)window
+  * A click on another display's window makes it key. The keyboard and the
+  * main window's pointer tracking belong to the main window: hand it back.
+  * The click itself still reaches this window's view.
++ * Only while the main window's Space shows: when the escape combo (or a
++ * swipe) moves its display to another Space, macOS makes this window key,
++ * and making the main window key then would switch that display straight
++ * back to the VM's Space.
+  */
+ - (void)windowDidBecomeKey:(NSNotification *)note
+ {
+     dispatch_async(dispatch_get_main_queue(), ^{
+         NSWindow *main = [cocoaView window];
+-        if ([main isVisible] && [NSApp isActive] && ![main isKeyWindow]) {
++        if ([main isVisible] && [main isOnActiveSpace] && [NSApp isActive] && ![main isKeyWindow]) {
+             [main makeKeyWindow];
+         }
+     });

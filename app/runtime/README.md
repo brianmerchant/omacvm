@@ -47,6 +47,15 @@ commit 82927e9. Changes here:
   (`boot-logo/make-logo-bmp.py logo.svg --rows`), the animation's table is
   `boot-logo/make-splash-morph.py`'s; the build checks both, the
   animation's core and its fade (`Tests/display/`, also `check-boot-splash.sh` in CI)
+- `patches/omacvm-cocoa-fullscreen-own-space.patch`: full screen is always
+  macOS's own, in a Space of its own on every display (beside a notch it sits
+  below the camera; Omanotch fills the strip). The borderless kind of
+  `omacvm-cocoa-notch.patch` is left for tests only.
+  `patches/omacvm-cocoa-head-key-same-space.patch`: another display's window
+  hands the keyboard back to the main window only while the main window's
+  Space shows, so the escape combo's move to macOS is not undone.
+  `Tests/display/test-fullscreen-space.sh` checks both in the patched
+  `ui/cocoa.m` at build time.
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's
