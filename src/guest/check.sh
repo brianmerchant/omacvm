@@ -423,7 +423,8 @@ app)
   v=$(sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' <<<"$va" | tr '\n' ' ')
   lim=$(sed -n 's/^omacvm_drv_video: the Mac keeps at most \([1-9][0-9]*\) decoders.*/\1/p' <<<"$va" | head -1)
   # VA-API that does not start: the GPU driver (Mesa) is broken, say how.
-  vafail=$(grep -m1 -E 'MESA-LOADER|vaInitialize failed' <<<"$va" || true)
+  vafail=$(grep -m1 -E 'MESA-LOADER|cannot open shared object' <<<"$va" ||
+    grep -m1 -E 'libva error|vaInitialize failed' <<<"$va" || true)
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
   elif [[ -n $vafail ]]; then bad "video decoding" "VA-API does not start, videos decode on the CPU: $vafail"
