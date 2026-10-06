@@ -8,8 +8,8 @@
 //   keymove  'key' while the pointer moves all the time in the window's lower right part (frames come
 //            close together: the present's jitter-buffer path, not single frames)
 // Environment: REGION=x0,y0,x1,y1 (fractions of the window) limits where a change counts (default:
-// keymove the upper left part, else everything); QMP=/path/qmp.sock sends the keys through QMP
-// instead (input-send-event: no AppKit, no window code), for comparison.
+// keymove the upper left part, else everything); QMP=/path/qmp.sock sends the keys or pointer moves
+// through QMP instead (input-send-event: no AppKit, no window code), for comparison.
 // Prints one JSON line per event to OUT and a summary line to stdout. Times: post = when the event was
 // posted (wall clock, us, comparable with QEMU's -msg timestamp=on log), lat_ms = display time - post.
 import AppKit
@@ -146,13 +146,23 @@ func qkey(_ qcode: String, _ down: Bool) {
   qsend("{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"key\",\"data\":{\"down\":\(down),\"key\":{\"type\":\"qcode\",\"data\":\"\(qcode)\"}}}]}}\n")
 }
 
-// keymove: a pointer that never stops, 125 moves a second, in the lower right part.
+// keymove: a pointer that never stops, 125 moves a second, in the lower right part (with QMP set,
+// the moves go through QMP and the keys through AppKit).
 var moving = true
+let qmpMotion = mode == "keymove" && qmpFD >= 0
 if mode == "keymove" {
   Thread.detachNewThread {
     var t = 0.0
     while moving {
-      move(at(0.8 + 0.1 * cos(t), 0.8 + 0.1 * sin(t)))
+      let fx = 0.8 + 0.1 * cos(t), fy = 0.8 + 0.1 * sin(t)
+      if qmpMotion {
+        qsend("{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[" +
+              "{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":\(Int(fx * 32767))}}," +
+              "{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":\(Int(fy * 32767))}}]}}\n")
+        _ = read(qmpFD, &qbuf, qbuf.count)
+      } else {
+        move(at(fx, fy))
+      }
       t += 0.12
       usleep(8000)
     }
@@ -176,11 +186,20 @@ for i in 0..<count {
   var what = ""
   switch mode {
   case "pointer":
-    let p = i % 2 == 0 ? at(0.3, 0.55) : at(0.6, 0.45)
-    move(p); what = "move"
+    let fx = i % 2 == 0 ? 0.3 : 0.6, fy = i % 2 == 0 ? 0.55 : 0.45
+    if qmpFD >= 0 {
+      // The tablet's own range (0..0x7fff) over the guest's output.
+      qsend("{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[" +
+            "{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":\(Int(fx * 32767))}}," +
+            "{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":\(Int(fy * 32767))}}]}}\n")
+      usleep(20000); _ = read(qmpFD, &qbuf, qbuf.count)
+    } else {
+      move(at(fx, fy))
+    }
+    what = "move"
   default:
     let code: CGKeyCode = i % 2 == 0 ? 7 : 51     // kVK_ANSI_X, kVK_Delete (Backspace)
-    if qmpFD >= 0 {
+    if qmpFD >= 0 && !qmpMotion {
       let q = i % 2 == 0 ? "x" : "backspace"
       qkey(q, true); usleep(20000); qkey(q, false); _ = read(qmpFD, &qbuf, qbuf.count)
     } else {
@@ -213,4 +232,4 @@ lats.sort()
 func q(_ x: Double) -> Double { lats.isEmpty ? 0 : lats[min(lats.count - 1, Int(x * Double(lats.count)))] }
 let mean = lats.isEmpty ? 0 : lats.reduce(0, +) / Double(lats.count)
 print(String(format: "{\"mode\":\"%@\",\"via\":\"%@\",\"events\":%d,\"seen\":%d,\"missed\":%d,\"idle_changes_1_5s\":%d,\"p10\":%.1f,\"p50\":%.1f,\"p90\":%.1f,\"max\":%.1f,\"mean\":%.1f}",
-             mode, qmpFD >= 0 ? "qmp" : "appkit", count, lats.count, misses, noise, q(0.1), q(0.5), q(0.9), lats.last ?? 0, mean))
+             mode, qmpMotion ? "appkit keys, qmp motion" : qmpFD >= 0 ? "qmp" : "appkit", count, lats.count, misses, noise, q(0.1), q(0.5), q(0.9), lats.last ?? 0, mean))

@@ -7,16 +7,20 @@
 # ScreenCaptureKit. QEMU's trace (-msg timestamp=on) splits each event into
 # Mac -> QEMU input, QEMU input -> the guest's next flush, flush -> screen.
 #   src/tests/input-latency-vm.sh --runtime DIR --vm DIR --ssh-port PORT [--hz 60|120]
-#        [--count N] [--modes "key pointer keymove qmpkey"] [--env K=V]... [--hw-cursor] [--out DIR]
+#        [--count N] [--modes MODES] [--env K=V]... [--hw-cursor] [--out DIR]
+# MODES (default all): key pointer keymove (AppKit), qmpkey qmppointer (QMP:
+# no AppKit), qmpkeymove (keys AppKit, the moving pointer QMP).
 # DIR (vm): a COPY of an OmacVM.app VM made by omacvm apply (disk.img,
-# efi-vars.fd); the test writes to it. --env passes settings to QEMU for an
-# A/B run (e.g. OMACVM_GL_VSYNC=0). --hw-cursor: the guest's pointer on
+# efi-vars.fd); the test writes to it. --runtime: a built runtime or an
+# app's Contents/Resources/runtime (with --firmware: its firmware's
+# edk2-aarch64-code.fd). --env passes settings to QEMU for an A/B run
+# (e.g. OMACVM_GL_VSYNC=0). --hw-cursor: the guest's pointer on
 # virtio-gpu's cursor plane (OMACVM_HW_CURSOR=1, omacvm.hwcursor=1).
 # Each mode prints a JSON summary; --out keeps the raw rows, QEMU's log and
 # the breakdown (breakdown.json).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey"; OUT=""; HWC=0
+RT=""; VMD=""; PORT=""; HZ=60; COUNT=40; MODES="key pointer keymove qmpkey qmppointer qmpkeymove"; OUT=""; HWC=0
 FW=$R/app/runtime/.build/firmware/edk2-aarch64-code.fd
 QENV=()
 while (( $# )); do
@@ -31,11 +35,14 @@ while (( $# )); do
     --env) QENV+=("$2"); shift 2 ;;
     --hw-cursor) HWC=1; shift ;;
     --out) OUT=$2; shift 2 ;;
-    *) sed -n '9,10s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    *) sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
-[[ -x $RT/bin/qemu-system-aarch64 && -f $VMD/disk.img && -f $VMD/efi-vars.fd && $PORT =~ ^[0-9]+$ && -f $FW &&
-   $HZ =~ ^(60|120)$ && $COUNT =~ ^[0-9]+$ ]] || { sed -n '9,10s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+# A runtime from the build (qemu-system-aarch64) or from an app bundle (named OmacVM there).
+QEMU=$RT/bin/qemu-system-aarch64
+[[ -x $QEMU ]] || QEMU=$RT/bin/OmacVM
+[[ -x $QEMU && -f $VMD/disk.img && -f $VMD/efi-vars.fd && $PORT =~ ^[0-9]+$ && -f $FW &&
+   $HZ =~ ^(60|120)$ && $COUNT =~ ^[0-9]+$ ]] || { sed -n '9,12s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 [[ -e $HOME/.omacvm-user-testing ]] && { echo "input-latency-vm: the user is testing: no VM (STANDARDS 18)" >&2; exit 1; }
 lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 && { echo "input-latency-vm: port $PORT is in use" >&2; exit 1; }
 
@@ -88,7 +95,7 @@ SMB=()
 env OMACVM_PRODUCT_NAME="$NAME" OMACVM_SLIRP_HOST_PORTS=1 OMACVM_NOTCH=0 \
   OMACVM_TEST_SKIP_DISPLAYS="$SKIP" OMACVM_TEST_MAIN_DISPLAY="$VD" OMACVM_BACKGROUND=1 \
   OMACVM_TEST_POINTER=1 OMACVM_DISPLAY_SOCKET="$RUN/display" ${QENV[@]+"${QENV[@]}"} \
-  "$RT/bin/qemu-system-aarch64" -name "$NAME" -machine virt,gic-version=3 -accel hvf \
+  "$QEMU" -name "$NAME" -machine virt,gic-version=3 -accel hvf \
   -cpu host,pmu=off -smp 4,sockets=1,cores=4,threads=1 -m 8192M -nodefaults \
   -action reboot=reset,shutdown=poweroff \
   -drive "if=pflash,format=raw,readonly=on,file=$FW" \
@@ -130,6 +137,7 @@ U=${OMACVM_USER:-$(id -nu 1000)}; X=/run/user/$(id -u "$U")
 SIG=$(ls "$X/hypr" | head -1)
 hc() { sudo -u "$U" env XDG_RUNTIME_DIR=$X HYPRLAND_INSTANCE_SIGNATURE=$SIG hyprctl "$@"; }
 if command -v alacritty >/dev/null; then T="alacritty -o cursor.blinking=\"Never\" -e bash --norc --noprofile"
+elif command -v ghostty >/dev/null; then T="ghostty --cursor-style-blink=false -e bash --norc --noprofile"
 else T="foot -o cursor.blink=no bash --norc --noprofile"; fi
 hc dispatch exec "$T" >/dev/null
 sleep 3
@@ -141,6 +149,8 @@ sleep 2
 for m in $MODES; do
   case $m in
     qmpkey) QMP=$RUN/qmp "$W/inputlat" "$QPID" key "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
+    qmppointer) QMP=$RUN/qmp "$W/inputlat" "$QPID" pointer "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
+    qmpkeymove) QMP=$RUN/qmp "$W/inputlat" "$QPID" keymove "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
     key|pointer|keymove) "$W/inputlat" "$QPID" "$m" "$COUNT" "$OUT/$m.jsonl" | tee "$OUT/$m.summary" ;;
     *) echo "unknown mode $m" >&2 ;;
   esac
@@ -178,12 +188,13 @@ for m in modes:
         if row["lat_ms"] is None:
             continue
         post, screen = row["post_us"], row["post_us"] + row["lat_ms"] * 1e3
-        q = first("input_event_abs" if m == "pointer" else "input_event_key_qcode", post)
+        q = first("input_event_abs" if m.endswith("pointer") else "input_event_key_qcode", post)
+        # (keymove: the pointer's own moves are in the trace too; keys are what is timed)
         if q is None or q > screen:
             continue
         inp.append((q - post) / 1e3)
         c = first("virtio_gpu_update_cursor", q)
-        if m == "pointer" and c is not None and c < screen:
+        if m.endswith("pointer") and c is not None and c < screen:
             cur.append((c - q) / 1e3)
         f = first("virtio_gpu_cmd_res_flush", q)
         if f is not None and f < screen:
