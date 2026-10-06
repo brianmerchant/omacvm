@@ -26,6 +26,10 @@
 #    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
 #    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
 #    and trackpad frames through the real callbacks).
+# 7. A Magic Mouse in the captured VM: two fingers sideways = a workspace swipe
+#    (three virtual fingers), macOS's scroll for them dropped; one finger
+#    flicked sideways = Back/Forward; a resting finger and scrolling = nothing
+#    extra (test-mouse.c, made-up Magic Mouse frames through the real callback).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -35,7 +39,7 @@ trap 'killtree ${PIDS:-}; rm -rf "$T"' EXIT
 trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 # One token, as the Mac's Bridge and the guests share it.
 TOKEN=$(openssl rand -hex 24)
 mkdir -p "$T/mac/Library/Application Support/omacvm-bridge" "$T/vm"
@@ -188,7 +192,7 @@ reject "$T/out2" "live App VM 192.168.77.2"
 # 4. The event tap after a VM app (re)starts.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-tap" > "$T/tap" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/tap"
 n=$(grep -c "cannot create the event tap again" "$T/tap" || true)
@@ -196,7 +200,7 @@ if [[ $n == 1 ]]; then echo "ok   a failed re-creation is logged once (two tries
 # 5. The escape combo's way out and back.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-escape" "$HERE/test-escape.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-escape" > "$T/escape" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/escape"
 REPO=$(cd "$HERE/../../.." && pwd)
@@ -214,7 +218,13 @@ grep -E '^(ok|FAIL|skip) ' "$T/notice"
 # 6. Which scrolling scroll momentum takes.
 clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
-  -framework CoreFoundation -framework AppKit
+  -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-scroll" > "$T/scroll" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/scroll"
+# 7. The Magic Mouse's gestures.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-mouse" "$HERE/test-mouse.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-mouse" > "$T/mouse" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/mouse"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }
