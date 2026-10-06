@@ -13,7 +13,7 @@ their sizes), a boot splash, any Omarchy scale on 5K and larger displays,
 sound that holds on a busy Mac, the fast network with a VPN. Full screen
 with a Space of its own on every display, no crash when the VM shuts down
 (pending #121), Magic Mouse swipes (pending #125, #127), ⌃⌥ Esc twice for
-Mission Control (pending, no PR yet), no black desktop after a Mesa update
+Mission Control (pending #130), no black desktop after a Mesa update
 (pending, no PR yet). And less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
