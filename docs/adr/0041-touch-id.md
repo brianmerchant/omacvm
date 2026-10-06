@@ -378,6 +378,16 @@ sensor) and the last result.
   open", the app not relaying: "OmacVM.app does not answer", SSH never
   asked, no Bridge token in the VM. A helper without the port still asks
   for the password.
+- Real dialog through the app's path (2026-10-06, MacBook Air M2, macOS
+  26.6.2): the Bridge built from this branch (test identity), `AuthRelay`
+  as the app runs it, the VM's request signed with a Touch ID key the Mac
+  knows, a diskless QEMU window in front. The macOS Touch ID dialog
+  (`coreautha`) came up 1.4 s after the request, without a click;
+  Escape closed it, and the VM got the signed answer `no`, `cancelled`.
+  Bridge log: `touchid: from relay (OmacVM A-tidapp): 200 sudo no
+  cancelled`. The first request right after the Bridge started got 409
+  `unknown-vm` (its VM list was still being read): the password that
+  time.
 - Test VM pass (2026-10-06, OmacVM.app test VM on the MacBook Pro, Arch
   ARM: sudo 1.9.17p2, polkit 127, systemd 262, Hyprland 0.56 through uwsm;
   the real PAM stacks and polkit, a stand-in Bridge on 127.0.0.1 in the
