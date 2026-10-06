@@ -62,7 +62,14 @@ struct MacLinks: Equatable {
 /// --test-identity): its own Gestures and Bridge in Contents/Helpers, on
 /// their own ports and folders. A test VM never reaches the installed helpers.
 enum TestIdentity {
-    static let isOn = Bundle.main.bundleIdentifier == "org.omacvm.app.test"
+    static let isOn = isTest(Bundle.main.bundleIdentifier)
+    /// org.omacvm.app.test, and a lane's copy of it re-signed as
+    /// org.omacvm.app.test.<lane>: such a copy counted as the release app
+    /// before, so it used the installed helpers' ports and the user's files.
+    static func isTest(_ id: String?) -> Bool {
+        guard let id else { return false }
+        return id == "org.omacvm.app.test" || id.hasPrefix("org.omacvm.app.test.")
+    }
     /// The Bridge's folder (token, relay key, relay socket).
     static let bridgeFolder = isOn ? "omacvm-test-bridge" : "omacvm-bridge"
     /// For the scripts the app runs: their Mac side starts the test helpers

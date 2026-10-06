@@ -189,6 +189,9 @@ jobs:
       - name: The note when macOS refuses the VM's keyboard tap
         run: src/tests/app-key-access.sh
 
+      - name: Only OmacVM writes the Bridge's cli file (test copies keep away)
+        run: src/tests/app-cli-file.sh
+
       - name: The desktop restarts by itself after a lost GPU context (app rules, VM script)
         run: src/tests/app-desktop-recovery.sh
 

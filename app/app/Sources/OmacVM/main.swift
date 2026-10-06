@@ -547,42 +547,10 @@ extension AppDelegate: NSMenuDelegate {
             let outcome = await u.checkNow()
             // This launcher runs the VM: it can shut it down, update and start it again.
             let restart = u.runningVM() != nil
-            let alert = Self.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow, restart: restart)
+            let alert = Updater.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow, restart: restart)
             guard alert.runModal() == .alertFirstButtonReturn, case .ready = outcome else { return }
             if restart { await u.restartFromMac() } else { u.install() }
         }
-    }
-
-    /// What Check for Updates… says. busy: why the app cannot be replaced
-    /// right now (a VM runs from it): the update then waits for it.
-    static func checkAlert(_ outcome: Updater.Outcome, current: String, busy: String?, restart: Bool = false) -> NSAlert {
-        if restart, case .ready(let v) = outcome { return Updater.restartAlert(v, current: current) }
-        let alert = NSAlert()
-        switch outcome {
-        case .ready(let v):
-            alert.messageText = "\(Product.name) \(v) is ready to install"
-            if let busy {
-                alert.informativeText = "You have \(current). \(busy), so \(v) goes in once it has shut down. Your VMs are not changed."
-                alert.addButton(withTitle: "Update After Shutdown")
-            } else {
-                alert.informativeText = "You have \(current). \(Product.name) restarts with the new version; your VMs are not changed. If it does not start, \(current) comes back by itself."
-                alert.addButton(withTitle: "Update and Relaunch")
-            }
-            alert.addButton(withTitle: "Later")
-        case .upToDate:
-            alert.messageText = "\(Product.name) is up to date"
-            alert.informativeText = "\(current) is the newest version."
-        case .skipped(let v):
-            alert.messageText = "\(Product.name) \(v) is skipped"
-        case .needsMacOS(let v, let m):
-            alert.messageText = "\(Product.name) \(v) needs macOS \(m)"
-            alert.informativeText = "This Mac stays on \(current). Update macOS to get \(v)."
-        case .failed(let why):
-            alert.messageText = "Could not check for updates"
-            // The reasons are log lines ("no connection to ..."): as a sentence.
-            alert.informativeText = Updater.sentence(why)
-        }
-        return alert
     }
 
     @objc func goBack(_ sender: Any?) {

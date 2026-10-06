@@ -744,7 +744,7 @@ struct UpdateSection: View {
             Task { await updater.restartFromMac() }
             return
         }
-        let alert = AppDelegate.checkAlert(.ready(version), current: current, busy: updater.busyNow)
+        let alert = Updater.checkAlert(.ready(version), current: current, busy: updater.busyNow)
         if alert.runModal() == .alertFirstButtonReturn { updater.install() }
     }
 }

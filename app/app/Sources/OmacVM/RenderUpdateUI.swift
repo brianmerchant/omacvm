@@ -69,14 +69,14 @@ enum RenderUpdateUI {
 
         // A new alert per picture: an alert's view does not draw twice.
         let alerts: [(String, () -> NSAlert)] = [
-            ("alert-1-ready", { AppDelegate.checkAlert(.ready(next), current: current, busy: nil) }),
-            ("alert-2-ready-vm-runs", { AppDelegate.checkAlert(.ready(next), current: current, busy: "A VM runs from \(Product.name)") }),
-            ("alert-3-up-to-date", { AppDelegate.checkAlert(.upToDate, current: current, busy: nil) }),
-            ("alert-4-needs-macos", { AppDelegate.checkAlert(.needsMacOS(next, "26.0"), current: current, busy: nil) }),
-            ("alert-5-failed", { AppDelegate.checkAlert(.failed("no connection to the update feed (The Internet connection appears to be offline.)"),
+            ("alert-1-ready", { Updater.checkAlert(.ready(next), current: current, busy: nil) }),
+            ("alert-2-ready-vm-runs", { Updater.checkAlert(.ready(next), current: current, busy: "A VM runs from \(Product.name)") }),
+            ("alert-3-up-to-date", { Updater.checkAlert(.upToDate, current: current, busy: nil) }),
+            ("alert-4-needs-macos", { Updater.checkAlert(.needsMacOS(next, "26.0"), current: current, busy: nil) }),
+            ("alert-5-failed", { Updater.checkAlert(.failed("no connection to the update feed (The Internet connection appears to be offline.)"),
                                                         current: current, busy: nil) }),
             ("alert-6-go-back", { AppDelegate.goBackAlert("2.9.0", current: current) }),
-            ("alert-7-restart-vm", { AppDelegate.checkAlert(.ready(next), current: current, busy: "The VM runs", restart: true) }),
+            ("alert-7-restart-vm", { Updater.checkAlert(.ready(next), current: current, busy: "The VM runs", restart: true) }),
             ("alert-8-shutdown-timeout", { Updater.shutdownTimeoutAlert() }),
         ]
         for (name, make) in alerts {
