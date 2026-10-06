@@ -114,6 +114,10 @@ in more words.
   route, and waited for the next other change. It also missed IPv4 address
   messages (shorter than it expected). Tested with a real WireGuard client
   (docs/routes/app.md).
+- Fast network: `omacvm enable fast-network` (and the control centre's
+  switch) failed with "no OmacVM.app installed" when OmacVM.app was not in
+  /Applications or ~/Applications (another drive, or not moved yet). It
+  now uses the app whose omacvm runs (#162).
 - In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
   which gives them real-time priority, took a VM that had been stopped for
   a runaway thread and put them back to normal priority for the rest of the
