@@ -106,6 +106,9 @@ final class Creator: ObservableObject {
 
     func cancel() { process?.terminate() }
 
+    /// The script still runs (an update's ERROR: comes before its VM is shut down).
+    var running: Bool { process?.isRunning == true }
+
     private func exited(_ id: Int, _ status: Int32) {
         guard id == run else { return }
         exitStatus = status

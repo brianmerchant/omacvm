@@ -174,12 +174,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if state.screen == .building {
             if state.creator.job == .update {
                 // Stopping the update script would leave its apply running in
-                // the user's VM while the VM shuts down: quit once it is done
-                // (it shuts the VM down itself).
+                // the user's VM while the VM shuts down: quit once the script
+                // has ended (it shuts the VM down itself, also after an error).
                 showWindow()
                 func wait() {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                        guard let c = self?.state.creator, !c.finished, c.failed == nil else {
+                        guard let c = self?.state.creator, c.running else {
                             NSApp.reply(toApplicationShouldTerminate: true)
                             return
                         }
