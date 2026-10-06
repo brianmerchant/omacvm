@@ -134,13 +134,13 @@ def caller_ok(user, sid):
     setuid polkit helper): never an SSH login or another user's. Omarchy's
     terminals run under the user's service manager (uwsm), whose session
     has no seat (Class=manager); cron and other background sessions are
-    refused. A session logind does not know (none, or an older systemd)
-    leaves it to at_the_screen."""
-    if not sid or sid == "4294967295" or not sid.isdigit():
+    refused, and so is an audit session logind does not know (cronie
+    sets one without logind). No audit session at all (polkit 127's
+    socket-started helper, a kernel without audit) leaves it to
+    at_the_screen."""
+    if not sid or sid == "4294967295":
         return True
-    s = logind("show-session", sid, *SESSION)
-    if not s:
-        return True
+    s = logind("show-session", sid, *SESSION) if sid.isdigit() else {}
     return (s.get("Name") == user and s.get("Remote") == "no"
             and (s.get("Seat", "") != "" or s.get("Class") == "manager"))
 

@@ -86,7 +86,7 @@ run yes; expect "from an SSH login: password" 1 "$rc"; asked "... without asking
 session 9 bob no yes seat0 user; run yes; expect "from another user's session: password" 1 "$rc"
 session 9 vincent no yes '' background; run yes; expect "from a cron job's session: password" 1 "$rc"
 session 9 vincent no yes seat0 user; run yes; expect "from a text console of the user: asks" 0 "$rc"
-echo 77 > "$T/proc/$$/sessionid"; run yes; expect "a session logind does not know: the desktop decides" 0 "$rc"
+echo 77 > "$T/proc/$$/sessionid"; run yes; expect "an audit session logind does not know (cronie's): password" 1 "$rc"
 echo 4294967295 > "$T/proc/$$/sessionid"; run yes; expect "no audit session: the desktop decides" 0 "$rc"
 echo 2 > "$T/proc/$$/sessionid"
 session 1 vincent yes yes seat0 user; run yes; expect "desktop session remote: password" 1 "$rc"

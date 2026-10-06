@@ -106,9 +106,9 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
     the user's service manager (class `manager`: Omarchy starts Hyprland
     through uwsm, so every terminal runs under `user@<uid>.service`, audit
     session = the manager's). An SSH login, a cron job (class
-    `background`) or another user's session: no. A session logind does not
-    know (the socket-started polkit helper has none) leaves it to the
-    display session.
+    `background`), an audit session logind does not know (cronie sets
+    one) or another user's session: no. No audit session at all (polkit
+    127's socket-started helper) leaves it to the display session.
   - sudo: `PAM_TTY` is a terminal (`pts/N`, `ttyN`) the user owns. `sudo
     -n` from a program in the background has none and never reaches the
     Mac. The terminal goes into the dialog text.
