@@ -49,8 +49,10 @@ case $RES in ""|low|balanced|high|best) ;; *) usage "--resources low, balanced, 
 app_label() { case $1 in parallels) echo Parallels ;; utm) echo UTM ;; fusion) echo "VMware Fusion" ;; app) echo OmacVM.app ;; *) echo "$1" ;; esac; }
 
 # The one VM of that name (and type). A name in two apps, or twice in one
-# app, is refused: changing the wrong VM is worse than asking.
-hits=$(vms_list | awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && (t == "" || $2 == t) { print $2 "\t" $3 }')
+# app, is refused: changing the wrong VM is worse than asking. With a type
+# other than UTM, UTM's data is not read.
+skip=""; [[ -n $TYPE && $TYPE != utm ]] && skip=no-utm
+hits=$(vms_list $skip | awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && (t == "" || $2 == t) { print $2 "\t" $3 }')
 count=$(grep -c . <<<"$hits" || true)
 if (( count == 0 )); then
   usage "no ${TYPE:+$(app_label "$TYPE") }VM named '$VM' (omacvm vms lists them)"

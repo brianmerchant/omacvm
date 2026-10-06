@@ -123,17 +123,18 @@ cat > "$P/pacman" <<'EOF'
 echo "pacman $*" >> "$CALLS"
 case "$1 $2" in
   "-Q vulkan-virtio") echo "vulkan-virtio 1:26.2.4-0.1"; exit 0 ;;
-  "-Q spirv-tools") exit 0 ;;            # installed: the update would be partial
+  "-Q spirv-tools") echo "spirv-tools 1"; exit 0 ;;   # installed: the update would be partial
   "-Q "*) exit 1 ;;
   "-T "*) echo glslang; exit 0 ;;
-  "-S --print") printf 'glslang\n%s\n' $PULLS; exit 0 ;;
+  "-S --print") printf 'glslang 1\n%s 2\n' $PULLS; exit 0 ;;
 esac
 exit 0
 EOF
 chmod +x "$P/pacman"; cp "$T/vercmp" "$T/ldd" "$P/"
 CALLS=$P/calls PULLS=spirv-tools PATH="$P:$PATH" OMACVM_VENUS_PROBE="$V" OMACVM_MESA_ICD=$T/none.json \
+  OMACVM_PKG_ADD="$PWD/src/guest/pkg-add" OMACVM_PKG_LOG=$P/pkg.log \
   bash "$P/venus/vulkan-virtio.sh" > "$P/out" 2>&1; rc=$?
-[[ $rc == 1 ]] && grep -q 'would update spirv-tools' "$P/out" && ! grep -q 'pacman -S --needed --noconfirm' "$P/calls" &&
+[[ $rc == 1 ]] && grep -q 'spirv-tools 1 -> 2' "$P/out" && ! grep -q 'pacman -S --needed --noconfirm' "$P/calls" &&
   ! grep -q 'pacman -Rns' "$P/calls" && pass "build tools that would update installed packages: stops, installs nothing" ||
   fail "partial upgrade not refused: rc $rc, said '$(cat "$P/out")'"
 
@@ -229,7 +230,7 @@ sed "s#/run/omacvm/host.env#$d/host.env#" "$G" > "$d/gen"
 [[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "no host.env: software WSI" || fail "no host.env: not software WSI"
 echo OMACVM_VKWINDOWS=1 > "$d/host.env"
 [[ -z $(sh "$d/gen") ]] && pass "app shows Vulkan windows: normal WSI" || fail "app shows Vulkan windows: still software WSI"
-printf 'OMACVM_NOTCH=64\nOMACVM_VKWINDOWS=0\n' > "$d/host.env"
+printf 'OMACVM_SCREEN=2056x1329\nOMACVM_VKWINDOWS=0\n' > "$d/host.env"
 [[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "flag 0: software WSI" || fail "flag 0: not software WSI"
 rm -rf "$d"
 grep -q 'user-environment-generators/90-omacvm-vulkan-present' src/app/guest/install.sh &&

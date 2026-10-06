@@ -205,6 +205,13 @@ def test_graphics_row_only_for_app_vms():
     assert r.note == "Automatic: OpenGL and Vulkan"
 
 
+def test_graphics_row_without_the_mac():
+    """No status from the Mac (not set up, not answering): not "older"."""
+    assert S.graphics_row(None, "app", offline=True).note == "needs the Mac"
+    assert S.graphics_row(None, "app").note == "asking the Mac"
+    assert "older than 3.0.0" in S.graphics_row({"graphics": None}, "app").note
+
+
 def test_graphics_row_says_next_start():
     st = {"graphics": {"graphics": "opengl", "next_start": "opengl", "this_start": "auto -> vulkan (macOS 27, KosmicKrisp)"}}
     assert S.graphics_row(st, "app").note == "OpenGL: OpenGL from the next start"

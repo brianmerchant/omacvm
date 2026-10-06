@@ -124,9 +124,10 @@ source "$R/lib/app.sh"
 source "$R/lib/helpers.sh"
 # The omacvm the Bridge runs for the control centre's requests (control.swift
 # checks it belongs to this user and nobody else can write it): only the
-# installed checkout (cli_for_bridge).
+# installed checkout (cli_for_bridge). OmacVM.app's copy (OMACVM_APP_CLI, a
+# copy of it runs this) is set by apply.sh: never this temporary copy.
 me="$(cd "$R/.." && pwd -P)/omacvm"
-if cli_for_bridge "$me"; then
+if [[ -z ${OMACVM_APP_CLI:-} && -f $me ]] && cli_for_bridge "$me"; then
   (umask 077; printf '%s\n' "$me" > ~/Library/Application\ Support/omacvm/cli)
 fi
 # The token first: a Bridge starting without one makes its own, and two at

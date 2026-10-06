@@ -10,7 +10,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
 | Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network), `192.168.64.1` (UTM's) and the `.1` of VMware Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in `/Library/Preferences/VMware Fusion/networking`), and for OmacVM.app `127.0.0.1` and `192.168.77.1` (its fast network), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
 | Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `omacvm apply`) |
-| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon`, `keyboard_low_steps`, `external_brightness` (read again within 2 s of a change; `omacvm apply` sets it from the feature) |
+| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon`, `keyboard_low_steps`, `external_brightness`, `brightness_steps` (read again within 2 s of a change; `omacvm apply` sets it from the feature) |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`, and goes only to a Bridge that proved it knows it, see API) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
 | Shared event stream | `guest/omacvm-bridge-events`, user socket `omacvm-bridge-events.socket` (`$XDG_RUNTIME_DIR/omacvm-bridge-events.sock`): one `/events` connection to the Mac per VM; `omacvm-bridge events` reads from it, so the widgets and the OSD keep their interface (see Events) |
@@ -391,7 +391,8 @@ While **a VM is in front** (an OmacVM.app VM, full screen or in a window;
 Parallels, UTM or VMware Fusion with the VM covering a whole display), volume
 up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
-and shown by Omarchy's own OSD in the VM. Which key goes where is one tested
+display brightness in 1/32 steps (see Brightness steps), and shown by Omarchy's
+own OSD in the VM. Which key goes where is one tested
 rule, `MediaRoute` in `mac/keys-model.swift` (`mac/test-models.sh`):
 
 - volume and mute on an output without a software volume (an audio interface
@@ -430,14 +431,32 @@ Switch it off in the menu-bar icon or with `"capture_keys": false`.
 
 With the VM in front on an external display, the display brightness keys
 set that display instead (see External displays): OmacVM.app's VMs also in a
-window, Parallels, UTM and Fusion in full screen; 16 steps (Option: 64),
-read from the display first, writes at most every 50 ms (the latest level),
-never waiting in the key path; Omarchy's popup shows the level (not the
+window, Parallels, UTM and Fusion in full screen; 32 steps (Option: 64, see
+Brightness steps), read from the display first, writes at most every 50 ms
+(the latest level; a jump of more than two steps ramps there), never waiting
+in the key path; Omarchy's popup shows the level (not the
 display's name). A Mac mini
 whose only display macOS dims itself (LG UltraFine, Studio Display) has it set
 also while the display is not looked at yet (the Bridge's own DisplayServices
 call). A display without DDC/CI keeps the keys as before (the Mac's built-in
 display, in full screen), and the log says once why. `"external_brightness": false` in `config.json` switches it off.
+
+### Brightness steps
+
+The display brightness keys step 1/32 by default, half of macOS's 1/16:
+the built-in display, Apple displays (DisplayServices) and DDC/CI monitors
+alike, while a VM is in front. Option (or Shift+Option) steps 1/64, macOS's
+quarter step. One setting: `"brightness_steps": 32` in `config.json` (8 to
+100; Option then gives twice that, at least 64, at most 100), read again
+within 2 s, no restart. `BrightnessStep` in `mac/external-model.swift`.
+On a DDC/CI monitor every press moves its raw value (a monitor with a
+coarse range steps on until it does), and a jump of more than two steps
+(presses that piled up while the monitor was busy, a held key) goes out as
+a ramp: one write per 50 ms gap, at most two steps each, the latest level
+winning (`Ramp`). Writes the VM asks for are not ramped (one per 250 ms).
+Omarchy's popup shows each level (3-4 points apart). Volume and the keyboard
+light keep macOS's 1/16. Omarchy's own `+5%` inside the VM is unchanged: the
+Mac's keys never reach the VM.
 
 The keyboard light has four more steps below macOS's lowest (1/16): 0.001,
 0.01, 0.02 and 0.04 (`KeyboardSteps` in `mac/keylight.swift`). Measured on a
