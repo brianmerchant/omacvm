@@ -28,6 +28,8 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- OmacVM.app with its VMs folder on another drive: downloads go there too
+  (`.downloads` in that folder), not to the Mac's own disk.
 
 ## 3.0.0
 

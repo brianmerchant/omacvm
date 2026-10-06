@@ -25,3 +25,26 @@ hdiutil create -quiet -size 64m -fs JHFS+ -volname OmacVMTestHFS "$T/hfs.dmg"
 hdiutil attach -quiet -nobrowse -mountpoint "$T/volumes/Hfs" "$T/hfs.dmg"
 HFS=$T/volumes/Hfs
 "$T/storage-test" "$T/work" "$MNT" "$T/volumes" "$HFS"
+
+# The build scripts' rules (app/scripts/vm-common.sh), on the same folders.
+fail=0
+expect() { if [[ $2 == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: want '$2', got '$3'"; fail=1; fi; }
+log() { printf '==> %s\n' "$*"; }
+eval "$(sed -n -e '/^downloads_dir()/,/^}/p' -e '/^live_reuse()/,/^}/p' "$R/app/scripts/vm-common.sh")"
+while IFS=$'\t' read -r root want; do
+  expect "downloads_dir agrees with the app: $root" "$want" "$(HOME=$T/work/dlhome downloads_dir "$root")"
+done < "$T/work/downloads-rule.tsv"
+# An earlier build's live system in the Mac's cache moves to the new place.
+H=$T/work/dlhome LIVE_RELEASE=v0.4.1 old=$T/work/dlhome/Library/Caches/omacvm/live new=$MNT/VMs/.downloads/live
+mkdir -p "$old" "$new"
+for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do printf '%s' "$f" > "$old/$f"; done
+expect "no reuse without the marker" 1 "$(HOME=$H live_reuse "$new" >/dev/null; echo $?)"
+: > "$old/ok-v0.4.0"
+expect "no reuse of another release" 1 "$(HOME=$H live_reuse "$new" >/dev/null; echo $?)"
+: > "$old/ok-v0.4.1"
+expect "no reuse into the Mac's cache itself" 1 "$(HOME=$H live_reuse "$old" >/dev/null; echo $?)"
+expect "reused" 0 "$(HOME=$H live_reuse "$new" >/dev/null; echo $?)"
+expect "moved: files and marker there, gone here" "rootfs.ext4 ok yes" \
+  "$(cat "$new/rootfs.ext4") $([[ -f $new/ok-v0.4.1 ]] && echo ok) $([[ ! -e $old/rootfs.ext4 && ! -e $old/ok-v0.4.1 && ! -e $new/.moving ]] && echo yes)"
+expect "other files of the old place stay" yes "$([[ -f $old/ok-v0.4.0 ]] && echo yes)"
+(( fail == 0 )) || exit 1

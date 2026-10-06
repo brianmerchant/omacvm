@@ -159,6 +159,78 @@ enum Storage {
             try fm.removeItem(at: item)
         }
     }
+
+    // MARK: Downloads
+
+    /// What builds download into a downloads folder: try-omarchy's live system
+    /// and prebuilt VMs. Only these are counted and removed: the Mac's
+    /// ~/Library/Caches/omacvm also holds the omacvm command's work
+    /// (build-live, make-image.sh's prebuilt-out).
+    static let downloadItems = ["live", "prebuilt"]
+
+    /// Where builds of VMs in a VMs folder keep their downloads: the Mac's
+    /// ~/Library/Caches/omacvm when the folder is on the home folder's drive,
+    /// else ROOT/.downloads, so VMs on another drive leave the Mac's disk
+    /// alone. vm-common.sh (downloads_dir) has the same rule.
+    static func downloadsFolder(vmsRoot: URL, home: URL) -> URL {
+        let root = vmsRoot.standardizedFileURL
+        if missingDrive(for: root) == nil && sameVolume(root, home) {
+            return home.appendingPathComponent("Library/Caches/omacvm")
+        }
+        return root.appendingPathComponent(".downloads")
+    }
+
+    /// Every downloads folder of these VMs folders, the Mac's own always
+    /// (older versions used only that one); each once, the first root's first.
+    static func downloadsFolders(vmsRoots: [URL], home: URL) -> [URL] {
+        var seen = Set<String>(), out: [URL] = []
+        let all = vmsRoots.map { downloadsFolder(vmsRoot: $0, home: home) } + [home.appendingPathComponent("Library/Caches/omacvm")]
+        for f in all where seen.insert(f.standardizedFileURL.path).inserted { out.append(f.standardizedFileURL) }
+        return out
+    }
+
+    /// What the downloads in a folder take on its drive.
+    static func downloadsSize(_ folder: URL) -> Int64 {
+        downloadItems.reduce(0) { $0 + allocatedSize(of: folder.appendingPathComponent($1)) }
+    }
+
+    /// Removes the downloads in a folder, nothing else. Refused when the
+    /// folder is a link or holds a VM (it would not be a downloads folder).
+    static func clearDownloads(_ folder: URL) throws {
+        let fm = FileManager.default
+        var st = stat()
+        guard lstat(folder.path, &st) == 0 else { return }
+        guard st.st_mode & S_IFMT == S_IFDIR else {
+            throw StorageError.failed("\(folder.path) is not a folder: left alone.")
+        }
+        let names = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
+        if names.contains(where: { fm.fileExists(atPath: folder.appendingPathComponent($0).appendingPathComponent("vm.env").path) }) {
+            throw StorageError.failed("\(folder.path) holds a VM: left alone.")
+        }
+        for name in downloadItems {
+            let u = folder.appendingPathComponent(name)
+            if lstat(u.path, &st) == 0 { try fm.removeItem(at: u) }
+        }
+    }
+
+    /// The downloads of a VMs folder the app no longer uses: to NEWFOLDER when
+    /// that is on the same drive and not there yet (a rename), else removed
+    /// (the next build downloads again). Not the Mac's own folder, not while
+    /// a build uses them, not on a drive that is not connected.
+    static func dropDownloads(ofRoot root: URL, to newFolder: URL, lines: [String] = processLines()) {
+        let old = root.standardizedFileURL.appendingPathComponent(".downloads")
+        let fm = FileManager.default
+        guard missingDrive(for: root) == nil, fm.fileExists(atPath: old.path),
+              old.path != newFolder.standardizedFileURL.path, !downloadsInUse(old, lines: lines) else { return }
+        if newFolder.lastPathComponent == ".downloads", !fm.fileExists(atPath: newFolder.path), sameVolume(old, newFolder),
+           (try? fm.createDirectory(at: newFolder.deletingLastPathComponent(), withIntermediateDirectories: true)) != nil,
+           (try? fm.moveItem(at: old, to: newFolder)) != nil {
+            return
+        }
+        try? clearDownloads(old)
+        try? fm.removeItem(at: old.appendingPathComponent(".DS_Store"))
+        rmdir(old.path)   // only when empty now: anything else in it stays
+    }
 }
 
 /// Moves a VM folder into another folder. On one drive that is a rename. To

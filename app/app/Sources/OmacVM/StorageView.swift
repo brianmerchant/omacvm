@@ -56,7 +56,7 @@ final class StorageModel: ObservableObject {
         DispatchQueue.global(qos: .utility).async {
             let free = Storage.freeBytes(at: root)
             let sizes = folders.map { Storage.allocatedSize(of: $0) }
-            let downloads = Storage.allocatedSize(of: Paths.downloads)
+            let downloads = Paths.allDownloads.reduce(Int64(0)) { $0 + Storage.downloadsSize($1) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard run == self.refreshRun else { return }
@@ -129,6 +129,9 @@ final class StorageModel: ObservableObject {
             r.path != new.standardizedFileURL.path && r.path != legacy
                 && (Storage.missingDrive(for: r) != nil || VMsFolder.hasVMs(r, fm: .default))
         }
+        // A folder left without VMs: its downloads go to the new place or away.
+        let kept = Set(Paths.vmsRoots.map(\.path))
+        for r in old where !kept.contains(r.path) { Storage.dropDownloads(ofRoot: r, to: Paths.downloads) }
         refresh()
     }
 
@@ -253,17 +256,17 @@ final class StorageModel: ObservableObject {
 
     // MARK: Downloaded images
 
-    /// Empties the app's cache of Omarchy images (Paths.downloads). Never
+    /// Empties the app's caches of Omarchy images (Paths.allDownloads). Never
     /// the Mac's Downloads folder.
     func removeImages() {
-        if building() || Storage.downloadsInUse(Paths.downloads) {
+        if building() || Paths.allDownloads.contains(where: { Storage.downloadsInUse($0) }) {
             say("A VM is being set up from these images; remove them once it is done.", error: true)
             return
         }
         let size = Storage.format(downloads ?? 0)
         guard removeImagesAlert().runModal() == .alertFirstButtonReturn else { return }
         do {
-            try Storage.clear(Paths.downloads)
+            for f in Paths.allDownloads { try Storage.clearDownloads(f) }
             say("Downloaded images removed (\(size)).")
         } catch {
             say("Could not remove all downloaded images: \(error.localizedDescription)", error: true)
@@ -274,7 +277,7 @@ final class StorageModel: ObservableObject {
     func removeImagesAlert() -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Remove the downloaded images (\(Storage.format(downloads ?? 0)))?"
-        alert.informativeText = "These are the Omarchy images \(Product.name) downloaded to set up VMs, in \(Self.short(Paths.downloads)). Your VMs keep everything; a new VM downloads them again.\n\nYour Mac's Downloads folder is not touched."
+        alert.informativeText = "These are the Omarchy images \(Product.name) downloaded to set up VMs, in \(Paths.allDownloads.filter { Storage.downloadsSize($0) > 0 }.map { Self.short($0) }.joined(separator: " and ")). Your VMs keep everything; a new VM downloads them again.\n\nYour Mac's Downloads folder is not touched."
         alert.addButton(withTitle: "Remove")
         alert.addButton(withTitle: "Cancel")
         return alert

@@ -37,7 +37,7 @@ final class Creator: ObservableObject {
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [Paths.scripts.appendingPathComponent(prebuilt ? "prebuilt-vm.sh" : "create-vm.sh").path,
                        config.folder.path]
-        p.environment = TestIdentity.environment()
+        p.environment = PrebuiltImage.environment()
         let input = Pipe(), output = Pipe()
         p.standardInput = input
         p.standardOutput = output
@@ -159,6 +159,16 @@ struct PrebuiltImage: Equatable {
         case none
     }
 
+    /// For the build scripts: the test identity, and the downloads on the
+    /// drive of the VMs folder (vm-common.sh CACHE). Never into a folder of a
+    /// drive that is not connected: that would be the Mac's own disk.
+    static func environment() -> [String: String] {
+        var e = TestIdentity.environment()
+        e["OMACVM_CACHE"] = nil
+        if Storage.missingDrive(for: Paths.vmsRoot) == nil { e["OMACVM_CACHE"] = Paths.downloads.path }
+        return e
+    }
+
     /// Off the main thread; nil when there is none, no connection, or no
     /// answer within 20 seconds (then the VM is built here).
     static func lookup() async -> PrebuiltImage? {
@@ -168,6 +178,7 @@ struct PrebuiltImage: Equatable {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/bash")
             p.arguments = [script.path, "--lookup"]
+            p.environment = environment()
             let out = Pipe()
             p.standardOutput = out
             p.standardError = FileHandle.nullDevice

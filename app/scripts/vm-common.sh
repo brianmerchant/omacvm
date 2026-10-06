@@ -21,6 +21,8 @@ else
   OMACVM_SRC=$_root/omacvm/src
 fi
 [[ -x $QEMU && -f $FIRMWARE && -d $OMACVM_SRC ]] || die "the app is incomplete (QEMU, firmware or OmacVM missing under $_root)"
+# Downloads (try-omarchy, prebuilt VMs): OMACVM_CACHE (the app passes it),
+# else next to the VM (vm_load: downloads_dir).
 CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/omacvm}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 source "$OMACVM_SRC/vm/live/release.sh"
@@ -61,9 +63,24 @@ proxy_to_vm() {
   printf '%s\n' "$e" | vssh "umask 022; cat > /root/omacvm-proxy.env"
 }
 
+# downloads_dir ROOT: where builds of VMs in the VMs folder ROOT keep their
+# downloads: ~/Library/Caches/omacvm when ROOT is on the home folder's drive,
+# else ROOT/.downloads, so VMs on another drive leave the Mac's disk alone.
+# The app's Storage.downloadsFolder has the same rule (src/tests/app-storage.sh).
+downloads_dir() {
+  if [[ $(stat -f %d "$1") == "$(stat -f %d "$HOME")" ]]; then echo "$HOME/Library/Caches/omacvm"
+  else echo "$1/.downloads"; fi
+}
+
 vm_load() {
   VM_DIR=$(cd "$1" && pwd)
   [[ -f $VM_DIR/vm.env ]] || die "no vm.env in $VM_DIR"
+  [[ -n ${OMACVM_CACHE:-} ]] || CACHE=$(downloads_dir "$(dirname "$VM_DIR")")
+  if [[ ! -d $CACHE ]]; then
+    mkdir -p "$CACHE"
+    # Time Machine leaves it out (~/Library/Caches is left out anyway).
+    tmutil addexclusion "$CACHE" >/dev/null 2>&1 || true
+  fi
   source "$VM_DIR/vm.env"
   : "${NAME:?}" "${CPUS:?}" "${MEM_MB:?}" "${DISK_GB:?}" "${SSH_PORT:?}" "${VM_USER:?}"
   LOG=$VM_DIR/logs; mkdir -p "$LOG"
@@ -101,6 +118,7 @@ live_fetch() {
     log "live system cached"; return
   fi
   rm -f "$d/ok-$LIVE_RELEASE"
+  live_reuse "$d" && return
   dmg=$d/TryOmarchy-$LIVE_RELEASE.dmg
   # Only the app uses this folder: the omacvm command's build-live.sh works in
   # ../build-live and deletes its files when done.
@@ -131,6 +149,24 @@ live_fetch() {
   hdiutil detach "$vol" >/dev/null
   touch "$d/ok-$LIVE_RELEASE"
   rm -f "$dmg"
+}
+
+# live_reuse DIR: the live system of an earlier build in the Mac's own cache
+# (the VMs were on the Mac then, or OmacVM 3.0.0 and older) moves to DIR
+# instead of being downloaded again: copied, then deleted there.
+live_reuse() {
+  local d=$1 old=$HOME/Library/Caches/omacvm/live f
+  [[ $d != "$old" && -f $old/ok-$LIVE_RELEASE ]] || return 1
+  for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do [[ -f $old/$f ]] || return 1; done
+  log "moving the live system from $old"
+  rm -rf "$d/.moving"; mkdir -p "$d/.moving"
+  for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do
+    cp "$old/$f" "$d/.moving/$f" || { rm -rf "$d/.moving"; log "could not copy it: downloading instead"; return 1; }
+  done
+  for f in vmlinuz-linux initramfs-linux.img rootfs.ext4; do mv -f "$d/.moving/$f" "$d/$f"; done
+  rmdir "$d/.moving"
+  touch "$d/ok-$LIVE_RELEASE"
+  rm -f "$old/ok-$LIVE_RELEASE" "$old/vmlinuz-linux" "$old/initramfs-linux.img" "$old/rootfs.ext4"
 }
 
 # qemu_headless NAME ARGS...: QEMU without a window, serial console in
