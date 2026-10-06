@@ -144,6 +144,33 @@ enum WindowList {
   }
 }
 
+/// Which Bridge an OmacVM.app VM belongs to. A Mac can run OmacVM.app's Bridge
+/// and the test identity's Bridge side by side (OmacVM Test.app, port 47931).
+/// Each VM talks only to the Bridge of its own app. If both Bridges took its
+/// media keys, the one the VM does not talk to could swallow them and send
+/// the popup to nobody (MacBook Air, 2026-10-06: no Omarchy OSD at all).
+enum VMOwner {
+  static let testApp = "org.omacvm.app.test"
+  static let testBridge = "org.omacvm.test.bridge"
+  private static let runtime = "/Contents/Resources/runtime/bin/OmacVM"
+
+  /// The .app a VM process runs from (<app>/Contents/Resources/runtime/bin/OmacVM).
+  /// nil for a development build's qemu-system-aarch64.
+  static func app(executable exe: String) -> String? {
+    guard exe.hasSuffix(runtime) else { return nil }
+    let app = String(exe.dropLast(runtime.count))
+    return app.hasSuffix(".app") ? app : nil
+  }
+
+  /// `appID`: the bundle id of the VM's app (nil: unknown, e.g. a development
+  /// build; such a VM stays every Bridge's, as before). The test Bridge takes
+  /// only OmacVM Test.app's VMs, every other Bridge all the others.
+  static func ours(appID: String?, testBridge: Bool) -> Bool {
+    guard let appID else { return true }
+    return (appID == testApp) == testBridge
+  }
+}
+
 /// A Mac display, in CoreGraphics' global space (points, top-left origin).
 struct MacDisplay: Equatable {
   let id: CGDirectDisplayID
