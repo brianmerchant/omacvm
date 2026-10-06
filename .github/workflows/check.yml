@@ -137,6 +137,9 @@ jobs:
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
 
+      - name: The desktop restarts by itself after a lost GPU context (app rules, VM script)
+        run: src/tests/app-desktop-recovery.sh
+
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
 
