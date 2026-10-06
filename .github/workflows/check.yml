@@ -53,8 +53,11 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
           cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
 
-      - name: Bridge's control centre requests (allow-list, limits, manifest signatures)
+      - name: Bridge's control centre and Touch ID requests (allow-list, limits, manifest signatures, LocalAuthentication mocked)
         run: src/bridge/mac/tests/run.sh
+
+      - name: Touch ID's PAM client against a fake Bridge, and its PAM lines in and out
+        run: src/tests/touchid-client.sh
 
       - name: Update parts cover src/
         run: python3 src/release/manifest.py parts > /dev/null
@@ -88,6 +91,14 @@ jobs:
       - name: OmacVM.app new VM features (Omanotch on with a notch)
         working-directory: app/app
         run: swift run features-tests
+
+      - name: OmacVM.app Touch ID port relay (org.omacvm.auth, no Bridge, no dialog)
+        working-directory: app/app
+        run: swift run auth-tests
+
+      - name: OmacVM.app Touch ID panel (never on screen, no LAContext)
+        working-directory: app/app
+        run: swift run touchid-panel-tests
 
       - name: OmacVM.app window rules (custom resources, disk, omacvm in Terminal, keyboard note)
         working-directory: app/app
@@ -308,6 +319,9 @@ jobs:
 
       - name: A feature switch on Linux (GNU sed, glide off path)
         run: src/tests/feature-switch.sh
+
+      - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
+        run: src/tests/touchid-client.sh
 
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |

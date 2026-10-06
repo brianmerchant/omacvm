@@ -13,6 +13,10 @@ struct MacLinks: Equatable {
     var bridge = true     // OmacVM Bridge, 127.0.0.1:47831
     var battery = true    // the app's battery port
     var camera = true     // the app's camera port
+    /// Touch ID (org.omacvm.auth): off unless the file says touch-id=on
+    /// (a feature that is off by default; VMs set up before it never had it).
+    /// Only then does the VM get the port at all.
+    var touchID = false
 
     init() {}
 
@@ -28,6 +32,7 @@ struct MacLinks: Equatable {
         bridge = on["bridge"] ?? true
         battery = on["battery"] ?? true
         camera = on["camera"] ?? true
+        touchID = on["touch-id"] ?? false
     }
 
     static func load(folder: URL) -> MacLinks {
@@ -53,7 +58,8 @@ struct MacLinks: Equatable {
 
     /// For qemu.log, which omacvm check reads: "Omanotch on, Gestures off, ...".
     var record: String {
-        [("Omanotch", omanotch), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera)]
+        [("Omanotch", omanotch), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera),
+         ("Touch ID", touchID)]
             .map { "\($0.0) \($0.1 ? "on" : "off")" }.joined(separator: ", ")
     }
 }

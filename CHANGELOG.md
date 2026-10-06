@@ -5,6 +5,20 @@ in more words.
 
 ## 3.0.2 (unreleased)
 
+- Touch ID in the VM (experimental, off by default; turn it on in the
+  control centre or with `omacvm enable touch-id`): sudo, polkit prompts
+  and 1Password's "Unlock using system authentication" in Omarchy ask the
+  Mac's Touch ID first; the password
+  keeps working, and comes at once when the Mac is locked, another app is
+  in front or the Mac has no Touch ID. The Mac asks every time, shows the
+  command and its terminal, and gives the VM only yes or no. Only for the
+  person at the VM's screen: never over SSH or for a program without a
+  terminal. Parallels, UTM, VMware Fusion and OmacVM.app (there through
+  its own port: shut the VM down and start it again once after turning it
+  on) (ADR 0041). In OmacVM.app the Mac asks in its own panel in your
+  Omarchy theme, centred on the VM's window, with a fingerprint that
+  traces, turns green and draws a check (or shakes red); no click needed.
+  Parallels, UTM and Fusion keep macOS's own dialog.
 - The Mac's camera in ffmpeg (and other apps that go by the frame times):
   a recording was all black, and `ffmpeg -t 10` ended at once. A new reader
   gets the last frame first, and that frame carried the time of the

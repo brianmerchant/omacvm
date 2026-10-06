@@ -61,6 +61,7 @@ class FakeMac:
         self.notch = False   # a MacBook with a notch: Omanotch can go on
         self.mac_app: bool | None = None  # the Mac's omacvm is OmacVM.app's copy (None: an older Mac says nothing)
         self.app_update: tuple | None = None  # (status, body) for POST /omacvm/app-update (None: an older Mac)
+        self.refuse_theme: tuple | None = None   # (status, code, error) for POST /omacvm/theme (Touch ID off: 403 off)
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -205,6 +206,11 @@ class FakeMac:
                         return self.send(400, {"error": "send {\"fingers\": 3|4}", "code": "bad-body"})
                     fake.mouse_swipe = dict(fake.mouse_swipe, fingers=b["fingers"])
                     return self.send(200, fake.mouse_swipe)
+                if self.path == "/omacvm/theme":   # the Touch ID panel's colours (touchid_theme.swift)
+                    if fake.refuse_theme:
+                        st, code, err = fake.refuse_theme
+                        return self.send(st, {"error": err, "code": code})
+                    return self.send(200, {"ok": True, "dark": True})
                 if self.path == "/omacvm/updates/check":
                     fake.checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     return self.send(200, fake.updates())

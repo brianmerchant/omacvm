@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import OmacVMAuth
 import OmacVMNet
 import OmacVMUpdate
 import OmacVMUSB
@@ -118,6 +119,14 @@ final class Runner {
               // The control centre's requests (omacvm in the VM), passed on to OmacVM Bridge.
               "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=6,chardev=ctl0,name=org.omacvm.control"]
+        // Touch ID (docs/adr/0041): the VM's PAM client asks through it, the
+        // app passes it on to OmacVM Bridge (AuthRelay). Only for a VM with
+        // touch-id on at this start: other VMs keep their device list. A
+        // port on vser0 moves no PCI device; the VM finds it by its name.
+        if links.touchID {
+            a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
+                  "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
+        }
         // The fast network: an empty PCIe slot for the user network's NIC
         // should vmnet fail while the VM runs (useUserNetwork). Last,
         // so no other device moves.
@@ -302,8 +311,12 @@ final class Runner {
         // QEMU empties the console log only when it opens it: the last
         // boot's text would tell the Vulkan start watch the firmware ran.
         try? FileManager.default.removeItem(at: c.folder.appendingPathComponent("logs/console.log"))
+        try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
         let p = Process()
         p.executableURL = Paths.qemu
+        // What of the Mac this start may use (its features), read once: the
+        // Touch ID port in the arguments and its relay below agree.
+        links = MacLinks.load(folder: c.folder)
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -313,7 +326,6 @@ final class Runner {
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
         // ports (patched libslirp), and only for its features that are on:
         // Omanotch, Gestures, Bridge.
-        links = MacLinks.load(folder: c.folder)
         env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
         // And the port of the Mac's proxy on its 127.0.0.1, if it has one
         // (MacProxy, #122): a VM built behind it reaches it as 10.0.2.2.
@@ -343,6 +355,13 @@ final class Runner {
         let desktop = DesktopRestart(for: c)
         env["OMACVM_DESKTOP_LOST"] = desktop.lost.path
         env["OMACVM_DESKTOP_RESTART_REQUEST"] = desktop.requestName
+        // Touch ID's panel in QEMU's own window process (omacvm-cocoa-touchid-panel.patch):
+        // macOS reads the finger only for the app in front.
+        if links.touchID, let panel = Paths.touchIDPanel {
+            try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
+            env["OMACVM_TOUCHID_PANEL"] = panel.path
+            env["OMACVM_TOUCHID_PANEL_SOCKET"] = c.touchIDPanelSocket.path
+        }
         // The VM's graphics memory on the Mac, for this app and omacvm check (GPUMemory).
         env["OMACVM_GPU_MEMORY_STATUS"] = GPUMemory.file(for: c).path
         try? FileManager.default.removeItem(at: GPUMemory.file(for: c))
@@ -420,6 +439,7 @@ final class Runner {
                 self?.featuresRoute?.stop()
                 self?.audioLatency?.stop()
                 self?.audioLatency = nil
+                self?.auth?.stop()
                 self?.onExit?(status)
             }
         }
@@ -456,6 +476,7 @@ final class Runner {
         }
         audioDelay.start()
         audioLatency = audioDelay
+        if links.touchID { startAuth() }
         // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
         Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
         // Grow or Compact asked for in the window (VMDisk), once the guest answers.
@@ -736,6 +757,42 @@ final class Runner {
                     DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
+    // MARK: Touch ID's port (OmacVMAuth), reconnected while QEMU runs.
+
+    private var auth: AuthRelay?
+
+    private func startAuth() {
+        let path = config.authSocket.path, name = config.name
+        let panelPath = config.touchIDPanelSocket.path
+        let panel: AuthRelay.Panel? = Paths.touchIDPanel == nil ? nil : { prompt, gone in
+            guard let fd = try? NativeBridgeSocket.connectSecure(path: panelPath, label: "Touch ID panel") else {
+                FileHandle.standardError.write(Data("[auth] Touch ID panel: not there (the Mac's own dialog instead)\n".utf8))
+                return .error
+            }
+            defer { Darwin.close(fd) }
+            return TouchIDPanelClient.ask(fd: fd, prompt, gone: gone)
+        }
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "auth port") {
+                    let relay = AuthRelay(guest: fd, connectBridge: {
+                        try? NativeBridgeSocket.connectSecure(path: NativeControlBridge.relaySocketPath, label: "Bridge relay")
+                    },
+                                          headers: { NativeControlBridge.relayHeaders(vmName: name) },
+                                          panel: panel,
+                       log: { FileHandle.standardError.write(Data("[auth] \($0)\n".utf8)) })
+                    DispatchQueue.main.sync { self?.auth = relay }
+                    try? relay.run()
+                    relay.stop()
                 }
                 Thread.sleep(forTimeInterval: 1)
             }

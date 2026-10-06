@@ -25,6 +25,7 @@ enum ControlRoute: Equatable {
   case mouseSwipe, setMouseSwipe(Int)
   case startJob(JobRequest)
   case job(String)
+  case theme(Data)   // the Touch ID panel's colours (touchid_theme.swift checks the body)
 }
 
 struct PolicyError: Error, Equatable {
@@ -121,12 +122,14 @@ func controlRoute(method: String, path: String, body: Data, known: Set<String>) 
         names.append(n)
       }
       return .success(.startJob(JobRequest(action: action, features: names)))
+    case ("POST", "theme"):
+      return .success(.theme(body))
     case ("GET", let s) where s.hasPrefix("jobs/"):
       let id = String(s.dropFirst(5))
       guard validJobID(id), body.isEmpty else { throw PolicyError(404, "not-found", "no such job") }
       return .success(.job(id))
     case (_, "hello"), (_, "status"), (_, "updates"), (_, "updates/check"), (_, "settings/update-checks"), (_, "jobs"),
-         (_, "gpu-memory"), (_, "settings/mouse-swipe"), (_, "app-update"):
+         (_, "gpu-memory"), (_, "settings/mouse-swipe"), (_, "app-update"), (_, "theme"):
       throw PolicyError(405, "method", "method not allowed")
     default:
       throw PolicyError(404, "not-found", "not found")
@@ -337,13 +340,14 @@ func hmacHex(_ key: String, _ text: String) -> String {
 
 /// What a request's signature covers: method, path, time, nonce, protocol
 /// header and the body's hash.
-func requestMAC(key: String, method: String, path: String, time: Int64, nonce: String, proto: String, body: Data) -> String {
-  hmacHex(key, ["omacvm-control-request 1", method, path, String(time), nonce, proto, hexSHA256(body)].joined(separator: "\n"))
+func requestMAC(key: String, method: String, path: String, time: Int64, nonce: String, proto: String, body: Data,
+                label: String = "omacvm-control-request 1") -> String {
+  hmacHex(key, [label, method, path, String(time), nonce, proto, hexSHA256(body)].joined(separator: "\n"))
 }
 
 /// What an answer's signature covers: the request's nonce, the status and the body.
-func answerMAC(key: String, nonce: String, status: Int, body: Data) -> String {
-  hmacHex(key, ["omacvm-control-answer 1", nonce, String(status), hexSHA256(body)].joined(separator: "\n"))
+func answerMAC(key: String, nonce: String, status: Int, body: Data, label: String = "omacvm-control-answer 1") -> String {
+  hmacHex(key, [label, nonce, String(status), hexSHA256(body)].joined(separator: "\n"))
 }
 
 func sameText(_ a: String, _ b: String) -> Bool {
@@ -442,7 +446,8 @@ func noVMKey() -> PolicyError {
 /// Checks X-OmacVM-Auth against the key the Mac keeps for the VM (made by
 /// omacvm apply). Success: the request's nonce (the answer is signed with it).
 func verifyControlAuth(header: String?, key stored: String?, vm: String, method: String, path: String, proto: String,
-                       body: Data, now: Date, nonces: inout NonceStore) -> Result<String, AuthFailure> {
+                       body: Data, now: Date, nonces: inout NonceStore,
+                       label: String = "omacvm-control-request 1") -> Result<String, AuthFailure> {
   guard let key = stored?.trimmingCharacters(in: .whitespacesAndNewlines), key.utf8.count >= authKeyMin else {
     return .failure(AuthFailure(error: noVMKey(), nonce: nil, macTime: nil))
   }
@@ -451,7 +456,7 @@ func verifyControlAuth(header: String?, key stored: String?, vm: String, method:
   let f = (header ?? "").split(separator: " ").map(String.init)
   guard f.count == 4, f[0] == "1", let t = Int64(f[1]), f[2].utf8.count == 32, f[3].utf8.count == 64,
         f[2].utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return .failure(bad) }
-  guard sameText(requestMAC(key: key, method: method, path: path, time: t, nonce: f[2], proto: proto, body: body), f[3]) else {
+  guard sameText(requestMAC(key: key, method: method, path: path, time: t, nonce: f[2], proto: proto, body: body, label: label), f[3]) else {
     return .failure(bad)
   }
   let mac = Int64(now.timeIntervalSince1970)

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OmacVMAuth
 import OmacVMUpdate
 
 /// The control centre for this app's VMs (docs/adr/0031): the virtio port
@@ -141,17 +142,20 @@ final class NativeControlBridge: @unchecked Sendable {
     private let fallbackLock = NSLock()
     private var saidFallback = false
 
+    /// The app's own headers for a request it passes on: the Bridge token,
+    /// the relay key and the VM's name. Nil: the Bridge is not set up.
+    static func relayHeaders(vmName: String) -> [(String, String)]? {
+        guard let token = secret("token"), let relayKey = secret("relay-key") else { return nil }
+        return [("Authorization", "Bearer " + token), ("X-OmacVM-Relay", relayKey),
+                ("X-OmacVM-App-VM", Data(vmName.utf8).base64EncodedString())]
+    }
+
     /// The request to the Bridge, with the app's headers only.
     private func relay(_ r: Request) -> (Int, [String: Any]) {
-        guard let token = Self.secret("token"), let relayKey = Self.secret("relay-key") else {
+        guard var headers = Self.relayHeaders(vmName: vmName) else {
             return (0, ["error": "OmacVM Bridge is not set up on this Mac: open OmacVM on the Mac once"])
         }
-        var headers: [(String, String)] = [
-            ("Authorization", "Bearer " + token),
-            ("X-OmacVM-Relay", relayKey),
-            ("X-OmacVM-App-VM", Data(vmName.utf8).base64EncodedString()),
-            ("X-OmacVM-Proto", String(r.proto)),
-        ]
+        headers.append(("X-OmacVM-Proto", String(r.proto)))
         if !r.version.isEmpty { headers.append(("X-OmacVM-Version", r.version)) }
         if let g = Self.gpuMemoryHeader(path: r.path, file: gpuMemoryFile) { headers.append(("X-OmacVM-GPU-Memory", g)) }
         if r.body != nil { headers.append(("Content-Type", "application/json")) }
@@ -229,29 +233,13 @@ final class NativeControlBridge: @unchecked Sendable {
 
     /// One HTTP/1.1 request; the Bridge answers with Content-Length and closes.
     static func httpRequest(method: String, path: String, headers: [(String, String)], body: Data?) -> Data {
-        var head = "\(method) \(path) HTTP/1.1\r\nHost: omacvm-bridge\r\n"
-        for (k, v) in headers { head += "\(k): \(v)\r\n" }
-        head += "Content-Length: \(body?.count ?? 0)\r\nConnection: close\r\n\r\n"
-        return Data(head.utf8) + (body ?? Data())
+        BridgeHTTP.request(method: method, path: path, headers: headers, body: body)
     }
 
     /// Status and JSON body of the Bridge's answer, or nil (not one).
     static func parseResponse(_ data: Data) -> (Int, [String: Any])? {
-        guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let lines = String(decoding: data[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
-        let first = lines[0].split(separator: " ")
-        guard first.count >= 2, first[0].hasPrefix("HTTP/1."), let status = Int(first[1]), (100...599).contains(status) else { return nil }
-        var body = data[end.upperBound...]
-        for l in lines.dropFirst() {
-            let kv = l.split(separator: ":", maxSplits: 1)
-            if kv.count == 2, kv[0].lowercased() == "content-length",
-               let n = Int(kv[1].trimmingCharacters(in: .whitespaces)), n >= 0 {
-                guard body.count >= n else { return nil }   // cut short
-                body = body.prefix(n)
-            }
-        }
-        let o = (try? JSONSerialization.jsonObject(with: Data(body))) as? [String: Any] ?? [:]
-        return (status, o)
+        guard let r = BridgeHTTP.parse(data) else { return nil }
+        return (r.status, (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any] ?? [:])
     }
 
     /// Sends the request on the relay socket and reads the answer until the

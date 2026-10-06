@@ -27,5 +27,6 @@ a new record replaces it and says so.
 | [0038](0038-desktop-restarts-after-lost-gpu-context.md) | The desktop restarts by itself after a lost GPU context (once in 10 min, then the app asks) | accepted, built (`gpu-auto-recovery`, 3.0.1) |
 | [0039](0039-system-disk-options.md) | The app VM's disk stays NVMe, writeback, discard (virtio-blk + iothread hangs after a pause) | accepted (`disk-speed`) |
 | [0040](0040-x86-apps-box64.md) | x86_64 Linux apps through box64, built in the VM | accepted, built (`x86-apps`, 3.0.1) |
+| [0041](0041-touch-id.md) | Touch ID in the VM: pam_exec asks the Bridge, the Mac answers yes or no | accepted (`touch-id`, 3.0.2) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

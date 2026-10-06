@@ -821,6 +821,10 @@ grep -q '\[\[self window\] setContentSize:area\];' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-screen window must fill the area (Omanotch), clean-size patch"
 grep -q 'full = isFullscreen && omacvm_present_layer() &&' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: rows may be cut only with the IOSurface layer below a notch, clean-size patch"
+# Touch ID's panel in the VM window's own process (OmacVM.app's dylib, ADR 0041).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-touchid-panel.patch"
+grep -q 'dlsym(handle, "omacvm_touchid_panel_start")' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not load the Touch ID panel (touchid-panel patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

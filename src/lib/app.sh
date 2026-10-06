@@ -163,9 +163,15 @@ app_links_stale() {
   local l x k n v out=""
   l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
   [[ -n $l ]] || return 0
-  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
+  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera touch-id:Touch\ ID; do
     k=${x%%:*} n=${x#*:} v=on
     [[ " $2 " == *" $k=off "* ]] && v=off
+    # Touch ID is off unless named on (its port is there only then); an app
+    # whose line does not name it never serves it.
+    if [[ $k == touch-id ]]; then
+      [[ " $2 " == *" $k=on "* ]] || v=off
+      [[ ", $l, " == *", Touch ID "* ]] || l+=", Touch ID off"
+    fi
     [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
   done
   echo "$out"

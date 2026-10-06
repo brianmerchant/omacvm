@@ -36,6 +36,9 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(ok(route("GET", "/omacvm/settings/mouse-swipe")) == .mouseSwipe, "mouse swipe")
     expect(ok(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 3}"#)) == .setMouseSwipe(3), "mouse swipe 3")
     expect(ok(route("POST", "/omacvm/settings/mouse-swipe", #"{"fingers": 4}"#)) == .setMouseSwipe(4), "mouse swipe 4")
+    // The Touch ID panel's colours: the body goes to touchid_theme.swift's rules (tests/touchid_panel_tests.swift).
+    expect(ok(route("POST", "/omacvm/theme", ##"{"background": "#1a1b26"}"##)) == .theme(Data(##"{"background": "#1a1b26"}"##.utf8)), "theme")
+    expect(err(route("GET", "/omacvm/theme"))?.status == 405, "theme: POST only")
     for g in ["opengl", "vulkan", "auto"] {
       expect(ok(route("POST", "/omacvm/jobs", #"{"action": "graphics", "graphics": "\#(g)"}"#))
              == .startJob(JobRequest(action: .graphics, features: [g])), "graphics \(g)")

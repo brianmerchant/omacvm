@@ -87,6 +87,12 @@ enum Paths {
         return resources.appendingPathComponent("runtime/bin/OmacVM")
     }
 
+    /// Touch ID's panel, which QEMU loads (OmacVMTouchIDPanel; nil: an app built without it).
+    static var touchIDPanel: URL? {
+        let url = resources.appendingPathComponent("runtime/lib/OmacVMTouchIDPanel.dylib")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     static var firmware: URL {
         let dev = resources.appendingPathComponent("runtime/.build/firmware/edk2-aarch64-code.fd")
         if FileManager.default.fileExists(atPath: dev.path) { return dev }
@@ -207,6 +213,8 @@ struct VMConfig: Equatable {
     var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
     var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
+    var authSocket: URL { Paths.runDir.appendingPathComponent("\(id).auth") }
+    var touchIDPanelSocket: URL { Paths.runDir.appendingPathComponent("\(id).tid") }
 
     func write() throws {
         try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)

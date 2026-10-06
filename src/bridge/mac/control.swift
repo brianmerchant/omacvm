@@ -254,7 +254,7 @@ final class Control {
       let v = ProcessInfo.processInfo.operatingSystemVersion
       return answer(200, ["proto": proto, "proto_min": controlProtoMin, "omacvm": version,
                           "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs",
-                                       "gpu-memory", "settings/mouse-swipe", "app-update"],
+                                       "gpu-memory", "settings/mouse-swipe", "app-update", "theme"],
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
@@ -350,6 +350,17 @@ final class Control {
       // The app sends the file with the request: the Bridge does not read an external drive itself.
       let fromApp = relayed ? gpuMemoryFromApp(headers["x-omacvm-gpu-memory"]) : nil
       answer(200, gpuMemoryAnswer(fromApp ?? gpuMemoryText(vm)))
+    case .theme(let b):
+      // The Touch ID panel's colours: only from a VM with Touch ID on (its key on the Mac).
+      guard touchIDKey(vm) != nil else { return refuse(PolicyError(403, "off", "Touch ID is off for this VM")) }
+      let name = vmKeyName(type: vm.type, name: vm.name)
+      if let e = touchIDThemes.admit(name, now: Date()) { return refuse(e) }
+      switch parseTouchIDTheme(b) {
+      case .failure(let e): return refuse(e)
+      case .success(let t):
+        guard touchIDThemes.save(t, for: name) else { return refuse(PolicyError(500, "not-kept", "the Mac could not keep the theme")) }
+        answer(200, ["ok": true, "dark": t.dark], "theme \(t.background.hex) \(t.dark ? "dark" : "light")")
+      }
     case .job(let id):
       guard let j = job(id), j.vm == vmKey(vm) else { return refuse(PolicyError(404, "not-found", "no such job")) }
       answer(200, jobAnswer(j))
@@ -514,6 +525,54 @@ final class Control {
     if let vm = q.sync(execute: { vms.vm(at: peer) }) { return ("vm " + vm, true) }
     return ("address " + peer, false)
   }
+
+  /// Touch ID (touchid.swift): the VM that asks, found as for the control
+  /// centre's requests, and its Touch ID key and checked nonce. `key` nil:
+  /// the feature is off for that VM (no key on the Mac). The nonce is also
+  /// given back with an error once the signature checked out, so the
+  /// refusal can be signed.
+  func touchIDCaller(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data)
+      -> (vm: VMEntry?, key: String?, nonce: String?, error: PolicyError?) {
+    let cli: String
+    switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e) }
+    let vm: VMEntry
+    let found: Result<VMEntry, PolicyError>
+    if peer == relayPeer || fromThisMac(fd, peer: peer) {
+      guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
+            let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
+        return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"))
+      }
+      found = vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false })
+    } else {
+      found = vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false })
+    }
+    switch found { case .success(let v): vm = v; case .failure(let e): return (nil, nil, nil, lookingAgain(e)) }
+    guard let key = touchIDKey(vm) else { return (vm, nil, nil, nil) }
+    let checked = q.sync { () -> Result<String, AuthFailure> in
+      let r = verifyControlAuth(header: headers["x-omacvm-auth"], key: key, vm: vmKeyName(type: vm.type, name: vm.name),
+                                method: method, path: path, proto: headers["x-omacvm-proto"] ?? "", body: body,
+                                now: Date(), nonces: &nonces, label: touchIDRequestLabel)
+      keepNonces()
+      return r
+    }
+    switch checked {
+    case .success(let n): return (vm, key, n, nil)
+    case .failure(let f): return (vm, key, f.nonce, f.error)
+    }
+  }
+
+  /// The VM's Touch ID key on the Mac (lib/mac.sh touchid_key_ensure), only
+  /// when this user's alone; nil: Touch ID is off for it.
+  func touchIDKey(_ vm: VMEntry) -> String? {
+    let path = omacvmSupport + "/vm-keys/" + touchIDKeyName(type: vm.type, name: vm.name)
+    var st = stat()
+    guard lstat(path, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == getuid(), st.st_mode & 0o077 == 0, st.st_size < 256,
+          let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+    return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// How many VMs this Mac has set up (the dialog names the VM when more than one).
+  func setUpVMCount() -> Int { q.sync { vms.list.filter { $0.setup }.count } }
 
   /// An address the cache does not have was turned away for the limits: a
   /// VM that just started may be one, so look again (at most once a minute).
