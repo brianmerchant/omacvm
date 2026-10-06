@@ -38,4 +38,19 @@ done
 out=$("$R/app/runtime/Tests/display/test-fullscreen-space.sh" --self-test 2>&1); rc=$?
 echo "$out" | sed 's/^/     /'
 expect "test-fullscreen-space.sh catches the old code" 0 "$rc"
+
+# The shutdown crash guard and the hidden full-screen start, after them.
+for p in omacvm-cocoa-shutdown-events.patch omacvm-cocoa-fullscreen-start.patch; do
+  expect "$p pinned" yes \
+    "$(cd "$R/app/runtime/patches" && grep -q " $p\$" SHA256SUMS && shasum -a 256 -c --status <(grep " $p\$" SHA256SUMS) && echo yes || echo no)"
+done
+down=$(line 'patches/omacvm-cocoa-shutdown-events.patch"')
+start=$(line 'patches/omacvm-cocoa-fullscreen-start.patch"')
+expect "the build applies them after the full-screen patches" yes \
+  "$([[ -n $down && -n $start ]] && (( key < down && down < start )) && echo yes || echo no)"
+for t in test-shutdown-events.sh test-fullscreen-start.sh; do
+  out=$("$R/app/runtime/Tests/display/$t" --self-test 2>&1); rc=$?
+  echo "$out" | sed 's/^/     /'
+  expect "$t catches the old code" 0 "$rc"
+done
 exit $fail

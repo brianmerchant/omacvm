@@ -763,6 +763,14 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-ow
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-head-key-same-space.patch"
 "$native_dir/Tests/display/test-fullscreen-space.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: full screen without a Space of its own (test-fullscreen-space.sh)"
+# OmacVM: no events into QEMU once the display is cleaned up (the crash on
+# Quit/shutdown); a full-screen start shows nothing until it is there.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-events.patch"
+"$native_dir/Tests/display/test-shutdown-events.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: events into QEMU after the display's cleanup (test-shutdown-events.sh)"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-start.patch"
+"$native_dir/Tests/display/test-fullscreen-start.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
