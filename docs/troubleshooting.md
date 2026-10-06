@@ -645,5 +645,13 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   23 and keeps the old Mesa, which needs LLVM 22 (`libLLVM.so.22.1`): the
   same black screen. If you pinned it, remove the pin in the same sitting
   as the full update.
+- **3.0.1:** Graphics -> Vulkan on a VM whose package list is older than
+  the mirrors (a prebuilt VM a day later) runs the whole update first
+  (`src/guest/system-update`: `omarchy update -y` as the desktop user, then
+  `gbm-guard test`), never `pacman -Sy` alone. `omacvm graphics` asks first
+  (the control centre asks in its own dialog); `omacvm apply` never runs it.
+  An update that shows nothing new for 10 minutes or runs over 40 is
+  stopped.
 - **Where:** `src/guest/pkg-add`, `src/guest/gbm-guard`,
-  `src/guest/install.sh` (runs both), `src/tests/pkg-safe.sh`.
+  `src/guest/system-update`, `src/guest/install.sh` (runs both),
+  `src/tests/pkg-safe.sh`.

@@ -114,6 +114,9 @@ in more words.
   it off with `defaults write org.omacvm.app desktopAutoRestart -bool false`.
   VMs get it with `omacvm apply` (before that, the app restarts the login
   manager directly, without the notification).
+- Graphics -> Vulkan on a VM from an older prebuilt image: OmacVM updates
+  the whole system first (`omarchy update`, asks first in a terminal), so
+  the driver build works.
 - **x86 Linux apps** (experimental, off by default): `omacvm enable
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (on an M4: about 85 % of native speed for
