@@ -24,12 +24,42 @@ fi
 CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/omacvm}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 source "$OMACVM_SRC/vm/live/release.sh"
+# A script of "OmacVM Test" run by hand (apply-vm.sh from a shell) is the
+# test identity too, not only when the app sets OMACVM_TEST_IDENTITY: else its
+# apply installs the normal Bridge next to the test one, and that Bridge takes
+# the test VM's media keys (MacBook Air, 2026-10-06).
+if [[ -z ${OMACVM_TEST_IDENTITY:-} && -f $_root/../Info.plist ]] &&
+   [[ $(plutil -extract CFBundleIdentifier raw -o - "$_root/../Info.plist" 2>/dev/null) == org.omacvm.app.test ]]; then
+  export OMACVM_TEST_IDENTITY=1
+fi
 # The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Omanotch, Gestures, Bridge.
 # OMACVM_HOST_PORTS= (empty): none (image builds and test VMs leave the Mac's helpers alone).
 # The test identity (OMACVM_TEST_IDENTITY=1, from "OmacVM Test"): its own Gestures and
 # Bridge on 47930/47931 (libslirp maps the guest's ports), never Omanotch.
 if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then HOST_PORTS=${OMACVM_HOST_PORTS-47830>47930,47831>47931}
 else HOST_PORTS=${OMACVM_HOST_PORTS-47811,47830,47831}; fi
+source "$OMACVM_SRC/lib/proxy.sh"
+proxy_none
+
+# proxy_setup: the Mac's proxy (src/lib/proxy.sh) for this build; the ports of
+# one on the Mac's 127.0.0.1 join HOST_PORTS (the VM's 10.0.2.2:PORT is then
+# the Mac's 127.0.0.1:PORT). Image builds take nothing of this Mac.
+proxy_setup() {
+  [[ ${OMACVM_CREATE_IMAGE:-} == 1 ]] && return 0
+  proxy_detect
+  [[ -z $PROXY_NOTE ]] || log "proxy: $PROXY_NOTE"
+  local p; p=$(proxy_ports)
+  [[ -z $p ]] || HOST_PORTS=${HOST_PORTS:+$HOST_PORTS,}$p
+  [[ -z $(proxy_summary) ]] || log "proxy: $(proxy_summary)"
+}
+
+# proxy_to_vm: the proxy variables into the live system's /root/omacvm-proxy.env
+# (base-install.sh uses them and keeps them in the new system); nothing without a proxy.
+proxy_to_vm() {
+  local e; e=$(proxy_guest_env 10.0.2.2)
+  [[ -n $e ]] || return 0
+  printf '%s\n' "$e" | vssh "umask 022; cat > /root/omacvm-proxy.env"
+}
 
 vm_load() {
   VM_DIR=$(cd "$1" && pwd)
@@ -113,7 +143,7 @@ qemu_headless() {
   OMACVM_SLIRP_HOST_PORTS=$HOST_PORTS \
   "$QEMU" -name "$(qe "$NAME")" -machine virt,gic-version=3 -accel hvf -cpu host,pmu=off \
     -smp "$CPUS" -m "${MEM_MB}M" -nodefaults -display none -monitor none \
-    -action reboot=reset,shutdown=poweroff \
+    -action reboot=reset,shutdown=poweroff -boot menu=on,splash-time=0 \
     -serial "file:$(qe "$LOG/$name-console.log")" \
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22" -device virtio-net-pci,netdev=net0,romfile= \
     -device virtio-rng-pci -qmp "unix:$(qe "$QMP"),server=on,wait=off" "$@" \

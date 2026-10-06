@@ -112,16 +112,27 @@ now=$(cat "$R/src/VERSION")
 # ---------- the features it gets ----------
 features_read_env "$probe"
 PREV=("${FV[@]}")   # what the VM has now: --transaction goes back to it
-notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # OmacVM.app: see below
 # New to OmacVM (or a prebuilt VM before its first apply): the defaults,
 # Omanotch with a notch.
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
-# OmacVM.app: the VM's fast-network file is the switch (the app's button sets
-# it too), so an apply without --feature fast-network keeps what it says.
-if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
-  [[ -s $d/fast-network ]] && FV[$(feature_index fast-network)]=on || FV[$(feature_index fast-network)]=off
+# OmacVM.app: the VM's record (its features file) over the VM's copy.
+rd=""
+if [[ $TYPE == app ]] && (( NAMED )) && rd=$(app_dir "$VM"); then
+  [[ -z $had ]] || features_read_record "$rd"
+fi
+# What was switched outside OmacVM keeps its real state: the fast network
+# (the app's button writes the fast-network file) and autologin (SDDM, also an
+# Omarchy install's own file). An apply without --feature for them keeps it.
+features_real "$probe" "$rd"
+if [[ -n $had ]]; then
+  while IFS= read -r l; do [[ -z $l ]] || info "$l"; done < <(features_drift_lines "kept, the record follows")
+  # What the VM has now is the real state: a rollback goes back to it, not
+  # to the record's mistake (it would set an autologin file aside).
+  for x in ${DRIFT[@]+"${DRIFT[@]}"}; do
+    IFS=$'\t' read -r n v _ <<<"$x"; PREV[$(feature_index "$n")]=$v
+  done
 fi
 # A VM from before the control centre: one question (yes without a terminal).
 cc=$(feature_index control-centre)
@@ -165,6 +176,9 @@ helper_of() {
 }
 if (( MAC )); then
   step mac "the Mac side"
+  # OmacVM.app's apply (apply-vm.sh, or the app's omacvm the Bridge runs):
+  # the Bridge runs the app's own omacvm for the control centre (cli_file_app).
+  [[ -n ${OMACVM_APP_CLI:-} ]] && cli_file_app "$OMACVM_APP_CLI"
   args=(--quiet)
   # A repair builds that feature's Mac helper again (the others stay as they are).
   for f in ${REINSTALL[@]+"${REINSTALL[@]}"}; do
@@ -186,9 +200,8 @@ if (( MAC )); then
   needs_bridge || args+=(--no-bridge)
   on gestures || args+=(--skip-gestures)
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
-  # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
-  # app's own notch-strip mode is a separate switch in the app, which apply
-  # leaves alone).
+  # Omanotch from src/omanotch. OmacVM.app too, as for the other routes: its
+  # full screen sits below the camera and Omanotch fills the strip.
   on omanotch && args+=(--omanotch)
   MAC_FAILED=$(mktemp -t omacvm-mac)
   mrc=0; OMACVM_MAC_FAILED_FILE=$MAC_FAILED "$R/src/mac/install.sh" "${args[@]}" || mrc=$?

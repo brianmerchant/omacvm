@@ -138,8 +138,9 @@ VM runs, and goes back by itself when a new version does not start
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
-- Full screen, like Parallels; on a MacBook with a notch Omarchy's bar goes
-  beside the notch ("Use the notch for the menu bar", below).
+- Full screen, like Parallels: macOS's own, in a Space of its own on every
+  display; on a MacBook with a notch Omanotch puts Omarchy's bar beside the
+  notch (below).
 - Every Mac display in full screen: with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
@@ -167,12 +168,15 @@ VM runs, and goes back by itself when a new version does not start
   while the VM runs (`omacvm enable bridge`) gets its link to the Mac at the
   next start: shut the VM down and start it again. `omacvm apply` names
   such features, and `omacvm check` fails on them until then.
-- On a MacBook with a notch, "Use the notch for the menu bar" (on by
-  default): full screen covers the strip beside the notch too and Omarchy's
-  bar goes there, but that full screen has no Space of its own (macOS 15
-  keeps full-screen Spaces below the notch). Switched off, full screen is in
-  its own Space below the notch. The switch shows only while the Mac's
-  built-in display has a notch; elsewhere it is off.
+- On a MacBook with a notch, full screen sits below the camera in its own
+  Space (macOS keeps full-screen windows there and the strip beside the
+  notch black), and Omanotch fills the strip with Omarchy's bar. It is on
+  by default for a VM made on a Mac with a notch. A VM made with the lid
+  closed or by an app before 3.0.0 has it off: `omacvm enable omanotch`
+  (with it off the strip stays black). Before 3.0.0 the app had a switch,
+  "Use the notch for the menu bar", whose full screen covered the strip
+  but had no Space of its own: other windows could share it and the
+  escape combo had nothing to leave. It is gone.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
@@ -229,9 +233,14 @@ VM runs, and goes back by itself when a new version does not start
   `omacvm` finds VMs in every folder the app does. Going back to 2.9.0
   after that: it shows only the VMs in ~/OmacVM (or the picked folder); the
   others are hidden from it, not deleted.
-- **Sizes**: the settings show each VM's size on disk (with Show in Finder)
-  and the downloads in `~/Library/Caches/omacvm` (try-omarchy's live system,
-  prebuilt VMs) with **Clear Downloads** (not while a build uses them).
+- **Sizes**: Storage shows the VM in the window with its size on disk and
+  Show in Finder. **All VMs…** lists every VM with its size, Show in Finder
+  and Delete (to the Trash; not while it runs).
+- **Downloaded images**: the Omarchy images the app downloaded to set up
+  VMs (try-omarchy's live system, prebuilt VMs), in `~/Library/Caches/omacvm`.
+  **Remove…** deletes them after a confirmation with the size (not while a
+  VM is being set up). Your VMs keep everything; a new VM downloads them
+  again. The Mac's Downloads folder is not touched.
 - **Backups and search**: Time Machine leaves VM folders out (the disk
   changes all the time). Spotlight never reads a VM's disk (it has no
   importer for it), but lists the files' names; macOS has no switch an app
@@ -290,6 +299,10 @@ one VM at a time: the build stops at the start while another one runs.
   Mission Control); the pointer goes to Omarchy again once its window shows.
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
   it checks for them before a build and offers to install them.
+- Instant resume (save the VM when you quit, continue where you were at the
+  next start): QEMU cannot save a VM that uses the Mac's GPU, so Quit still
+  shuts Omarchy down and the next start boots it
+  ([why, and what could change it](../adr/0037-no-instant-resume-yet.md)).
 
 ## How it talks to the Mac
 
@@ -300,7 +313,8 @@ the VM's SSH on `127.0.0.1:<port>`.
   47811 (Omanotch), 47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
   127.0.0.1 (dev servers, databases) is refused, like on the other routes.
   The app's QEMU carries a libslirp patch for that
-  (`OMACVM_SLIRP_HOST_PORTS`).
+  (`OMACVM_SLIRP_HOST_PORTS`). One more port when the Mac has a proxy on
+  its 127.0.0.1 (`MacProxy.swift`, [Behind a proxy](../guide.md#behind-a-proxy)).
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,
@@ -525,8 +539,36 @@ What is missing before it can become the default: [below](#fast-network-not-done
     tunnel too (no VM, no service), and not without it: Parallels' (or
     macOS's) doing with a tunnel present, not the NAT. Quit and reopen
     Parallels Desktop, or `sudo killall prl_naptd`, brings them back.
-- Not tested yet: a real VPN client (WireGuard, IKEv2) connecting while the
-  VM runs (the test tunnel is a `utun` as theirs), real trackpad gestures over the fast network
+- A real WireGuard client on the Mac mini (macOS 27, 2026-10-06):
+  `wireguard-go` on a `utun`, set up as a VPN app does (addresses, MTU
+  1420, split routes), and a WireGuard server in userspace that takes only
+  the tunnel's own address as source, as a real one does. A stand-in VM on
+  the fast network (the daemon's socket, ARP and pings): the NAT is on
+  about a second after the tunnel; the VM's pings reach the server as
+  `10.99.0.1`. With the service's anchor emptied by hand the server drops
+  them ("packet with disallowed source address"): what VMs got before the
+  VPN NAT. Down and up again, the VM leaving: as with the test tunnel.
+  An IKEv2-style `ipsec0` (macOS's own kernel interface for IKEv2, here
+  without a security association) got no NAT at first: for an IPv4
+  address added to an interface that was already up, the service saw only
+  a new route (its local route), which it did not count. Fixed: it
+  follows route changes too (not ARP entries or per-destination routes);
+  `ipsec0` now gets its rule within a second, and pf translates to its
+  address. It also missed IPv4 address messages, which are shorter than
+  it expected; it counts them now.
+  Then an app VM's QEMU (headless clone of a test VM) on the fast network
+  with the fixed service and the same client: NAT on 1.1 s after the
+  tunnel; the VM reaches the server over IPv4 and IPv6 (seen as
+  `10.99.0.1` and `2001:db8:99::1`), 20 MiB down and 20 MiB up through the
+  tunnel's MTU of 1420 (VM 1500) at about 70 MB/s each; anchor emptied by
+  hand: dropped by the server, back 1.1 s later on the next change. A full
+  tunnel for 25 s: the VM's requests to `1.1.1.1` and `9.9.9.9` went
+  through it as `10.99.0.1`; internet as before after. The VM restarting
+  with the tunnel up: NAT in the same second, all of the above again.
+  pf outside the service's anchor, Parallels and Tailscale unchanged.
+- Not tested yet: a VPN app's own tunnel (WireGuard app, an IKEv2 profile in
+  System Settings; the tests above use the same kernel interfaces without
+  touching the Mac's VPN settings), real trackpad gestures over the fast network
   (the choice of VM is covered by `src/gestures/mac/test.sh`), Omanotch's
   strip on a MacBook with a notch over it (the link is tested), the app's
   password dialog end to end (its arguments are covered by
@@ -559,6 +601,12 @@ window per guest screen:
   around all its outputs. `omacvm-displays` reports where Hyprland put each
   output, and QEMU points the tablet at the matching spot of that box, so
   the pointer lands where it is on the Mac, also with Omarchy's zoom.
+  Hyprland sends no event when an output only moves (display-sync and
+  Omanotch move them, and a config reload puts them back to "auto" for a
+  moment), and a stale report kept the pointer in half the screen for up
+  to 30 s. So a Lua hook (`monitor.layout_changed`) pokes the agent, which
+  also compares the layout twice a second for 15 s after any change and
+  every 10 s otherwise (a report goes out only when it changed).
   The other displays' windows take the pointer (and with it the keyboard)
   only while OmacVM.app is in front, or on a click; another app coming to
   the front gets both back.

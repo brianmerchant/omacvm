@@ -106,5 +106,13 @@ check "no permission: UTM's container not read" no "$([[ -e $T/read ]] && echo y
 out=$(run OMACVM_UTM=1 OMACVM_TEST_IDENTITY=1)
 check "test identity: no UTM row" 0 "$(grep -c '"type": "utm"' <<<"$out")"
 
+# 7. A command on an app VM (apply/check --vm Work --vm-type app) from a
+# person at a terminal, with UTM used here: UTM's data is not read at all.
+rm -f "$T/read"
+got=$(HOME=$H PATH="$B:$PATH" PRLCTL=/nonexistent UTMCTL="$B/utmctl" bash -c 'source "$1/src/lib/mac.sh"; source "$1/src/lib/vm.sh"
+  UTM_TTY=1; VM=Work; TYPE=app; s=$SECONDS; resolve_vm; echo "type=$TYPE ip=${IP:-none} quick=$((SECONDS - s < 2))"' _ "$R" < /dev/null 2>&1)
+check "app VM named: resolved without starting it, no 2 s UTM wait" "type=app ip=none quick=1" "$(tail -1 <<<"$got")"
+check "app VM named: UTM's container not read" no "$([[ -e $T/read ]] && echo yes || echo no)"
+
 (( fail )) && { echo "vms-no-container: FAILED"; exit 1; }
 echo "vms-no-container: all passed"
