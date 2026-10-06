@@ -5,6 +5,8 @@
 //   state            hot key 188: enabled? key? ; screen locked? front app
 //   set 0|1          switch hot key 188 off/on (this process's call) and exit
 //   hold <s>         switch it off, sleep, exit WITHOUT switching it on (exit restore test)
+//   activate <pid>   bring that app to the front
+//   post             post 179 down/up at the HID level (to whatever is in front)
 //   recv <s> [post]  a small window in front logging key events; with "post" it
 //                    posts 179 down/up at the HID level after 1 s; lists new windows
 #import <AppKit/AppKit.h>
@@ -82,6 +84,12 @@ int main(int argc, char **argv) {
     NSString *cmd = @(argv[1]);
     if ([cmd isEqual:@"state"]) { state(); return 0; }
     if ([cmd isEqual:@"set"] && argc > 2) { int r = setOn(188, atoi(argv[2]) != 0); printf("set -> %d\n", r); state(); return 0; }
+    if ([cmd isEqual:@"activate"] && argc > 2) {
+      NSRunningApplication *a = [NSRunningApplication runningApplicationWithProcessIdentifier:atoi(argv[2])];
+      BOOL ok = [a activateWithOptions:NSApplicationActivateAllWindows];
+      printf("activate %s: %d\n", argv[2], ok); return ok ? 0 : 1;
+    }
+    if ([cmd isEqual:@"post"]) { post179(); return 0; }
     if ([cmd isEqual:@"hold"] && argc > 2) { setOn(188, false); state(); fflush(stdout); sleep(atoi(argv[2])); printf("exiting without restore\n"); return 0; }
     if ([cmd isEqual:@"recv"] && argc > 2) {
       double secs = atof(argv[2]); BOOL post = argc > 3 && !strcmp(argv[3], "post");
