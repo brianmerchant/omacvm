@@ -86,7 +86,10 @@ whole Mac's draw from its battery telemetry, 3 minutes per load; hours are
 100 Wh over that draw, whole hours from 13 h up, one decimal below. The GPU
 row is from 2026-10-04 (OmacVM 2.6.0, median of 3, brightness at its lowest,
 an external display connected); on the Mac, Geekbench 7 GPU gives 204241 with
-Metal and 117456 with OpenCL.
+Metal and 117456 with OpenCL. OmacVM.app's Speedometer and GPU row are
+3.0.0's, from 2026-10-06: run on a Mac mini M4 in the same session as
+Parallels, then scaled by Parallels' result on the MacBook
+([how](benchmarks/README.md#omacvmapp-300-2026-10-06)).
 
 Every step, the raw numbers and how to run the same tests yourself:
 [benchmarks](benchmarks/README.md).
