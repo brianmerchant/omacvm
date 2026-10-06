@@ -204,6 +204,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startVM() {
+        // A build or an update runs the VM without a window: a second QEMU on
+        // its disk (a start from the Dock or `omacvm start`) would corrupt it.
+        if state.screen == .building {
+            showWindow()
+            return
+        }
         reloadConfig()
         if state.storage.moving != nil {
             state.message = "A VM is being moved; start once that is done."
