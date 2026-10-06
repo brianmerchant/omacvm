@@ -286,7 +286,10 @@ def test_u_updates_the_mac_app_and_this_vm(tmp_path, monkeypatch):
             await pilot.press("y")
             assert await settle(pilot, lambda: any(p == "/omacvm/app-update" for _, p, _ in mac.requests))
             assert await settle(pilot, lambda: "shuts down in a moment" in a.last_result)
-            assert os.path.exists(resume_file())
+            # Not used in this boot: the VM has not restarted yet.
+            a.live_refresh()
+            await pilot.pause(0.5)
+            assert os.path.exists(resume_file()) and "shuts down in a moment" in a.last_result
             assert not any(p == "/omacvm/jobs" for _, p, _ in mac.requests)
     asyncio.run(go())
     mac.stop()
@@ -318,7 +321,7 @@ def test_after_the_restart_this_vms_part_follows(tmp_path, monkeypatch):
     mac, checks = app_world(tmp_path, monkeypatch)
     mac.version = "2.9.1"   # OmacVM.app updated itself
     from omacvm_cc.local import resume_file, write_resume
-    write_resume("2.9.1")
+    write_resume("2.9.1", boot="the boot before")
 
     async def go():
         a = app()
@@ -333,7 +336,7 @@ def test_after_the_restart_this_vms_part_follows(tmp_path, monkeypatch):
 def test_after_the_restart_an_app_that_did_not_update_says_why(tmp_path, monkeypatch):
     mac, checks = app_world(tmp_path, monkeypatch)
     from omacvm_cc.local import write_resume
-    write_resume("2.9.1")
+    write_resume("2.9.1", boot="the boot before")
 
     async def go():
         a = app()

@@ -25,7 +25,7 @@ from . import collect, look, report, system
 from . import state as S
 from .bridge import BridgeError
 from .controller import ACTION_FOR, Controller, local_time
-from .local import log_tail, take_resume, write_resume
+from .local import drop_resume, log_tail, take_resume, write_resume
 
 # Job polls (one a second) that may fail in a row before the job counts as
 # lost: an update restarts the Bridge, which takes a while.
@@ -87,6 +87,8 @@ ConfirmScreen > Vertical { width: 72; max-width: 95%; height: auto; border: roun
 # OmacVM.app cannot be asked from this VM (another app's VM, an older Mac).
 MANUAL_APP_UPDATE = ("Update OmacVM.app first: shut this VM down, open OmacVM on the Mac and click Check Now. "
                      "Then u here updates this VM.")
+MANUAL_APP_UPDATE_OTHER = ("Update OmacVM.app first: open OmacVM on the Mac and click Check Now. "
+                           "Then u here updates this VM.")
 
 
 def app_update_error(e: BridgeError) -> str:
@@ -669,6 +671,7 @@ class ControlCentre(App):
         if changed:
             self.c.refresh_vm_checks()
         self.call_from_thread(self.refresh_all)
+        self.maybe_resume()
 
     @work(thread=True, exclusive=True, group="mac")
     def ask_mac(self) -> None:
@@ -684,11 +687,16 @@ class ControlCentre(App):
             self.c.refresh_updates()
             self.c.refresh_gpu_memory()
         self.call_from_thread(self.refresh_all)
-        # OmacVM.app restarted this VM for an update: this VM's part now.
-        if self.c.linked:
-            version = take_resume()
-            if version:
-                self.call_from_thread(self.resume_update, version)
+        self.maybe_resume()
+
+    def maybe_resume(self) -> None:
+        """OmacVM.app restarted this VM for an update: this VM's part now,
+        once the Mac answers (from a worker thread)."""
+        if not self.c.linked:
+            return
+        version = take_resume()
+        if version:
+            self.call_from_thread(self.resume_update, version)
 
     def look_gpu_memory(self) -> None:
         """Every 2 s while open: one look at a time, only on OmacVM.app VMs the Mac answers for."""
@@ -964,7 +972,8 @@ class ControlCentre(App):
                 self.notify("Update: the Mac has no update information yet", severity="warning")
             return
         if plan == "manual":
-            self.notify(MANUAL_APP_UPDATE, severity="warning", timeout=12)
+            text = MANUAL_APP_UPDATE if self.c.local.vm_type == "app" else MANUAL_APP_UPDATE_OTHER
+            self.notify(text, severity="warning", timeout=12)
             return
         if plan in ("app", "app+vm"):
             what = "OmacVM.app on the Mac" + (" and this VM get " if plan == "app+vm" else " gets ") + version
@@ -996,7 +1005,7 @@ class ControlCentre(App):
         try:
             self.c.bridge.app_update()
         except BridgeError as e:
-            take_resume()
+            drop_resume()
             self.last_result = ""
             self.call_from_thread(self.notify, f"Update: {app_update_error(e)}", severity="error", timeout=12)
             self.call_from_thread(self.refresh_all)

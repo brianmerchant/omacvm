@@ -52,15 +52,37 @@ def resume_file() -> str:
 RESUME_SECONDS = 3600
 
 
-def write_resume(version: str) -> None:
+def boot_id() -> str:
+    """This boot of the VM (OMACVM_BOOT_ID for tests)."""
+    if os.environ.get("OMACVM_BOOT_ID"):
+        return os.environ["OMACVM_BOOT_ID"]
+    try:
+        with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def write_resume(version: str, boot: str | None = None) -> None:
     os.makedirs(os.path.dirname(resume_file()), exist_ok=True)
     with open(resume_file(), "w", encoding="utf-8") as f:
-        json.dump({"version": version, "at": time.time()}, f)
+        json.dump({"version": version, "at": time.time(), "boot": boot_id() if boot is None else boot}, f)
+
+
+def drop_resume() -> None:
+    try:
+        os.remove(resume_file())
+    except OSError:
+        pass
 
 
 def take_resume(remove: bool = True) -> str | None:
-    """The version from a marker under an hour old (removed: it is used once), else None."""
+    """The version from a marker under an hour old, written before this boot
+    (removed: it is used once), else None. In the boot that wrote it the VM has
+    not restarted yet: the marker stays."""
     d = read_json(resume_file())
+    if d and d.get("boot") == boot_id():
+        return None
     if remove:
         try:
             os.remove(resume_file())
