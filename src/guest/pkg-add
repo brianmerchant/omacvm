@@ -1,0 +1,49 @@
+#!/bin/bash
+# pkg-add [--asdeps] PACKAGE...: installs the PACKAGEs this VM does not have
+# yet, and nothing else. Every OmacVM guest script installs through this.
+#
+# OmacVM never updates a package the VM already has. One package newer than
+# the rest of the system is a partial update, which Arch does not support:
+# on 2026-10-06 `pacman -S --needed ... mesa` after a `pacman -Sy` put Mesa
+# 26.2.4 (built for LLVM 23) beside LLVM 22, GBM could not load, Hyprland
+# stopped and the VM showed a black screen. Updates are the user's
+# `omarchy update` (all packages at once).
+#
+# A package counts as there in any version. When installing the missing ones
+# would also change a package the VM has (pacman's package list is newer than
+# the system, or a dependency needs a newer version), nothing is installed and
+# one line on stderr says so: update the whole system first, then
+# `omacvm apply`. Never runs `pacman -Sy`.
+# Exit: 0 all there now, 1 not (one line on stderr). pacman's own output goes
+# to /var/log/omacvm-pacman.log.
+# Tests: src/tests/pkg-safe.sh.
+set -uo pipefail
+LOG=${OMACVM_PKG_LOG:-/var/log/omacvm-pacman.log}
+asdeps=()
+[[ ${1:-} == --asdeps ]] && { asdeps=(--asdeps); shift; }
+(( $# )) || exit 0
+# pacman -T prints what is not installed (status 127 then).
+missing=$(pacman -T "$@") || true
+[[ -n $missing ]] || exit 0
+read -r -d '' -a want <<<"$missing" || true
+names=${want[*]}
+# What pacman would install for them, dependencies included.
+if ! targets=$(pacman -S --print --print-format '%n %v' --noconfirm "${want[@]}" 2>>"$LOG"); then
+  echo "OmacVM: $names not installed: pacman does not find them (no network, or an old package list: update the system with omarchy update, then omacvm apply)" >&2
+  exit 1
+fi
+change=""
+while read -r n v; do
+  [[ -n $n && -n ${v:-} ]] || continue
+  have=$(pacman -Q "$n" 2>/dev/null | awk '{ print $2 }') || have=""
+  [[ -n $have && $have != "$v" ]] && change+=", $n $have -> $v"
+done <<<"$targets"
+if [[ -n $change ]]; then
+  echo "OmacVM: $names not installed: that would also update ${change#, } on its own (a partial update can break the desktop). Update the system with omarchy update, then omacvm apply" >&2
+  exit 1
+fi
+{ echo "== $(date '+%F %T') pkg-add ${asdeps[*]-} $names"; } >>"$LOG" 2>/dev/null || true
+if ! pacman -S --noconfirm ${asdeps[@]+"${asdeps[@]}"} "${want[@]}" >>"$LOG" 2>&1; then
+  echo "OmacVM: $names not installed: pacman failed (details in $LOG)" >&2
+  exit 1
+fi
