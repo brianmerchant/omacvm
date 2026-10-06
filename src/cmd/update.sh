@@ -99,7 +99,9 @@ mac_failure() {   # the failed line for the control centre, last (it shows the l
 step app "OmacVM.app"
 # The version that goes with this OmacVM, from its release (curl: no
 # quarantine). Not while the app is open: it may run a VM.
-if app=$(app_bundle); then
+# Not from OmacVM.app's own copy: the app updates itself (Check Now, or u in
+# the control centre), and app_bundle may name another copy of it.
+if [[ -z ${OMACVM_APP_COPY:-} ]] && app=$(app_bundle); then
   have=$(app_version "$app"); want=$(cat "$R/src/VERSION")
   if app_version_lt "$have" "$want"; then
     # awk reads to the end: an early exit would stop app_list with SIGPIPE.

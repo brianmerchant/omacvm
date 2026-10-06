@@ -1143,8 +1143,10 @@ class ControlCentre(App):
             self.call_from_thread(self.run_job, "update", [])
         elif plan in ("app", "app+vm", "manual"):
             self.app_step = None
-            self.last_result = ("OmacVM.app was not updated on the Mac. On the Mac: open OmacVM and click Check Now "
-                                "to see why.")
+            mac = c.mac_version()
+            self.last_result = (f"OmacVM.app was not updated on the Mac{f' (it has {mac})' if mac else ''}: if the new "
+                                "version did not start there, the old one came back and skips it until a later one. "
+                                "This VM was not changed. OmacVM's window on the Mac says why once this VM is shut down.")
             self.call_from_thread(self.refresh_all)
         else:
             self.app_step = None
