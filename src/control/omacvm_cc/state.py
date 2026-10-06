@@ -298,7 +298,7 @@ PLANS = ("none", "vm", "app+vm", "app", "mac-checkout", "manual")
 def update_plan(release, vm, mac, mac_app: bool, app_vm: bool, app_update: bool) -> str:
     """mac_app: the Mac's omacvm is OmacVM.app's copy (the app updates it).
     app_vm: this VM runs in OmacVM.app. app_update: the Mac takes
-    POST /omacvm/app-update (3.0.1 on). Forward only."""
+    POST /omacvm/app-update (3.0.2 on). Forward only."""
     r, v, m = version_tuple(release), version_tuple(vm), version_tuple(mac)
     if r is None or (m is not None and r < m):
         return "none"   # no release, or the Mac is ahead of it

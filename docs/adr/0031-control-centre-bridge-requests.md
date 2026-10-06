@@ -28,7 +28,7 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 `graphics` jobs and `gpu-memory`, read-only numbers for OmacVM.app VMs, 3.0.0;
 `settings/mouse-swipe`, Gestures' Magic Mouse swipe: GET says whether the
 Mac has a Magic Mouse and 3 or 4 fingers, POST takes `{"fingers": 3|4}`
-only, 3.0.1. It is a Mac-wide setting: a switch from one VM applies to all
+only, 3.0.2. It is a Mac-wide setting: a switch from one VM applies to all
 VMs and to OmacVM.app.)
 
 - The Mac decides which VM: the peer address must match exactly one running
@@ -96,7 +96,7 @@ VMs and to OmacVM.app.)
   127.0.0.1 to a Bridge older than the socket. The Bridge applies the same
   list; without the relay key 127.0.0.1 still gets `hello` only (the app's
   guests reach the Mac from there too).
-- `app-update` (3.0.1, `POST`, empty body; listed in `hello`): OmacVM.app
+- `app-update` (3.0.2, `POST`, empty body; listed in `hello`): OmacVM.app
   updates itself for its own VM, so `u` in the control centre updates the
   Mac and the VM in one step. The Bridge only says yes (200 `{"go": true,
   "release", "mac"}`), and only when the request came through the app's

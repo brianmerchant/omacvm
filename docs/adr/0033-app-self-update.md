@@ -155,7 +155,7 @@ Developer ID is a feed signed with our key that names the old and the new
 team. The staged update keeps its signed feed and is checked against it again
 at the next launch.
 
-**Check Now and updates with a running VM** (3.0.1). The window has a
+**Check Now and updates with a running VM** (3.0.2). The window has a
 Check Now button next to the weekly switch; it works with weekly checks off
 (a check by hand always does) and its result stays for the session. When
 this launcher runs a VM, an update shuts it down cleanly (power button, then

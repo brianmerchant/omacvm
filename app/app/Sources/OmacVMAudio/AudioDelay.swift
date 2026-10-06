@@ -1,7 +1,7 @@
 import Foundation
 
 /// How late the Mac plays a VM's sound after the VM's sound card took it
-/// (av-sync, 3.0.1).
+/// (av-sync, 3.0.2).
 ///
 /// Players in the VM (Chromium, Firefox, mpv) hold the picture back by the
 /// sound delay PipeWire reports. That covers the VM's own buffers only. After

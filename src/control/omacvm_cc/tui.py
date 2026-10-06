@@ -1187,7 +1187,7 @@ class ControlCentre(App):
         self.call_from_thread(self.refresh_all)
         try:
             answer = self.c.bridge.app_update()
-            # Only OmacVM.app 3.0.1 on answers "restarting": an older app passes
+            # Only OmacVM.app 3.0.2 on answers "restarting": an older app passes
             # the Bridge's yes on as it is, and nothing would happen.
             if answer.get("state") != "restarting":
                 raise BridgeError("refused", "OmacVM.app on the Mac is too old to update itself from here",

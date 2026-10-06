@@ -4,14 +4,14 @@ import OmacVMAudio
 
 /// Tells the VM how late the Mac plays its sound (AudioDelay: QEMU's buffers
 /// plus the Mac's output device), so Chromium, Firefox and mpv in the VM hold
-/// the picture back by as much (av-sync, 3.0.1). At the start, and whenever
+/// the picture back by as much (av-sync, 3.0.2). At the start, and whenever
 /// the Mac's default output or its delay changes (AirPods: about 170 ms more).
 ///
 /// Over the guest agent, as root: /usr/local/bin/omacvm-audio-latency MS. It
 /// keeps the value and sets PipeWire's latency offset on the sound card's
 /// output port. Until the VM's agent answers (the VM is still starting) it
 /// tries again every 5 s for 5 minutes; a VM without the program (guest files
-/// before 3.0.1) says no the same way and is left alone until the next change.
+/// before 3.0.2) says no the same way and is left alone until the next change.
 final class AudioLatencyWatch: @unchecked Sendable {
     static let program = "/usr/local/bin/omacvm-audio-latency"
     static let firstSendSeconds = 8
@@ -94,7 +94,7 @@ final class AudioLatencyWatch: @unchecked Sendable {
         }
         tries += 1
         guard tries < Self.maximumTries else {
-            log("OmacVM: the VM did not take the sound delay (no omacvm-audio-latency: guest files before 3.0.1?)")
+            log("OmacVM: the VM did not take the sound delay (no omacvm-audio-latency: guest files before 3.0.2?)")
             wanted = nil
             return
         }
