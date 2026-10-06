@@ -573,6 +573,12 @@ window per guest screen:
   around all its outputs. `omacvm-displays` reports where Hyprland put each
   output, and QEMU points the tablet at the matching spot of that box, so
   the pointer lands where it is on the Mac, also with Omarchy's zoom.
+  Hyprland sends no event when an output only moves (display-sync and
+  Omanotch move them, and a config reload puts them back to "auto" for a
+  moment), and a stale report kept the pointer in half the screen for up
+  to 30 s. So a Lua hook (`monitor.layout_changed`) pokes the agent, which
+  also compares the layout twice a second for 15 s after any change and
+  every 10 s otherwise (a report goes out only when it changed).
   The other displays' windows take the pointer (and with it the keyboard)
   only while OmacVM.app is in front, or on a click; another app coming to
   the front gets both back.

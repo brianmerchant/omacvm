@@ -5,6 +5,14 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
+  with external displays: after a Hyprland config reload (a theme change, a
+  saved hypr file, a feature switched in the control centre) the pointer
+  could reach only the left or the right half of the screen for up to 30
+  seconds. The VM told the Mac where its outputs were from a moment when
+  they were still moving. It now hears every move and tells the Mac within
+  half a second. In the VM, a reinstall of the guest files no longer stops
+  the display agent.
 - OmacVM.app VMs start about 5 seconds faster (Mac mini M4: 14.2 s to the
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
