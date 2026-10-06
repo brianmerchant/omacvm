@@ -21,7 +21,9 @@ tar -C clip -cf - . | ./vm.sh ssh 'tar --no-same-owner -C /opt/avs -xf - && chmo
 if [[ $(./vm.sh ssh 'systemctl is-active omacvm-vdecd' 2>/dev/null) != active ]]; then
   echo "$(date +%T) installing chromium-video (v3.0.0 src/vdec)"
   ./vm.sh ssh 'rm -rf /root/avs-vdec && mkdir -p /root/avs-vdec' && ./vm.sh ssh 'tar -C /root/avs-vdec -xf -' < vdec-v3.0.0.tar
-  ./vm.sh ssh 'U=$(stat -c %U /run/user/1000); cd /root/avs-vdec/src/vdec/guest && ./install.sh "$U" on 2>&1 | tail -15; systemctl is-active omacvm-vdecd; ls /dev/video*'
+  ./vm.sh ssh 'U=$(stat -c %U /run/user/1000); cd /root/avs-vdec/src/vdec/guest && ./install.sh "$U" on 2>&1 | tail -15' || true
 fi
+# Without it the def-* rows are Chromium's software decode (said here, the matrix goes on).
+echo "vdecd now: $(./vm.sh ssh 'systemctl is-active omacvm-vdecd; ls /dev/video* 2>&1' 2>&1 | tr '\n' ' ')"
 ./vm.sh ssh 'U=$(stat -c %U /run/user/1000); tail -3 /home/$U/.config/chromium-flags.conf'
 
