@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 
 <p align="center">Using a coding agent? <a href="docs/agents.md">Copy the prompt for it</a>.</p>
 
-<p align="center"><b>New in 3.0.0:</b> OmacVM.app updates itself, a control centre in Omarchy, a prebuilt VM for the app, Vulkan, and Chromium video on the Mac's media engine. <a href="CHANGELOG.md">What changed</a>.</p>
+<p align="center"><b>New in 3.0.0:</b> OmacVM.app updates itself, a control centre in Omarchy, a prebuilt VM for the app, Vulkan, Chromium video on the Mac's media engine, full screen in a Space of its own on every display (pending #121), and Magic Mouse swipes (pending #125). <a href="CHANGELOG.md">What changed</a>.</p>
 
 <p align="center">
   <img src="docs/images/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
@@ -26,13 +26,13 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
 | 🎮 **Real GPU performance**<br>A fast GPU path that keeps up with your display's refresh, up to 120 Hz. Vulkan on the Mac's GPU; WebGPU and OpenCL opt-in. | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
 | 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
-| 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
+| 👆 **Mac trackpad and Magic Mouse gestures**<br>2, 3 and 4 finger swipes and pinch zoom, Magic Mouse swipes (pending #125), plus optional macOS-like momentum scrolling. | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
 | ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
 | 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
 | 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups, for external displays too. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
 | 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🔄 **Updates itself**<br>OmacVM.app checks once a week, signed and with a way back; `omacvm update` does the rest. |
 | 📷 **Camera and microphone**<br>Video calls in the VM. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
-| 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | 🎛️ **Control centre in Omarchy**<br>`omacvm` in the VM: features on or off, updates, report a problem. |
+| 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | 🎛️ **Control centre in Omarchy**<br>`omacvm` in the VM opens a floating window: features on or off, updates, report a problem. |
 
 **[See the full compatibility list per app below](#which-app), or [every feature in detail](docs/features.md).**
 
