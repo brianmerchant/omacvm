@@ -41,6 +41,9 @@ in more words.
 - Omanotch: no more box of the old bar (the clock's last digits) at the
   strip's end after hiding the bar while the pointer was at the top edge.
   notchcast froze the pixels around a cursor that was not on NOTCH at all.
+- Omanotch: at fractional scales (such as 1.6) the strip trims the extra
+  rounding rows at its top only, so its bottom row meets the display's top
+  row and the wallpaper runs through without a step.
 
 ## 3.0.0
 
