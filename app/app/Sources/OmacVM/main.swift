@@ -204,36 +204,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Each time it comes back (first open, after the VM): centred on the
         // built-in display. Left where the user put it while it stays open.
         let placing = window.map { !$0.isVisible } ?? false
-        if placing, let w = window { place(w) }
+        if placing { window?.centreOnAppScreen() }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
         // SwiftUI may still size the window once it is on screen: centre again
         // with its final size (same place when the size did not change).
         if placing {
             DispatchQueue.main.async { [weak self] in
-                if let self, let w = self.window, w.isVisible { self.place(w) }
+                if let w = self?.window, w.isVisible { w.centreOnAppScreen() }
             }
         }
-    }
-
-    /// Centred on the built-in display, else the main one (WindowPlacement).
-    /// Not NSWindow.center(): that picks the active menu bar's display (the
-    /// external one, often) and sits above the middle. No frame autosave or
-    /// restoration: nothing brings back an old place on another display.
-    private func place(_ w: NSWindow) {
-        func id(_ s: NSScreen) -> UInt32? {
-            s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
-        }
-        let screens = NSScreen.screens.compactMap { s in id(s).map { WindowPlacement.Screen(id: $0, frame: s.visibleFrame) } }
-        let builtIn = screens.first { CGDisplayIsBuiltin($0.id) != 0 }?.id
-        guard let s = WindowPlacement.appScreen(screens: screens, builtIn: builtIn, main: NSScreen.main.flatMap(id)) else { return }
-        // SwiftUI sizes the window from its content: lay it out first.
-        w.contentView?.layoutSubtreeIfNeeded()
-        var size = w.frame.size
-        if size.width < 1 || size.height < 1, let v = w.contentView {
-            size = w.frameRect(forContentRect: NSRect(origin: .zero, size: v.fittingSize)).size
-        }
-        w.setFrameOrigin(WindowPlacement.centred(size, in: s.frame))
     }
 
     private func startVM() {
