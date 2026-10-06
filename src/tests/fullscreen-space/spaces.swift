@@ -7,6 +7,7 @@
 //                              screen), PID's windows on it, other apps' windows on it
 //   spaces watch DISPLAY SECS  the display's current Space every 50 ms, on change
 //   spaces left DISPLAY        the escape combo's move (Ctrl+Left, marked)
+import ColorSync
 import CoreGraphics
 import Foundation
 
