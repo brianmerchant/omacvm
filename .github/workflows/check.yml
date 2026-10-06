@@ -257,6 +257,9 @@ jobs:
       - name: Sound on a busy Mac and a Mac audio device that does not answer (log lines, check, test stub)
         run: src/tests/audio-timing.sh
 
+      - name: Chromium's video decoder comes back (GPU retry, pacman hook, check says why)
+        run: src/tests/vdecd-down.sh
+
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.
   guest:
@@ -276,3 +279,10 @@ jobs:
         run: |
           sudo apt-get install -y -qq lua5.4 >/dev/null
           luac5.4 -p src/app/guest/omacvm_app.lua
+
+      - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends pkg-config gcc libva-dev libgbm-dev libegl-dev \
+            libgles-dev libdrm-dev libavcodec-dev libavutil-dev libsystemd-dev
+          OMACVM_VDECD_SYSTEMD=1 src/tests/vdecd-down.sh

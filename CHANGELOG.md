@@ -156,6 +156,8 @@ in more words.
   restart or an Omanotch quit with the VM running keeps that. If the VM is
   windowed now, Omanotch gives the bar back as soon as it connects (an older
   Omanotch, or none running: after 8 s).
+- Chromium video: the decoder service comes back by itself after a broken
+  Mesa is fixed or FFmpeg is updated, and `omacvm check` says why it is down.
 
 ## 3.0.0
 
