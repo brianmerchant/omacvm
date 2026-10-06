@@ -47,6 +47,14 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- Graphics Vulkan: WebGPU in Chromium on the Mac's GPU, without the
+  experimental vulkan feature. The VM's Venus driver (OmacVM's build of
+  Mesa 26.2.4) now shares the semaphores Chrome asks for before it offers
+  pages a WebGPU adapter (before: "no adapter"), and a "Chromium (WebGPU)"
+  menu entry starts Chromium with its compositor on Vulkan. VMs set to
+  Vulkan rebuild the driver once (a few minutes, in the background after
+  the next start, or with `omacvm apply`). `omacvm check` has a "WebGPU in
+  Chromium" row.
 - **x86 Linux apps** (experimental, off by default): `omacvm enable
   x86-apps` builds box64 in the VM; x86_64 programs and AppImages then
   start like ARM ones, slower (on an M4: about 85 % of native speed for
