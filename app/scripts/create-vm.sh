@@ -40,6 +40,7 @@ cp -c "$LIVE_ROOTFS" "$LIVE_IMG" 2>/dev/null || cp "$LIVE_ROOTFS" "$LIVE_IMG"
 truncate_file "$LIVE_IMG" $((16 * 1024 * 1024 * 1024))   # the live system grows into it
 [[ -f $VM_DIR/disk.img ]] || truncate_file "$VM_DIR/disk.img" $((DISK_GB * 1024 * 1024 * 1024))
 efi_vars_create
+proxy_setup                        # the Mac's proxy, if it has one (#122)
 
 log "starting the live system"
 key_b64=$(base64 < "$KEY.pub" | tr -d '\n')
@@ -49,6 +50,7 @@ qemu_headless live "${QEMU_UEFI[@]}" -kernel "$LIVE_KERNEL" -initrd "$LIVE_INITR
   -drive "if=none,id=live,file=$(qe "$LIVE_IMG"),format=raw,cache=unsafe" -device virtio-blk-pci,drive=live \
   -drive "$DISK_OPT" -device nvme,serial=omacvm,drive=disk
 wait_ssh 300 || die "the live system did not answer on SSH (log: $LOG/live-console.log)"
+proxy_to_vm || die "could not pass the Mac's proxy to the live system"
 
 # ---------- 2. Arch Linux ARM ----------
 step 2 "Installing Arch Linux ARM onto the disk"
