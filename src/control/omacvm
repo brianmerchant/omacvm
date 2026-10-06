@@ -9,6 +9,9 @@
   omacvm report [--print | --save FILE]
                              report a problem: what goes into the GitHub issue,
                              without personal data, shown before the browser opens
+  omacvm update-system [--yes]
+                             update the VM's own system (omarchy update, not
+                             OmacVM), then check the graphics before a restart
   omacvm --version
   omacvm --window            what the menu, the bar item and the launcher run:
                              as omacvm, and the window waits for Return before
@@ -212,6 +215,11 @@ def main(args: list) -> int:
     if cmd == "status":
         from omacvm_cc import plain
         return plain.status("--json" in args)
+    if cmd == "update-system":
+        from omacvm_cc import system
+        rc = system.run(yes="--yes" in args)
+        wait_in_window()
+        return rc
     if cmd:
         print(f"omacvm: no command '{cmd}' here (omacvm --help); the Mac's omacvm has the others", file=sys.stderr)
         return 2
