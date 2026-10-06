@@ -263,6 +263,18 @@ spin and naps above. `OMACVM_VIRGL_FENCE_BUSY=0` turns it off. Bench lock,
 shipped, ADR 0026) 19.9 fps, glmark2 short set 1160 / 2986 / 3168, testufo
 unchanged.
 
+Program binds (`virgl-use-program-cache.patch`): vrend called `glUseProgram`
+before every draw, also when that program was already bound, and Apple's GL
+rebuilds its draw state after each one. WebGL Aquarium makes one draw per
+fish, so it paid that about 590,000 times a second. vrend now remembers the
+bound program per sub context (one GL context each) and skips the repeat.
+Deleting a program or pipeline, the GL blitter, and binds from paths that do
+not know their sub context (transfers, read-back) drop what it remembers.
+`bench-program-binds` (vrend through its API, one draw with new constants
+per object, mini, no lock): 0.83 -> 0.64 us per draw.
+`OMACVM_VIRGL_PROGRAM_CACHE=0` binds on every draw again. Test:
+`test-program-binds`.
+
 ### Where the time goes
 
 - Light frames (glmark2, the desktop): the fence round trip. Fixed above.
