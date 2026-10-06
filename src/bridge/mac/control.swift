@@ -176,6 +176,10 @@ final class Control {
   private var requests = RequestLimiter()
   private var nonceFD: Int32 = -1, nonceAppended = 0
   private var lastCheck = Date.distantPast
+  /// The app ran the last VM list for the Bridge (appRunner): its status
+  /// runs and jobs go through it too. False after it refused or failed
+  /// (another signer, say): they run as before until a list works again.
+  private var runnerOK = true
   private var timer: DispatchSourceTimer?
 
   func start() {
@@ -337,7 +341,7 @@ final class Control {
       if runningOnDisk(vmKey(vm)) { return refuse(PolicyError(409, "busy", "a job runs for this VM: wait for it")) }
       if let e = q.sync(execute: { limiter.admit(vmKey(vm)) }) { return refuse(e) }
       let argv = jobArgv(cli: cli, r, vm: vm.name, type: vm.type, commit: commit)
-      guard let j = startJob(argv, vm: vm, request: r, app: vm.type == "app" ? appRunner(cli) : nil) else {
+      guard let j = startJob(argv, vm: vm, request: r, app: appRunnerFor(cli, vm)) else {
         q.sync { limiter.finished(vmKey(vm)) }
         return refuse(PolicyError(500, "spawn", "the job did not start"))
       }
@@ -368,6 +372,13 @@ final class Control {
     _ = d.withUnsafeBytes { write(nonceFD, $0.baseAddress, d.count) }
     nonceAppended += new.count
     if nonceAppended > 2 * nonces.perVMLimit { compactNonces() }
+  }
+
+  /// The app's executable for this VM's CLI runs, or nil (not an app VM, no
+  /// runner, or it did not work for the last VM list).
+  private func appRunnerFor(_ cli: String, _ vm: VMEntry) -> String? {
+    guard vm.type == "app", q.sync(execute: { runnerOK }) else { return nil }
+    return appRunner(cli)
   }
 
   // ---- which VM ----
@@ -422,6 +433,7 @@ final class Control {
         DispatchQueue.global(qos: .utility).async(group: g) { [self] in
           app = listVMs([cli, "vms", "--json", "--app-only"], app: runner)
           if app == nil { log("control: OmacVM.app's VM list through the app gave none (the Bridge's own list counts)") }
+          q.sync { runnerOK = app != nil }
         }
       }
       all = listVMs([cli, "vms", "--json"])
@@ -488,7 +500,7 @@ final class Control {
     guard mine else { return q.sync { status[key]?.body } ?? ["omacvm": version, "pending": true] }
     defer { _ = q.sync { statusRunning.remove(key) } }
     var feats: Any = NSNull(), checks: Any = NSNull()
-    let app = vm.type == "app" ? appRunner(cli) : nil
+    let app = appRunnerFor(cli, vm)
     let g = DispatchGroup()
     DispatchQueue.global().async(group: g) {
       if let (_, out) = runCLI([cli, "features", "--vm", vm.name, "--vm-type", vm.type, "--json"], timeout: 60, app: app),
