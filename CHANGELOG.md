@@ -26,6 +26,11 @@ in more words.
   desktop before, 8.7 s now): the firmware no longer waits 5 seconds for a
   key before it boots (the wait was hidden under the boot logo).
   `defaults write org.omacvm.app firmwareWait -int 5` brings it back.
+- OmacVM.app: **Mac folder** (off by default). One folder of the Mac at
+  `~/Mac` in the VM (virtio-9p; big files fast, many small files slow). A
+  folder that is not there or that OmacVM may not open is left out for that
+  start and the VM starts as usual; the home folder and the folders above it
+  are refused. VMs from before 3.0.1: `omacvm apply` once.
 - USB devices (experimental, OmacVM.app, off by default): give a VM a USB
   device macOS does not use itself (debug probes, SDR sticks, boards in DFU
   mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
