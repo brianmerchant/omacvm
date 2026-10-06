@@ -21,6 +21,13 @@ in more words.
   VM start. pacman and git clone try a failed download again (3 tries)
   while Omarchy installs. PAC files are not read. Details: docs/guide.md,
   "Behind a proxy".
+- Omanotch: the right bar from the first frame after login. The bar no
+  longer shows up on the display right under the notch strip for a few
+  seconds at boot (a second copy came back for 3 s about 8 s after login),
+  and the strip no longer shows a stretched or empty frame first. When the
+  strip showed at the end of the last session, the bar starts in the strip,
+  with the notch layout of then; if the VM is windowed now, Omanotch gives
+  the bar back at once (an older Omanotch: after 8 s).
 
 ## 3.0.0 (unreleased)
 
