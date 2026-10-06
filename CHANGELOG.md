@@ -5,10 +5,16 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
-In short: OmacVM.app updates itself, the control centre in Omarchy, a
-prebuilt VM for the app, Vulkan (a Graphics setting; KosmicKrisp on macOS
-26 and newer), Chromium video on the Mac's media engine, VMs on any drive,
-a boot splash, any Omarchy scale on 5K and larger displays, less power
+In short: OmacVM.app updates itself, the control centre in Omarchy (a
+floating window, also on a Mac with only the app), a prebuilt VM for the
+app, Vulkan (a Graphics setting; KosmicKrisp on macOS 26 and newer),
+Chromium video on the Mac's media engine, VMs on any drive (Storage shows
+their sizes), a boot splash, any Omarchy scale on 5K and larger displays,
+sound that holds on a busy Mac, the fast network with a VPN. Full screen
+with a Space of its own on every display, no crash when the VM shuts down
+(pending #121), Magic Mouse swipes (pending #125, #127), ⌃⌥ Esc twice for
+Mission Control (pending, no PR yet), no black desktop after a Mesa update
+(pending, no PR yet). And less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
@@ -154,6 +160,18 @@ itself. Details below.
   updates for your features (from the release's signed manifest) and
   installs them when you ask (as `omacvm update` does). Feature `control-centre`, on by
   default; an older VM is asked once at its next apply.
+- The control centre opens as a floating window in the middle of the
+  screen (65 % of the display), from the menu, the bar, or `omacvm` typed
+  in a terminal on the desktop (`omacvm --here` stays in the terminal).
+  Escape closes it.
+- The control centre works on a Mac with only OmacVM.app (no `omacvm`
+  command installed). The app carries the whole `omacvm` and points OmacVM
+  Bridge at it at every start; before, every Mac row said "not checked".
+  Changes run from a copy, so nothing is written inside the signed app.
+  Without Textual in the VM, the control centre installs it from the Mac
+  instead of asking you to run `sudo pacman`.
+- `omacvm check` no longer calls the Bridge failing when it sets up its
+  media keys again as a VM comes to the front.
 - OmacVM.app can update itself (weekly check, waits until the VM is shut
   down, goes back to the old version if the new one does not start; "Go
   Back" in the app menu). The feed is signed with OmacVM's release key;
