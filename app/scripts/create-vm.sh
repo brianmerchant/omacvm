@@ -59,7 +59,8 @@ printf 'OMA_USER=%q\nOMA_FULLNAME=%q\nOMA_HASH=%q\nOMA_TZ=%q\nOMA_LANG=%q\nOMA_H
   "$VM_USER" "$VM_FULLNAME" "$HASH" "$VM_TZ" "$VM_LANG" "$VM_HOSTNAME" "$kb_layout" "${kb_variant:-}" |
   vssh "umask 077; cat > /root/omacvm.env"
 vssh "cat > /root/omacvm.pub" < "$KEY.pub"
-if ! run_logged "$LOG/base-install.log" vssh "bash -s" < "$OMACVM_SRC/vm/base-install.sh"; then
+# progress.sh first: package progress for the app (STEP and progress lines).
+if ! run_logged "$LOG/base-install.log" vssh "bash -s" < <(cat "$OMACVM_SRC/vm/progress.sh" "$OMACVM_SRC/vm/base-install.sh"); then
   # pacstrap's full output is only in the live system: keep it with the log.
   { echo "---- /root/pacstrap.log ----"; vssh "cat /root/pacstrap.log" < /dev/null; } >> "$LOG/base-install.log" 2>&1 || true
   die "the Arch Linux ARM install failed (log: $LOG/base-install.log)"
@@ -77,7 +78,7 @@ wait_ssh 300 || die "the new system did not answer on SSH (log: $LOG/system-cons
 # ---------- 4. Omarchy ----------
 step 4 "Installing Omarchy (omarchy-mac, 20-40 minutes)"
 CHANNEL=$(omarchy_channel)
-run_logged "$LOG/omarchy-install.log" vssh "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$OMACVM_SRC/vm/omarchy-install.sh" ||
+run_logged "$LOG/omarchy-install.log" vssh "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < <(cat "$OMACVM_SRC/vm/progress.sh" "$OMACVM_SRC/vm/omarchy-install.sh") ||
   die "Omarchy did not install (log: $LOG/omarchy-install.log)"
 vssh "rm -f /root/omacvm.env"   # it holds the password hash
 

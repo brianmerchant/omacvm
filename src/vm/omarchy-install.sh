@@ -39,10 +39,16 @@ systemctl reset-failed omacvm-omarchy-install 2>/dev/null || true
 systemd-run --uid="$U" --gid="$U" --unit=omacvm-omarchy-install -p WorkingDirectory="$H" \
   -E HOME="$H" -E USER="$U" -E LANG=en_US.UTF-8 -E TERM=xterm-256color \
   /bin/bash -c "$H/.omacvm-install.sh > '$H/.omacvm-install.log' 2>&1"
-while systemctl is-active -q omacvm-omarchy-install; do
-  sleep 20
-  sed 's/\x1b\[[0-9;]*m//g' "$H/.omacvm-install.log" | grep -E '^==>' | tail -1 || true
-done
+# The installer's output as it comes (OmacVM.app sends progress.sh first: then
+# with its package progress), until the installer is done.
+declare -F pac_progress >/dev/null || pac_progress() { sed -u 's/\x1b\[[0-9;]*m//g' | grep --line-buffered -E '^==>' || true; }
+declare -F cache_watch >/dev/null || cache_watch() { :; }
+{
+  tail -n +1 -F "$H/.omacvm-install.log" 2>/dev/null & t=$!
+  cache_watch /var/cache/pacman/pkg & w=$!
+  while systemctl is-active -q omacvm-omarchy-install; do sleep 2; done
+  sleep 1; kill "$t" "$w" 2>/dev/null || true
+} | pac_progress /dev/null
 mv "$H/.omacvm-install.log" "$L"; rm -f "$H/.omacvm-install.sh"
 grep -q 'INSTALL-EXIT=0' "$L" || { tail -30 "$L"; echo "omarchy-mac install failed, full log: $L" >&2; exit 1; }
 # Omarchy turns on its firewall (deny inbound). This SSH session survives, the
