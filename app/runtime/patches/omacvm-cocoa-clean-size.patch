@@ -88,8 +88,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +#else
 +    return false;
 +#endif
- }
- 
++}
++
 +/*
 + * OmacVM: the guest is the scale size picked for this area: as wide, pixel
 + * for pixel, omacvm_full_cut points shorter.
@@ -120,8 +120,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        [CATransaction commit];
 +    }
 +    [self updateCursorLayout];
-+}
-+
+ }
+ 
 +/*
 + * OmacVM: where the window sits in full screen. Filling the area (also with
 + * the guest at its top) or as wide as it: at the top, right below the menu
@@ -268,7 +268,16 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      omacvm_corner_release();
  }
  
-@@ -2585,6 +2691,43 @@
+@@ -2566,6 +2672,8 @@
+     [fullScreenMenuItem setTitle:@"Exit Full Screen"];
+     [cocoaView updateScale];
+     [cocoaView updateUIInfo];
++    /* A guest that is the area's scale size already (no mode change follows). */
++    [cocoaView omacvmGuestAtTop:[cocoaView omacvmGuestFitsTop:[cocoaView fullScreenSize]]];
+     omacvm_full_screen_take();
+     omacvm_displays_update();
+ }
+@@ -2585,6 +2693,43 @@
  {
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
@@ -312,7 +321,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  }
  
  /* Called when the user clicks on a window's close button */
-@@ -6205,6 +6348,8 @@
+@@ -6205,6 +6350,8 @@
              omacvm_mac_box[0].y = d.origin.y + omacvm_main_full_top;
              omacvm_mac_box[0].h = d.size.height - omacvm_main_full_top;
          }
