@@ -1,0 +1,203 @@
+From: OmacVM
+Subject: [PATCH] cocoa: guest sizes that fit Omarchy's scale presets
+
+What: in macOS full screen the guest gets up to 6 points fewer rows than
+the area below the menu bar or the notch, as many as make Omarchy's scale
+presets fit (ui/omacvm-clean-size.h). The window, fitted to the guest, sits
+at the top of the area, pixel for pixel; the rows left over are black at
+the bottom. A window's content goes in 20 point steps (resizing, zoom, the
+first size), so the presets fit there too. QEMU's log says the size
+("omacvm: full screen: guest ...", on change). The display layout the
+guest gets has the guest's rows only.
+
+Why: Hyprland takes a scale only when the output divides into whole
+logical pixels by it, and Omarchy's scale panel rounds its presets up to
+those. The MacBook Air's area below the notch is 2940x1846 pixels: only 1x
+and 2x fit, the panel offered nothing in between (user: "the macbook air
+is missing scaling like 1.6 and 1.3 as an option"). At 2940x1840 (3 points
+of black at the bottom) it offers 1, 1.25, 1.67, 2, 3.33 and 4. A 14-inch
+MacBook Pro gets 3024x1888 (1.33, 1.6), a 16-inch keeps 3456x2160. A window
+on 20 point steps always fits 1.25, 1.6 and 2 at 2x. The old rule (even
+sizes at 2x) stays the floor.
+
+Upstream: not applicable (Omarchy's presets).
+Test: Tests/display/test-clean-size.sh (the picking); by hand on the
+MacBook Air in full screen: Virtual-1 2940x1840, the scale panel offers
+1.25, 1.67 and 2, the picture pixel for pixel (tracks: w2-scale-clean).
+Applies after omacvm-cocoa-clean-size-logic.patch, last of the cocoa
+patches.
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 26d2d12..1b35633 100644
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -44,6 +44,7 @@
+ #include "ui/omacvm-pointer-start.h"
+ #include "ui/omacvm-shortcuts.h"
+ #include "ui/omacvm-gpu-memory.h"
++#include "ui/omacvm-clean-size.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -1189,6 +1190,29 @@ - (NSSize) fullScreenSize
+     return size;
+ }
+ 
++/*
++ * OmacVM: where the window sits in full screen once it is fitted to the
++ * guest. As wide as the area (the guest a few rows shorter, for a scale
++ * size): at the top, right below the menu bar or the notch's strip, pixel
++ * for pixel, black below. Narrower (a firmware or boot mode): in the middle.
++ */
++- (void) placeFullScreen
++{
++    NSWindow *w = [self window];
++    NSRect sf = [[w screen] frame];
++    NSSize area = [self fullScreenSize];
++    NSRect frame = [w frame];
++    CGFloat top = sf.origin.y + area.height;   /* the area ends at the bottom */
++
++    if (![w screen] || frame.size.width < area.width - 0.5) {
++        [w center];
++        return;
++    }
++    frame.origin.x = sf.origin.x + (sf.size.width - frame.size.width) / 2;
++    frame.origin.y = top - frame.size.height;
++    [w setFrameOrigin:frame.origin];
++}
++
+ - (void) resizeWindow
+ {
+     /*
+@@ -1210,7 +1234,7 @@ - (void) resizeWindow
+         [[self window] center];
+     } else if ([[self window] styleMask] & NSWindowStyleMaskFullScreen) {
+         [[self window] setContentSize:[self fixAspectRatio:[self fullScreenSize]]];
+-        [[self window] center];
++        [self placeFullScreen];
+     } else {
+         [[self window] setContentSize:[self fixAspectRatio:[self frame].size]];
+     }
+@@ -1227,6 +1251,11 @@ - (void) updateScale
+     [self updateCursorLayout];
+ }
+ 
++/* OmacVM: the full-screen guest height last logged. */
++static uint32_t omacvm_clean_logged;
++/* OmacVM: points cut off the bottom of the full-screen area for the guest. */
++static CGFloat omacvm_full_cut;
++
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+ 
+@@ -1235,6 +1264,7 @@ - (void) updateUIInfoLocked
+     /* Must be called with the BQL, i.e. via updateUIInfo */
+     NSSize frameSize;
+     QemuUIInfo info = { 0 };
++    bool full = false;
+ 
+     if (!qemu_console_is_graphic(dcl.con)) {
+         return;
+@@ -1248,6 +1278,7 @@ - (void) updateUIInfoLocked
+         uint32_t refreshRate = 0;
+ 
+         frameSize = isFullscreen ? [self fullScreenSize] : [self frame].size;
++        full = isFullscreen;
+ 
+         if (!CVDisplayLinkCreateWithCGDisplay(display, &displayLink)) {
+             CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(displayLink);
+@@ -1294,15 +1325,22 @@ - (void) updateUIInfoLocked
+ #ifdef CONFIG_OPENGL
+     omacvm_splash_view_size(backingFrameSize.width, backingFrameSize.height);
+ #endif
+-    /* Keep the corresponding Hyprland logical dimensions integral. */
+-    uint32_t cleanScaleDivisor = backingScale > 1.75 ? 2 :
+-                                 backingScale > 1.25 ? 3 : 1;
+-    info.width = MAX(cleanScaleDivisor,
+-                     (uint32_t)backingFrameSize.width / cleanScaleDivisor *
+-                         cleanScaleDivisor);
+-    info.height = MAX(cleanScaleDivisor,
+-                      (uint32_t)backingFrameSize.height / cleanScaleDivisor *
+-                          cleanScaleDivisor);
++    /*
++     * OmacVM: a size Omarchy's scale presets fit (ui/omacvm-clean-size.h).
++     * In full screen a few rows less; they stay black at the bottom.
++     */
++    OmacVMSize clean = omacvm_clean_size(backingFrameSize.width,
++                                         backingFrameSize.height,
++                                         backingScale, full);
++    info.width = clean.w;
++    info.height = clean.h;
++    omacvm_full_cut = full ? (backingFrameSize.height - clean.h) / backingScale : 0;
++    if (full && clean.h != omacvm_clean_logged) {
++        omacvm_clean_logged = clean.h;
++        fprintf(stderr, "omacvm: full screen: guest %ux%u in %.0fx%.0f pixels (%.0f black rows at the bottom)\n",
++                clean.w, clean.h, backingFrameSize.width, backingFrameSize.height,
++                backingFrameSize.height - clean.h);
++    }
+ 
+     qemu_console_set_ui_info(dcl.con, &info, TRUE);
+ }
+@@ -2327,7 +2365,8 @@ static NSRect cocoa_initial_window_frame(void)
+     NSRect available = [hostScreen visibleFrame];
+     CGFloat unit = floor(MIN(NSWidth(available) * 0.75 / 16.0,
+                              NSHeight(available) * 0.75 / 9.0));
+-    NSSize size = NSMakeSize(16.0 * unit, 9.0 * unit);
++    NSSize size = NSMakeSize(omacvm_window_step(16.0 * unit),
++                             omacvm_window_step(9.0 * unit));
+ 
+     return NSMakeRect(floor(NSMidX(available) - size.width / 2.0),
+                       floor(NSMidY(available) - size.height / 2.0),
+@@ -2554,6 +2593,43 @@ - (void)windowDidResize:(NSNotification *)notification
+     [cocoaView updateUIInfo];
+ }
+ 
++/*
++ * OmacVM: the window's content in 20 point steps (ui/omacvm-clean-size.h),
++ * so Omarchy's scale presets fit its guest. Not in full screen.
++ */
++static NSRect omacvm_window_on_steps(NSWindow *w, NSRect frame)
++{
++    NSRect c = [w contentRectForFrameRect:frame];
++    CGFloat top = NSMaxY(c);
++
++    c.size.width = omacvm_window_step(c.size.width);
++    c.size.height = omacvm_window_step(c.size.height);
++    c.origin.y = top - c.size.height;
++    return [w frameRectForContentRect:c];
++}
++
++- (NSSize)windowWillResize:(NSWindow *)sender toSize:(NSSize)frameSize
++{
++    NSRect f = [sender frame];
++
++    if (sender != [cocoaView window] ||
++        ([sender styleMask] & NSWindowStyleMaskFullScreen) ||
++        !([sender styleMask] & NSWindowStyleMaskTitled)) {
++        return frameSize;
++    }
++    f.size = frameSize;
++    return omacvm_window_on_steps(sender, f).size;
++}
++
++- (NSRect)windowWillUseStandardFrame:(NSWindow *)window defaultFrame:(NSRect)newFrame
++{
++    if (window != [cocoaView window] ||
++        !([window styleMask] & NSWindowStyleMaskTitled)) {
++        return newFrame;
++    }
++    return omacvm_window_on_steps(window, newFrame);
++}
++
+ /* Called when the user clicks on a window's close button */
+ - (BOOL)windowShouldClose:(id)sender
+ {
+@@ -6170,6 +6246,8 @@ static void omacvm_update_mac_layout(void)
+             omacvm_mac_box[0].y = d.origin.y + omacvm_main_full_top;
+             omacvm_mac_box[0].h = d.size.height - omacvm_main_full_top;
+         }
++        /* The guest's rows only: the cut ones below are black. */
++        omacvm_mac_box[0].h -= omacvm_full_cut;
+     } else {
+         NSSize size = [cocoaView frame].size;
+         omacvm_mac_box[0] = (OmacVMBox){ 0, 0, size.width, size.height };

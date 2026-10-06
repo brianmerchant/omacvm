@@ -28,6 +28,9 @@ in more words.
   busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
+- OmacVM.app: Omarchy's scale panel offers 1.25 and 1.6 on the MacBook Air
+  too (full screen leaves up to 6 points black at the bottom; a window
+  resizes in 20 point steps).
 
 ## 3.0.0
 

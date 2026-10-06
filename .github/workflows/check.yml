@@ -195,6 +195,9 @@ jobs:
       - name: The VM takes the pointer without a click; the Mac's cursor hides once the guest draws its own
         run: app/runtime/Tests/display/test-pointer-start.sh
 
+      - name: Guest sizes that fit Omarchy's scale presets (full screen, window steps)
+        run: app/runtime/Tests/display/test-clean-size.sh
+
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 

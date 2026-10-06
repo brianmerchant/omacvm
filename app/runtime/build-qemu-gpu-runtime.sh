@@ -774,6 +774,14 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shutdown-even
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-start.patch"
 "$native_dir/Tests/display/test-fullscreen-start.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a full-screen start shows its windowed frame (test-fullscreen-start.sh)"
+# OmacVM: guest sizes that fit Omarchy's scale presets (full screen a few
+# rows shorter, black at the bottom; a window in 20 point steps); last of the
+# cocoa patches, and its logic's test.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-clean-size-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-clean-size.patch"
+"$native_dir/Tests/display/test-clean-size.sh"
+grep -q 'OmacVMSize clean = omacvm_clean_size(' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not size the guest for Omarchy's scales (clean-size patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
