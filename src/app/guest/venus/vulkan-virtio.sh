@@ -18,6 +18,8 @@
 # Tests: OMACVM_VENUS_PROBE replaces the probe's output ("venus=1 blob_alignment=16384").
 set -euo pipefail
 cd "$(dirname "$0")"
+# Packages only through guest/pkg-add: never an update of one the VM has.
+PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../../guest/pkg-add}
 FIXED=1:26.2.4                       # the first Venus driver that honours blob alignment
 LOG=/var/log/omacvm-vulkan-virtio.log
 
@@ -85,7 +87,7 @@ fail() { echo "Vulkan (Venus): $1 (OpenGL is unaffected; details in $LOG)" >&2; 
 : > "$LOG"
 if [[ -n $missing ]]; then
   # shellcheck disable=SC2086 # one package per word
-  pacman -S --needed --noconfirm --asdeps $missing >>"$LOG" 2>&1 || fail "pacman could not install the build tools"
+  "$PKG_ADD" --asdeps $missing || fail "the build tools are not installed"
 fi
 install -m644 PKGBUILD "$B/"
 chown -R nobody: "$B"
@@ -98,7 +100,7 @@ for f in "$B"/vulkan-virtio-"$FIXED"-*-aarch64.pkg.tar.*; do [[ -f $f ]] && pkg=
 [[ -n $pkg ]] || fail "the build made no package"
 # Keep how the distro's package was installed (a dependency of Omarchy's, or by hand).
 reason=--asexplicit
-pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
+LC_ALL=C pacman -Qi vulkan-virtio 2>/dev/null | grep -q '^Install Reason *: Installed as a dependency' && reason=--asdeps
 pacman -U --noconfirm "$reason" "$pkg" >>"$LOG" 2>&1 || fail "pacman could not install $(basename "$pkg")"
 s=$(status)
 if [[ ${s%% *} == no-venus || ${s%% *} == no-pages ]]; then
