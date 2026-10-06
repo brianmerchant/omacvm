@@ -14,7 +14,8 @@ let there: (String) -> Bool = { _ in true }
 let gone: (String) -> Bool = { _ in false }
 
 // Off: no file, an empty file.
-expect(P.plan(fileText: nil, isDirectory: there) == P.Plan(arguments: [], record: "off"), "no file: off")
+let off = P.plan(fileText: nil, isDirectory: there)
+expect(off.arguments.isEmpty && off.record == "off", "no file: off")
 expect(P.plan(fileText: "\n", isDirectory: there).arguments.isEmpty, "empty file: off")
 
 // On: one fsdev and one device, the folder as written.

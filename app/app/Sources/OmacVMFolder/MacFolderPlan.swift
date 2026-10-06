@@ -18,7 +18,7 @@ public enum MacFolderPlan {
     /// line; nil when the file is empty (off) or the path is not usable.
     public static func path(fromFile text: String?) -> String? {
         guard let line = text?.split(separator: "\n", omittingEmptySubsequences: false).first else { return nil }
-        let p = String(line).trimmingCharacters(in: .whitespaces)
+        let p = String(line)
         guard p.hasPrefix("/"), p != "/", !p.contains("\0") else { return nil }
         // QEMU itself must not see "..": the folder is what the user picked.
         guard !p.split(separator: "/").contains("..") else { return nil }
