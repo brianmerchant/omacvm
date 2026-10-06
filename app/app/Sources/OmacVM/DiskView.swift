@@ -78,6 +78,8 @@ enum VMDisk {
                 if GuestAgent.execute(socketPath: agentPath, "{\"execute\":\"guest-ping\"}")?.contains("\"return\"") == true { break }
                 Thread.sleep(forTimeInterval: 5)
             }
+            // logs/disk: this start's results, one line per job.
+            try? Data().write(to: c.folder.appendingPathComponent("logs/disk"))
             for job in jobs {
                 guard running() else { return }
                 let script = job == .grow ? DiskSize.growScript : DiskSize.compactScript
@@ -115,7 +117,11 @@ enum VMDisk {
             h.write(Data("OmacVM: \(line)\n".utf8))
             try? h.close()
         }
-        try? Data("\(line)\n".utf8).write(to: logs.appendingPathComponent("disk"))
+        if let h = FileHandle(forWritingAtPath: logs.appendingPathComponent("disk").path) {
+            h.seekToEndOfFile()
+            h.write(Data("\(line)\n".utf8))
+            try? h.close()
+        }
     }
 }
 
