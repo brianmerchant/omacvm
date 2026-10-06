@@ -5,6 +5,11 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- Graphics Vulkan on macOS 26 and newer (KosmicKrisp): Vulkan apps in a
+  window or full screen now show through the Mac's GPU like on MoltenVK,
+  not through the slow CPU copy (vkmark full screen at 5K on a Mac mini M4:
+  about 260; 203 with the CPU copy in 3.0.0, other scenes). Automatic stays
+  OpenGL.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer

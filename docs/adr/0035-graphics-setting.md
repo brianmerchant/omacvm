@@ -32,9 +32,10 @@ decides whether Vulkan apps get the Mac's GPU, not how the desktop draws.
   "opengl"|"vulkan"|"auto"}`, app VMs only, a fixed argv).
 - Automatic = OpenGL on every Mac in 3.0.0 (`Graphics.autoVulkan` /
   `GRAPHICS_AUTO_VULKAN` = off): the black desktop from Vulkan windows is
-  fixed (the host no longer ends Hyprland's context on that import), but on
-  macOS 26 and newer (KosmicKrisp) Vulkan windows still go through the slow
-  CPU copy and the GPU path is not tested there yet. With it on: Vulkan on
+  fixed (the host no longer ends Hyprland's context on that import). Since
+  3.0.1 Vulkan windows take that path with KosmicKrisp too (tested on a Mac
+  mini M4, macOS 27); what Vulkan costs the OpenGL desktop there is not
+  measured yet, so Automatic stays OpenGL. With it on: Vulkan on
   macOS 26 and newer when the app has KosmicKrisp, OpenGL otherwise. The
   numbers are in
   [benchmarks](../benchmarks/README.md#graphics-automatic-2026-10-05).
