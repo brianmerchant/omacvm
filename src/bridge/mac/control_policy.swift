@@ -143,6 +143,41 @@ struct VMEntry: Equatable {
   var dir: String = ""
 }
 
+// ---- OmacVM.app's VMs: their CLI runs go through the app ----
+// The Bridge spawns omacvm with its responsibility disclaimed (Local Network
+// privacy, spawn() in control.swift). macOS then counts that bash as a
+// program of its own and refuses it a VMs folder on an external drive
+// without asking (Removable Volumes): the folder reads empty, and the VM is
+// "no such OmacVM.app VM". For an app VM the Bridge runs omacvm through the
+// app's own executable instead (`<app>/Contents/MacOS/OmacVM --control-run
+// <cli> ...`, app/app/Sources/OmacVM/ControlRun.swift), also spawned
+// disclaimed: macOS counts the run as the app's, with the access the person
+// already gave the app (the drive, and the local network for the fast network).
+
+/// The app executable that runs `cli` for the control centre: when cli is
+/// an app's own copy (<app>/Contents/Resources/omacvm/omacvm, as the app
+/// writes it) and that app's Info.plist (`info`) says it can
+/// (OmacVMControlRun: an older app would open its window instead). The app
+/// is of this Bridge's identity (`testApp`: the test identity's app id).
+func appRunnerPath(cli: String, info: [String: Any]?, testIdentity: Bool, testApp: String) -> String? {
+  let tail = "/Contents/Resources/omacvm/omacvm"
+  guard cli.hasPrefix("/"), cli.hasSuffix(tail), !cli.contains("/../"), !cli.utf8.contains(0),
+        let info, strictBool(info["OmacVMControlRun"]) == true,
+        let exe = info["CFBundleExecutable"] as? String, !exe.isEmpty, !exe.contains("/"), exe != "..",
+        let id = info["CFBundleIdentifier"] as? String, (id == testApp) == testIdentity else { return nil }
+  return String(cli.dropLast(tail.count)) + "/Contents/MacOS/" + exe
+}
+
+/// One VM list from the Bridge's own run (`all`, every VM; an app VM on an
+/// external drive is missing there) and the app's run (`app`, `omacvm vms
+/// --json --app-only`; nil when there is none or it failed): the app's VMs
+/// from the app's run, the others from the Bridge's. nil: the Bridge's run failed.
+func mergeVMLists(all: [VMEntry]?, app: [VMEntry]?) -> [VMEntry]? {
+  guard let all else { return nil }
+  guard let app else { return all }
+  return all.filter { $0.type != "app" } + app.filter { $0.type == "app" }
+}
+
 // ---- an OmacVM.app VM's graphics memory (GET /omacvm/gpu-memory) ----
 // QEMU writes logs/gpu-memory in the VM's folder while it runs
 // (virgl-darwin-memory-pressure.patch): what the VM's GPU work uses of the
@@ -157,6 +192,18 @@ func gpuMemoryFile(dir: String) -> String? {
   guard dir.hasPrefix("/"), !dir.utf8.contains(0), dir.utf8.count <= 1024, !dir.contains("/../"), !dir.hasSuffix("/..")
   else { return nil }
   return dir + "/logs/gpu-memory"
+}
+
+/// The file's text as OmacVM.app sends it with a relayed request
+/// (X-OmacVM-GPU-Memory: base64, "-" when there is no file): the app reads
+/// its VM's folder, which the Bridge may not (an external drive). nil
+/// (absent or not valid): the Bridge reads the file itself (an older app).
+/// .some(nil): the app says there is no file.
+func gpuMemoryFromApp(_ header: String?) -> String?? {
+  guard let h = header?.trimmingCharacters(in: .whitespaces), !h.isEmpty, h.utf8.count <= 8192 else { return nil }
+  if h == "-" { return .some(nil) }
+  guard let d = Data(base64Encoded: h), d.count <= gpuMemoryFileMax, let t = String(data: d, encoding: .utf8) else { return nil }
+  return .some(t)
 }
 
 /// The answer from the file's text (nil: no file). "measured": false until
@@ -808,7 +855,7 @@ struct VMListCache {
   mutating func jobEnded(vm: String, version: String?) -> Bool {
     if let version {
       list = list.map { v in
-        Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup) : v
+        Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup, dir: v.dir) : v
       }
     }
     if running { again = true; return false }

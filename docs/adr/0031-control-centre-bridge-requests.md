@@ -109,6 +109,15 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
   on SSH). The Bridge spawns the CLI with its responsibility disclaimed
   (`responsibility_spawnattrs_setdisclaim`, looked up at run time; Terminal
   does the same for its shells), so the CLI answers for itself.
+- That disclaimed bash is then refused a VMs folder on an external drive,
+  with no prompt (Removable Volumes): the app's VMs there were "no such
+  OmacVM.app VM" (3.0.0, found on a MacBook Air with an SD card). For the
+  app's VMs the Bridge runs omacvm through the app's executable
+  (`OmacVM --control-run`, also spawned disclaimed), so the run is the
+  app's, with the grants the person gave the app. The app runs only its own
+  omacvm, only the Bridge's commands, and only when its parent is OmacVM
+  Bridge of the same identity and signer: its access is not lent to any
+  other program.
 - A job can outlive the Bridge: an update reinstalls the Bridge, which stops
   it mid-job. Jobs run in their own session and write their output and exit
   code to `omacvm-bridge/jobs/`; a restarted Bridge reports them from there

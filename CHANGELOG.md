@@ -5,6 +5,15 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app VMs on an external drive: the control centre in the VM said
+  "no such OmacVM.app VM" and could not switch features, update, change
+  Graphics or show the Mac's checks. OmacVM Bridge ran omacvm as a program
+  of its own, and macOS refused it the drive without asking: the VMs folder
+  looked empty. The Bridge now runs omacvm for the app's VMs through the app
+  (`OmacVM --control-run`), which already has the access, so nothing new is
+  asked. The app also sends the VM's graphics memory numbers with the
+  request. Listing the app's VMs no longer misses one on an external drive
+  now and then (a glob in bash could see the folder as empty, #151).
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer
