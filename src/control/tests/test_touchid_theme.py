@@ -16,7 +16,7 @@ from fakes import SRC, FakeMac, vm_env  # noqa: E402
 SENDER = os.path.join(SRC, "bridge", "guest", "omacvm-touchid-theme")
 FIX = os.path.join(SRC, "bridge", "mac", "tests", "fixtures")
 TOKYO = {"accent": "#7aa2f7", "background": "#1a1b26", "border": ["#7aa2f7"], "border_angle": 0.0, "error": "#f7768e",
-         "foreground": "#a9b1d6", "radius": 0}
+         "foreground": "#a9b1d6", "radius": 0, "success": "#9ece6a", "muted": "#414868"}
 
 
 @pytest.fixture
@@ -73,6 +73,14 @@ def test_colors_toml_alone(vm):
                                                'accent = "#7daea3"\nred = "#ea6962"\n')
     t = printed(env)
     assert (t["background"], t["foreground"], t["accent"], t["error"]) == ("#282828", "#d4be98", "#7daea3", "#ea6962")
+
+
+def test_success_and_muted_from_colors_toml(vm):
+    tmp, env = vm
+    text = (tmp / "theme" / "colors.toml").read_text()
+    (tmp / "theme" / "colors.toml").write_text(text.replace('green = "#9ece6a"', 'green = "nope"'))
+    t = printed(env)
+    assert "success" not in t and t["muted"] == "#414868", "a colour it cannot read is left out (the Mac uses the text colour)"
 
 
 def test_odd_values_are_left_out(vm):

@@ -105,6 +105,11 @@ def theme() -> dict | None:
     accent = colour(colors.get("accent")) or ref(hypr.get("active-border")) or fg
     out = {"background": bg, "foreground": fg, "accent": accent,
            "error": ref(polkit.get("text-error")) or colour(colors.get("red")) or fg}
+    # The panel's "done" and its lines (the Mac checks their contrast).
+    for key, name in (("success", "green"), ("muted", "muted")):
+        c = colour(colors.get(name))
+        if c:
+            out[key] = c
     border = hypr_border(hypr_option("general:col.active_border"))
     if border:
         out["border"], out["border_angle"] = border[0], border[1]

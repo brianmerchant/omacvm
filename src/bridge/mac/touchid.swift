@@ -5,7 +5,6 @@
 import AppKit
 import Darwin
 import LocalAuthentication
-import LocalAuthenticationEmbeddedUI
 
 /// LocalAuthentication: a fresh LAContext per request, never reused.
 final class LATouchID: TouchIDAuthenticator {
@@ -32,6 +31,11 @@ final class LATouchID: TouchIDAuthenticator {
   }
 
   func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
+    // OmacVM.app's panel when it can show (the Mac password needs this dialog).
+    if let ask = p.appPanel, !passwordFallback, touchIDPanelSetting() {
+      if let o = ask(p, timeout, gone) { return o }
+      log("touchid: OmacVM.app's panel could not show: macOS's dialog instead")
+    }
     let reason = p.reason
     let c = LAContext()
     c.touchIDAuthenticationAllowableReuseDuration = 0
@@ -57,83 +61,40 @@ final class LATouchID: TouchIDAuthenticator {
   }
 }
 
-/// The Bridge's own panel (touchid_panel.swift) in the VM's Omarchy theme,
-/// with Apple's embedded Touch ID view for a fresh LAContext; macOS's alert
-/// (LATouchID) when the panel cannot be used (TouchIDPanelGate): the Mac
-/// password offered, "touch_id_panel": false, no VM window on a screen, or
-/// the embedded view failed fast once in this run.
-final class LAPanelTouchID: TouchIDAuthenticator {
-  private let alert = LATouchID()
-  private let lock = NSLock()
-  private var gate = TouchIDPanelGate()
-  let themes: TouchIDThemeStore
-  let mac: TouchIDMacState
-  init(themes: TouchIDThemeStore, mac: TouchIDMacState) { self.themes = themes; self.mac = mac }
-
-  /// The bundled fonts, once (Contents/Resources).
-  private static let fonts: Void = { if let r = Bundle.main.resourcePath { TouchIDPanelFonts.register(r) } }()
-
-  func unavailable(passwordFallback: Bool) -> TouchIDNo? { alert.unavailable(passwordFallback: passwordFallback) }
-
-  private func locked<T>(_ f: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return f() }
-
-  static func end(_ ok: Bool, _ e: Error?) -> TouchIDLAEnd {
-    if ok { return .yes }
-    guard let e = e as? LAError else { return .other }
-    switch e.code {
-    case .userCancel, .appCancel, .systemCancel, .userFallback: return .cancelled
-    case .biometryLockout: return .lockout
-    case .biometryNotAvailable, .biometryNotEnrolled, .passcodeNotSet: return .notAvailable
-    case .authenticationFailed: return .failed
-    default: return .other
-    }
+/// OmacVM.app's panel (TouchIDPanelPrompt in app/app/Sources/OmacVMAuth):
+/// the words and the VM's theme go to the app in an interim answer on the
+/// relay connection; the app's one-line answer comes back on it. The app is
+/// this Mac user's own program behind the relay key, as trusted as the VM's
+/// Touch ID key on this Mac. Nil: the panel could not show (macOS's dialog).
+func touchIDAskAppPanel(fd: Int32, _ p: TouchIDPrompt, timeout: Double, gone: () -> Bool) -> TouchIDOutcome? {
+  let text = touchIDPanelText(p.request, vm: p.vmLabel)
+  let theme = p.theme.flatMap { touchIDThemes.load($0) } ?? .tokyoNight
+  var o: [String: Any] = ["title": text.title, "line": text.line, "timeout": Int(timeout), "theme": theme.panelColors]
+  if let box = text.box { o["box"] = box }
+  let head = "HTTP/1.1 103 Touch ID Panel\r\nX-OmacVM-Panel: \(jsonData(o).base64EncodedString())\r\n\r\n"
+  guard writeAll(fd, Data(head.utf8)) else { return .no(.cancelled) }
+  let end = Date().addingTimeInterval(timeout + 5)
+  var line = Data(), b = [UInt8](repeating: 0, count: 64)
+  while Date() < end {
+    var pf = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+    let ready = poll(&pf, 1, 250)
+    if ready < 0 { if errno == EINTR { continue }; return .no(.cancelled) }
+    if ready == 0 { continue }
+    let n = b.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+    if n < 0 && errno == EINTR { continue }
+    if n <= 0 { return .no(.cancelled) }   // the app (and the VM's client) went away
+    line.append(contentsOf: b[0..<n])
+    guard let nl = line.firstIndex(of: 0x0A) else { if line.count > 64 { return .no(.failed) }; continue }
+    let answer = String(decoding: line[..<nl], as: UTF8.self)
+    log("touchid: OmacVM.app's panel: \(logSafe(answer))")
+    return touchIDAppPanelOutcome(answer)
   }
-
-  func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
-    let show = locked { gate.show(passwordFallback: passwordFallback, setting: touchIDPanelSetting(), windowFound: true) }
-    guard show == .panel else { return alert.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone) }
-    _ = LAPanelTouchID.fonts
-    let theme = p.theme.flatMap { themes.load($0) } ?? .tokyoNight
-    let c = LAContext()
-    c.touchIDAuthenticationAllowableReuseDuration = 0
-    c.localizedFallbackTitle = ""   // no "Use Password" (that needs the alert)
-    let flow = TouchIDPanelFlow(theme: theme, text: touchIDPanelText(p.request, vm: p.vmLabel),
-                                icon: NSApp.applicationIconImage, marker: VMKeys.marker)
-    flow.place = { size in
-      // The VM's app is in front (the decider checked): its frontmost window.
-      guard let app = NSWorkspace.shared.frontmostApplication, let w = touchIDFrontWindow(pid: app.processIdentifier),
-            let pl = touchIDPanelPlacement(window: w, screens: touchIDPanelScreens(), size: size) else { return nil }
-      log("touchid: panel \(pl.style == .notch ? "under the notch" : "over the VM's window") (theme \(theme.background.hex))")
-      return pl
-    }
-    flow.authView = { LAAuthenticationView(context: c, controlSize: .regular) }   // 64 pt, the panel's slot
-    flow.start = { done in
-      c.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: p.reason) { ok, e in done(LAPanelTouchID.end(ok, e)) }
-    }
-    flow.stop = { c.invalidate() }
-    let mac = self.mac
-    flow.interrupt = { mac.locked ? .locked : mac.frontType != p.vmType ? .notFront : nil }
-    let began = Date()
-    let r = flow.run(timeout: timeout, gone: gone)
-    c.invalidate()
-    switch r {
-    case .done(let o): return o
-    case .noWindow:
-      log("touchid: the VM's window is not on a screen: macOS's alert instead of the panel")
-      return alert.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone)
-    case .ended(let e, let after):
-      if locked({ gate.ended(e, after: after) }) {
-        log("touchid: the panel's Touch ID view did not work (it ended at once): macOS's alert until the Bridge restarts")
-        let left = max(5, timeout - Date().timeIntervalSince(began))
-        return alert.evaluate(p, passwordFallback: passwordFallback, timeout: left, gone: gone)
-      }
-      return touchIDOutcome(e)
-    }
-  }
+  _ = gone()
+  return .no(.timeout)
 }
 
-/// "touch_id_panel": false in the Bridge's config.json: macOS's alert instead
-/// of the panel (on unless set; read at each request).
+/// "touch_id_panel": false in the Bridge's config.json: macOS's dialog instead
+/// of OmacVM.app's panel (on unless set; read at each request).
 func touchIDPanelSetting() -> Bool {
   guard let d = FileManager.default.contents(atPath: config.path),
         let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return true }
@@ -173,7 +134,7 @@ func touchIDPasswordFallback() -> Bool {
   return strictBool(o["touch_id_password_fallback"]) ?? false
 }
 
-let touchID = TouchIDDecider(auth: LAPanelTouchID(themes: touchIDThemes, mac: LiveMacState()), mac: LiveMacState())
+let touchID = TouchIDDecider(auth: LATouchID(), mac: LiveMacState())
 
 /// True once the VM's client closed its end (Ctrl+C in sudo).
 func peerGone(_ fd: Int32) -> Bool {
@@ -209,9 +170,12 @@ func touchIDRequest(fd: Int32, peer: String, method: String, path: String, heade
   case .failure(let e): return reply(e.status, ["error": e.message, "code": e.code], e.code)
   }
   let label = control.setUpVMCount() > 1 ? vm.name : nil
+  // OmacVM.app says it can show the panel (only through its relay: c.vm came from there).
+  let panel: TouchIDAppPanel? = headers["x-omacvm-panel"] == "1" && vm.type == "app"
+    ? { p, timeout, gone in touchIDAskAppPanel(fd: fd, p, timeout: timeout, gone: gone) } : nil
   let o = touchID.decide(vm: VMListCache.key(vm), type: vm.type, on: true, request: r, vmLabel: label,
                          passwordFallback: touchIDPasswordFallback(), theme: vmKeyName(type: vm.type, name: vm.name),
-                         gone: { peerGone(fd) })
+                         appPanel: panel, gone: { peerGone(fd) })
   let result: String
   if case .no(let n) = o { result = "no " + n.rawValue } else { result = "yes" }
   var fast = false

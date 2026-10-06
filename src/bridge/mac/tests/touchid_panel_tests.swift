@@ -28,16 +28,17 @@ struct FrontMac: TouchIDMacState { var locked = false; var frontType: String? = 
   static func main() {
     let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
     let base: [String: Any] = ["background": "#1a1b26", "foreground": "#a9b1d6", "accent": "#7aa2f7", "error": "#f7768e",
-                               "border": ["#7aa2f7"], "border_angle": 0, "radius": 0]
+                               "border": ["#7aa2f7"], "border_angle": 0, "radius": 0, "success": "#9ece6a", "muted": "#414868"]
     func with(_ k: String, _ v: Any?) -> [String: Any] { var o = base; o[k] = v; return o }
 
     // ---- the 22 stock themes ----
     let tsv = try! String(contentsOfFile: here + "/fixtures/omarchy-themes.tsv", encoding: .utf8)
-    var stock = 0, lowest = 21.0, errorFallback: [String] = []
+    var stock = 0, lowest = 21.0, errorFallback: [String] = [], successFallback: [String] = [], mutedMix: [String] = []
     for line in tsv.split(separator: "\n") where !line.hasPrefix("#") {
       let f = line.split(separator: "\t").map(String.init)
-      guard f.count == 6 else { check(false, "fixture line \(line)"); continue }
-      let t = theme(["background": f[1], "foreground": f[2], "accent": f[3], "error": f[4], "border": [f[3]], "radius": 0])
+      guard f.count == 8 else { check(false, "fixture line \(line)"); continue }
+      let t = theme(["background": f[1], "foreground": f[2], "accent": f[3], "error": f[4], "border": [f[3]], "radius": 0,
+                     "success": f[6], "muted": f[7]])
       check(t != nil, "stock theme \(f[0]) passes")
       guard let t else { continue }
       stock += 1
@@ -45,11 +46,14 @@ struct FrontMac: TouchIDMacState { var locked = false; var frontType: String? = 
       check(t.dark == (f[5] == "dark"), "\(f[0]): light or dark from the background matches its mode")
       check(t.background.hex == f[1].lowercased() && t.foreground.hex == f[2].lowercased(), "\(f[0]): colours kept")
       if t.error != ThemeRGB(hex: f[4]) { errorFallback.append(f[0]) }
+      if t.success != ThemeRGB(hex: f[6]) { successFallback.append(f[0]) }
+      if t.muted != ThemeRGB(hex: f[7]) { mutedMix.append(f[0]) }
       check(t.accent.contrast(t.background) >= 3 && t.border.allSatisfy { $0.contrast(t.background) >= 1.5 }, "\(f[0]): contrasts")
     }
     check(stock == 22, "22 stock themes (got \(stock))")
     check(lowest >= 6.5, "lowest text contrast of the stock themes \(lowest)")
     check(errorFallback.sorted() == ["miasma", "solitude"], "stock themes whose red is too faint for errors: \(errorFallback)")
+    print("note: stock themes whose green falls back to the text colour: \(successFallback.sorted()); muted mixed: \(mutedMix.sorted())")
 
     // ---- the theme's rules ----
     let tn = theme(base)
@@ -95,6 +99,17 @@ struct FrontMac: TouchIDMacState { var locked = false; var frontType: String? = 
     check(refusal(Data("{".utf8)) == "bad-json", "broken JSON")
     check(OmarchyTheme.tokyoNight.dark && theme(with("background", "#ffffff").merging(["foreground": "#000000"]) { $1 })?.dark == false,
           "dark and light")
+
+    // ---- the panel's done and line colours ----
+    let plain: [String: Any] = ["background": "#1a1b26", "foreground": "#a9b1d6"]
+    var sm = plain; sm["success"] = "#9ece6a"; sm["muted"] = "#414868"
+    check(theme(sm)?.success == ThemeRGB(hex: "#9ece6a") && theme(sm)?.muted == ThemeRGB(hex: "#414868"), "success and muted as sent")
+    sm["success"] = "#1c1d28"; sm["muted"] = "#1b1c27"
+    check(theme(sm)?.success == ThemeRGB(hex: "#a9b1d6"), "a success colour that melts in: the text colour")
+    check(theme(sm)?.muted == ThemeRGB(hex: "#1a1b26")!.mix(ThemeRGB(hex: "#a9b1d6")!, 0.28), "a muted colour that melts in: a mix")
+    check(theme(plain)?.muted == ThemeRGB(hex: "#1a1b26")!.mix(ThemeRGB(hex: "#a9b1d6")!, 0.28), "no muted colour: a mix")
+    sm["success"] = "green"
+    check(theme(sm) == nil, "success: #rrggbb only")
 
     // ---- the Mac's copy ----
     let dir = NSTemporaryDirectory() + "touchid-theme-\(getpid())"
@@ -154,63 +169,18 @@ struct FrontMac: TouchIDMacState { var locked = false; var frontType: String? = 
     check(touchIDPanelText(TouchIDRequest(kind: .onePassword, user: "v", detail: "x", action: ""), vm: "Work")
           == TouchIDPanelText(title: "Touch ID in Omarchy (Work)", line: "Unlock 1Password", box: nil), "1Password: no box")
 
-    // ---- where it goes ----
-    let sz: (TouchIDPanelStyle) -> CGSize = { $0 == .notch ? CGSize(width: 360, height: 300) : CGSize(width: 360, height: 340) }
-    // A 1470x956 MacBook Air screen with a notch (safe area 32 pt, camera in the middle) and a 1920x1080 screen to its right.
-    let air = TouchIDPanelScreen(frame: CGRect(x: 0, y: 0, width: 1470, height: 956), visible: CGRect(x: 0, y: 0, width: 1470, height: 924),
-                                 safeTop: 32, notchMidX: 735)
-    let ext = TouchIDPanelScreen(frame: CGRect(x: 1470, y: 0, width: 1920, height: 1080), visible: CGRect(x: 1470, y: 0, width: 1920, height: 1055))
-    check(touchIDCocoaRect(CGRect(x: 10, y: 20, width: 300, height: 200), mainHeight: 956) == CGRect(x: 10, y: 736, width: 300, height: 200),
-          "window list to Cocoa coordinates")
-    let win = touchIDPanelPlacement(window: CGRect(x: 200, y: 100, width: 1000, height: 700), screens: [air, ext], size: sz)
-    check(win == TouchIDPanelPlacement(style: .window, frame: CGRect(x: 520, y: 800 - 154 - 340, width: 360, height: 340), screen: 0),
-          "windowed: centred, 22 % down \(String(describing: win))")
-    let tall = touchIDPanelPlacement(window: CGRect(x: 100, y: 0, width: 1000, height: 924), screens: [air, ext], size: sz)
-    check(tall?.style == .window && tall?.frame.maxY == 924 - 180, "a tall window: at most 180 pt down")
-    let fullNotch = touchIDPanelPlacement(window: CGRect(x: 0, y: 0, width: 1470, height: 956), screens: [air, ext], size: sz)
-    check(fullNotch == TouchIDPanelPlacement(style: .notch, frame: CGRect(x: 555, y: 956 - 32 - 300, width: 360, height: 300), screen: 0),
-          "full screen with a notch: a card under the strip, on the notch \(String(describing: fullNotch))")
-    // Native full screen keeps the window below the notch: as big as the screen under the strip.
-    let belowStrip = touchIDPanelPlacement(window: CGRect(x: 0, y: 0, width: 1470, height: 924), screens: [air], size: sz)
-    check(belowStrip?.style == .notch, "full screen below the strip: the notch card too")
-    check(touchIDPanelPlacement(window: CGRect(x: 0, y: 80, width: 1470, height: 844), screens: [air], size: sz)?.style == .window,
-          "a window above the Dock is not full screen")
-    let fullExt = touchIDPanelPlacement(window: ext.frame, screens: [air, ext], size: sz)
-    check(fullExt?.style == .window && fullExt?.screen == 1 && fullExt?.frame.midX == ext.frame.midX, "full screen without a notch: the window style")
-    let second = touchIDPanelPlacement(window: CGRect(x: 1400, y: 100, width: 900, height: 700), screens: [air, ext], size: sz)
-    check(second?.screen == 1 && (second?.frame.minX ?? 0) >= ext.visible.minX, "most of the window on the second screen: there")
-    let edge = touchIDPanelPlacement(window: CGRect(x: -100, y: 0, width: 400, height: 400), screens: [air], size: sz)
-    check(edge.map { air.visible.contains($0.frame) } == true, "kept inside the visible frame")
-    check(touchIDPanelPlacement(window: CGRect(x: 100, y: 100, width: 150, height: 400), screens: [air], size: sz) == nil, "too small: alert")
-    check(touchIDPanelPlacement(window: CGRect(x: 5000, y: 5000, width: 800, height: 600), screens: [air, ext], size: sz) == nil, "off screen: alert")
-    check(touchIDPanelPlacement(window: CGRect(x: 0, y: 0, width: 800, height: 600), screens: [], size: sz) == nil, "no screens: alert")
-
-    // ---- keys ----
-    check(touchIDPanelKey(keyCode: 53, command: false, marked: false) == .cancel, "Esc cancels")
-    check(touchIDPanelKey(keyCode: 47, command: true, marked: false) == .cancel, "Cmd-. cancels")
-    check(touchIDPanelKey(keyCode: 47, command: false, marked: false) == .ignore, ". alone does nothing")
-    check(touchIDPanelKey(keyCode: 36, command: false, marked: false) == .ignore, "Return does nothing")
-    check(touchIDPanelKey(keyCode: 76, command: false, marked: false) == .ignore, "Enter does nothing")
-    check(touchIDPanelKey(keyCode: 49, command: false, marked: false) == .ignore, "Space does nothing")
-    check(touchIDPanelKey(keyCode: 53, command: false, marked: true) == .ignore, "a marked Esc (a VM can cause it) is ignored")
-
-    // ---- panel or alert ----
-    var gate = TouchIDPanelGate()
-    check(gate.show(passwordFallback: false, setting: true, windowFound: true) == .panel, "panel")
-    check(gate.show(passwordFallback: true, setting: true, windowFound: true) == .alert, "the Mac password needs the alert")
-    check(gate.show(passwordFallback: false, setting: false, windowFound: true) == .alert, "setting off")
-    check(gate.show(passwordFallback: false, setting: true, windowFound: false) == .alert, "no VM window")
-    for e in [TouchIDLAEnd.yes, .cancelled, .lockout, .notAvailable, .failed] {
-      check(!gate.ended(e, after: 0.1), "\(e) fast is not a broken view")
+    // ---- OmacVM.app's panel: its answer line ----
+    check(touchIDAppPanelOutcome("yes") == .yes, "app panel: yes")
+    check(touchIDAppPanelOutcome("error") == nil, "app panel: error -> macOS's dialog")
+    check(touchIDAppPanelOutcome("no cancelled") == .no(.cancelled) && touchIDAppPanelOutcome("no lockout") == .no(.lockout)
+          && touchIDAppPanelOutcome("no not-front") == .no(.notFront) && touchIDAppPanelOutcome("no timeout") == .no(.timeout),
+          "app panel: each no")
+    for junk in ["YES", "yes ", "", "no", "ok", "yes\r", "no yes"] {
+      check(touchIDAppPanelOutcome(junk) == .no(.failed), "app panel: \(junk.debugDescription) is never a yes")
     }
-    check(!gate.ended(.other, after: 0.8), "a slow error: the person may have seen it, never asked again")
-    check(gate.show(passwordFallback: false, setting: true, windowFound: true) == .panel, "still the panel")
-    check(gate.ended(.other, after: 0.2) && gate.broken, "a fast error: the view could not show")
-    check(gate.show(passwordFallback: false, setting: true, windowFound: true) == .alert, "the alert for the rest of the run")
-
-    // ---- one end ----
-    var state = TouchIDPanelState()
-    check(state.finish(.no(.cancelled)) && !state.finish(.yes) && state.end == .no(.cancelled), "the first end wins")
+    let colours = OmarchyTheme.tokyoNight.panelColors
+    check(Set(colours.keys) == ["background", "foreground", "accent", "error", "success", "muted"] && colours["success"] == "#9ece6a"
+          && colours["muted"] == "#414868", "app panel: the colours it draws with")
 
     // ---- the decider hands the panel what it needs ----
     let pa = PromptAuth()
@@ -219,6 +189,10 @@ struct FrontMac: TouchIDMacState { var locked = false; var frontType: String? = 
                                                          passwordFallback: false, theme: vm, now: t0)
     check(pa.prompts.count == 1 && pa.prompts[0].request == r && pa.prompts[0].vmType == "app" && pa.prompts[0].theme == vm
           && pa.prompts[0].vmLabel == "Work" && pa.prompts[0].reason == touchIDReason(r, vm: "Work"), "prompt")
+    let pb = PromptAuth()
+    _ = TouchIDDecider(auth: pb, mac: FrontMac()).decide(vm: "app/Work", type: "app", on: true, request: r, vmLabel: nil,
+                                                         passwordFallback: false, appPanel: { _, _, _ in .yes }, now: t0)
+    check(pb.prompts.first?.appPanel != nil && pa.prompts.first?.appPanel == nil, "the app's panel reaches the authenticator only when given")
 
     print("touchid-panel: \(tPassed) passed, \(tFailures) failed")
     exit(tFailures == 0 ? 0 : 1)

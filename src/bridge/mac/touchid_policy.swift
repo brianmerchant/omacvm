@@ -186,7 +186,12 @@ struct TouchIDPrompt {
   let vmLabel: String?         // the VM's name when the Mac has several
   let vmType: String           // its app (omacvm vms --json "type")
   var theme: String?           // its key name: the theme the Mac keeps for it
+  var appPanel: TouchIDAppPanel? = nil
 }
+
+/// OmacVM.app's panel, shown by the VM window's own process (QEMU): asks it
+/// and gives the outcome, or nil when it could not show (macOS's dialog then).
+typealias TouchIDAppPanel = (_ p: TouchIDPrompt, _ timeout: Double, _ gone: @escaping () -> Bool) -> TouchIDOutcome?
 
 /// LocalAuthentication, or a mock.
 protocol TouchIDAuthenticator {
@@ -216,7 +221,8 @@ final class TouchIDDecider {
   /// `on`: the feature is on for it (its key is on the Mac); `theme`: its
   /// key name, for the panel's colours.
   func decide(vm: String, type: String, on: Bool, request: TouchIDRequest, vmLabel: String?, passwordFallback: Bool,
-              theme: String? = nil, now: Date = Date(), gone: @escaping () -> Bool = { false }) -> TouchIDOutcome {
+              theme: String? = nil, appPanel: TouchIDAppPanel? = nil, now: Date = Date(),
+              gone: @escaping () -> Bool = { false }) -> TouchIDOutcome {
     guard on else { return .no(.off) }
     if let n = locked({ limits.admit(vm, now: now) }) { return .no(n) }
     let outcome: TouchIDOutcome
@@ -224,7 +230,8 @@ final class TouchIDDecider {
     else if mac.frontType != type { outcome = .no(.notFront) }
     else if let n = auth.unavailable(passwordFallback: passwordFallback) { outcome = .no(n) }
     else {
-      let p = TouchIDPrompt(reason: touchIDReason(request, vm: vmLabel), request: request, vmLabel: vmLabel, vmType: type, theme: theme)
+      let p = TouchIDPrompt(reason: touchIDReason(request, vm: vmLabel), request: request, vmLabel: vmLabel, vmType: type, theme: theme,
+                            appPanel: appPanel)
       outcome = auth.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone)
     }
     // The pause after misses counts from the request's time (tests give it).

@@ -41,6 +41,11 @@ struct ThemeRGB: Equatable {
     }
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
   }
+  /// `t` of the way from this colour to `o`.
+  func mix(_ o: ThemeRGB, _ t: Double) -> ThemeRGB {
+    func m(_ a: UInt8, _ b: UInt8) -> UInt8 { UInt8(max(0, min(255, (Double(a) + (Double(b) - Double(a)) * t).rounded()))) }
+    return ThemeRGB(m(r, o.r), m(g, o.g), m(b, o.b))
+  }
   /// WCAG contrast ratio, 1...21.
   func contrast(_ o: ThemeRGB) -> Double {
     let a = luminance, b = o.luminance
@@ -54,6 +59,8 @@ struct OmarchyTheme: Equatable {
   var border: [ThemeRGB]     // one colour, or two for Hyprland's gradient
   var borderAngle: Double    // degrees, 0..<360, gradient only
   var radius: Double         // Hyprland's decoration:rounding, 0...12 pt
+  var success = ThemeRGB(0x9e, 0xce, 0x6a)   // colors.toml green: the panel's "done"
+  var muted = ThemeRGB(0x41, 0x48, 0x68)     // colors.toml muted: the panel's lines
 
   /// Light or dark from the background itself, not from the theme's "mode".
   var dark: Bool { background.luminance < 0.18 }
@@ -71,8 +78,17 @@ struct OmarchyTheme: Equatable {
   /// For the Mac's copy (the same keys the VM sends).
   var json: [String: Any] {
     ["background": background.hex, "foreground": foreground.hex, "accent": accent.hex, "error": error.hex,
-     "border": border.map { $0.hex }, "border_angle": borderAngle, "radius": radius]
+     "border": border.map { $0.hex }, "border_angle": borderAngle, "radius": radius, "success": success.hex, "muted": muted.hex]
   }
+
+  /// The colours OmacVM.app's panel draws with (TouchIDPanelPrompt's theme).
+  var panelColors: [String: String] {
+    ["background": background.hex, "foreground": foreground.hex, "accent": accent.hex, "error": error.hex,
+     "success": success.hex, "muted": muted.hex]
+  }
+
+  /// Lines that stay visible on the background (else a mix of background and text).
+  static let mutedContrast = 1.3
 }
 
 /// A JSON number that is not a bool and is finite.
@@ -92,8 +108,8 @@ func parseTouchIDTheme(_ body: Data) -> Result<OmarchyTheme, PolicyError> {
   }
   let o: [String: Any]
   do {
-    guard let obj = try strictObject(body, allowed: ["background", "foreground", "accent", "error", "border",
-                                                     "border_angle", "radius"]) else {
+    guard let obj = try strictObject(body, allowed: ["background", "foreground", "accent", "error", "success", "muted",
+                                                     "border", "border_angle", "radius"]) else {
       return .failure(PolicyError(400, "bad-json", "body must be a JSON object"))
     }
     o = obj
@@ -106,7 +122,7 @@ func parseTouchIDTheme(_ body: Data) -> Result<OmarchyTheme, PolicyError> {
     return .success(c)
   }
   var got: [String: ThemeRGB] = [:]
-  for (k, req) in [("background", true), ("foreground", true), ("accent", false), ("error", false)] {
+  for (k, req) in [("background", true), ("foreground", true), ("accent", false), ("error", false), ("success", false), ("muted", false)] {
     switch colour(k, required: req) {
     case .failure(let e): return .failure(e)
     case .success(let c): got[k] = c
@@ -140,10 +156,12 @@ func parseTouchIDTheme(_ body: Data) -> Result<OmarchyTheme, PolicyError> {
   }
   let accent = got["accent"].flatMap { $0.contrast(bg) >= OmarchyTheme.accentContrast ? $0 : nil } ?? fg
   let error = got["error"].flatMap { $0.contrast(bg) >= OmarchyTheme.accentContrast ? $0 : nil } ?? fg
+  let success = got["success"].flatMap { $0.contrast(bg) >= OmarchyTheme.accentContrast ? $0 : nil } ?? fg
+  let muted = got["muted"].flatMap { $0.contrast(bg) >= OmarchyTheme.mutedContrast ? $0 : nil } ?? bg.mix(fg, 0.28)
   // A border colour that melts into the background: the whole border is the accent.
   if border.isEmpty || border.contains(where: { $0.contrast(bg) < OmarchyTheme.borderContrast }) { border = [accent] }
   return .success(OmarchyTheme(background: bg, foreground: fg, accent: accent, error: error, border: border,
-                               borderAngle: border.count == 2 ? angle : 0, radius: radius))
+                               borderAngle: border.count == 2 ? angle : 0, radius: radius, success: success, muted: muted))
 }
 
 /// The Mac's copy of each VM's theme: <dir>/<vm key name>.json, 0600, in a

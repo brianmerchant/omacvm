@@ -402,18 +402,18 @@ with `touch-id=on` at the VM's start); the app passes the request on to
 the relay socket with the relay key and the VM's name, the guest's
 signature along, and the signed answer back unchanged (`AuthRelay`).
 
-The Bridge shows its own panel (`touchid_panel.swift`, from 3.0.2) instead
-of macOS's alert: over the VM's window, or hanging from the notch strip in
-full screen, in the VM's Omarchy theme, with Apple's embedded Touch ID view
-(`LAAuthenticationView`) for the request's `LAContext`. Only a finger says
-yes; Cancel, Esc and Cmd-. say no. macOS's alert stays for the password
-fallback, `"touch_id_panel": false` in `config.json`, no VM window on a
-screen, or when the embedded view failed at once (then for the rest of the
-run). The VM sends its theme with `POST /omacvm/theme` (control key; only
-with Touch ID on; `#rrggbb` colours, a border and a radius, checked for
-contrast: `touchid_theme.swift`), kept per VM in `touchid-theme/`. Tests
-without a window: `tests/run.sh`, `tests/panel/build.sh` (mock flow and
-snapshots).
+For OmacVM.app's VMs the Mac asks in a panel in the VM's Omarchy theme
+(from 3.0.2), shown by QEMU, the VM window's own process: macOS reads the
+finger only for the app in front. The Bridge decides as always, then sends
+the panel's words and the VM's theme to the app in an interim
+`103 Touch ID Panel` answer on the relay connection and gets the panel's end
+back as one line (`touchIDAskAppPanel`); it signs the final answer.
+macOS's dialog stays for Parallels, UTM and Fusion, the password fallback,
+`"touch_id_panel": false` in `config.json`, and whenever the panel could not
+show. The VM sends its theme with `POST /omacvm/theme` (control key; only
+with Touch ID on; `#rrggbb` colours checked for contrast:
+`touchid_theme.swift`), kept per VM in `touchid-theme/`. Tests:
+`tests/run.sh`; the panel itself: `swift run touchid-panel-tests` in app/app.
 
 ### Not built: Wi-Fi control
 
