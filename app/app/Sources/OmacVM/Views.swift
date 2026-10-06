@@ -458,21 +458,22 @@ struct UpdateSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-            let banner = updater.enabled && updater.staged != nil
+            // Weekly checks on, or a check by hand in this session.
+            let banner = updater.staged != nil && (updater.enabled || updater.lastOutcome != nil)
             if banner, let s = updater.staged {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("\(Product.name) \(s.version) is ready", systemImage: "arrow.down.circle.fill")
                         .font(.headline)
-                    Text(updater.installWhenIdle
-                         ? "You have \(updater.currentVersion). It goes in once the VM has shut down; your VMs are not changed."
-                         : "You have \(updater.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed.")
+                    Text(bannerText)
                         .font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack {
                         if let n = s.notes { Button("What's New") { NSWorkspace.shared.open(n) } }
-                        Button("Skip This Version") { updater.skip() }
+                        Button("Skip This Version") { updater.skip() }.disabled(updater.restarting)
                         Spacer()
-                        if !updater.installWhenIdle { Button("Update and Relaunch") { updater.install() } }
+                        if !updater.installWhenIdle && !updater.restarting {
+                            Button("Update to \(s.version)…") { update(s.version) }.keyboardShortcut(.defaultAction)
+                        }
                     }
                 }
                 .padding(12)
@@ -485,12 +486,49 @@ struct UpdateSection: View {
                     .font(.callout).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Toggle("Check for updates once a week", isOn: Binding(get: { updater.enabled }, set: { updater.setEnabled($0) }))
-            Text("Off: no checks and no messages. The same switch as in OmacVM's control centre in Omarchy. \(Product.name) › Check for Updates… still works.")
+            HStack {
+                Toggle("Check for updates once a week", isOn: Binding(get: { updater.enabled }, set: { updater.setEnabled($0) }))
+                Spacer()
+                if updater.checking {
+                    ProgressView().controlSize(.small)
+                    Text("Checking…").font(.callout).foregroundStyle(.secondary)
+                }
+                Button("Check Now") { Task { await updater.checkNow() } }
+                    .disabled(updater.checking || updater.restarting)
+            }
+            if !updater.checking, let o = updater.lastOutcome, let line = Updater.outcomeLine(o, current: updater.currentVersion) {
+                Text(line)
+                    .font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Off: no checks and no messages. Check Now still works. The same switch as in the control centre in Omarchy.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
         }
+    }
+
+    private var bannerText: String {
+        if updater.restarting { return "The VM shuts down for the update; it starts again with the new version." }
+        if updater.installWhenIdle {
+            return "You have \(updater.currentVersion). It goes in once the VM has shut down; your VMs are not changed."
+        }
+        if updater.runningVM() != nil {
+            return "You have \(updater.currentVersion). Your VM shuts down cleanly, \(Product.name) updates and restarts, then starts the VM again."
+        }
+        return "You have \(updater.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed."
+    }
+
+    /// One confirm, then the update: with a VM restart when this launcher runs the VM.
+    private func update(_ version: String) {
+        let current = updater.currentVersion
+        if updater.runningVM() != nil {
+            guard Updater.restartAlert(version, current: current).runModal() == .alertFirstButtonReturn else { return }
+            Task { await updater.restartFromMac() }
+            return
+        }
+        let alert = AppDelegate.checkAlert(.ready(version), current: current, busy: updater.busyNow)
+        if alert.runModal() == .alertFirstButtonReturn { updater.install() }
     }
 }
 

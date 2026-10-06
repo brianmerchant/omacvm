@@ -642,13 +642,196 @@ final class Updater: ObservableObject {
         "\(why): \(Product.name) \(version) goes in once it has shut down."
     }
 
+    // MARK: - Check Now (the window and the menu)
+
+    /// The last check asked for by hand in this session: the window shows it,
+    /// also with weekly checks off (a check by hand always works).
+    @Published private(set) var lastOutcome: Outcome?
+
+    @discardableResult
+    func checkNow() async -> Outcome {
+        let o = await check(manual: true)
+        lastOutcome = o
+        return o
+    }
+
+    /// The line under Check Now for a check by hand (nil: the banner says it).
+    static func outcomeLine(_ o: Outcome, current: String) -> String? {
+        switch o {
+        case .ready: return nil
+        case .upToDate: return "\(Product.name) \(current) is the newest version."
+        case .skipped(let v): return "\(Product.name) \(v) is skipped."
+        case .needsMacOS(let v, let m): return "\(Product.name) \(v) needs macOS \(m). This Mac stays on \(current)."
+        case .failed(let why): return sentence(why)
+        }
+    }
+
+    /// A reason from the log ("no connection to ...") as a sentence.
+    static func sentence(_ why: String) -> String {
+        why.prefix(1).uppercased() + why.dropFirst() + (why.hasSuffix(".") ? "" : ".")
+    }
+
+    // MARK: - update with a VM restart (docs/adr/0033)
+    //
+    // The VM this launcher runs shuts down cleanly, the app updates and
+    // restarts, then starts the VM again. From the window, the menu, or the
+    // VM's control centre (POST /omacvm/app-update through the relay,
+    // NativeControlBridge). The state file restart-vm names the VM; the new
+    // app (or the old one after a rollback) starts it once, if it is fresh.
+    // A VM that does not shut down in time stops the update: nothing forced
+    // without a second confirm on the Mac.
+
+    /// From the app delegate: the VM this launcher runs, and its controls.
+    var runningVM: () -> (folder: URL, name: String)? = { nil }
+    var powerDownVM: () -> Void = {}
+    var forceStopVM: () -> Void = {}
+    var startVMAgain: (URL) -> Void = { _ in }
+    /// Why no restart-update can start now (a build, a disk move, a quit).
+    var restartBlocker: () -> String? = { nil }
+
+    /// A restart-update runs (from the check to the swap).
+    @Published private(set) var restarting = false
+    private var restartTimer: Timer?
+
+    /// Checks (as by hand: the signed feed, the download, the Developer ID)
+    /// and, when an update is ready, notes the VM to start again. The VM is
+    /// not touched yet: shutDownForRestart does that. vmName: the VM that
+    /// asked (the relay), which must be the one this launcher runs.
+    func prepareRestart(vmName: String?) async -> RestartCheck {
+        if let why = unavailableReason { return .cannot(why) }
+        if restarting || swapping { return .busy("an update runs") }
+        if checking { return .busy("a check for updates runs") }
+        if let why = restartBlocker() { return .busy(why) }
+        guard let vm = runningVM(), vmName.map({ $0 == vm.name }) ?? true else {
+            return .busy("this VM does not run from this \(Product.name)")
+        }
+        restarting = true
+        let outcome = await checkNow()
+        switch outcome {
+        case .ready(let v):
+            guard runningVM()?.folder == vm.folder else {
+                restarting = false
+                return .busy("the VM stopped")
+            }
+            stopWaiting()   // an install waiting for the shutdown: this one takes over
+            setState("restart-vm", RestartVM(folder: vm.folder.path, version: v, at: Date()).line)
+            log("restart-update \(v) for \(vm.name): ready")
+            return .ready(v)
+        case .upToDate, .skipped:
+            restarting = false
+            return .upToDate(currentVersion)
+        case .needsMacOS(let v, let m):
+            restarting = false
+            return .needsMacOS(v, m)
+        case .failed(let why):
+            restarting = false
+            return .failed(why)
+        }
+    }
+
+    /// The VM shuts down cleanly (power button, then the guest agent); the
+    /// install follows when it has ended (vmEndedForRestart).
+    func shutDownForRestart() {
+        guard restarting else { return }
+        log("restart-update: shutting the VM down")
+        powerDownVM()
+        restartTimer?.invalidate()
+        restartTimer = Timer.scheduledTimer(withTimeInterval: RestartVM.shutdownTimeout, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shutdownTimedOut() }
+        }
+    }
+
+    /// Stops a restart-update before anything was swapped.
+    func cancelRestart(_ why: String) {
+        restartTimer?.invalidate()
+        restartTimer = nil
+        guard restarting else { return }
+        restarting = false
+        setState("restart-vm", nil)
+        log("restart-update stopped: \(why)")
+    }
+
+    private func shutdownTimedOut() {
+        guard restarting, runningVM() != nil else { return }
+        let version = staged?.version
+        cancelRestart("the VM still runs after \(Int(RestartVM.shutdownTimeout)) s")
+        NSApp.activate()
+        // The second confirm: forcing it off loses what is not saved in the VM.
+        guard Self.shutdownTimeoutAlert().runModal() == .alertSecondButtonReturn,
+              let vm = runningVM(), let version else { return }
+        restarting = true
+        setState("restart-vm", RestartVM(folder: vm.folder.path, version: version, at: Date()).line)
+        log("restart-update: the user forced the VM off")
+        forceStopVM()
+    }
+
+    static func shutdownTimeoutAlert() -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "The VM did not shut down"
+        alert.informativeText = "It still runs after 3 minutes, so the update stopped. Nothing was changed. Force it off only if nothing in it needs saving."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Force Off and Update")
+        return alert
+    }
+
+    /// The confirm before an update shuts the running VM down.
+    static func restartAlert(_ version: String, current: String) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Update to \(Product.name) \(version)?"
+        alert.informativeText = "Your VM shuts down cleanly, \(Product.name) updates and restarts, then starts the VM again. Save your work in the VM first. If the new version does not start, \(current) comes back by itself."
+        alert.addButton(withTitle: "Shut Down and Update")
+        alert.addButton(withTitle: "Cancel")
+        return alert
+    }
+
+    /// From the window or the menu (the user confirmed): check, then shut down.
+    func restartFromMac() async {
+        let r = await prepareRestart(vmName: nil)
+        if case .ready = r { shutDownForRestart(); return }
+        if case .busy(let why) = r { notice = Self.sentence(why) }
+        if case .cannot(let why) = r { notice = why }
+    }
+
+    /// The VM ended (any status). During a restart-update: install now; the
+    /// new app starts the VM. True when handled here.
+    func vmEndedForRestart() -> Bool {
+        guard restarting else { return false }
+        restartTimer?.invalidate()
+        restartTimer = nil
+        log("restart-update: the VM has ended, installing")
+        install(quit: true, quiet: false)
+        // Swapping, or waiting a moment for QEMU's process to go (idle timer).
+        if swapping || installWhenIdle { return true }
+        // Nothing swapped (the notice says why): the VM comes back at once.
+        let folder = state("restart-vm").flatMap(RestartVM.parse)?.folder
+        cancelRestart("the install did not start")
+        if let folder { startVMAgain(URL(fileURLWithPath: folder)) }
+        return true
+    }
+
+    /// At launch: the VM a restart-update shut down, to start once (only when
+    /// fresh: a late or stray launch never starts a VM by surprise).
+    func takeRestartVM() -> URL? {
+        guard let text = state("restart-vm") else { return nil }
+        setState("restart-vm", nil)
+        guard let r = RestartVM.parse(text), r.fresh(now: Date()) else {
+            log("restart-vm: old or unreadable, the VM is not started")
+            return nil
+        }
+        log("starting the VM again after the update: \(r.folder)")
+        return URL(fileURLWithPath: r.folder)
+    }
+
     // MARK: - pictures of the UI (test builds: --render-update-ui)
 
     private var shownPrevious: String?
 
     /// Puts the updater in a state to draw it; nothing is checked or saved.
-    func showForRendering(staged: Staged?, notice: String?, enabled: Bool, waiting: Bool, previous: String?) {
+    func showForRendering(staged: Staged?, notice: String?, enabled: Bool, waiting: Bool, previous: String?,
+                          outcome: Outcome? = nil, checking: Bool = false) {
         self.staged = staged
+        lastOutcome = outcome
+        self.checking = checking
         self.notice = notice
         self.enabled = enabled
         installWhenIdle = waiting

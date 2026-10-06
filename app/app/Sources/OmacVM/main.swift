@@ -100,7 +100,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.quitting { return "Quitting" }
             return nil
         }
-        let starting = state.config.isReady && args.contains("--start")
+        // Update with a VM restart (Updater.swift): the launcher's VM and its controls.
+        let u = Updater.shared
+        u.runningVM = { [weak self] in
+            guard let r = self?.runner, r.isRunning else { return nil }
+            return (r.config.folder, r.config.name)
+        }
+        u.powerDownVM = { [weak self] in self?.runner?.powerDown() }
+        u.forceStopVM = { [weak self] in self?.runner?.forceStop() }
+        u.startVMAgain = { [weak self] folder in self?.startAgain(folder) }
+        u.restartBlocker = { [weak self] in
+            guard let self else { return nil }
+            if self.state.screen == .building { return "a VM is being built" }
+            if self.state.storage.moving != nil { return "a VM is being moved" }
+            if self.quitting { return "it is quitting" }
+            return nil
+        }
+        // A restart-update shut a VM down for this version (or the old one
+        // came back): start it again, once.
+        let again = args.contains("--update-now") ? nil : u.takeRestartVM()
+        let starting = again != nil || (state.config.isReady && args.contains("--start"))
         Updater.shared.start(pending: args.contains("--update-now") || args.contains("--update-check") ? .leave
                              : starting ? .waitUntilIdle : .installNow)
         buildMenu()
@@ -109,9 +128,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Updater.shared.runScripted(quitWhenDone: true) }
             return
         }
-        if starting {
+        if let again {
+            startAgain(again)
+        } else if starting {
             startVM()
         } else {
+            showWindow()
+        }
+    }
+
+    /// Starts the VM in this folder (after a restart-update), else the window.
+    private func startAgain(_ folder: URL) {
+        guard runner?.isRunning != true else { return }
+        if let c = VMConfig.load(from: folder), c.isReady {
+            state.config = c
+            state.screen = .ready
+            startVM()
+        } else {
+            state.message = "The VM at \(folder.path) could not be started again after the update: start it here."
             showWindow()
         }
     }
@@ -221,6 +255,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         r.onExit = { [weak self] status in
             guard let self else { return }
             self.runner = nil
+            // An update with a VM restart: it installs now; the new app starts the VM.
+            if !self.quitting, Updater.shared.vmEndedForRestart() { return }
             if self.quitting {
                 self.quitting = false
                 // An update asked for while the VM ran goes in now, quietly:
@@ -396,15 +432,19 @@ extension AppDelegate: NSMenuDelegate {
     @objc func checkForUpdates(_ sender: Any?) {
         let u = Updater.shared
         Task { @MainActor in
-            let outcome = await u.check(manual: true)
-            let alert = Self.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow)
-            if alert.runModal() == .alertFirstButtonReturn, case .ready = outcome { u.install() }
+            let outcome = await u.checkNow()
+            // This launcher runs the VM: it can shut it down, update and start it again.
+            let restart = u.runningVM() != nil
+            let alert = Self.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow, restart: restart)
+            guard alert.runModal() == .alertFirstButtonReturn, case .ready = outcome else { return }
+            if restart { await u.restartFromMac() } else { u.install() }
         }
     }
 
     /// What Check for Updates… says. busy: why the app cannot be replaced
     /// right now (a VM runs from it): the update then waits for it.
-    static func checkAlert(_ outcome: Updater.Outcome, current: String, busy: String?) -> NSAlert {
+    static func checkAlert(_ outcome: Updater.Outcome, current: String, busy: String?, restart: Bool = false) -> NSAlert {
+        if restart, case .ready(let v) = outcome { return Updater.restartAlert(v, current: current) }
         let alert = NSAlert()
         switch outcome {
         case .ready(let v):
@@ -428,7 +468,7 @@ extension AppDelegate: NSMenuDelegate {
         case .failed(let why):
             alert.messageText = "Could not check for updates"
             // The reasons are log lines ("no connection to ..."): as a sentence.
-            alert.informativeText = why.prefix(1).uppercased() + why.dropFirst() + (why.hasSuffix(".") ? "" : ".")
+            alert.informativeText = Updater.sentence(why)
         }
         return alert
     }

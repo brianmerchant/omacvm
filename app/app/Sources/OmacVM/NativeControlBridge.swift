@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OmacVMUpdate
 
 /// The control centre for this app's VMs (docs/adr/0031): the virtio port
 /// org.omacvm.control carries the VM's requests, one JSON line each
@@ -129,7 +130,7 @@ final class NativeControlBridge: @unchecked Sendable {
     /// The request to the Bridge, with the app's headers only.
     private func relay(_ r: Request) -> (Int, [String: Any]) {
         guard let token = Self.secret("token"), let relayKey = Self.secret("relay-key") else {
-            return (0, ["error": "OmacVM Bridge is not set up on this Mac (or is older): omacvm update on the Mac"])
+            return (0, ["error": "OmacVM Bridge is not set up on this Mac: open OmacVM on the Mac once"])
         }
         var headers: [(String, String)] = [
             ("Authorization", "Bearer " + token),
@@ -143,7 +144,14 @@ final class NativeControlBridge: @unchecked Sendable {
         // twice (a job must not start twice).
         if let fd = try? NativeBridgeSocket.connectSecure(path: Self.relaySocketPath, label: "Bridge relay") {
             defer { Darwin.close(fd) }
-            return Self.exchange(fd, Self.httpRequest(method: r.method, path: r.path, headers: headers, body: r.body))
+            let (status, body) = Self.exchange(fd, Self.httpRequest(method: r.method, path: r.path, headers: headers, body: r.body))
+            if Self.isAppUpdate(r) { return Self.appUpdate(status, body, vmName: vmName) }
+            return (status, body)
+        }
+        // The app updates itself only on the Bridge's yes over the relay socket.
+        if Self.isAppUpdate(r) {
+            return (409, ["code": "old-bridge",
+                          "error": "the Mac's OmacVM Bridge cannot ask for this yet: shut this VM down, open OmacVM on the Mac and click Check Now"])
         }
         fallbackLock.lock()
         if !saidFallback {
@@ -169,6 +177,39 @@ final class NativeControlBridge: @unchecked Sendable {
         }.resume()
         done.wait()
         return result
+    }
+
+    static func isAppUpdate(_ r: Request) -> Bool { r.method == "POST" && r.path == "/omacvm/app-update" }
+
+    private final class Box: @unchecked Sendable { var check: RestartCheck = .busy("no answer") }
+
+    /// The Bridge said yes to POST /omacvm/app-update (docs/adr/0031): the app
+    /// checks its own signed feed and downloads (the answer waits for that),
+    /// then answers the VM and shuts it down a few seconds later; the update
+    /// and the VM's restart follow (Updater.swift). A refusal of the Bridge
+    /// goes back as it is.
+    static func appUpdate(_ status: Int, _ body: [String: Any], vmName: String) -> (Int, [String: Any]) {
+        guard status == 200, (body["go"] as? Bool) == true else { return (status, body) }
+        let started = Date(), box = Box(), done = DispatchSemaphore(value: 0)
+        Task { @MainActor in
+            box.check = await Updater.shared.prepareRestart(vmName: vmName)
+            done.signal()
+        }
+        done.wait()
+        var check = box.check
+        if case .ready = check, Date().timeIntervalSince(started) > RestartVM.answerWithin {
+            // The control centre may have given up: nothing shuts down. The
+            // download is kept, so the next try is quick.
+            DispatchQueue.main.sync { MainActor.assumeIsolated { Updater.shared.cancelRestart("the check took too long") } }
+            check = .slow
+        }
+        let a = check.answer
+        guard case .ready(let version) = check else { return (a.status, ["code": a.code, "error": a.text]) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + RestartVM.shutdownDelay) {
+            MainActor.assumeIsolated { Updater.shared.shutDownForRestart() }
+        }
+        return (a.status, ["state": a.code, "code": a.code, "text": a.text, "version": version,
+                           "shutdown_in": Int(RestartVM.shutdownDelay)])
     }
 
     /// One HTTP/1.1 request; the Bridge answers with Content-Length and closes.
