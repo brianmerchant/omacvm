@@ -101,6 +101,26 @@ printf 'bridge=off autologin=on fast-network=on\n' > "$d2/features"
 expect "apply-vm: the record once it is there, without the fast network" "--feature bridge=off --feature autologin=on" \
   "$(av "$d2" "bridge=on autologin=off")"
 
+# ---- apply.sh: the real state goes in, and a rollback goes back to it ----
+block=$(awk '/^# OmacVM.app: the VM.s record \(its features file\) over the VM.s copy\.$/ {on = 1} on {print} on && /^fi$/ {n++} on && n == 2 {exit}' "$R/src/cmd/apply.sh")
+[[ $block == *'features_real'* && $block == *'PREV['* ]] || { echo "FAIL apply.sh record block not found"; exit 1; }
+d3=$T/vm3; mkdir -p "$d3"; echo "mac=52:54:00:01:02:03" > "$d3/fast-network"
+echo "autologin=off fast-network=off omanotch=on" > "$d3/features"
+ap() {   # PROBE -> "autologin fast-network omanotch | PREV's autologin | what it said"
+  ( TYPE=app NAMED=1 VM=x had=3.0.0 SAID="" probe=$1
+    app_dir() { echo "$d3"; }
+    info() { SAID+="[$*]"; }
+    features_read_env "$1"; PREV=("${FV[@]}")
+    eval "$block"
+    echo "$(fv autologin) $(fv fast-network) $(fv omanotch) | ${PREV[$(feature_index autologin)]} | $SAID" )
+}
+expect "apply: real state in, rollback to it, said once each" \
+  "on on on | on | [Fast network: on (the app's Fast network setting); OmacVM's record said off: kept, the record follows][Autologin: on (SDDM's autologin in the VM); OmacVM's record said off: kept, the record follows]" \
+  "$(ap $'OMACVM_FEATURE_autologin=off\nOMACVM_FEATURE_omanotch=off\nOMACVM_REAL_autologin=on')"
+rm "$d3/fast-network"
+expect "apply: nothing drifted, nothing said" "off off on | off | " \
+  "$(ap $'OMACVM_FEATURE_autologin=off\nOMACVM_FEATURE_fast_network=off\nOMACVM_REAL_autologin=off')"
+
 # ---- the autologin rule: the probe (lib/vm.sh) and the VM (guest/autologin.sh) agree ----
 probe_script=$(awk '/^vm_probe\(\) \{/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/lib/vm.sh")
 eval "$probe_script"

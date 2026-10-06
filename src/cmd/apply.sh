@@ -127,7 +127,14 @@ fi
 # (the app's button writes the fast-network file) and autologin (SDDM, also an
 # Omarchy install's own file). An apply without --feature for them keeps it.
 features_real "$probe" "$rd"
-[[ -z $had ]] || while IFS= read -r l; do [[ -z $l ]] || info "$l"; done < <(features_drift_lines "kept, the record follows")
+if [[ -n $had ]]; then
+  while IFS= read -r l; do [[ -z $l ]] || info "$l"; done < <(features_drift_lines "kept, the record follows")
+  # What the VM has now is the real state: a rollback goes back to it, not
+  # to the record's mistake (it would set an autologin file aside).
+  for x in ${DRIFT[@]+"${DRIFT[@]}"}; do
+    IFS=$'\t' read -r n v _ <<<"$x"; PREV[$(feature_index "$n")]=$v
+  done
+fi
 # A VM from before the control centre: one question (yes without a terminal).
 cc=$(feature_index control-centre)
 if [[ -n $had ]] && ! grep -q '^OMACVM_FEATURE_control_centre=' <<<"$probe" && [[ " ${SETN[*]:-} " != *" control-centre "* ]]; then
