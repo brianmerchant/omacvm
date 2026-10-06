@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.1 (unreleased)
+
+- Building a VM behind a proxy (Vocllum, #122). The build takes the Mac's
+  proxy (http_proxy/https_proxy/all_proxy in the terminal, else the fixed
+  proxies in macOS's network settings) into the VM: pacman, git and the
+  Omarchy installer use it, through sudo and the installer's systemd unit
+  too. A proxy on the Mac's 127.0.0.1 (Clash and the like) is reached as
+  10.0.2.2 in OmacVM.app: its port gets through at the build and at every
+  VM start. pacman and git clone try a failed download again (3 tries)
+  while Omarchy installs. PAC files are not read. Details: docs/guide.md,
+  "Behind a proxy".
+
 ## 3.0.0 (unreleased)
 
 In short: OmacVM.app updates itself, the control centre in Omarchy, a
