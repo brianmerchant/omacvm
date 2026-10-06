@@ -170,12 +170,13 @@ VM runs, and goes back by itself when a new version does not start
   such features, and `omacvm check` fails on them until then.
 - On a MacBook with a notch, full screen sits below the camera in its own
   Space (macOS keeps full-screen windows there and the strip beside the
-  notch black). With Omanotch on for the VM it fills the strip with
-  Omarchy's bar; app VMs start with it off for now (`omacvm enable
-  omanotch`), and then the strip stays black. Before 3.0.0 the app had a switch, "Use the notch for the
-  menu bar", whose full screen covered the strip but had no Space of its
-  own: other windows could share it and the escape combo had nothing to
-  leave. It is gone.
+  notch black), and Omanotch fills the strip with Omarchy's bar. It is on
+  by default for a VM made on a Mac with a notch. A VM made with the lid
+  closed or by an app before 3.0.0 has it off: `omacvm enable omanotch`
+  (with it off the strip stays black). Before 3.0.0 the app had a switch,
+  "Use the notch for the menu bar", whose full screen covered the strip
+  but had no Space of its own: other windows could share it and the
+  escape combo had nothing to leave. It is gone.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).

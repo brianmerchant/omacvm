@@ -5,7 +5,7 @@
 <p align="center">The real Omarchy bar, right where the VM app leaves a black hole.</p>
 
 <p align="center">
-  <b>Part of <a href="../../README.md">OmacVM</a></b>, which sets it up with the VM: the <code>omanotch</code> feature, on by default on a MacBook with a notch (OmacVM.app VMs: off by default for now, <code>omacvm enable omanotch</code>).
+  <b>Part of <a href="../../README.md">OmacVM</a></b>, which sets it up with the VM: the <code>omanotch</code> feature, on by default on a MacBook with a notch.
 </p>
 
 <p align="center">

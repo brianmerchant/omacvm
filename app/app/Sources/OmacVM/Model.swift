@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OmacVMFeatures
 
 enum HelperError: LocalizedError, Equatable {
     case io(String)
@@ -116,9 +117,10 @@ struct VMConfig: Equatable {
     var timeZone = "UTC"
     var language = "en_US.UTF-8"
     var keyboard = "us"
-    // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
-    // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=on omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on chromium-video=on idle-lock=on autologin=off thp-kernel=off"
+    // A new VM gets its own from the setup screen (SetupView). This one is
+    // for a vm.env without FEATURES: no screens asked here (VMConfig is
+    // also made off the main thread), so Omanotch only with a notch then.
+    var features = NewVMFeatures.string(hasBattery: Mac.hasBattery, hasNotch: false)
 
     /// The folder of a VM that exists (it may be in an older VMs folder);
     /// nil for a new one, which goes into the VMs folder under its name.
@@ -450,6 +452,18 @@ enum Settings {
 }
 
 extension Mac {
+    /// The built-in display has a camera notch. Asked at run time from the
+    /// display itself (no model list); false with the lid closed, on a Mac
+    /// without a notch, or at a resolution that ends below the notch.
+    /// Main thread (NSScreen).
+    static var hasNotch: Bool {
+        NSScreen.screens.contains { s in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+                  CGDisplayIsBuiltin(id) != 0 else { return false }
+            return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
+        }
+    }
+
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs
     /// without one (MacBook Air, SDR monitors) keep the 8-bit SDR path.
