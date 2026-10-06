@@ -89,7 +89,9 @@ FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
-GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
+GESTURES=${OMACVM_FEATURE_gestures:-on}
+# no-idle-lock was idle-lock before 3.0.1, on and off the other way round.
+NO_IDLE_LOCK=${OMACVM_FEATURE_no_idle_lock:-$( [[ ${OMACVM_FEATURE_idle_lock:-on} == off ]] && echo on || echo off)}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 CONTROL=${OMACVM_FEATURE_control_centre:-off}
@@ -520,10 +522,10 @@ if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH fro
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 
 section "Choices"
-FEATURE=idle-lock
-if [[ $IDLE_LOCK == off ]]; then
-  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock" "off: the Mac's lock protects the VM"
-  else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
+FEATURE=no-idle-lock
+if [[ $NO_IDLE_LOCK == on ]]; then
+  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock disabled" "the Mac's lock protects the VM"
+  else bad "screensaver and lock disabled" "chosen, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 FEATURE=autologin
 # As SDDM does it, whoever wrote the file (the Mac's omacvm check fixes OmacVM's record to match).

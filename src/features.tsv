@@ -15,7 +15,7 @@ camera	on	mac,vm	-	-	The Mac's camera	Linux apps and video calls in the browser 
 battery	laptop	mac,vm	laptop,not-parallels	-	The Mac's battery	its charge and charging state in Omarchy's bar, as on a laptop (UTM, VMware Fusion, OmacVM.app; Parallels shows it itself)
 external-brightness	on	mac,vm	-	bridge	External display brightness	the brightness keys set the external display the VM is in front on, over DDC/CI (a Studio Display or Pro Display XDR as macOS does), and so do Omarchy's own brightness keys and monitor panel; the built-in display as before (OmacVM.app also in a window; Parallels, UTM and VMware Fusion in full screen)
 chromium-video	on	vm	app-only	-	Chromium video on the Mac	Arch Linux ARM's Chromium decodes H.264 and VP9 on the Mac's media engine, like Chrome and Brave do on their own (OmacVM.app)
-idle-lock	on	vm	-	-	Screensaver and lock	Omarchy's own, after idle in the VM (off: the Mac's lock protects the VM)
+no-idle-lock	off	vm	-	-	Screensaver and lock disabled	Omarchy's own screensaver and lock after idle stay off in the VM, the Mac's lock protects it (called idle-lock before 3.0.1, with on and off the other way round)
 autologin	off	vm	-	-	Autologin	straight into Omarchy, without its login screen
 thp-kernel	off	vm	slow	-	Memory-optimized kernel	Arch Linux ARM's kernel with transparent huge pages and MGLRU, for memory-heavy work (about 10 minutes per build and update)
 control-centre	on	mac,vm	-	-	OmacVM control centre	omacvm in Omarchy: switch, repair and update these features, and report a problem, from the menu or the bar

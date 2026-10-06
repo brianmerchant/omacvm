@@ -2,6 +2,8 @@
 # bash 3.2, so parallel arrays instead of associative ones).
 #   features_load                 FN FDEF FSIDES FTAGS FNEEDS FTITLE FSUM
 #   feature_index NAME            -> index, or status 1
+#   feature_alias NAME VALUE      -> "NAME VALUE" with a renamed feature's new
+#                                 name (idle-lock on = no-idle-lock off)
 #   feature_has_tag INDEX TAG
 #   feature_default INDEX        on|off on this Mac (NOTCH, TYPE)
 #   feature_available INDEX      status 1 + REASON when this Mac or VM type cannot have it
@@ -38,6 +40,24 @@ feature_index() {
   local i
   for ((i = 0; i < ${#FN[@]}; i++)); do [[ ${FN[$i]} == "$1" ]] && { echo "$i"; return 0; }; done
   return 1
+}
+
+# Renamed features: a VM, a record or a command from before says the old name.
+# idle-lock (on: Omarchy's screensaver and lock after idle) became
+# no-idle-lock in 3.0.1 (on: OmacVM keeps them off), so the value flips.
+# Only the new name is written.
+feature_flip() { case ${1:-} in on) echo off ;; off) echo on ;; *) echo "${1:-}" ;; esac; }
+feature_alias() {   # NAME [VALUE] -> "NEWNAME NEWVALUE"
+  if [[ $1 == idle-lock ]]; then echo "no-idle-lock $(feature_flip "${2:-}")"; else echo "$1 ${2:-}"; fi
+}
+# The old name's value in TEXT (KEY=value lines or words), flipped to the new
+# one ("" when TEXT does not name it either).
+feature_old_value() {   # NEWNAME TEXT
+  [[ $1 == no-idle-lock ]] || return 0
+  local v
+  v=$(tr ' \t' '\n\n' <<<"$2" | sed -n -e 's/^OMACVM_FEATURE_idle_lock=//p' -e 's/^idle-lock=//p' | tail -1)
+  [[ $v == on || $v == off ]] && feature_flip "$v"
+  return 0
 }
 
 feature_has_tag() { [[ ",${FTAGS[$1]}," == *",$2,"* ]]; }
@@ -80,6 +100,7 @@ features_read_env() {
       # VMs from before a feature existed: what they were built with.
       # (scroll-momentum was called glide in the experiment)
       [[ ${FN[$i]} == scroll-momentum ]] && v=$(sed -n 's/^OMACVM_FEATURE_glide=//p' <<<"$1" | tail -1)
+      [[ -n $v ]] || v=$(feature_old_value "${FN[$i]}" "$1")
       [[ -n $v ]] || case ${FN[$i]} in omanotch|scroll-momentum|autologin|thp-kernel|fast-network) v=off ;; *) v=$(feature_default "$i") ;; esac
     fi
     FV[$i]=$v
@@ -104,7 +125,10 @@ features_read_record() {
   rec=" $(tr '\n\t' '  ' < "$1/features") "
   for ((i = 0; i < ${#FN[@]}; i++)); do
     v=${rec#* "${FN[$i]}="}
-    [[ $v == "$rec" ]] && continue   # not named: the VM's copy says
+    if [[ $v == "$rec" ]]; then   # not named: an old name, or else the VM's copy says
+      v=$(feature_old_value "${FN[$i]}" "$rec")
+      [[ -n $v ]] || continue
+    fi
     v=${v%% *}
     [[ $v == on || $v == off ]] && FV[$i]=$v
   done

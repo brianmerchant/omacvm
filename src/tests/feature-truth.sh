@@ -31,6 +31,7 @@ OMACVM_FEATURE_fast_network=off
 OMACVM_REAL_autologin=on"
 features_read_env "$probe"; features_read_record "$d"
 expect "record: omanotch on (the features file)" on "$(fv omanotch)"
+expect "record: idle-lock=on (before 3.0.1) is no-idle-lock off" off "$(fv no-idle-lock)"
 features_real "$probe" "$d"
 expect "real: fast network on (the app's file)" on "$(fv fast-network)"
 expect "real: autologin on (SDDM)" on "$(fv autologin)"
@@ -49,6 +50,8 @@ features_record_fix ip "$d"; rc=$?
 expect "fix: status 0" 0 "$rc"
 expect "fix: features file has fast-network=on" yes "$(grep -q ' fast-network=on ' <<<" $(cat "$d/features") " && echo yes)"
 expect "fix: features file has autologin=on" yes "$(grep -q ' autologin=on ' <<<" $(cat "$d/features") " && echo yes)"
+expect "fix: features file has the new name only" "yes no" \
+  "$(grep -q ' no-idle-lock=off ' <<<" $(cat "$d/features") " && echo yes) $(grep -q ' idle-lock=' <<<" $(cat "$d/features") " && echo yes || echo no)"
 expect "fix: the VM's copy, autologin" OMACVM_FEATURE_autologin=on "$(grep autologin "$T/env")"
 expect "fix: the VM's copy, fast network" OMACVM_FEATURE_fast_network=on "$(grep fast_network "$T/env")"
 expect "fix: the rest of the VM's copy as it was" OMACVM_VM_TYPE=app "$(head -1 "$T/env")"
@@ -90,6 +93,57 @@ expect "first write: changed" 0 "$rc"
 expect "first write: FEATURES gone" "NAME='x'" "$(cat "$d2/vm.env")"
 app_features_write "$d2" "bridge=on"; rc=$?
 expect "same again: unchanged" 1 "$rc"
+
+# ---- idle-lock, renamed no-idle-lock in 3.0.1 (on and off the other way round) ----
+features_read_env "OMACVM_FEATURE_idle_lock=off"
+expect "old name, VM's copy: idle-lock off = no-idle-lock on" on "$(fv no-idle-lock)"
+features_read_env "OMACVM_FEATURE_idle_lock=on"
+expect "old name, VM's copy: idle-lock on = no-idle-lock off" off "$(fv no-idle-lock)"
+features_read_env ""
+expect "not named: Omarchy's own screensaver and lock, as before" off "$(fv no-idle-lock)"
+features_read_env $'OMACVM_FEATURE_idle_lock=off\nOMACVM_FEATURE_no_idle_lock=off'
+expect "both names: the new one wins" off "$(fv no-idle-lock)"
+d4=$T/vm4; mkdir -p "$d4"; echo "bridge=on idle-lock=off autologin=off" > "$d4/features"
+features_read_env ""; features_read_record "$d4"
+expect "old name, record: idle-lock=off = no-idle-lock on" on "$(fv no-idle-lock)"
+echo "bridge=on no-idle-lock=off idle-lock=off" > "$d4/features"
+features_read_env ""; features_read_record "$d4"
+expect "old and new name in the record: the new one wins" off "$(fv no-idle-lock)"
+expect "alias: disable idle-lock" "no-idle-lock on" "$(feature_alias idle-lock off)"
+expect "alias: enable idle-lock" "no-idle-lock off" "$(feature_alias idle-lock on)"
+expect "alias: other names as they are" "bridge on" "$(feature_alias bridge on)"
+i=$(feature_index no-idle-lock)
+expect "title" "Screensaver and lock disabled" "${FTITLE[$i]}"
+expect "default: off (Omarchy's own, as before)" off "$(feature_default "$i")"
+# apply.sh's set_feature and its options (its own lines, run here).
+block=$(awk '/^set_feature\(\) \{/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/cmd/apply.sh")
+sf() { ( SETN=(); SETV=(); eval "$block"; for a in "$@"; do set_feature "${a%%=*}" "${a#*=}"; done; echo "${SETN[*]} ${SETV[*]}" ) 2>&1; }
+expect "apply: --feature idle-lock=off" "no-idle-lock on" "$(sf idle-lock=off)"
+expect "apply: --feature no-idle-lock=on" "no-idle-lock on" "$(sf no-idle-lock=on)"
+expect "apply: --feature idle-lock=maybe" "omacvm apply: --feature idle-lock=maybe: on or off" "$(sf idle-lock=maybe)"
+# check.sh: the VM's copy from before 3.0.1 (its own line, run here).
+line=$(grep '^NO_IDLE_LOCK=' "$R/src/guest/check.sh")
+ck() { ( unset OMACVM_FEATURE_idle_lock OMACVM_FEATURE_no_idle_lock; eval "$1"; eval "$line"; echo "$NO_IDLE_LOCK" ); }
+expect "check: idle-lock off" on "$(ck OMACVM_FEATURE_idle_lock=off)"
+expect "check: nothing named" off "$(ck :)"
+expect "check: no-idle-lock on" on "$(ck "OMACVM_FEATURE_no_idle_lock=on OMACVM_FEATURE_idle_lock=on")"
+# guest/install.sh's --feature: the old name flipped (its own lines, run with
+# a bash 5 as Arch's; macOS's own 3.2 has no associative arrays).
+block=$(awk '/^    --feature\) / {on = 1} on {print} on && /shift 2 ;;$/ {exit}' "$R/src/guest/install.sh")
+[[ $block == *'idle-lock'* ]] || { echo "FAIL install.sh --feature block not found"; exit 1; }
+B5=""; for b in /opt/homebrew/bin/bash /usr/local/bin/bash /usr/bin/bash; do
+  [[ -x $b ]] && (( $("$b" -c 'echo ${BASH_VERSINFO[0]}') >= 4 )) && { B5=$b; break; }
+done
+gi() { "$B5" -c "declare -A SET=(); set -- --feature \"\$1\"; case \$1 in
+$block
+esac; for k in \"\${!SET[@]}\"; do echo \"\$k=\${SET[\$k]}\"; done" _ "$1"; }
+if [[ -n $B5 ]]; then
+  expect "guest: --feature idle-lock=off" no-idle-lock=on "$(gi idle-lock=off)"
+  expect "guest: --feature idle-lock=on" no-idle-lock=off "$(gi idle-lock=on)"
+  expect "guest: --feature bridge=on" bridge=on "$(gi bridge=on)"
+else
+  echo "skip guest --feature: no bash 4 or newer here"
+fi
 
 # ---- apply-vm.sh: the record, else the setup's choice; never the fast network ----
 block=$(awk '/^feats=\$\{FEATURES:-\}$/ {on = 1} on {print} on && /^done$/ {exit}' "$R/app/scripts/apply-vm.sh")

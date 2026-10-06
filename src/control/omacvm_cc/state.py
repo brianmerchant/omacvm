@@ -19,6 +19,11 @@ NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 # env does not name it (as features_read_env in src/lib/features.sh).
 OFF_WHEN_UNNAMED = {"omanotch", "scroll-momentum", "autologin", "thp-kernel", "control-centre"}
 
+# Renamed features: new name -> the old one, whose on and off are the other
+# way round (as feature_old_value in src/lib/features.sh). idle-lock (on:
+# Omarchy's screensaver and lock) became no-idle-lock in 3.0.1.
+FLIPPED_OLD_NAMES = {"no-idle-lock": "idle-lock"}
+
 
 class Status(str, Enum):
     BUSY = "busy"
@@ -124,6 +129,9 @@ def desired(features: list[Feature], env: dict[str, str]) -> dict[str, bool]:
     out = {}
     for f in features:
         v = env.get(env_key(f.name))
+        old = env.get(env_key(FLIPPED_OLD_NAMES[f.name])) if f.name in FLIPPED_OLD_NAMES else None
+        if v is None and old in ("on", "off"):
+            v = "off" if old == "on" else "on"
         if v is None:
             v = "off" if f.name in OFF_WHEN_UNNAMED or f.default != "on" else "on"
         out[f.name] = v == "on"
