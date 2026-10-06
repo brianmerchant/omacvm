@@ -1,7 +1,7 @@
 #!/bin/bash
 # OmacVM.app's own window on the Mac's real displays: it opens centred on the
-# built-in display (else the main one), as the app opens it (a window SwiftUI
-# sizes after it is made, shown, then placed again). Compiles
+# built-in display (else the main one), as the app opens it (SwiftUI sizes the
+# window after it is shown: it stays centred). Compiles
 # AppWindowPlacement.swift and WindowPlacement.swift into a small throwaway
 # app (own bundle id, no settings, no VM), opens it, reads where the window
 # went. Needs a logged-in screen. With --old: NSWindow.center() as before 3.0.1.
@@ -38,6 +38,7 @@ struct V: View {
 }
 final class D: NSObject, NSApplicationDelegate {
     var w: NSWindow?
+    var c: CentredWindow?
     var mainAtStart: NSScreen?
     func applicationDidFinishLaunching(_ n: Notification) {
         mainAtStart = NSScreen.main
@@ -46,10 +47,10 @@ final class D: NSObject, NSApplicationDelegate {
         w.contentViewController = NSHostingController(rootView: V())
         w.isReleasedWhenClosed = false
         self.w = w
-        if old { w.center() } else { w.centreOnAppScreen() }
+        c = CentredWindow(w)
+        if old { w.center() } else { c?.place() }
         w.makeKeyAndOrderFront(nil)
         NSApp.activate()
-        if !old { DispatchQueue.main.async { if w.isVisible { w.centreOnAppScreen() } } }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.report() }
     }
     func report() {
@@ -65,7 +66,8 @@ final class D: NSObject, NSApplicationDelegate {
         let want = builtIn ?? mainAtStart ?? NSScreen.screens.first!
         let v = want.visibleFrame
         let onIt = w.screen == want
-        let centred = abs(f.midX - v.midX) <= 1 && abs(f.midY - v.midY) <= 1
+        // 2 points: the menu bar's height can change while the app comes forward.
+        let centred = abs(f.midX - v.midX) <= 2 && abs(f.midY - v.midY) <= 2
         lines.append("\(onIt ? "ok  " : "FAIL") on the \(builtIn != nil ? "built-in" : "main") display")
         lines.append("\(centred ? "ok  " : "FAIL") centred (window middle \(f.midX),\(f.midY), display middle \(v.midX),\(v.midY))")
         try? (lines.joined(separator: "\n") + "\n").write(toFile: out, atomically: true, encoding: .utf8)

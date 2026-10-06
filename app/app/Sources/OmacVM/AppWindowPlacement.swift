@@ -23,3 +23,39 @@ extension NSWindow {
         setFrameOrigin(WindowPlacement.centred(size, in: s.frame))
     }
 }
+
+/// Keeps the app's window centred while SwiftUI sizes it (AppKit grows it
+/// from the top left corner, so a taller screen would hang below the middle),
+/// until the user moves it. Main thread.
+@MainActor
+final class CentredWindow {
+    private weak var window: NSWindow?
+    private var placed: CGPoint?   // top left corner after the last placement
+    private var observer: NSObjectProtocol?
+
+    init(_ w: NSWindow) {
+        window = w
+        observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: w,
+                                                          queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.resized() }
+        }
+    }
+
+    deinit { observer.map(NotificationCenter.default.removeObserver) }
+
+    /// Centred on the built-in display, else the main one.
+    func place() {
+        guard let w = window else { return }
+        w.centreOnAppScreen()
+        placed = Self.topLeft(w)
+    }
+
+    private func resized() {
+        guard let w = window, let p = placed else { return }
+        // Moved by the user (or grown from another corner): leave it there.
+        if Self.topLeft(w) != p { placed = nil; return }
+        if w.isVisible { place() }
+    }
+
+    private static func topLeft(_ w: NSWindow) -> CGPoint { CGPoint(x: w.frame.minX, y: w.frame.maxY) }
+}

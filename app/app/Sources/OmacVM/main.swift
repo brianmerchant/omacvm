@@ -8,6 +8,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = AppState()
     var window: NSWindow?
+    private var centring: CentredWindow?
     var runner: Runner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -200,21 +201,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.isReleasedWhenClosed = false
             w.isRestorable = false
             window = w
+            centring = CentredWindow(w)
         }
         // Each time it opens (first open, after closing it, after the VM):
-        // centred on the built-in display. Left where the user put it while
-        // it stays open or sits in the Dock.
-        let placing = window.map { !$0.isVisible && !$0.isMiniaturized } ?? false
-        if placing { window?.centreOnAppScreen() }
+        // centred on the built-in display, and kept centred while SwiftUI
+        // sizes it. Left where the user put it while it stays open or sits
+        // in the Dock.
+        if let w = window, !w.isVisible, !w.isMiniaturized { centring?.place() }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
-        // SwiftUI may still size the window once it is on screen: centre again
-        // with its final size (same place when the size did not change).
-        if placing {
-            DispatchQueue.main.async { [weak self] in
-                if let w = self?.window, w.isVisible { w.centreOnAppScreen() }
-            }
-        }
     }
 
     private func startVM() {
