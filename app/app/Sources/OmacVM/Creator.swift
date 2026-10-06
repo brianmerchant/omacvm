@@ -39,17 +39,13 @@ final class Creator: ObservableObject {
     private var exitStatus: Int32?
     private var logURL: URL?
 
+    /// What runs: a new VM (create-vm.sh, prebuilt-vm.sh) or an existing VM's
+    /// OmacVM brought up to this app's (update-vm.sh).
+    enum Job { case build, update }
+    @Published private(set) var job = Job.build
+
     func start(config: VMConfig, password: String, prebuilt: Bool = false, graphics: GraphicsChoice = .auto) {
-        failed = nil; finished = false; step = 0
-        activity = nil; speed = nil; secondsLeft = nil; logTail = []; logName = ""
-        rate.reset(); stepSeconds = [:]
-        route = prebuilt ? .prebuilt : .build
-        buildStarted = Date(); stepStarted = buildStarted; lastOutput = buildStarted
-        logsDir = config.folder.appendingPathComponent("logs")
-        reader?.readabilityHandler = nil
-        reader = nil; run += 1; buffer = ""; exitStatus = nil
-        let id = run
-        title = "Preparing"
+        reset(.build, folder: config.folder, route: prebuilt ? .prebuilt : .build)
         do {
             try config.write()
             // Read by omacvm apply at the end of the build (the VM's Venus driver).
@@ -58,10 +54,39 @@ final class Creator: ObservableObject {
             failed = "Could not write the VM settings: \(error.localizedDescription)"
             return
         }
+        launch(script: prebuilt ? "prebuilt-vm.sh" : "create-vm.sh", folder: config.folder,
+               log: "create.log", input: password + "\n")
+    }
+
+    /// An existing VM (made by an older app): started without a window,
+    /// OmacVM applied as at the end of a build, shut down. The VM's
+    /// settings stay as they are.
+    func update(config: VMConfig) {
+        reset(.update, folder: config.folder, route: .build)
+        launch(script: "update-vm.sh", folder: config.folder, log: "update.log", input: nil)
+    }
+
+    /// The log of the last build or update.
+    var log: URL? { logURL }
+
+    private func reset(_ j: Job, folder: URL, route r: StepTimes.Route) {
+        job = j
+        failed = nil; warning = nil; finished = false; step = 0
+        activity = nil; speed = nil; secondsLeft = nil; logTail = []; logName = ""
+        rate.reset(); stepSeconds = [:]
+        route = r
+        buildStarted = Date(); stepStarted = buildStarted; lastOutput = buildStarted
+        logsDir = folder.appendingPathComponent("logs")
+        reader?.readabilityHandler = nil
+        reader = nil; run += 1; buffer = ""; exitStatus = nil
+        title = "Preparing"
+    }
+
+    private func launch(script: String, folder: URL, log logFile: String, input text: String?) {
+        let id = run
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [Paths.scripts.appendingPathComponent(prebuilt ? "prebuilt-vm.sh" : "create-vm.sh").path,
-                       config.folder.path]
+        p.arguments = [Paths.scripts.appendingPathComponent(script).path, folder.path]
         // Progress lines only for the app: omacvm build runs the same scripts
         // in a terminal, where they would be noise.
         var env = TestIdentity.environment()
@@ -71,7 +96,7 @@ final class Creator: ObservableObject {
         p.standardInput = input
         p.standardOutput = output
         p.standardError = output
-        let logURL = config.folder.appendingPathComponent("create.log")
+        let logURL = folder.appendingPathComponent(logFile)
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         self.logURL = logURL
         let log = try? FileHandle(forWritingTo: logURL)
@@ -98,18 +123,21 @@ final class Creator: ObservableObject {
         }
         do {
             try p.run()
-            input.fileHandleForWriting.write((password + "\n").data(using: .utf8)!)
+            if let text { input.fileHandleForWriting.write(Data(text.utf8)) }
             try? input.fileHandleForWriting.close()
             process = p
             startTicker()
         } catch {
             reader?.readabilityHandler = nil
             reader = nil
-            failed = "Could not start the build: \(error.localizedDescription)"
+            failed = "Could not start the \(job == .build ? "build" : "update"): \(error.localizedDescription)"
         }
     }
 
     func cancel() { process?.terminate() }
+
+    /// The script still runs (an update's ERROR: comes before its VM is shut down).
+    var running: Bool { process?.isRunning == true }
 
     private func exited(_ id: Int, _ status: Int32) {
         guard id == run else { return }
@@ -132,10 +160,11 @@ final class Creator: ObservableObject {
         ticker?.invalidate(); ticker = nil
         if status == 0 {
             endStep()
-            StepTimes.remember(stepSeconds, route: route)
+            // Step times are kept for builds only (an update has other steps).
+            if job == .build { StepTimes.remember(stepSeconds, route: route) }
             finished = true
         } else if failed == nil {
-            failed = "The build stopped (exit \(status)). Log: \(logURL?.path ?? "")"
+            failed = "The \(job == .build ? "build" : "update") stopped (exit \(status)). Log: \(logURL?.path ?? "")"
         }
     }
 

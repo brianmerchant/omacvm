@@ -29,6 +29,10 @@ in more words.
   feature again) instead of starting at once without a word. "Report a
   problem" keeps sudo's working folder (`PWD=/`), which it used to take out
   as a secret, and counts only what it really took out.
+- OmacVM.app: a VM made by an older app (2.9.x and earlier, or 3.0.0) gets
+  this app's OmacVM with Update VM in the app's window. Before, replacing
+  the app left the VM's side as it was, and a VM from before 3.0.0 has no
+  control centre to ask for it.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer

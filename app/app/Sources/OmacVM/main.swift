@@ -134,6 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Another launcher (or `omacvm`) asks to start a VM.
     private func startRequested(_ name: String) {
         if runner?.isRunning == true { Self.qemuApp?.activate(); return }
+        // A build or an update runs a VM without a window; the screen stays on
+        // it (startVM checks the same, but only after the lines below).
+        if state.screen == .building { showWindow(); return }
         if !name.isEmpty, let c = VMConfig.named(name) { state.config = c; state.screen = c.isReady ? .ready : .setup }
         if state.config.isReady { startVM() } else { showWindow() }
     }
@@ -170,6 +173,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateLater
         }
         if state.screen == .building {
+            if state.creator.job == .update {
+                // Stopping the update script would leave its apply running in
+                // the user's VM while the VM shuts down: quit once the script
+                // has ended (it shuts the VM down itself, also after an error).
+                showWindow()
+                func wait() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                        guard let c = self?.state.creator, c.running else {
+                            NSApp.reply(toApplicationShouldTerminate: true)
+                            return
+                        }
+                        wait()
+                    }
+                }
+                wait()
+                return .terminateLater
+            }
             state.creator.cancel()
         }
         return .terminateNow
@@ -213,6 +233,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startVM() {
+        // A build or an update runs the VM without a window: a second QEMU on
+        // its disk (a start from the Dock or `omacvm start`) would corrupt it.
+        if state.screen == .building {
+            showWindow()
+            return
+        }
         reloadConfig()
         if state.storage.moving != nil {
             state.message = "A VM is being moved; start once that is done."

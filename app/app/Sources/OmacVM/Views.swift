@@ -228,7 +228,8 @@ struct BuildView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Building \(state.config.name)").font(.title2.bold())
+            Text(creator.job == .build ? "Building \(state.config.name)" : "Updating OmacVM in \(state.config.name)")
+                .font(.title2.bold())
             ProgressView(value: Double(max(creator.step - 1, 0)), total: Double(creator.steps))
             Text(creator.step > 0 ? "Step \(creator.step) of \(creator.steps): \(creator.title)" : creator.title)
             if creator.failed == nil {
@@ -245,10 +246,10 @@ struct BuildView: View {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
                 HStack {
                     Button("Show Log") {
-                        NSWorkspace.shared.open(state.config.folder.appendingPathComponent("create.log"))
+                        NSWorkspace.shared.open(creator.log ?? state.config.folder.appendingPathComponent("create.log"))
                     }
                     Spacer()
-                    Button("Back") { state.screen = .setup }
+                    Button("Back") { state.screen = creator.job == .build ? .setup : .ready }
                 }
             } else {
                 Text("You can use your Mac meanwhile. Keep it awake and online.")
@@ -256,10 +257,12 @@ struct BuildView: View {
             }
         }
         .onChange(of: creator.finished) { _, done in
-            if done {
-                state.message = creator.warning
-                state.screen = .ready
-            }
+            guard done else { return }
+            let updated = creator.job == .update
+            state.screen = .ready
+            if updated { state.reload() }   // its sizes; the VM stays the one shown
+            state.message = creator.warning
+                ?? (updated ? state.config.guestVersion.map { "OmacVM in \(state.config.name) is now \($0)." } : nil)
         }
     }
 }
@@ -310,6 +313,10 @@ struct BuildNowView: View {
     /// "This step: 3 min 10 s so far, usually 15-40 min on this Mac (last time 22 min). Build: 9 min."
     private func stepTime(at now: Date) -> String {
         var s = "This step: \(BuildText.duration(now.timeIntervalSince(creator.stepStarted))) so far"
+        // An update has its own steps: no build times for them.
+        guard creator.job == .build else {
+            return s + ". Whole update: \(BuildText.duration(now.timeIntervalSince(creator.buildStarted)))."
+        }
         if let last = StepTimes.last(route: creator.route, step: creator.step) {
             s += ", last time \(BuildText.duration(last)) on this Mac"
         } else if let u = StepTimes.usual(route: creator.route, step: creator.step, performanceCores: Mac.performanceCores) {
@@ -442,6 +449,9 @@ struct ReadyView: View {
                 Text(p).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
             UpdateSection(updater: Updater.shared)
+            if let app = OmacVMVersion.app, OmacVMVersion.vmIsBehind(state.config.guestVersion, app: app) {
+                guestUpdate(app: app)
+            }
             HStack {
                 Button("Delete…") { state.storage.delete(state.config) }
                     .disabled(state.storage.moving != nil)
@@ -489,6 +499,26 @@ struct ReadyView: View {
             macFolderNote = "Applies on the next start."
         } catch {
             macFolderNote = "Could not share: \(error.localizedDescription)"
+        }
+    }
+
+    /// A VM made by an older app keeps its OmacVM when the app is replaced:
+    /// offer to bring it up to this app's (the control centre in Omarchy only
+    /// exists from 3.0.0 on, so an older VM cannot ask for it itself).
+    private func guestUpdate(app: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("OmacVM in this VM: \(state.config.guestVersion ?? "from an older app")")
+                Spacer()
+                Button("Update VM") {
+                    state.message = nil
+                    state.creator.update(config: state.config)
+                    state.screen = .building
+                }
+                .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
+            }
+            Text("This app has OmacVM \(app). Update VM starts the VM without a window, updates OmacVM in it and its helpers on the Mac (a few minutes) and shuts it down. Your files and settings in Omarchy stay.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 

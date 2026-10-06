@@ -416,6 +416,9 @@ step finish "finishing"
 # hid Omarchy's pointer and need the Mac's until they get this apply.
 if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   echo omarchy > "$d/guest-pointer"
+  # Which OmacVM the VM has now: the app offers "Update VM" while it has
+  # an older one (or none recorded: made by an app before 3.0.1).
+  echo "$now" > "$d/omacvm-version"
   # The app reads them at each start of the VM: a feature that is off gets
   # no port to the Mac's helpers and nothing on its virtio port (MacLinks.swift).
   # Vulkan without OmacVM's Mesa in the VM is off, in the record too: else it
