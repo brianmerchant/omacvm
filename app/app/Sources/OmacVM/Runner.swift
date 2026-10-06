@@ -4,6 +4,7 @@ import Foundation
 import OmacVMNet
 import OmacVMUpdate
 import OmacVMUSB
+import OmacVMDesktop
 
 /// Runs one VM: QEMU with its own Cocoa window (VirGL), a QMP socket for
 /// power and pause, and the Mac's sleep and wake.
@@ -337,6 +338,11 @@ final class Runner {
             self?.appendLog(line)
         }
         env["OMACVM_FEATURES_REQUEST"] = route.requestName
+        // "Restart the Desktop…" in QEMU's app menu after Later on the
+        // desktop-lost window (GPUMemoryWatch, DesktopRestart).
+        let desktop = DesktopRestart(for: c)
+        env["OMACVM_DESKTOP_LOST"] = desktop.lost.path
+        env["OMACVM_DESKTOP_RESTART_REQUEST"] = desktop.requestName
         // The VM's graphics memory on the Mac, for this app and omacvm check (GPUMemory).
         env["OMACVM_GPU_MEMORY_STATUS"] = GPUMemory.file(for: c).path
         try? FileManager.default.removeItem(at: GPUMemory.file(for: c))

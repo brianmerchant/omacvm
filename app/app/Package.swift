@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMBuildProgress", "OmacVMWindow"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMBuildProgress", "OmacVMWindow", "OmacVMDesktop"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -36,6 +36,10 @@ let package = Package(
         // "omacvm in Terminal", the keyboard note: `swift run window-tests`.
         .target(name: "OmacVMWindow"),
         .executableTarget(name: "window-tests", dependencies: ["OmacVMWindow"]),
+        // "Restart the Desktop…" in QEMU's app menu after Later on the
+        // desktop-lost window: `swift run desktop-tests`.
+        .target(name: "OmacVMDesktop"),
+        .executableTarget(name: "desktop-tests", dependencies: ["OmacVMDesktop"]),
     ],
     swiftLanguageModes: [.v5]
 )

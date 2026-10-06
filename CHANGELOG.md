@@ -143,6 +143,9 @@ in more words.
   it off with `defaults write org.omacvm.app desktopAutoRestart -bool false`.
   VMs get it with `omacvm apply` (before that, the app restarts the login
   manager directly, without the notification).
+- OmacVM.app: after *Later* on "The VM's desktop stopped drawing", the app
+  menu has *Restart the Desktop…* until the desktop restarts. Before, there
+  was no way back: the screen stayed black until the VM was shut down.
 - Graphics -> Vulkan on a VM from an older prebuilt image: OmacVM updates
   the whole system first (`omarchy update`, asks first in a terminal), so
   the driver build works.
