@@ -5,6 +5,12 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
+  VM goes back to what it had and the command fails (exit 4), as in the
+  control centre. Before, it ended with 0 and the record said Vulkan was on,
+  so a second `omacvm enable vulkan` said "Nothing to change". `omacvm
+  enable` and `disable` now always work this way. An apply that finds no
+  OmacVM Mesa also keeps the record at off.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer
