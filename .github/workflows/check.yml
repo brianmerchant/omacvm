@@ -253,6 +253,9 @@ jobs:
           python3 src/app/guest/tests/test_omacvm_displays.py -v
           python3 src/app/guest/tests/test_idle_waits.py -v
 
+      - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
+        run: src/tests/touchid-client.sh
+
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |
           sudo apt-get install -y -qq lua5.4 >/dev/null
