@@ -52,6 +52,19 @@ struct GPUMemory: Equatable {
         mb < 1024 ? "\(mb) MB" : String(format: "%.1f GB", Double(mb) / 1024)
     }
 
+    /// Why a context was lost, for the alert. A refusal with macOS's pressure
+    /// normal and the peak at the budget came from the budget (all graphics
+    /// together at three quarters of the Mac), not from macOS running short:
+    /// on an 8 GB Mac a browser with big WebGL pages gets there while macOS
+    /// still says normal (Air M2, 2026-10-06).
+    var lostReason: String {
+        if refused == 0 && pressure == "normal" { return "Its graphics on the Mac failed." }
+        if pressure == "normal" && budgetMB > 0 && peakMB + 512 >= budgetMB {
+            return "Its graphics reached the most one VM may use on this Mac (\(GPUMemory.gb(budgetMB)))."
+        }
+        return "macOS ran short of memory for its graphics."
+    }
+
     /// "Graphics memory: 1.6 GB (peak 2.6 GB)"
     var line: String { "Graphics memory: \(GPUMemory.gb(inUseMB)) (peak \(GPUMemory.gb(peakMB)))" }
 
@@ -154,13 +167,10 @@ final class GPUMemoryWatch {
     /// leaving a black window.
     private func desktopLost(_ m: GPUMemory) {
         guard alert == nil else { return }
-        log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
+        log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
         let a = NSAlert()
         a.messageText = "The VM's desktop stopped drawing"
-        a.informativeText = (m.pressure == "normal" && m.refused == 0
-            ? "Its graphics on the Mac failed. "
-            : "macOS ran short of memory for its graphics. ") +
-            "The VM still runs, but its screen stays black until the desktop starts again. " +
+        a.informativeText = m.lostReason + " The VM still runs, but its screen stays black until the desktop starts again. " +
             "Restarting the desktop closes the apps open in the VM."
         a.addButton(withTitle: "Restart the Desktop")
         a.addButton(withTitle: "Later")

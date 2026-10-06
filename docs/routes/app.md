@@ -873,9 +873,17 @@ browser starts its GPU process again. Hyprland cannot: the VM's Mesa does
 not report a lost context, and Hyprland 0.56, when told, stops ("Cannot
 continue until proper GPU reset handling is implemented"). The app then
 shows "The VM's desktop stopped drawing" with a button that restarts the
-desktop session (SDDM logs you in again; apps open in the VM close),
-instead of leaving a black window. `logs/qemu.log` says which app lost its
+desktop session (apps open in the VM close; with autologin on SDDM logs you
+in again, with it off you type your password), instead of leaving a black
+window. The window says why: the VM's graphics reached the guard, macOS ran
+short, or the graphics failed. `logs/qemu.log` says which app lost its
 context and why.
+
+The guard is not only for runaway VMs on an 8 GB Mac: on a MacBook Air M2
+(8 GB, 4 GB VM, 2026-10-06) Chromium with 7 windows of big WebGL pages
+(5K canvas and 512 MB of textures each) reached 6 GB while macOS still said
+normal (it said warn on the way, never critical; 2.3 GB swap, the Mac stayed
+responsive). The browser lost its context first, Hyprland a few seconds later.
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses

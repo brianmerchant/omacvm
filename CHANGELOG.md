@@ -14,6 +14,10 @@ in more words.
   asked. The app also sends the VM's graphics memory numbers with the
   request. Listing the app's VMs no longer misses one on an external drive
   now and then (a glob in bash could see the folder as empty, #151).
+- OmacVM.app: when the VM's desktop stops drawing because its graphics
+  reached the most one VM may use (three quarters of the Mac's memory), the
+  window now says so. It said "macOS ran short of memory", also when macOS
+  still had memory (seen on an 8 GB MacBook Air with a browser full of WebGL).
 - `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
   VM goes back to what it had and the command fails (exit 4), as in the
   control centre. Before, it ended with 0 and the record said Vulkan was on,
