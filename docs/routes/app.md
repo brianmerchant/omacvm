@@ -138,8 +138,9 @@ VM runs, and goes back by itself when a new version does not start
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
-- Full screen, like Parallels; on a MacBook with a notch Omarchy's bar goes
-  beside the notch ("Use the notch for the menu bar", below).
+- Full screen, like Parallels: macOS's own, in a Space of its own on every
+  display; on a MacBook with a notch Omanotch puts Omarchy's bar beside the
+  notch (below).
 - Every Mac display in full screen: with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
@@ -167,12 +168,15 @@ VM runs, and goes back by itself when a new version does not start
   while the VM runs (`omacvm enable bridge`) gets its link to the Mac at the
   next start: shut the VM down and start it again. `omacvm apply` names
   such features, and `omacvm check` fails on them until then.
-- On a MacBook with a notch, "Use the notch for the menu bar" (on by
-  default): full screen covers the strip beside the notch too and Omarchy's
-  bar goes there, but that full screen has no Space of its own (macOS 15
-  keeps full-screen Spaces below the notch). Switched off, full screen is in
-  its own Space below the notch. The switch shows only while the Mac's
-  built-in display has a notch; elsewhere it is off.
+- On a MacBook with a notch, full screen sits below the camera in its own
+  Space (macOS keeps full-screen windows there and the strip beside the
+  notch black), and Omanotch fills the strip with Omarchy's bar. It is on
+  by default for a VM made on a Mac with a notch. A VM made with the lid
+  closed or by an app before 3.0.0 has it off: `omacvm enable omanotch`
+  (with it off the strip stays black). Before 3.0.0 the app had a switch,
+  "Use the notch for the menu bar", whose full screen covered the strip
+  but had no Space of its own: other windows could share it and the
+  escape combo had nothing to leave. It is gone.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
@@ -229,9 +233,14 @@ VM runs, and goes back by itself when a new version does not start
   `omacvm` finds VMs in every folder the app does. Going back to 2.9.0
   after that: it shows only the VMs in ~/OmacVM (or the picked folder); the
   others are hidden from it, not deleted.
-- **Sizes**: the settings show each VM's size on disk (with Show in Finder)
-  and the downloads in `~/Library/Caches/omacvm` (try-omarchy's live system,
-  prebuilt VMs) with **Clear Downloads** (not while a build uses them).
+- **Sizes**: Storage shows the VM in the window with its size on disk and
+  Show in Finder. **All VMs…** lists every VM with its size, Show in Finder
+  and Delete (to the Trash; not while it runs).
+- **Downloaded images**: the Omarchy images the app downloaded to set up
+  VMs (try-omarchy's live system, prebuilt VMs), in `~/Library/Caches/omacvm`.
+  **Remove…** deletes them after a confirmation with the size (not while a
+  VM is being set up). Your VMs keep everything; a new VM downloads them
+  again. The Mac's Downloads folder is not touched.
 - **Backups and search**: Time Machine leaves VM folders out (the disk
   changes all the time). Spotlight never reads a VM's disk (it has no
   importer for it), but lists the files' names; macOS has no switch an app
@@ -304,7 +313,8 @@ the VM's SSH on `127.0.0.1:<port>`.
   47811 (Omanotch), 47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
   127.0.0.1 (dev servers, databases) is refused, like on the other routes.
   The app's QEMU carries a libslirp patch for that
-  (`OMACVM_SLIRP_HOST_PORTS`).
+  (`OMACVM_SLIRP_HOST_PORTS`). One more port when the Mac has a proxy on
+  its 127.0.0.1 (`MacProxy.swift`, [Behind a proxy](../guide.md#behind-a-proxy)).
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,

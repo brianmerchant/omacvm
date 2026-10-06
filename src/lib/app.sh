@@ -61,16 +61,25 @@ app_vms_root() {
 # place, whose VMs keep working there until they are moved.
 app_vms_roots() {
   local r p i seen
-  r=$(app_vms_root); echo "$r"; seen=$'\n'"$r"$'\n'
+  r=$(app_vms_root); echo "$r"; seen=("$r")
   p=$(defaults export "$APP_ID" - 2>/dev/null)
   for ((i = 0; i < 64; i++)); do
     r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
     r=${r%/}
-    [[ -n $r && $seen != *$'\n'"$r"$'\n'* ]] && { echo "$r"; seen+="$r"$'\n'; }
+    [[ -n $r ]] && ! app_same_dir "$r" "${seen[@]}" && { echo "$r"; seen+=("$r"); }
   done
   # The old place holds the installed app's VMs from 2.9 and older: not the test identity's.
   [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && return
-  [[ $seen == *$'\n'"$HOME/$APP_VMS_OLD"$'\n'* ]] || echo "$HOME/$APP_VMS_OLD"
+  app_same_dir "$HOME/$APP_VMS_OLD" "${seen[@]}" || echo "$HOME/$APP_VMS_OLD"
+}
+
+# app_same_dir DIR DIR...: DIR is one of the others, by name or as the same
+# folder on disk (another case of the name: the old place is often
+# ~/Library/Application Support/omacvm/VMs on disk; macOS drives ignore case).
+app_same_dir() {
+  local d=$1 s; shift
+  for s in "$@"; do [[ $d == "$s" || ( -e $d && $d -ef $s ) ]] && return 0; done
+  return 1
 }
 
 app_vm_dirs() {   # every app VM folder (with vm.env), one per line
@@ -98,8 +107,18 @@ app_env() {   # DIR KEY: one value from vm.env (single quotes stripped)
 
 app_pid_dir() {   # DIR -> the PID of its QEMU (the disk is on its command line, commas
   # doubled); this user's processes only: another account could fake the line.
-  ps -x -U "$(id -u)" -o pid=,args= 2>/dev/null | grep -F -- "file=${1//,/,,}/disk.img," |
-    grep -v grep | awk '{ print $1; exit }'
+  # The app writes the folder as it is on disk, which can differ in case from
+  # DIR (~/Library/Application Support/omacvm/VMs): any case matches, then the
+  # disk on the line must be DIR's disk itself. The pattern goes to awk in its
+  # environment, not its arguments: awk's own line in ps would match.
+  local pid f
+  while IFS=$'\t' read -r pid f; do
+    f=${f//,,/,}
+    [[ $f == "$1/disk.img" || ( -e $f && $f -ef $1/disk.img ) ]] && { echo "$pid"; break; }
+  done < <(ps -x -U "$(id -u)" -o pid=,args= 2>/dev/null | OMA_PAT="file=${1//,/,,}/disk.img," awk '
+    { i = index(tolower($0), tolower(ENVIRON["OMA_PAT"]))
+      if (i) print $1 "\t" substr($0, i + 5, length(ENVIRON["OMA_PAT"]) - 6) }')
+  return 0
 }
 
 app_running_dir() { [[ -n $(app_pid_dir "$1") ]]; }
@@ -113,12 +132,19 @@ app_list() {
   done < <(app_vm_dirs)
 }
 
-# app_features_write DIR "bridge=on gestures=off ...": the VM's features for
-# the app, which reads them at each start of the VM (MacLinks.swift: a
-# feature that is off gets nothing of the Mac). Status 0 if they changed.
+# app_features_write DIR "bridge=on gestures=off ...": the VM's features, its
+# record (src/lib/features.sh), which the app reads at each start of the VM
+# (MacLinks.swift: a feature that is off gets nothing of the Mac). vm.env's
+# FEATURES (the setup's choice, for the first apply) goes once the record is
+# there: a second list would only go stale. Status 0 if they changed.
 app_features_write() {
-  [[ $(cat "$1/features" 2>/dev/null) != "$2" ]] || return 1
-  printf '%s\n' "$2" > "$1/features"
+  local same=0
+  if [[ $(cat "$1/features" 2>/dev/null) == "$2" ]]; then same=1
+  else printf '%s\n' "$2" > "$1/features.tmp" && mv -f "$1/features.tmp" "$1/features" || return 1; fi
+  if [[ -f $1/vm.env ]] && grep -q '^FEATURES=' "$1/vm.env"; then
+    grep -v '^FEATURES=' "$1/vm.env" > "$1/vm.env.tmp" && mv -f "$1/vm.env.tmp" "$1/vm.env"
+  fi
+  return $same
 }
 
 # app_links_stale DIR "bridge=on gestures=off ..." on|off: the Mac links the
