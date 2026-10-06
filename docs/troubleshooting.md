@@ -620,7 +620,9 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
      (`grep 'upgraded mesa' /var/log/pacman.log` names it).
   Then `/usr/local/share/omacvm/guest/gbm-guard test` must say "GBM opens";
   `systemctl restart sddm` (or restart the VM) brings the desktop back. Do
-  not pin Mesa with `IgnorePkg` for long: the next update then becomes
-  partial itself.
+  not pin Mesa with `IgnorePkg`: the next `omarchy update` then brings LLVM
+  23 and keeps the old Mesa, which needs LLVM 22 (`libLLVM.so.22.1`): the
+  same black screen. If you pinned it, remove the pin in the same sitting
+  as the full update.
 - **Where:** `src/guest/pkg-add`, `src/guest/gbm-guard`,
   `src/guest/install.sh` (runs both), `src/tests/pkg-safe.sh`.

@@ -18,6 +18,9 @@
 # to /var/log/omacvm-pacman.log.
 # Tests: src/tests/pkg-safe.sh.
 set -uo pipefail
+# pacman's English words below ("Depends On", "[installed: "): with the
+# VM's locale (German, say) the checks would find nothing and let it in.
+export LC_ALL=C
 LOG=${OMACVM_PKG_LOG:-/var/log/omacvm-pacman.log}
 asdeps=()
 [[ ${1:-} == --asdeps ]] && { asdeps=(--asdeps); shift; }

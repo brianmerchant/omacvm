@@ -84,6 +84,9 @@ static void fakeWarp(CGPoint p) { pointer = p; warps++; }
 static int same(Hotkey a, Hotkey b) { return a.enabled && b.enabled && a.keycode == b.keycode && a.flags == b.flags; }
 // "macOS": the key is one of the user's Space shortcuts (as set now) -> that move.
 static double lateKeys;   // macOS moves the Space only this many verify periods after the key
+// lateKeys < 0: macOS moves it only when the test says so (landHeld), after
+// every look, however slow the runner's timers are.
+static World *heldWorld; static int heldDir, heldMove;
 static int fakeKey(Hotkey k) {
   keys++; lastKey = k;
   Hotkey l = hotkeyFrom(binding, HOTKEY_SPACE_LEFT), r = hotkeyFrom(binding, HOTKEY_SPACE_RIGHT);
@@ -93,7 +96,8 @@ static int fakeKey(Hotkey k) {
     if (spaceKeys < 4) movedOn[spaceKeys] = w ? w->id : 0;
     spaceKeys++;
     int dir = same(k, l) ? -1 : 1;
-    if (!keysIgnored && lateKeys) {
+    if (!keysIgnored && lateKeys < 0) { heldMove = 1; heldWorld = w; heldDir = dir; }
+    else if (!keysIgnored && lateKeys) {
       pendingSteps++;
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(lateKeys * verifyAfter * NSEC_PER_SEC) + 3 * NSEC_PER_MSEC),
                      dispatch_get_main_queue(), ^{ pendingSteps--; moveSpace(w, dir); });
@@ -724,12 +728,15 @@ int main(void) {
     r2 = press(K, HID, 0); sent();
     check(r2 == 1 && spaceKeys == 1 && world[0].cur == 503, "... and back in");
     // Too late (never lands within the looks): the notice, still one key.
+    // The slide lands only after the press is done (a fixed delay failed on a
+    // slow CI runner: its timers stretched the looks past it).
     settle(vm, NET_APP); sent();
     front = safari; world[0].cur = 502; settle(vm, NET_APP); inVM(vm, 503);
-    lateKeys = 20; int sm = swipeMoves; swipeMoves = 0;
+    lateKeys = -1; int sm = swipeMoves; swipeMoves = 0;
     r2 = press(K, HID, 0); got2 = sent();
     check(r2 == 1 && spaceKeys == 1 && strstr(got2, "N space-unchanged"), "lands only after every look (the swipe does nothing): the notice, one key");
     swipeMoves = sm;
+    if (heldMove) { heldMove = 0; moveSpace(heldWorld, heldDir); }
     settleSteps();
     check(world[0].cur == 502, "... (and macOS's own slide still ends one Space over)");
     lateKeys = 0;
