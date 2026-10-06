@@ -131,5 +131,10 @@ printf '[Theme]\nCurrent=omarchy\n' > "$root/etc/sddm.conf.d/10-theme.conf"
 expect "others: only the foreign autologin file" "$root/etc/sddm.conf.d/20-autologin.conf" \
   "$(SDDM_ROOT=$root; source "$R/src/guest/autologin.sh"; sddm_autologin_others)"
 
+# ---- words, never a bare "slow" ----
+expect "slow hint in words" yes "$( [[ $(feature_slow_hint) == *"10 minutes"* ]] && echo yes)"
+grep -q '(slow to build)' "$R/src/cmd/features.sh" && { echo "FAIL features.sh still says slow to build"; fail=1; }
+grep -q 'slow to build' "$R/src/lib/ui.sh" && { echo "FAIL ui.sh still says slow to build"; fail=1; }
+
 (( fail )) && { echo "feature-truth: FAILED"; exit 1; }
 echo "feature-truth: all passed"

@@ -185,8 +185,7 @@ class FeaturesScreen(Screen):
                 t.add_row(status_cell(r, app.tick), "", r.feature.title, "", key=r.feature.name)
         for r in rows:
             dim = r.status in (S.Status.UNAVAILABLE, S.Status.OFF)
-            tags = [t for t in r.feature.tags if t in ("experimental", "slow")]
-            note = r.note or ", ".join(tags)
+            note = r.note or S.tag_note(r.feature)
             if len(note) > width:
                 note = note[: width - 1] + "…"
             style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan"}.get(r.status, "bright_black")
@@ -300,8 +299,11 @@ class DetailsScreen(Screen):
         t.append("     ")
         field("Needs", f.needs or "–")
         t.append("     ")
-        field("Tags", ", ".join(f.tags) or "–")
+        hints = [S.TAG_HINTS[x] for x in f.tags if x in S.TAG_HINTS]
         t.append("\n")
+        for h in hints:
+            field("Note", h)
+            t.append("\n")
         inst = app.c.local.installed_parts().get(f.name, {})
         offer = app.c.offer().get(f.name, {})
         version = inst.get("release") or app.c.local.version

@@ -42,6 +42,10 @@ feature_index() {
 
 feature_has_tag() { [[ ",${FTAGS[$1]}," == *",$2,"* ]]; }
 
+# What the tag slow means, in words (the control centre says the same:
+# TAG_HINTS in src/control/omacvm_cc/state.py).
+feature_slow_hint() { echo "switching it on takes about 10 minutes: a build in the VM, then a restart"; }
+
 # Does this Mac have a battery? yes|no (MacBooks: yes).
 mac_battery() { pmset -g batt 2>/dev/null | grep -q InternalBattery && echo yes || echo no; }
 

@@ -1,6 +1,6 @@
 """Feature state truth: the real state of what can be switched outside OmacVM
-(autologin by SDDM, the fast network by the app) and the Mac's "fixed the
-record" note."""
+(autologin by SDDM, the fast network by the app), the Mac's "fixed the record"
+note and the words for tags (never a bare "slow")."""
 import os
 import sys
 
@@ -114,3 +114,25 @@ def test_controller_takes_the_macs_fixed_state(features):
     assert rows["fast-network"].on is True                 # the Mac's fixed state
     assert rows["bridge"].on is False                      # no fix: the VM's own copy
     assert c.fixed_of("fast-network").endswith("fixed the record") and c.fixed_of("bridge") == ""
+
+
+# ---- tags in words ----
+
+def test_every_tag_shown_has_words(features):
+    for f in features:
+        for t in f.tags:
+            if t in ("experimental", "slow"):
+                assert t in S.TAG_NOTES and t in S.TAG_HINTS
+
+
+def test_slow_is_never_bare(features):
+    f = by(features, "thp-kernel")
+    assert "slow" in f.tags
+    note = S.tag_note(f)
+    assert note != "slow" and "10 min" in note
+    assert "10 minutes" in S.TAG_HINTS["slow"]
+
+
+def test_slow_words_match_the_cli():
+    lib = open(os.path.join(os.path.dirname(__file__), "..", "..", "lib", "features.sh"), encoding="utf-8").read()
+    assert S.TAG_HINTS["slow"] in lib
