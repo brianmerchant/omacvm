@@ -157,6 +157,7 @@ EOF
 pk=$R/src/x86/guest/PKGBUILD
 expect "PKGBUILD: a pinned commit, not a branch" yes "$(grep -qE '^_commit=[0-9a-f]{40} ' "$pk" && echo yes)"
 expect "PKGBUILD: no settings app without its PyQt (menu entry)" yes "$(grep -q 'rm -f "$pkgdir/usr/bin/box64-configurator" "$pkgdir/usr/share/applications/box64-configurator.desktop"' "$pk" && echo yes)"
+expect "PKGBUILD: the malloc hack for every program (Electron apps)" yes "$(grep -qF "'[*]' 'BOX64_MALLOC_HACK=2'" "$pk" && echo yes)"
 expect "PKGBUILD: two sources, two sha256s" "2 2" \
   "$(bash -c 'source "$1"; echo "${#source[@]} ${#sha256sums[@]}"' _ "$pk")"
 expect "PKGBUILD: no SKIP checksum" 0 "$(grep -c SKIP "$pk")"

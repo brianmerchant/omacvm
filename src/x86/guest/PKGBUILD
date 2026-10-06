@@ -47,6 +47,12 @@ package() {
   install -d "$pkgdir/usr/lib/binfmt.d"
   mv "$pkgdir/etc/binfmt.d/box64.conf" "$pkgdir/usr/lib/binfmt.d/box64.conf"
   rmdir "$pkgdir/etc/binfmt.d"
+  # Chromium-based apps (Electron AppImages) bring their own memory allocator
+  # and crash or hang without box64's malloc hack; box64 sets it only for the
+  # apps it knows by name. For every program here (an app's own entry still
+  # wins): Obsidian then opens; 7-Zip, ripgrep and Node.js run as fast as without.
+  { printf '%s\n' '# OmacVM: for every program (Electron apps need it).' '[*]' 'BOX64_MALLOC_HACK=2' ''
+    cat "$pkgdir/etc/box64.box64rc"; } > box64rc && install -m644 box64rc "$pkgdir/etc/box64.box64rc"
   # Its settings app needs PyQt, which Omarchy does not have: no menu entry that cannot start.
   rm -f "$pkgdir/usr/bin/box64-configurator" "$pkgdir/usr/share/applications/box64-configurator.desktop"
   rmdir --ignore-fail-on-non-empty "$pkgdir/usr/share/applications" 2>/dev/null || true
