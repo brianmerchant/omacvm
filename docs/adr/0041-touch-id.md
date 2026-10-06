@@ -443,3 +443,196 @@ Still to do:
   another app in front (password at once); 1Password's "Unlock using
   system authentication" after its first unlock ("unlock 1Password in
   Omarchy").
+
+## Addendum (3.0.2): the Mac's own Touch ID panel
+
+Status: proposed (`touch-id-panel`, design 2026-10-06). The feature stays
+opt-in and off by default; this only changes what the Mac shows once it is on.
+
+![The panel, Tokyo Night](../images/touchid-panel.png)
+
+### What
+
+Instead of macOS's generic "OmacVM Bridge is trying to ..." alert, the Bridge
+shows its own panel, drawn by the Mac in the VM's Omarchy theme, laid out like
+Apple's Touch ID panel: the OmacVM icon, "Touch ID in Omarchy", one plain line
+saying what asks, the verified command or action in a mono box, Apple's
+embedded Touch ID view in the middle, "Touch ID to allow", Cancel. It looks
+like Omarchy's own polkit prompt and OSD: the theme's background, text,
+accent and border colours, a 2 pt border, Hyprland's corner rounding (0 in
+the default themes), JetBrains Mono.
+
+### Where it lives: the Bridge
+
+`LAAuthenticationView` shows the prompt for the `LAContext` it was made with,
+in the same process. The Bridge already makes that context, decides and
+signs, for every route (Parallels, UTM, Fusion, OmacVM.app through the app's
+relay), so the panel lives in the Bridge (`touchid_panel.swift`) and nothing
+else changes in the request path: `TouchIDDecider` calls a new
+`TouchIDAuthenticator` (`LAPanelTouchID`) instead of `LATouchID`. OmacVM.app
+gets no panel code of its own; its VMs reach the same panel once the
+`org.omacvm.auth` port and its relay exist (Built, still to do). The panel
+draws its own icon and title, so the process name ("OmacVM Bridge") never
+shows; in the fallback alert it does, as today.
+
+### Apple's embedded view (checked in the macOS 26.2 SDK headers)
+
+- `LocalAuthenticationEmbeddedUI.LAAuthenticationView`, AppKit, macOS 12+
+  (the Bridge needs 13). `init(context:controlSize:)`; when
+  `evaluatePolicy` is called on that context, the UI shows in the view
+  instead of the alert.
+- It shows no text, only the Touch ID (or Watch) glyph. Apple: "the reason
+  must be apparent from the surrounding UI". That is our panel's job.
+- Policies: `.deviceOwnerAuthenticationWithBiometrics` (ours), the
+  companion ones, and `.deviceOwnerAuthentication` "for convenience" only:
+  it fails when neither Touch ID nor a Watch can be used. So the Mac password
+  never works in the view.
+- SwiftUI's `LocalAuthenticationView` (macOS 13+) wraps the same thing; we
+  use the AppKit view (the Bridge is AppKit).
+- Order: build the panel with the view, show it, then `evaluatePolicy`.
+  `localizedReason` is still passed (today's reason text; macOS needs one).
+- Not knowable from the headers, to check on the MacBook Air: that the view
+  works in a non-activating panel of an accessory (LSUIElement) app, and
+  with the lid closed and a Magic Keyboard with Touch ID.
+
+### Fallback to macOS's alert (today's dialog, unchanged)
+
+The panel is used only when all hold, else the alert, with the same reason
+text and the same rules:
+
+- `touch_id_password_fallback` is off (the Mac password needs the alert).
+- `touch_id_panel` in the Bridge's `config.json` is not `false` (escape
+  hatch; default on).
+- The VM's window is found on a screen (below). Not found: the alert.
+- The embedded view has not failed before in this Bridge run. If
+  `evaluatePolicy` ends within 0.5 s with an error other than a cancel,
+  lockout or "not available" (the view could not show), the Bridge logs it
+  once and uses the alert for this request and every later one until it
+  restarts. A request is never asked twice after the person could have seen
+  a prompt.
+
+No sensor, no finger enrolled, lid closed without a Touch ID keyboard: the
+fast `no-touch-id` as today, no panel and no alert.
+
+### Placement
+
+Read on the main thread, no Screen Recording needed (only window bounds,
+owner and layer from `CGWindowListCopyWindowInfo`):
+
+1. The front app's pid (it must be the VM's app already: `not-front`).
+2. Its frontmost on-screen window at layer 0, at least 200x150 pt.
+3. The screen holding most of that window.
+4. Windowed: centred on the window, its top 22 % down the window (at most
+   180 pt), kept inside the screen's visible frame.
+5. Full screen (the window fills the screen) on a screen with a notch
+   (`safeAreaInsets.top > 0`): a card hanging from the strip, centred on the
+   notch, square top, rounded bottom, sliding down; it sits right under
+   Omanotch's strip panel.
+
+Panel: `NSPanel`, borderless, `.nonactivatingPanel`, level 28 (Omanotch's
+strip is 27, Parallels' and UTM's strip windows 26), `.fullScreenAuxiliary,
+.moveToActiveSpace, .ignoresCycle, .transient`, not movable, opaque, a shadow
+when windowed. It may become key without activating the Bridge, so Esc and
+⌘. reach it and typing does not go on into the VM while it is up; when it
+closes, the VM's window has the keyboard again. `appearance` follows the
+theme (dark or light), so Apple's glyph matches the background.
+
+### The words
+
+Only from the request the Bridge parsed and verified (`TouchIDRequest`),
+cleaned by `touchIDClean` exactly as for `touchIDReason`; never from the
+theme:
+
+| kind | line | box |
+|---|---|---|
+| `sudo` | `sudo in pts/3 wants to run` | the command (up to 120 characters, whole, wrapped by character, never cut) |
+| `polkit` with action | `Allow a system request` | the action id |
+| `polkit` without | `Allow a system request` | none |
+| `1password` | `Unlock 1Password` | none |
+
+Title: "Touch ID in Omarchy", with " (<VM name>)" when more than one VM is set
+up (the name from the Mac's own VM list, as today). A test checks that the box
+holds exactly the text `touchIDReason` puts after its colon (or the action
+in its quotes), so the panel and the alert can never say different things.
+
+### The theme
+
+Source in Omarchy 4 (checked in a 4.0.3 VM): the current theme is
+`~/.local/state/omarchy/current/theme/` (`theme.name` next to it).
+`colors.toml` holds the palette (`mode`, `background`, `foreground`,
+`accent`, `red`, ...; all 22 stock themes have them). `shell.toml` is the
+shell's file generated from it (or shipped by the theme); its `[polkit]`
+section is what Omarchy's own password prompt draws with: `background`,
+`text`, `accent`, `text-error`, `border = "hyprland.active-border"`. The
+shell's corner radius is Hyprland's `decoration:rounding` and its border the
+live `general:col.active_border` (a colour or a gradient), both read with
+`hyprctl getoption`.
+
+Guest: `omacvm-touchid-theme` (installed by `touchid.sh on`, removed by
+off) reads `[polkit]` from `shell.toml` (falling back to `colors.toml`),
+`hyprctl -j getoption decoration:rounding` and `general:col.active_border`,
+and sends them signed with the VM's control key, through the control
+centre's client (TCP or `org.omacvm.control`):
+
+```json
+POST /omacvm/theme
+{"background": "#1a1b26", "foreground": "#a9b1d6", "accent": "#7aa2f7",
+ "error": "#f7768e", "border": ["#7aa2f7"], "border_angle": 0, "radius": 0}
+```
+
+It runs from a user path unit on `~/.local/state/omarchy/current` (as
+`omacvm-wallpaper.path`), from Omarchy's `theme-set` hook, and once at
+login. No control key in the VM, or the port busy: retried at the next
+change; the panel meanwhile uses the last theme or Tokyo Night.
+
+Mac: `/omacvm/theme` only for a VM with its Touch ID key on the Mac (else
+403 `off`), strict JSON, at most 512 bytes, known keys only, one a second per
+VM. Kept per VM as `touchid-theme/<vm key>.json` (0600) in the Bridge's
+folder, deleted with the VM's Touch ID key. Rules, so the reason stays
+readable whatever a VM sends:
+
+- Colours `#rrggbb` only; alpha is never the guest's (the card is opaque).
+- `foreground` on `background` at least 4.5:1 (WCAG), else the whole theme
+  is refused and the last good one (or Tokyo Night) stays. All 22 stock
+  themes pass (lowest: rose-pine 6.7:1).
+- `accent`, `error` at least 3:1, a border colour at least 1.5:1, else the
+  text colour (accent) stands in. At most 2 border colours; an angle.
+- `radius` clamped to 0...12 pt.
+- Font: always the bundled JetBrains Mono (OFL 1.1, in
+  THIRD_PARTY_NOTICES), never a family the guest names (a symbol font could
+  hide the command).
+- Light or dark comes from the background's luminance, not from `mode`.
+
+### Security
+
+- Drawn by the Mac only; the guest sends colours and a radius, nothing it
+  sends is shown as text except the verified request fields above.
+- Nothing in the panel can say yes: only a finger on the sensor does, inside
+  Apple's view. Cancel, Esc, ⌘. and closing all cancel. Return does nothing
+  (no default button). So a click or key the guest could cause on the Mac
+  (Gestures' hotkeys, the Bridge's media keys, both marked with OmacVM's
+  event marker) can at most cancel, and the panel also ignores events with
+  that marker.
+- One panel at a time (`busy`, as today). It closes when the VM's client goes
+  away (Ctrl+C in sudo, the agent's Cancel), on the 30 s timeout, when the
+  Mac locks or the display sleeps, and when another app comes to the front
+  (`not-front`, not a miss).
+- It cannot be moved or placed by the guest: position comes from the Mac's
+  window list only.
+
+### Tests
+
+- Swift, no macOS UI: theme parsing and every sanitizer rule (fixtures: the
+  22 stock `colors.toml` and the Tokyo Night `shell.toml`), panel text per
+  kind against `touchIDReason`, placement maths (windowed, full screen with
+  and without a notch, window on a second screen, window not found ->
+  alert), the panel's state (showing, cancelled by button/Esc/client gone/
+  timeout/lock/front change, closed once).
+- Snapshots of the real panel view drawn off screen (dark, light, long
+  command, rounded with a gradient border, notch card) as PNGs in
+  `~/omacvm-work/touchid-panel/`.
+- MacBook Pro (where the person works): a mock authenticator with a stand-in
+  view, the panel never ordered on screen, no `LAContext` made.
+- MacBook Air (Touch ID, notch, test identity): the panel shows over a test
+  VM windowed and full screen, Cancel, Esc, timeout, Ctrl+C in the VM. The
+  finger check is for the person.
