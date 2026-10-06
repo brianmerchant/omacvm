@@ -15,10 +15,34 @@ enum MacFolder {
 
     /// QEMU's arguments for this start, and the qemu.log line.
     static func plan(_ c: VMConfig) -> MacFolderPlan.Plan {
-        MacFolderPlan.plan(fileText: try? String(contentsOf: file(c), encoding: .utf8)) { p in
-            var dir: ObjCBool = false
-            return FileManager.default.fileExists(atPath: p, isDirectory: &dir) && dir.boolValue
+        MacFolderPlan.plan(fileText: try? String(contentsOf: file(c), encoding: .utf8),
+                           isDirectory: { p in
+                               var dir: ObjCBool = false
+                               return FileManager.default.fileExists(atPath: p, isDirectory: &dir) && dir.boolValue
+                           },
+                           canOpen: MacFolderPlan.canOpen, holdsHome: holdsHome)
+    }
+
+    /// `p` is the home folder or holds it: by name, and by the folders
+    /// themselves (another spelling of the same folder, such as
+    /// /System/Volumes/Data/Users).
+    static func holdsHome(_ p: String) -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        if MacFolderPlan.holdsHome(p, home: home) { return true }
+        var s = stat()
+        guard stat(p, &s) == 0 else { return false }
+        var h = URL(fileURLWithPath: home)
+        while true {
+            var t = stat()
+            if stat(h.path, &t) == 0, t.st_dev == s.st_dev, t.st_ino == s.st_ino { return true }
+            if h.path == "/" { return false }
+            h = h.deletingLastPathComponent()
         }
+    }
+
+    /// Why `url` cannot be the Mac folder; nil when it can.
+    static func refusal(_ url: URL) -> String? {
+        MacFolderPlan.refusal(url.standardizedFileURL.path, holdsHome: holdsHome)
     }
 
     /// Shares `url` from the next start (nil: off).
@@ -26,6 +50,9 @@ enum MacFolder {
         guard let url else {
             try? FileManager.default.removeItem(at: file(c))
             return
+        }
+        if let why = refusal(url) {
+            throw NSError(domain: "OmacVM", code: 1, userInfo: [NSLocalizedDescriptionKey: why])
         }
         try Data("\(url.standardizedFileURL.path)\n".utf8).write(to: file(c), options: .atomic)
     }

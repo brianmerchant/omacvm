@@ -428,7 +428,7 @@ struct ReadyView: View {
             macFolder = MacFolder.path(state.config)
             macFolderNote = "Applies on the next start."
         } catch {
-            macFolderNote = "Could not save: \(error.localizedDescription)"
+            macFolderNote = "Could not share: \(error.localizedDescription)"
         }
     }
 
