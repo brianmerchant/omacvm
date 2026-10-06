@@ -170,8 +170,9 @@ VM runs, and goes back by itself when a new version does not start
   such features, and `omacvm check` fails on them until then.
 - On a MacBook with a notch, full screen sits below the camera in its own
   Space (macOS keeps full-screen windows there and the strip beside the
-  notch black); Omanotch (on by default with a notch) fills the strip with
-  Omarchy's bar. Before 3.0.0 the app had a switch, "Use the notch for the
+  notch black). With Omanotch on for the VM it fills the strip with
+  Omarchy's bar; app VMs start with it off for now (`omacvm enable
+  omanotch`), and then the strip stays black. Before 3.0.0 the app had a switch, "Use the notch for the
   menu bar", whose full screen covered the strip but had no Space of its
   own: other windows could share it and the escape combo had nothing to
   leave. It is gone.

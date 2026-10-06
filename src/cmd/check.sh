@@ -569,7 +569,7 @@ if [[ $TYPE == app ]]; then
   # Omanotch fills the strip beside it.
   if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
   elif [[ $(feat omanotch off) == on ]]; then skip "notch strip (app)" "full screen in its own Space; Omanotch fills the strip"
-  else skip "notch strip (app)" "full screen in its own Space; the strip stays black (Omanotch is off for this VM)"; fi
+  else skip "notch strip (app)" "full screen in its own Space; the strip stays black (Omanotch is off for this VM: omacvm enable omanotch)"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
 if (( MAC_ONLY )); then

@@ -20,9 +20,11 @@ itself. Details below.
   display, the MacBook's too. Before, on a Mac with a notch, full screen
   was a window over the Space you were on: other windows could share it,
   and the escape combo opened Mission Control instead of moving to macOS.
-  macOS keeps a full-screen window below the camera, so Omanotch now fills
-  the strip beside the notch (as with Parallels and UTM); the switch "Use
-  the notch for the menu bar" is gone. With two displays the escape combo
+  macOS keeps a full-screen window below the camera: with Omanotch on for
+  the VM it fills the strip beside the notch (as with Parallels and UTM),
+  else the strip stays black (new app VMs start with Omanotch off for now:
+  `omacvm enable omanotch`). The switch "Use the notch for the menu bar" is
+  gone. With two displays the escape combo
   no longer jumps back into the VM a moment after leaving it.
 - OmacVM.app no longer quits with "OmacVM quit unexpectedly" when the VM
   shuts down: a key or mouse event that came in while QEMU was closing
