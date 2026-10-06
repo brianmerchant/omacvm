@@ -111,6 +111,9 @@ jobs:
       - name: Vulkan (Venus) driver step for app VMs (when it builds Mesa's vulkan-virtio)
         run: src/tests/venus-driver.sh
 
+      - name: Guest packages never update one alone (no partial update), GBM guard undoes a broken install
+        run: src/tests/pkg-safe.sh
+
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 

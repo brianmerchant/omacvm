@@ -12,6 +12,13 @@ a boot splash, any Omarchy scale on 5K and larger displays, less power
 when idle. From 2.9.x: `omacvm update` once; after that the app updates
 itself. Details below.
 
+- Fixed: a black screen after an OmacVM job. With a refreshed package list,
+  OmacVM's installs could update Mesa on its own (Mesa 26.2.4 next to LLVM
+  22), and the desktop could not open its graphics (GBM). OmacVM now only
+  installs packages the VM lacks, never updates one alone, never runs
+  `pacman -Sy`, and checks after every install that the graphics still
+  open (and puts packages back if not). The Vulkan driver check runs only
+  with Graphics Vulkan. Recovery: docs/troubleshooting.md, 27.
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy

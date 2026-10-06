@@ -589,3 +589,37 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Where:** `app/runtime/patches/qemu-sdl-audio-playback-thread.patch`,
   `src/cmd/check.sh`, the test stub
   `app/runtime/Tests/audio/wedged-output-start.c`.
+
+## 27. All routes: black screen after an update or an OmacVM job
+
+- **Symptom:** the VM starts to a black screen (no login screen, no desktop);
+  over SSH, `journalctl -b | grep -i gbm` shows Hyprland's
+  `Couldn't open a GBM device` / `Cannot create a GBM Allocator` /
+  `Cannot open backend: no allocator available`.
+- **Cause:** a partial update. Mesa was updated on its own, without the
+  libraries it was built for. Arch Linux ARM's Mesa 26.2.4 needs LLVM 23
+  (`libLLVM.so.23.1`); next to LLVM 22 its GBM backend cannot load, so
+  Hyprland stops. Seen 2026-10-06: a `pacman -Sy` (a newer package list, no
+  update) and then OmacVM's `pacman -S --needed ... mesa` (Chromium video)
+  updated Mesa alone. Mesa 26.2.4 itself is fine: a full update (Mesa and
+  LLVM together) starts the desktop.
+- **Fix (3.0.0):** OmacVM installs only packages the VM does not have and
+  never updates one it has (`src/guest/pkg-add`); when an install would
+  update others, it stops and says to update the whole system first. It no
+  longer runs `pacman -Sy`. Every guest install checks at the end that GBM
+  still opens and, if this install broke it, puts the changed packages back
+  from pacman's cache (`src/guest/gbm-guard`). The Vulkan (Venus) driver
+  check runs only when the VM's Graphics gives it Vulkan.
+- **Recover a VM that already shows the black screen:** SSH in (or
+  Ctrl+Alt+F3 for a text console) as root, then either
+  1. update the whole system, which brings the matching LLVM:
+     `pacman -Syu` (Omarchy's `omarchy update` does the same and more), or
+  2. go back to the Mesa from before:
+     `pacman -U /var/cache/pacman/pkg/mesa-<old version>-aarch64.pkg.tar.*`
+     (`grep 'upgraded mesa' /var/log/pacman.log` names it).
+  Then `/usr/local/share/omacvm/guest/gbm-guard test` must say "GBM opens";
+  `systemctl restart sddm` (or restart the VM) brings the desktop back. Do
+  not pin Mesa with `IgnorePkg` for long: the next update then becomes
+  partial itself.
+- **Where:** `src/guest/pkg-add`, `src/guest/gbm-guard`,
+  `src/guest/install.sh` (runs both), `src/tests/pkg-safe.sh`.

@@ -477,6 +477,7 @@ The less obvious ones, with causes and where the fix lives, are in
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Black screen at start, journal: `Couldn't open a GBM device` | partial update: Mesa newer than its LLVM (`ldd /usr/lib/gbm/dri_gbm.so` shows "not found") | full `pacman -Syu`, or `pacman -U` the old Mesa from the cache; `src/guest/gbm-guard test` (docs/troubleshooting.md, 27) |
 | `omacvm check`: Omanotch not connected, Mac log says "another guest is connected" | Omanotch serves one VM at a time | close or stop `notchcast` in the other VM |
 | Bar widgets missing after a fresh build | the Omarchy shell was not running at install time | queued; `omacvm-plugins.service` enables them at the first login |
 | `OMARCHY_PATH is not set` from omarchy commands run as root/sudo | no Omarchy env | `source /usr/share/omarchy/default/bash/env-bootstrap` first |
@@ -504,6 +505,11 @@ The less obvious ones, with causes and where the fix lives, are in
 
 ## 8. Hard-won rules (do NOT)
 
+- Do not install packages in the VM with `pacman -S --needed` or refresh the
+  package list with `pacman -Sy` (without `u`): use `src/guest/pkg-add`, which
+  installs only missing packages and never updates one alone. A partial update
+  (2026-10-06: Mesa 26.2.4 next to LLVM 22) leaves GBM unable to load and the
+  VM on a black screen (docs/troubleshooting.md, 27).
 - Do not use try-omarchy as the installed system (pinned demo runtime). It is
   only the temporary live installer.
 - Do not update with bare `pacman -Syu`: omarchy-mac pins the Hyprland stack to

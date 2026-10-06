@@ -1,0 +1,138 @@
+#!/bin/bash
+# Offline test (no VM) of how OmacVM installs packages in a VM: only ones the
+# VM lacks, never an update of one it has (src/guest/pkg-add), and that an
+# install which breaks the desktop's graphics (GBM) is undone
+# (src/guest/gbm-guard). The case of 2026-10-06: a `pacman -Sy` had fetched a
+# newer package list, then `pacman -S --needed ... mesa` put Mesa 26.2.4
+# (built for LLVM 23) beside LLVM 22: black screen. pacman is a stand-in here
+# with an installed list, a package list and a cache.
+set -u
+cd "$(dirname "$0")/../.." || exit 1
+fails=0
+pass() { echo "ok   $1"; }
+fail() { echo "FAIL $1"; fails=$((fails + 1)); }
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/bin" "$T/cache"
+# Stand-in pacman. $T/db: installed "name version"; $T/sync: the package list
+# "name version dep..."; every call that changes something goes to $T/calls.
+cat > "$T/bin/pacman" <<'EOF'
+#!/bin/bash
+db=$T/db; sync=$T/sync
+ver() { awk -v n="$1" '$1 == n { print $2 }' "$2"; }
+case $1 in
+  -T) shift; rc=0; for p in "$@"; do [[ -n $(ver "$p" "$db") ]] || { echo "$p"; rc=127; }; done; exit $rc ;;
+  -Q) [[ $# == 1 ]] && { cat "$db"; exit 0; }
+      v=$(ver "$2" "$db"); [[ -n $v ]] && { echo "$2 $v"; exit 0; }; exit 1 ;;
+  -S) shift
+      if [[ $1 == --print ]]; then
+        shift 3   # --print --print-format FMT
+        for p in "$@"; do
+          [[ $p == --noconfirm ]] && continue
+          line=$(awk -v n="$p" '$1 == n' "$sync"); [[ -n $line ]] || { echo "error: target not found: $p" >&2; exit 1; }
+          set -- $line; echo "$1 $2"; shift 2
+          for d in "$@"; do s=$(ver "$d" "$sync"); [[ $(ver "$d" "$db") == "$s" ]] || echo "$d $s"; done
+        done
+        exit 0
+      fi
+      echo "pacman -S $*" >> "$T/calls"
+      for p in "$@"; do [[ $p == -* ]] && continue; s=$(ver "$p" "$sync")
+        grep -v "^$p " "$db" > "$db.n"; echo "$p $s" >> "$db.n"; mv "$db.n" "$db"; done ;;
+  -U) shift; echo "pacman -U $*" >> "$T/calls"
+      for f in "$@"; do [[ $f == -* ]] && continue
+        b=$(basename "$f"); b=${b%-aarch64.pkg.tar.*}; v=${b##*-}; b=${b%-*}; v=${b##*-}-$v; n=${b%-*}
+        grep -v "^$n " "$db" > "$db.n"; echo "$n $v" >> "$db.n"; mv "$db.n" "$db"; done ;;
+  *) echo "pacman stand-in: $*" >&2; exit 1 ;;
+esac
+EOF
+# The GBM test: Mesa 26.2.4 needs LLVM 23 (libLLVM.so.23.1), as Arch Linux ARM's does.
+cat > "$T/bin/gbmtest" <<'EOF'
+#!/bin/bash
+m=$(awk '$1 == "mesa" { print $2 }' "$T/db"); l=$(awk '$1 == "llvm-libs" { print $2 }' "$T/db")
+[[ $m == 1:26.2.4-1 && $l != 23.* ]] && echo "/usr/lib/gbm/dri_gbm.so needs libLLVM.so.23.1 (not installed)"
+exit 0
+EOF
+chmod +x "$T/bin/"*
+export T PATH="$T/bin:$PATH" OMACVM_PKG_LOG=$T/pacman.log OMACVM_GBM_TEST=$T/bin/gbmtest \
+  OMACVM_GBM_GUARD_DIR=$T/guard OMACVM_PKG_CACHE=$T/cache
+vm() {   # the user's VM of 2026-10-06: Mesa 26.2.3 on LLVM 22, a newer package list
+  printf '%s\n' "mesa 1:26.2.3-1" "llvm-libs 22.1.8-2" "ffmpeg 2:9.0.2-1" "libva 2.23.0-1" "dkms 3.2.2-1" \
+    "make 4.4.1-2" "gcc 15.2.1-1" "python 3.14.0-1" > "$T/db"
+  printf '%s\n' "mesa 1:26.2.4-1 llvm-libs" "llvm-libs 23.1.1-1" "ffmpeg 2:9.0.2-2" "libva 2.23.0-1" "dkms 3.2.2-1" \
+    "make 4.4.1-2" "gcc 15.2.1-1" "python 3.14.0-1" "python-textual 8.2.8-2 python" "jq 1.8.1-1" \
+    "opencl-mesa 1:26.2.4-1 mesa llvm-libs" > "$T/sync"
+  : > "$T/calls"; rm -rf "$T/guard" "$T/cache"; mkdir -p "$T/cache"
+}
+P=src/guest/pkg-add G=src/guest/gbm-guard
+
+vm
+out=$("$P" dkms make gcc ffmpeg libva mesa 2>&1); rc=$?
+[[ $rc == 0 && ! -s $T/calls && $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.3-1" ]] &&
+  pass "all there (the chromium-video case): no pacman -S, Mesa stays 26.2.3" ||
+  fail "all there: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm
+out=$("$P" jq python-textual 2>&1); rc=$?
+[[ $rc == 0 && $(cat "$T/calls") == "pacman -S --noconfirm jq python-textual" ]] &&
+  pass "missing ones: only they are installed" || fail "missing ones: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm
+out=$("$P" --asdeps jq 2>&1); rc=$?
+[[ $rc == 0 && $(cat "$T/calls") == "pacman -S --noconfirm --asdeps jq" ]] && pass "--asdeps passed on" ||
+  fail "--asdeps: calls '$(cat "$T/calls")'"
+
+vm
+out=$("$P" opencl-mesa 2>&1); rc=$?
+[[ $rc == 1 && ! -s $T/calls && $out == *"mesa 1:26.2.3-1 -> 1:26.2.4-1"* && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* && $out == *"omarchy update"* ]] &&
+  pass "a missing package that would update Mesa and LLVM alone: refused, says why" ||
+  fail "partial update not refused: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm
+out=$("$P" no-such-package 2>&1); rc=$?
+[[ $rc == 1 && ! -s $T/calls && $out == *"does not find"* ]] && pass "unknown package: one line, nothing installed" ||
+  fail "unknown package: rc $rc, said '$out'"
+
+# gbm-guard: an install that updated Mesa alone is undone from the cache.
+vm; : > "$T/cache/mesa-1:26.2.3-1-aarch64.pkg.tar.xz"; : > "$T/cache/mesa-1:26.2.3-1-aarch64.pkg.tar.xz.sig"
+"$G" begin
+echo "mesa 1:26.2.4-1" > "$T/db.n"; grep -v '^mesa ' "$T/db" >> "$T/db.n"; mv "$T/db.n" "$T/db"   # what pacman -S --needed did
+[[ $("$G" test) == *"libLLVM.so.23.1"* ]] && pass "test: sees the broken GBM" || fail "test does not see it"
+out=$("$G" end 2>&1); rc=$?
+[[ $rc == 0 && $(cat "$T/calls") == "pacman -U --noconfirm $T/cache/mesa-1:26.2.3-1-aarch64.pkg.tar.xz" &&
+   $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.3-1" && $out == *"graphics work again"* ]] &&
+  pass "end: Mesa put back to 26.2.3 from the cache, GBM opens again" ||
+  fail "end: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm; "$G" begin
+echo "mesa 1:26.2.4-1" > "$T/db.n"; grep -v '^mesa ' "$T/db" >> "$T/db.n"; mv "$T/db.n" "$T/db"
+out=$("$G" end 2>&1); rc=$?
+[[ $rc == 1 && ! -s $T/calls && $out == *"not in the package cache: mesa-1:26.2.3-1"* && $out == *"Do not restart"* ]] &&
+  pass "end: old package not in the cache: fails, says how to recover" || fail "end without cache: rc $rc, said '$out'"
+
+vm; "$G" begin
+out=$("$G" end 2>&1); rc=$?
+[[ $rc == 0 && -z $out && ! -s $T/calls && ! -e $T/guard ]] && pass "end: nothing changed: silent" || fail "end, no change: rc $rc, said '$out'"
+
+vm; echo "mesa 1:26.2.4-1" > "$T/db.n"; grep -v '^mesa ' "$T/db" >> "$T/db.n"; mv "$T/db.n" "$T/db"
+"$G" begin; out=$("$G" end 2>&1); rc=$?
+[[ $rc == 0 && ! -s $T/calls && $out == *"so before this install"* ]] && pass "end: broken before the install: says so, undoes nothing" ||
+  fail "end, broken before: rc $rc, said '$out'"
+
+# A full update (Mesa and LLVM together) is fine for the test.
+vm; printf '%s\n' "mesa 1:26.2.4-1" "llvm-libs 23.1.1-1" > "$T/db"
+[[ $("$G" test) == "GBM opens" ]] && pass "test: Mesa 26.2.4 with LLVM 23 opens" || fail "test: full update said broken"
+
+# Wired in, and no other way to pacman -S in guest code.
+grep -q '"$R/guest/gbm-guard" begin && GBM_GUARD=1' src/guest/install.sh &&
+  grep -q '"$R/guest/gbm-guard" end' src/guest/install.sh && pass "guest/install.sh runs the GBM guard" ||
+  fail "guest/install.sh does not run the GBM guard"
+bad=$(git grep -nE 'pacman +(-S[a-zA-Z]*|--sync)( |$)' -- 'src/**' ':!src/tests/**' ':!src/guest/pkg-add' ':!src/vm/**' \
+  ':!**/*.md' ':!src/bench/**' | grep -vE '^[^:]+:[0-9]+:\s*#' |
+  grep -vE 'pacman -(Syu|Scc|Si) |\(pacman -S [a-z0-9 -]*\)|pacman -Q openssh [^|]*\|\| pacman -S |"\$k-headers"' || true)
+# Allowed above: a full update, cache cleaning and reads; "(pacman -S x)" in a
+# message; openssh only when missing; the kernel's own headers version (dkms.sh).
+[[ -z $bad ]] && pass "no pacman -S/-Sy in guest code outside guest/pkg-add" || { fail "pacman -S outside guest/pkg-add:"; echo "$bad"; }
+grep -q "^ExecCondition=.*OMACVM_GRAPHICS=vulkan" src/app/guest/venus/omacvm-venus-driver.service &&
+  grep -q 'systemctl disable --now omacvm-venus-driver.timer' src/app/guest/install.sh &&
+  pass "Venus driver unit only with Graphics Vulkan (or the vulkan feature)" || fail "Venus driver unit also runs with OpenGL"
+
+exit $fails
