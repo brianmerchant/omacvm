@@ -46,7 +46,8 @@ declare -F cache_watch >/dev/null || cache_watch() { :; }
 # sed -u passes whole lines only, so cache_watch's lines never land in the
 # middle of one (tail writes what it reads, also half lines).
 {
-  ( tail -n +1 -F "$H/.omacvm-install.log" 2>/dev/null & echo $! > /run/omacvm-install-tail.pid; wait ) | sed -u '' &
+  # 2>/dev/null on the subshell: no "Terminated" line when tail is stopped.
+  ( tail -n +1 -F "$H/.omacvm-install.log" & echo $! > /run/omacvm-install-tail.pid; wait ) 2>/dev/null | sed -u '' &
   cache_watch /var/cache/pacman/pkg & w=$!
   while systemctl is-active -q omacvm-omarchy-install; do sleep 2; done
   sleep 1; kill "$w" 2>/dev/null || true

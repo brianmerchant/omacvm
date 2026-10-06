@@ -295,6 +295,9 @@ struct BuildNowView: View {
                         .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 }
             }
+            // Room for the tallest case (a download): the window keeps its
+            // height as lines come and go.
+            .frame(minHeight: 116, alignment: .topLeading)
         }
     }
 

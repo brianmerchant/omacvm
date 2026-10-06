@@ -62,7 +62,11 @@ final class Creator: ObservableObject {
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [Paths.scripts.appendingPathComponent(prebuilt ? "prebuilt-vm.sh" : "create-vm.sh").path,
                        config.folder.path]
-        p.environment = TestIdentity.environment()
+        // Progress lines only for the app: omacvm build runs the same scripts
+        // in a terminal, where they would be noise.
+        var env = TestIdentity.environment()
+        env["OMACVM_PROGRESS"] = "1"
+        p.environment = env
         let input = Pipe(), output = Pipe()
         p.standardInput = input
         p.standardOutput = output

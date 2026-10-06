@@ -104,15 +104,20 @@ live_fetch() {
 }
 
 # progress_line PHASE NOW DONE TOTAL: a progress line for the app (Creator.swift).
+# Only when the app asks (OMACVM_PROGRESS=1): omacvm build runs these scripts
+# in a terminal too.
 progress_line() {
+  [[ ${OMACVM_PROGRESS:-} == 1 ]] || return 0
   printf '{"omacvm_progress": 1, "phase": "%s", "now": "%s", "done": %d, "total": %d}\n' "$1" "$2" "$3" "$4"
 }
 
 # bytes_watch NOW TOTAL FILE...: every second a progress line with how many
-# bytes of the FILEs are there, until killed.
+# bytes of the FILEs are there, until killed or the script ($$) is gone (the
+# app's Cancel stops only the script).
 bytes_watch() {
   local now=$1 total=$2 f n sz; shift 2
-  while :; do
+  [[ ${OMACVM_PROGRESS:-} == 1 ]] || return 0
+  while kill -0 $$ 2>/dev/null; do
     n=0
     for f in "$@"; do sz=$(stat -f %z "$f" 2>/dev/null || echo 0); n=$((n + sz)); done
     progress_line download "$now" "$n" "$total"
@@ -120,10 +125,13 @@ bytes_watch() {
   done
 }
 
-# download URL FILE NOW: curl with a progress line every second (size from the
-# server; 0 when it gives none).
+# download URL FILE NOW: curl with a progress line every second for the app
+# (size from the server; 0 when it gives none), else curl's own bar.
 download() {
   local url=$1 out=$2 total w rc=0
+  if [[ ${OMACVM_PROGRESS:-} != 1 ]]; then
+    curl -fL --retry 3 --progress-bar -o "$out" "$url"; return
+  fi
   total=$(curl -fsIL --max-time 20 "$url" 2>/dev/null | tr -d '\r' |
     awk 'tolower($1) == "content-length:" && $2 ~ /^[0-9]+$/ { n = $2 } END { print n + 0 }') || total=0
   bytes_watch "$3" "${total:-0}" "$out" & w=$!

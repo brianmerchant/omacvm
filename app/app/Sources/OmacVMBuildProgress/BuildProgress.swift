@@ -168,14 +168,14 @@ public enum BuildText {
 /// How long each step usually takes, so a long one does not look stuck.
 /// From a real build (2026-10-06, MacBook Air M2, 4 performance cores, the
 /// live system cached, a fast line): 12 min in all, step 4 about 6 min, step 5
-/// about 2, step 6 about 1.5, step 2 about 1. A Pro/Max chip (8+ performance
-/// cores) is quicker. Downloads depend on the line and show their own speed.
+/// about 2, step 6 about 1.5, step 2 about 1. A Pro/Max chip (more than 4
+/// performance cores; the base chips have 4) is quicker. Downloads depend on the line and show their own speed.
 public enum StepTimes {
     public enum Route: String, Sendable { case build, prebuilt }
 
     /// (low, high) in seconds, or nil when there is no usual time.
     public static func usual(route: Route, step: Int, performanceCores: Int) -> (Double, Double)? {
-        let fast = performanceCores >= 8
+        let fast = performanceCores > 4
         let f = fast ? 0.7 : 1.0
         let t: (Double, Double)?
         switch (route, step) {
@@ -202,7 +202,10 @@ public enum StepTimes {
                      forKey: "buildStepSeconds.\(route.rawValue)")
     }
 
+    /// Not for a step with a download (build step 1, prebuilt step 2): a
+    /// cached second build takes a fraction of the first one's time.
     public static func last(route: Route, step: Int, defaults: UserDefaults = .standard) -> Double? {
+        if (route == .build && step == 1) || (route == .prebuilt && step == 2) { return nil }
         let d = defaults.dictionary(forKey: "buildStepSeconds.\(route.rawValue)") as? [String: Double]
         return d?[String(step)].flatMap { $0 > 0 && $0 < 86400 ? $0 : nil }
     }

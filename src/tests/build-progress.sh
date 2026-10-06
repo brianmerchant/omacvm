@@ -57,4 +57,18 @@ check "raw lines marked for the log" "grep -qx '| installing mesa...' '$t/out'"
 printf 'Packages (1) x\n:: Retrieving packages...\n a"b\\\\c-1-1-any downloading...\n' | pac_progress /dev/null | grep -v '^| ' > "$t/odd"
 check "odd name sanitised" "grep -q '\"now\": \"abc\"' '$t/odd' && python3 -c 'import json,sys; [json.loads(l) for l in open(sys.argv[1])]' '$t/odd'"
 python3 -c 'import json,sys; [json.loads(l) for l in open(sys.argv[1]) if l.startswith("{")]' "$t/app" && echo "ok   every progress line is JSON" || { echo "FAIL JSON"; fails=$((fails + 1)); }
+
+# Progress lines only when the app asks (OMACVM_PROGRESS=1): omacvm build runs
+# the same scripts in a terminal (--vm-type app, make-image.sh).
+fn() { sed -n "/^$1() {/,/^}/p" "$2"; }
+eval "$(fn progress_line app/scripts/vm-common.sh; fn bytes_watch app/scripts/vm-common.sh; fn vm_script app/scripts/create-vm.sh)"
+OMACVM_SRC=src
+check "no progress line unless asked" "[[ -z \$(unset OMACVM_PROGRESS; progress_line download x 1 2; bytes_watch x 2 /dev/null) ]]"
+check "progress line when asked" "OMACVM_PROGRESS=1 progress_line download x 1 2 | grep -q '^{\"omacvm_progress\": 1, '"
+check "progress.sh sent only when asked" "[[ \$(unset OMACVM_PROGRESS; vm_script base-install.sh | grep -c '^pac_progress()') == 0 && \$(OMACVM_PROGRESS=1 vm_script base-install.sh | grep -c '^pac_progress()') == 1 ]]"
+# omacvm build --vm-type app drops them anyway (an app of another version).
+f=$(grep -m1 "omacvm_progress\"/d" src/cmd/build.sh); f=${f% |}
+printf '%s\n' '{"omacvm_progress": 1, "phase": "download", "now": "x", "done": 1, "total": 2}' '| raw' 'STEP 2/7 Base' > "$t/cli"
+eval "$f" < "$t/cli" > "$t/cli.out"
+check "omacvm build drops progress lines" "[[ \$(cat '$t/cli.out') == '==> 2/7 Base' ]]"
 (( fails == 0 )) && echo "all passed" || { echo "$fails failed"; exit 1; }

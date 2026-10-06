@@ -45,9 +45,9 @@ pac_progress() {
 }
 
 # cache_watch DIR...: the size of the package caches, every 2 seconds, as
-# "OMACVM_CACHE <bytes>" lines, until killed.
+# "OMACVM_CACHE <bytes>" lines, until killed or the script ($$) is gone.
 cache_watch() {
-  while :; do
+  while kill -0 $$ 2>/dev/null; do
     printf 'OMACVM_CACHE %s\n' "$(du -sb "$@" 2>/dev/null | awk '{ s += $1 } END { printf "%.0f", s }')"
     sleep 2
   done
