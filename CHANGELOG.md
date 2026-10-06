@@ -240,6 +240,8 @@ in more words.
   (troubleshooting 28).
 - Control centre: a Magic Mouse swipe row (3 or 4 fingers) while the Mac
   has a Magic Mouse, on every route.
+- OmacVM.app with its VMs folder on another drive: downloads go there too
+  (`.downloads` in that folder), not to the Mac's own disk.
 
 ## 3.0.0
 
