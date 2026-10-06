@@ -327,7 +327,8 @@ final class MediaKeys {
                                  muteSettable: key == .mute && audio.outputMuteSettable,
                                  macBrightness: brightness ? Brightness.displayID : nil,
                                  external: brightness ? externalState(vm) : .unknown,
-                                 keyboardLight: [.keyboardUp, .keyboardDown, .keyboardToggle].contains(key) && KeyboardLight.get() != nil)
+                                 keyboardLight: [.keyboardUp, .keyboardDown, .keyboardToggle].contains(key) && KeyboardLight.get() != nil,
+                                 command: flags.contains(.maskCommand))
     return (vm, key, route, option)
   }
 
@@ -359,6 +360,9 @@ final class MediaKeys {
     case .vm(let qcode):
       guard down else { return true }
       guard let pid = front.app?.processIdentifier, let path = vmKeys.socket(for: pid) else { return false }
+      if event.flags.contains(.maskCommand), once.first("command \(key)") {
+        log("media key \(key) with Command: to the VM as Super + \(qcode) (Omarchy's screenshot keys), not the Mac's volume")
+      }
       work.async {
         let ok = VMKeys.press(qcode, socket: path)
         DispatchQueue.main.async { self.typed(key, into: pid, ok) }
