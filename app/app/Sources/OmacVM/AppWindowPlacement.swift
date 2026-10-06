@@ -31,23 +31,38 @@ extension NSWindow {
 final class CentredWindow {
     private weak var window: NSWindow?
     private var placed: CGPoint?   // top left corner after the last placement
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
+    /// Not yet placed, or closed / taken off screen by the app since: the next
+    /// open centres it again. Not set by hiding the app (Cmd-H) or by another
+    /// Space, so a window the user moved stays where it is then.
+    private(set) var needsPlace = true
 
     init(_ w: NSWindow) {
         window = w
-        observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: w,
-                                                          queue: .main) { [weak self] _ in
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: NSWindow.didResizeNotification, object: w, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.resized() }
-        }
+        })
+        observers.append(nc.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.taken() }
+        })
     }
 
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     /// Centred on the built-in display, else the main one.
     func place() {
         guard let w = window else { return }
         w.centreOnAppScreen()
         placed = Self.topLeft(w)
+        needsPlace = false
+    }
+
+    /// Closed, or ordered out by the app (a VM started): centre it again on
+    /// the next open.
+    func taken() {
+        needsPlace = true
+        placed = nil
     }
 
     private func resized() {

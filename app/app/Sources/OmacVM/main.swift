@@ -205,9 +205,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Each time it opens (first open, after closing it, after the VM):
         // centred on the built-in display, and kept centred while SwiftUI
-        // sizes it. Left where the user put it while it stays open or sits
-        // in the Dock.
-        if let w = window, !w.isVisible, !w.isMiniaturized { centring?.place() }
+        // sizes it. Left where the user put it while it stays open, sits in
+        // the Dock, or the app was hidden (Cmd-H).
+        if let w = window, let c = centring, c.needsPlace, !w.isMiniaturized { c.place() }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
@@ -253,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runner = r
             state.message = nil
             window?.orderOut(nil)
+            centring?.taken()
             // QEMU's window carries the app's name and icon in the Dock.
             NSApp.setActivationPolicy(.accessory)
             if let pid = r.process?.processIdentifier { handFocus(to: pid, wasActive: wasActive) }
