@@ -5,7 +5,7 @@
 // nothing posted.
 //   a finger resting, slow sideways scrolling, up/down scrolling -> nothing
 //   one finger flicked sideways                                 -> Back / Forward key, once per touch
-//   two fingers sliding sideways                                -> three virtual fingers (workspace swipe),
+//   two fingers sliding sideways                                -> four virtual fingers (workspace swipe),
 //                                                                  macOS's scroll for them dropped
 //   not captured, or a VM without gestures                      -> nothing, scrolling passes
 #define main helper_main
@@ -111,7 +111,7 @@ static Got drain(void) {
   for (char *l = acc; *l; ) {
     char *nl = strchr(l, '\n'); if (nl) *nl = 0;
     int id; float x;
-    if (!strncmp(l, "F 3 ", 4) && sscanf(l + 4, "%d %f", &id, &x) == 2 && id == MOUSE_FINGER_ID) {
+    if (!strncmp(l, "F 4 ", 4) && sscanf(l + 4, "%d %f", &id, &x) == 2 && id == MOUSE_FINGER_ID) {
       g.f3++; if (g.firstX < 0) g.firstX = x; g.lastX = x;
     } else if (!strcmp(l, "F 0")) g.f0++;
     else if (!strcmp(l, "K 158 1") || !strcmp(l, "K 158 0")) g.back++;
