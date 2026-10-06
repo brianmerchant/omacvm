@@ -28,6 +28,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **Graphics: OpenGL, Vulkan or Automatic** *(OmacVM.app, Automatic by default)* | Per VM, in the app's setup and VM window, `omacvm graphics` or the control centre. OpenGL: Omarchy and its apps draw with OpenGL on the Mac's GPU. Vulkan: the same plus Vulkan on the Mac's GPU for Vulkan apps (KosmicKrisp on macOS 26 and newer, MoltenVK before). Vulkan windows are copied through the CPU. Automatic is OpenGL on every Mac in 3.0.0 ([how](routes/app.md)) |
 | **WebGPU and GPU compute** *(experimental, OmacVM.app, off by default)* | WebGPU (Firefox, and Chromium from its "Chromium (WebGPU)" menu entry) and OpenCL (darktable, ffmpeg's OpenCL filters, Geekbench GPU) on the Mac's GPU: `omacvm enable vulkan`, then restart the VM. The VM builds a Mesa for it the first time (about 3 minutes, a 140 MB download) ([how](routes/app.md)) |
 | **USB devices** *(experimental, OmacVM.app, off by default)* | Per VM, in the app's VM window: give the VM a USB device macOS does not use itself (debug probes, SDR sticks, logic analysers, phones in fastboot). Security keys, keyboards, USB disks and serial adapters stay with the Mac: macOS keeps them ([why, and what works](usb.md)) |
+| **x86 Linux apps** *(experimental, off by default)* | x86_64 Linux programs and AppImages run in the VM through box64, which translates them to ARM: `omacvm enable x86-apps`. Slower than native ARM apps; the VM builds box64 the first time (a few minutes). ([details](#x86-linux-apps)) |
 | **Storage** *(OmacVM.app)* | VMs live in `~/OmacVM` or a folder you pick, an external drive too; the app moves them for you. Storage in the app's window shows the VM's size; **All VMs…** lists every VM with its size, Show in Finder and Delete. **Downloaded images** are the Omarchy images the app downloaded to set up VMs: **Remove…** frees that space (your VMs keep everything, a new VM downloads them again, the Mac's Downloads folder is not touched) ([where things are](routes/app.md#where-things-are)) |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
@@ -194,3 +195,54 @@ It is **experimental**: tuned on one Mac, by feel and by measurement, over 29
 rounds. The whole story, with every measurement and the analysis scripts, is in
 [experiments/trackpad-scrolling.md](experiments/trackpad-scrolling.md).
 Switch it off with `omacvm disable scroll-momentum`, on again with `omacvm enable scroll-momentum`.
+
+## x86 Linux apps
+
+Omarchy here is ARM Linux. Most apps exist for ARM, but some ship only for
+x86_64 (an AppImage, a tarball, a vendor's CLI). There is no Rosetta for Linux
+in OmacVM.app, UTM's QEMU VMs or VMware Fusion, so OmacVM brings its own
+translator: [box64](https://github.com/ptitSeb/box64).
+
+- **On:** `omacvm enable x86-apps` (or the control centre). The VM builds
+  box64 (a pinned build of its main branch) as a pacman package and
+  installs it: about 2 minutes on an M4 with 6 cores (4-5 with 4 cores), 70 MB of downloads (sources and build
+  tools; the tools go again after), 76 MB on disk. From then on an x86_64
+  program or AppImage starts like any other: `./Some-App-x86_64.AppImage`.
+  box64 translates the app's own code and uses the VM's native libraries
+  (glibc, GTK, X11, Wayland, OpenGL, SDL, FUSE) where it can.
+- **Off:** `omacvm disable x86-apps` removes the package (`omacvm-box64`,
+  not `box64`, so Omarchy's update does not swap it for the AUR's box64)
+  and its binfmt rule. A box64 you installed yourself is left alone.
+- `omacvm check` runs a tiny x86_64 program to show it works.
+
+**Speed**, the same program and version, the x86_64 build through box64
+against the native ARM build, in an OmacVM.app VM (6 cores, 8 GB) on a
+Mac mini M4:
+
+| Test | x86_64 through box64 | Native ARM | x86 in % of native |
+|---|---|---|---|
+| 7-Zip 26.03 benchmark, 1 thread | 8,257 MIPS | 9,589 MIPS | 86 % |
+| 7-Zip 26.03 benchmark, all threads | 46,239 MIPS | 55,353 MIPS | 84 % |
+| ripgrep 15.2.0, regex over 222 MB | 0.044 s | 0.017 s | 39 % |
+| Node.js 24, a small JavaScript benchmark | 1.09 s | 0.21 s | 20 % |
+| Start of a small program (ripgrep `--version`) | 23 ms | 0.4 ms | |
+| Start of Node.js 24 (`node -e`) | 3.0 s | 0.01 s | |
+
+Plain computing code runs at about 85 % of native speed, vector-heavy
+code at under half, a JavaScript engine at a fifth; every start costs
+extra, a lot for big runtimes like Node.js. Prefer the ARM build of an app
+when there is one.
+
+**Tested:** 7-Zip, ripgrep and appimagetool run. Obsidian's x86_64
+AppImage (Electron) opens in 3.9 s against 0.8 s for its ARM build (on an
+ARM64 Linux server with an X11 display; box64's malloc hack is on for
+every program, which Electron apps need; to turn it off for one program,
+give it its own entry in `~/.box64rc`, as the environment variable
+`BOX64_MALLOC_HACK=0` does not win over the shared entry). Node.js runs, but crashed in 2
+of 3 runs of the benchmark. **Not covered:** 32-bit x86 programs and
+Windows programs (Wine).
+
+On Parallels, keep Parallels' own Rosetta for Linux off (OmacVM's VMs
+start with it off): it and box64 both claim x86_64 programs. Installing or
+removing box64 restarts systemd-binfmt, which drops binfmt rules that were
+added by hand and are not in a binfmt.d folder.
