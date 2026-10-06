@@ -78,7 +78,7 @@ struct USBSection: View {
             case .usedByMac(let why):
                 guard on else { continue }
                 out.append(Row(id: d.id, name: d.name, on: on, canChoose: false,
-                               why: "\(why): the VM gets it once macOS lets it go."))
+                               why: "\(why): the VM gets it when macOS no longer does and it is plugged in again."))
             }
             seen.insert(d.id)
         }

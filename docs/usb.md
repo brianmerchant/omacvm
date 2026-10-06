@@ -102,3 +102,6 @@ Until then, other ways work for some of these:
   VM gets the first one QEMU finds.
 - A VM that is running does not get a device switched on meanwhile; that
   applies on its next start.
+- A chosen device that macOS used when the VM looked for it stays with the
+  Mac until it is unplugged and plugged in again (QEMU tries three times per
+  plug).
