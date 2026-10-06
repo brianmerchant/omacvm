@@ -138,7 +138,7 @@ class FeaturesScreen(Screen):
     BINDINGS = [
         Binding("space", "toggle", "on/off"), Binding("r", "repair", "repair"), Binding("u", "update", "update"),
         Binding("enter", "details", "details", priority=True), Binding("U", "updates", "updates"),
-        Binding("exclamation_mark", "report", "report"), Binding("q", "app.quit", "quit"),
+        Binding("exclamation_mark", "report", "report"), Binding("escape,q", "app.quit", "quit"),
         Binding("j", "down", show=False), Binding("k", "up", show=False),
     ]
 
@@ -149,7 +149,7 @@ class FeaturesScreen(Screen):
             yield Static("", classes="hint", id="hint")
             yield Static("", classes="banner", id="banner")
         yield Static(keys_line(("space", "on/off"), ("r", "repair"), ("u", "update"), ("enter", "details"),
-                               ("U", "updates"), ("!", "report"), ("q", "quit")), classes="keys")
+                               ("U", "updates"), ("!", "report"), ("esc", "quit")), classes="keys")
 
     def on_mount(self) -> None:
         t = self.query_one(DataTable)
