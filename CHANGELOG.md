@@ -14,6 +14,9 @@ in more words.
   speed and time left, how long the step usually takes on a Mac like yours
   (or took last time), and "Working. Last output 4 s ago." so a quiet part
   never looks frozen. *Show details* shows the last 20 lines of the log.
+- USB devices (experimental, OmacVM.app, off by default): give a VM a USB
+  device macOS does not use itself (debug probes, SDR sticks, boards in DFU
+  mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
 
 ## 3.0.0 (unreleased)
 
