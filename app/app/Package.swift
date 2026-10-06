@@ -5,7 +5,7 @@ let package = Package(
     name: "OmacVM",
     platforms: [.macOS("15.0")],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -24,6 +24,10 @@ let package = Package(
         // The Mac folder's QEMU arguments: `swift run folder-tests`.
         .target(name: "OmacVMFolder"),
         .executableTarget(name: "folder-tests", dependencies: ["OmacVMFolder"]),
+        // The features a new VM starts with (Omanotch on with a notch):
+        // `swift run features-tests`.
+        .target(name: "OmacVMFeatures"),
+        .executableTarget(name: "features-tests", dependencies: ["OmacVMFeatures"]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -131,7 +131,7 @@ sed "s#/run/omacvm/host.env#$d/host.env#" "$G" > "$d/gen"
 [[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "no host.env: software WSI" || fail "no host.env: not software WSI"
 echo OMACVM_VKWINDOWS=1 > "$d/host.env"
 [[ -z $(sh "$d/gen") ]] && pass "app shows Vulkan windows: normal WSI" || fail "app shows Vulkan windows: still software WSI"
-printf 'OMACVM_NOTCH=64\nOMACVM_VKWINDOWS=0\n' > "$d/host.env"
+printf 'OMACVM_SCREEN=2056x1329\nOMACVM_VKWINDOWS=0\n' > "$d/host.env"
 [[ $(sh "$d/gen") == MESA_VK_WSI_DEBUG=sw ]] && pass "flag 0: software WSI" || fail "flag 0: not software WSI"
 rm -rf "$d"
 grep -q 'user-environment-generators/90-omacvm-vulkan-present' src/app/guest/install.sh &&

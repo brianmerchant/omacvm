@@ -54,11 +54,18 @@ done
 log() { LAST_STEP=$*; printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 # A run that stops says where (apply shows it as what failed).
 # One EXIT trap for everything that must run at the end (Fusion's DNS below).
-LAST_STEP="the start"; REPORTED=""; FUSION_DNS=0
+LAST_STEP="the start"; REPORTED=""; FUSION_DNS=0; GBM_GUARD=0
 on_exit() {
   local rc=$?
+  # The desktop's graphics (GBM) must open after this run as they did before
+  # (guest/gbm-guard puts back packages that broke them; a black screen
+  # otherwise at the next start).
+  if (( GBM_GUARD )) && ! "$R/guest/gbm-guard" end; then
+    (( rc )) || { echo "guest/install.sh: failed during: the graphics check (GBM)" >&2; REPORTED=1; rc=1; }
+  fi
   (( rc == 0 || rc == 2 )) || [[ -n $REPORTED ]] || echo "guest/install.sh: failed during: $LAST_STEP" >&2
   (( ! FUSION_DNS )) || "$R/fusion/guest/dns.sh" off || true
+  exit "$rc"
 }
 trap on_exit EXIT
 # want FEATURE: this run installs that feature's part (all of them, or --only).
@@ -85,9 +92,11 @@ source "$R/guest/off.sh"
 
 # Earlier choices, then this run's.
 ENV=/etc/omacvm/env
-AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
-# Set up before choices were kept:
-[[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on
+source "$R/guest/autologin.sh"
+AUTOLOGIN_CONF=$OMACVM_AUTOLOGIN_CONF
+# Set up before choices were kept, or by someone else (an Omarchy install, a
+# migration): SDDM logs someone in.
+[[ -n $(sddm_autologin_user) ]] && F[autologin]=on
 [[ -x $H/.local/bin/notchcast ]] && F[omanotch]=on
 [[ $NAME64 =~ ^[A-Za-z0-9+/=]*$ ]] || { echo "guest/install.sh: --vm-name-b64: not base64" >&2; exit 2; }
 if [[ -r $ENV ]]; then
@@ -205,10 +214,13 @@ if [[ -e /var/lib/pacman/db.lck ]]; then
   log "pacman's lock from an install that was cut off: removed"
   rm -f /var/lib/pacman/db.lck
 fi
-pacman -S --needed --noconfirm jq >/dev/null 2>&1 || { echo "guest/install.sh: pacman could not install jq (no network?)" >&2; exit 1; }
+# Packages: only ones the VM lacks, never an update of one it has
+# (guest/pkg-add says why). And the graphics still open at the end.
+"$R/guest/gbm-guard" begin && GBM_GUARD=1
+"$R/guest/pkg-add" jq || { echo "guest/install.sh: pacman could not install jq (see above)" >&2; exit 1; }
 if system && command -v grub-mkconfig >/dev/null; then
   # Snapshots (snapper, set up by omarchy-mac) appear in the GRUB menu.
-  pacman -S --needed --noconfirm grub-btrfs inotify-tools >/dev/null 2>&1
+  "$R/guest/pkg-add" grub-btrfs inotify-tools
   # Read-only snapshots picked in GRUB boot with a temporary writable overlay
   # (Omarchy does this with Limine on x86; omarchy-mac uses GRUB).
   printf '%s\n' '[[ " ${HOOKS[*]} " == *" grub-btrfs-overlayfs "* ]] || HOOKS+=(grub-btrfs-overlayfs)' \
@@ -235,6 +247,13 @@ Relogin=false
 EOF
 else
   rm -f "$AUTOLOGIN_CONF"
+  # Off means off: another file that logs someone in (an Omarchy install, a
+  # migration) is kept beside, as NAME.omacvm-off, which SDDM does not read.
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    mv -f "$f" "$f.omacvm-off" && log "autologin: off ($f kept as $f.omacvm-off)"
+  done < <(sddm_autologin_others)
+  [[ -z $(sddm_autologin_user) ]] || log "autologin: SDDM still logs $(sddm_autologin_user) in (/etc/sddm.conf or /usr/lib/sddm/sddm.conf.d): remove [Autologin] there"
 fi
 
 # Omarchy's idle screensaver and lock: its own "Stay Awake" switch turns both
@@ -268,7 +287,7 @@ fi
 if system && ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1; then
   log "sound: PipeWire's ALSA, PulseAudio and JACK parts"
   pacman -Q jack2 >/dev/null 2>&1 && pacman -Rdd --noconfirm jack2 >/dev/null
-  pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1 || true
+  "$R/guest/pkg-add" pipewire-alsa pipewire-pulse pipewire-jack rtkit || true
   user_ctl restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 fi
 # PipeWire's sound threads get real-time priority through RTKit. RTKit's
@@ -410,7 +429,7 @@ elif [[ ${F[omanotch]} == on ]]; then
   fi
   if [[ ! -x $H/.local/bin/notchcast ]]; then
     log "Omanotch (the bar beside the notch)"
-    pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1
+    "$R/guest/pkg-add" base-devel lz4 wayland wayland-protocols git
     install -d -o "$U" -g "$U" "$H/.local/state/omacvm"
     echo "$sum" > "$stamp"; chown "$U:$U" "$stamp"
     install -m644 "$R/guest/omacvm-omanotch.service" /etc/systemd/user/

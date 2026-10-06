@@ -210,7 +210,18 @@ final class StripView: NSView {
         // (the guest draws its own cursor). Parallels does not reliably reset
         // the cursor when the pointer comes from another app's window, which
         // would leave a macOS arrow on top of the guest cursor.
-        if let screenPoint = window?.convertPoint(toScreen: event.locationInWindow),
+        // Down: the strip is only shown right on top of the VM's full-screen
+        // window (StripDetector), so that is where the pointer is now. The
+        // window list is not asked: in macOS's full screen its (hidden) menu
+        // bar window covers the strip and, with the 2-point slack, the first
+        // row below it, so the test said "not the VM" and a macOS arrow stayed
+        // over the guest's own cursor until the VM app reset it.
+        // (Only straight down out of the strip's bottom edge: sideways may be
+        // another display that shows macOS.)
+        let straightDown = p.y >= bounds.height - 1 && p.x >= 0 && p.x < bounds.width
+        if straightDown, activeOwner != nil {
+            BackgroundCursor.transparent.set()
+        } else if let screenPoint = window?.convertPoint(toScreen: event.locationInWindow),
            let owner = activeOwner, StripView.isOverVMWindow(screenPoint, vmOwners: [owner]) {
             BackgroundCursor.transparent.set()
         } else {
