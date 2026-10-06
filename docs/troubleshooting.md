@@ -51,7 +51,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   VM has the keyboard; fn+F1..F12 and fn as a modifier work as before.
   `qemu.log` says "globe key goes to the VM", and for the first presses
   how macOS showed them ("globe key pressed: fn alone" or "key code 0xb3";
-  none at all means the press never reached the VM). To leave it with macOS:
+  none at all means the press never reached the VM; "fn with a key, click
+  or scroll the VM window did not see" means fn was used as a modifier).
+  The globe key reaches the VM but nothing opens: the VM was set up before
+  3.0.1, run `omacvm update`. To leave it with macOS:
   `defaults write org.omacvm.app globeKeyToVM -bool false` and a VM restart.
   If the globe key ever does nothing in macOS after a VM crashed: start and
   quit any OmacVM VM (it gives macOS's shortcut back), or log out and in.

@@ -11,6 +11,10 @@ the moment it has not. A lone globe press then reaches the VM as KEY_PROG3
 macOS may show that press to the app as fn down and up with nothing
 between, as key code 0xb3, or both: either way one KEY_PROG3 goes to the VM
 (omacvm_globe_tap_step), and qemu.log names how the first presses came.
+fn used as a modifier is no tap, also with keys our window never sees
+(media, volume, brightness: the Bridge takes them; shortcuts macOS keeps;
+scrolls): macOS's event counters at fn down and up tell. Nor is fn held
+longer than 0.7 s.
 Only this one shortcut: macOS keeps all its others (the default), fn as a
 modifier (fn+F1..F12, fn+arrows) works as before, and so do the globe
 shortcuts outside the VM.
@@ -37,7 +41,7 @@ Mac (macOS's shortcut 188 and key code 179).
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -675,7 +675,229 @@
+@@ -675,7 +675,263 @@
          pthread_detach(watchdog);
      }
      omacvm_shortcuts_update();
@@ -65,7 +69,8 @@ Mac (macOS's shortcut 188 and key code 179).
 +static int64_t omacvm_globe_heartbeat;  /* ms; qatomic */
 +static bool omacvm_globe_live;          /* qatomic: the VM has the globe key now */
 +static OmacVMGlobeTap omacvm_globe_tap = OMACVM_GLOBE_TAP_INIT;  /* main thread */
-+static int omacvm_globe_seen[2];        /* main thread: log lines (fn tap, 0xb3) */
++static int omacvm_globe_seen[3];        /* main thread: log lines (fn tap, 0xb3, unseen) */
++static uint32_t omacvm_globe_marks[ARRAY_SIZE(omacvm_globe_unseen_types)];  /* main thread */
 +static char omacvm_globe_note[1024];
 +
 +static pid_t omacvm_globe_note_pid(void)
@@ -80,7 +85,7 @@ Mac (macOS's shortcut 188 and key code 179).
 +    }
 +    fclose(f);
 +    return (pid_t)atoi(line);
- }
++}
 +
 +/* Under the lock: switch the shortcut and keep the note in step. */
 +static void omacvm_globe_apply_locked(bool want_vm, const char *why)
@@ -114,7 +119,7 @@ Mac (macOS's shortcut 188 and key code 179).
 +                     : "is macOS's again",
 +                why ? why : "", err != 0 ? ": FAILED" : "");
 +    }
-+}
+ }
 +
 +static void omacvm_globe_apply(bool want_vm, const char *why)
 +{
@@ -157,6 +162,26 @@ Mac (macOS's shortcut 188 and key code 179).
 +}
 +
 +/*
++ * Main thread: macOS's counts of what our window may never see (media keys
++ * the Bridge takes, shortcuts macOS keeps, scrolls). At fn down they are
++ * noted; at fn up, the type that changed, or -1.
++ */
++static int omacvm_globe_unseen(bool mark)
++{
++    int changed = -1;
++    for (size_t i = 0; i < ARRAY_SIZE(omacvm_globe_unseen_types); i++) {
++        uint32_t n = CGEventSourceCounterForEventType(kCGEventSourceStateHIDSystemState,
++                                                      (CGEventType)omacvm_globe_unseen_types[i]);
++        if (mark) {
++            omacvm_globe_marks[i] = n;
++        } else if (n != omacvm_globe_marks[i] && changed < 0) {
++            changed = omacvm_globe_unseen_types[i];
++        }
++    }
++    return changed;
++}
++
++/*
 + * Main thread, every key and click event before QEMU's own handling (the
 + * logic is omacvm_globe_tap_step). True: the event is used up. While the VM
 + * does not have the globe key a 0xb3 goes nowhere, as before.
@@ -194,6 +219,19 @@ Mac (macOS's shortcut 188 and key code 179).
 +        break;
 +    default:
 +        return false;
++    }
++    if (ev == OMACVM_GLOBE_EV_FN_DOWN) {
++        omacvm_globe_unseen(true);
++    } else if (ev == OMACVM_GLOBE_EV_FN_UP && omacvm_globe_tap.fn_down) {
++        int unseen = omacvm_globe_unseen(false);
++        if (unseen >= 0) {
++            omacvm_globe_tap_step(&omacvm_globe_tap, OMACVM_GLOBE_EV_OTHER, 0);
++            if (omacvm_globe_seen[2] < 2) {
++                omacvm_globe_seen[2]++;
++                fprintf(stderr, "omacvm: globe key: fn with a key, click or scroll the VM "
++                        "window did not see (event type %d): no KEY_PROG3\n", unseen);
++            }
++        }
 +    }
 +    int what = omacvm_globe_tap_step(&omacvm_globe_tap, ev, omacvm_now_ms());
 +    if (what == OMACVM_GLOBE_DO_TAP && qemu_console_is_graphic(dcl.con)) {
@@ -267,18 +305,18 @@ Mac (macOS's shortcut 188 and key code 179).
  static VMChangeStateEntry *pinch_vm_change;
  
  /* OmacVM: one window per Mac display (the code is further down). */
-@@ -1726,6 +1948,10 @@
-     }
- 
+@@ -1728,6 +1984,10 @@
      if (qemu_console_is_graphic(dcl.con) && [self handleInjectedText:event]) {
-+        return true;
-+    }
-+    /* OmacVM: a lone globe press (the globe-key patch). */
-+    if (omacvm_globe_event(event)) {
          return true;
      }
++    /* OmacVM: a lone globe press (the globe-key patch). */
++    if (omacvm_globe_event(event)) {
++        return true;
++    }
  
-@@ -7448,6 +7674,7 @@
+     switch ([event type]) {
+         case NSEventTypeFlagsChanged:
+@@ -7448,6 +7708,7 @@
          [controller setFullGrab: nil];
      }
      omacvm_shortcuts_init();

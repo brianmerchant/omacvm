@@ -295,6 +295,13 @@ int main(int argc, char **argv)
             { "fn up without a down (VM got the keyboard mid-press)", 1, { U }, { 0 }, 0 },
             { "VM lost the globe key mid-press", 3, { D, R, U }, { 0, 50, 90 }, 0 },
             { "a key before fn does not spoil the tap", 3, { O, D, U }, { 0, 10, 90 }, 1 },
+            { "fn + a media/volume/brightness key the window never sees", 3, { D, O, U }, { 0, 40, 120 }, 0 },
+            { "fn held, then let go unused", 2, { D, U }, { 0, 900 }, 0 },
+            { "fn tap just under the hold limit", 2, { D, U }, { 0, 650 }, 1 },
+            { "0xb3 just before fn down (same press)", 4, { BD, D, BU, U }, { 0, 5, 30, 90 }, 1 },
+            { "0xb3 down and up, then fn (same press)", 4, { BD, BU, D, U }, { 0, 20, 30, 90 }, 1 },
+            { "0xb3 alone, a fn tap later is a new press", 4, { BD, BU, D, U }, { 0, 20, 600, 690 }, 2 },
+            { "fn, 0xb3 while held, twice fast", 8, { D, BD, BU, U, D, BD, BU, U }, { 0, 2, 30, 90, 180, 182, 210, 270 }, 2 },
         };
         for (size_t c = 0; c < sizeof cases / sizeof cases[0]; c++) {
             OmacVMGlobeTap t = OMACVM_GLOBE_TAP_INIT;
@@ -312,6 +319,16 @@ int main(int argc, char **argv)
             CHECK(keys == cases[c].keys, "%s: %d KEY_PROG3 presses to the VM, want %d", cases[c].what, keys, cases[c].keys);
             CHECK(downs == ups, "%s: every 0xb3 down passed has its up passed (%d downs, %d ups)", cases[c].what, downs, ups);
         }
+    }
+
+    /* What spoils a fn tap from macOS's counters: keys, media keys, clicks, scrolls; never fn itself. */
+    {
+        int have[32] = { 0 };
+        for (size_t i = 0; i < sizeof omacvm_globe_unseen_types / sizeof omacvm_globe_unseen_types[0]; i++)
+            have[omacvm_globe_unseen_types[i] & 31] = 1;
+        CHECK(have[10] && have[14] && have[22] && have[1] && have[3] && have[25],
+              "fn tap: key downs, media keys (NX_SYSDEFINED), scrolls and clicks the window never sees spoil it");
+        CHECK(!have[12] && !have[11], "fn tap: flags changed (fn itself) and key ups never spoil it");
     }
 
     int enabled = 0, live_enabled = 0;

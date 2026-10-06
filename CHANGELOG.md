@@ -9,8 +9,10 @@ in more words.
   longer to macOS's Emoji & Symbols over it, while the VM's window has the
   keyboard. In Omarchy it opens the emoji picker (it is XF86Launch3 there,
   for your own bindings). fn+F1..F12 and the brightness and media keys work
-  as before. `defaults write org.omacvm.app globeKeyToVM -bool false` leaves
-  it with macOS.
+  as before, also with "Use F1, F2, etc. keys as standard function keys" on.
+  VMs set up before 3.0.1 get the emoji picker binding with `omacvm update`
+  (or `omacvm apply`). `defaults write org.omacvm.app globeKeyToVM -bool
+  false` leaves it with macOS.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer

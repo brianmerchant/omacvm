@@ -19,10 +19,10 @@ Test: app/runtime/Tests/keys/test-shortcuts.c.
 
 diff --git a/ui/omacvm-shortcuts.h b/ui/omacvm-shortcuts.h
 new file mode 100644
-index 0000000..c83889e
+index 0000000..57dac82
 --- /dev/null
 +++ b/ui/omacvm-shortcuts.h
-@@ -0,0 +1,206 @@
+@@ -0,0 +1,228 @@
 +/*
 + * OmacVM: macOS's own shortcuts while the VM has the keyboard.
 + *
@@ -99,10 +99,15 @@ index 0000000..c83889e
 + * the press as fn going down and up with nothing between (a flagsChanged
 + * pair), as key code 0xb3, or as both. So a lone fn tap is sent as a
 + * KEY_PROG3 tap, a 0xb3 is passed on as KEY_PROG3, and when both come for
-+ * one press only one goes to the VM: a 0xb3 while fn is held makes the fn
-+ * tap no lone tap; a 0xb3 just after a sent fn tap (and its key-up) is
-+ * dropped. fn with another key, modifier or click (fn+F1, fn+arrow) is no
-+ * tap. Only while the VM has the globe key (macOS's shortcut off).
++ * one press only one goes to the VM: a 0xb3 while fn is held, or just before
++ * it went down, makes the fn tap no lone tap; a 0xb3 just after a sent fn
++ * tap (and its key-up) is dropped. fn with another key, modifier or click
++ * (fn+F1, fn+arrow) is no tap, and neither is fn with something our window
++ * never sees: media, volume and brightness keys (the Bridge takes them),
++ * shortcuts macOS keeps (fn+C), a scroll (ui/cocoa.m sends that as
++ * OMACVM_GLOBE_EV_OTHER, from macOS's event counters). fn held longer than
++ * OMACVM_GLOBE_TAP_MAX_MS is no tap either: held, then not used. Only while
++ * the VM has the globe key (macOS's shortcut off).
 + */
 +typedef struct OmacVMGlobeTap {
 +    bool fn_down;       /* fn is held */
@@ -110,15 +115,19 @@ index 0000000..c83889e
 +    bool got_b3;        /* a 0xb3 came while fn was held */
 +    bool b3_dropped;    /* the last 0xb3 down was dropped: drop its up too */
 +    int64_t tap_ms;     /* when a fn tap was sent; -1: none waiting */
++    int64_t down_ms;    /* when fn went down */
++    int64_t b3_ms;      /* when a 0xb3 was last passed on; -1: none */
 +} OmacVMGlobeTap;
 +
-+#define OMACVM_GLOBE_TAP_INIT { false, false, false, false, -1 }
++#define OMACVM_GLOBE_TAP_INIT { false, false, false, false, -1, 0, -1 }
 +#define OMACVM_GLOBE_SAME_PRESS_MS 500
++#define OMACVM_GLOBE_B3_FIRST_MS 200    /* a 0xb3 this soon before fn down: same press */
++#define OMACVM_GLOBE_TAP_MAX_MS 700
 +
 +enum {
 +    OMACVM_GLOBE_EV_FN_DOWN, OMACVM_GLOBE_EV_FN_UP,
 +    OMACVM_GLOBE_EV_B3_DOWN, OMACVM_GLOBE_EV_B3_UP,
-+    OMACVM_GLOBE_EV_OTHER,  /* another key down, modifier or click */
++    OMACVM_GLOBE_EV_OTHER,  /* another key down, modifier, click, scroll, media key */
 +    OMACVM_GLOBE_EV_RESET,  /* the VM lost the globe key */
 +};
 +enum {
@@ -128,20 +137,32 @@ index 0000000..c83889e
 +    OMACVM_GLOBE_DO_DROP,     /* the 0xb3 is used up: nothing to the VM */
 +};
 +
++/*
++ * What our window never sees but macOS counts (CGEventSourceCounterForEventType,
++ * HID level, also for events a tap took): ui/cocoa.m compares their counts at
++ * fn down and fn up, and a change is OMACVM_GLOBE_EV_OTHER. CGEventType
++ * numbers: key down 10, NX_SYSDEFINED 14 (media, volume, brightness keys),
++ * mouse downs 1, 3, 25, scroll 22. Not flags changed (12, fn itself) nor key
++ * up (11).
++ */
++static const int omacvm_globe_unseen_types[] = { 10, 14, 1, 3, 25, 22 };
++
 +static inline int omacvm_globe_tap_step(OmacVMGlobeTap *t, int ev, int64_t now_ms)
 +{
 +    switch (ev) {
 +    case OMACVM_GLOBE_EV_FN_DOWN:
 +        t->fn_down = true;
 +        t->spoiled = false;
-+        t->got_b3 = false;
++        t->down_ms = now_ms;
++        /* The 0xb3 of this press came first. */
++        t->got_b3 = t->b3_ms >= 0 && now_ms - t->b3_ms < OMACVM_GLOBE_B3_FIRST_MS;
 +        return OMACVM_GLOBE_DO_NOTHING;
 +    case OMACVM_GLOBE_EV_FN_UP:
 +        if (!t->fn_down) {
 +            return OMACVM_GLOBE_DO_NOTHING;
 +        }
 +        t->fn_down = false;
-+        if (t->spoiled || t->got_b3) {
++        if (t->spoiled || t->got_b3 || now_ms - t->down_ms > OMACVM_GLOBE_TAP_MAX_MS) {
 +            return OMACVM_GLOBE_DO_NOTHING;
 +        }
 +        t->tap_ms = now_ms;
@@ -158,6 +179,7 @@ index 0000000..c83889e
 +            return OMACVM_GLOBE_DO_DROP;
 +        }
 +        t->b3_dropped = false;
++        t->b3_ms = now_ms;
 +        return OMACVM_GLOBE_DO_PASS;
 +    case OMACVM_GLOBE_EV_B3_UP:
 +        if (t->b3_dropped) {
