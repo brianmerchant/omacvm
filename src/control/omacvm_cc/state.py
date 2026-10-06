@@ -130,6 +130,27 @@ def desired(features: list[Feature], env: dict[str, str]) -> dict[str, bool]:
     return out
 
 
+def sddm_autologin_user(texts: list[str]) -> str:
+    """Who SDDM logs in, from its config files in the order SDDM reads them
+    (/usr/lib/sddm/sddm.conf.d, /etc/sddm.conf.d, /etc/sddm.conf): the last
+    User= of an [Autologin] section; "" nobody. The same rule as
+    src/guest/autologin.sh, whoever wrote the file."""
+    user, section = "", False
+    for text in texts:
+        for line in text.splitlines():
+            t = line.strip()
+            if t.startswith("["):
+                section = t.startswith("[Autologin]")
+            elif section and t.split("=", 1)[0].strip() == "User" and "=" in t:
+                user = t.split("=", 1)[1].strip()
+    return user
+
+
+def fixed_note(on: bool) -> str:
+    """The table's note for a feature whose record the Mac just fixed."""
+    return f"OmacVM's record said {'off' if on else 'on'}: fixed"
+
+
 def parse_check_tsv(text: str, side: str = "vm") -> list[Check]:
     """guest/check.sh --tsv: status name detail human feature (section lines skipped)."""
     out = []
@@ -232,11 +253,13 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
                avail: dict[str, Avail] | None = None, checks: list[Check] | None = None,
                jobs: list[Job] | None = None, installed: dict | None = None,
                offer: dict | None = None, mac_features: set[str] | None = None,
-               show_updates: bool = True) -> list[Row]:
+               show_updates: bool = True, fixed: dict[str, str] | None = None) -> list[Row]:
     """The features screen. mac_features: what the Mac's OmacVM knows (None:
     not known); a feature it lacks is unavailable until the Mac is updated.
     show_updates False (update checks off): no update marks, but an update
-    that runs still shows on the features it changes."""
+    that runs still shows on the features it changes. fixed: the features
+    whose record the Mac fixed to their real state (omacvm features --json
+    "fixed"); on must already say that state."""
     active = [j for j in (jobs or []) if j.active]
     rows = []
     for f in features:
@@ -248,6 +271,8 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
         job = next((j for j in active if f.name in j.features or (j.action == "update" and update)), None)
         mine = None if checks is None else [c for c in checks if c.feature == f.name]
         st, note = status_of(f, on.get(f.name, False), a, mine, job)
+        if (fixed or {}).get(f.name) and st in (Status.WORKS, Status.OFF, Status.UNKNOWN):
+            note = fixed_note(on.get(f.name, False))
         rows.append(Row(feature=f, on=on.get(f.name, False), status=st, note=note,
                         update=update and show_updates, checks=tuple(mine or ())))
     return rows

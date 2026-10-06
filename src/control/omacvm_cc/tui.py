@@ -311,6 +311,11 @@ class DetailsScreen(Screen):
         else:
             field("Version", version)
         t.append("\n")
+        fixed = app.c.fixed_of(f.name)
+        if fixed:
+            t.append("\n")
+            field("Record", fixed)
+            t.append("\n")
         if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY) or f.name == "gpu-memory") and r.note:
             t.append("\n")
             field("Now", r.note)
