@@ -19,7 +19,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 # Packages only through guest/pkg-add: never an update of one the VM has.
+# When the VM's packages are too old for that, --want updates the whole
+# system first (guest/system-update: omarchy update, then the GBM test).
 PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../../guest/pkg-add}
+SYSTEM_UPDATE=${OMACVM_SYSTEM_UPDATE:-$PWD/../../../guest/system-update}
 FIXED=1:26.2.4                       # the first Venus driver that honours blob alignment
 LOG=/var/log/omacvm-vulkan-virtio.log
 
@@ -76,18 +79,45 @@ while IFS= read -r d; do deps+=("$d"); done < <(bash -c 'source ./PKGBUILD; prin
 missing=$(pacman -T "${deps[@]}" || true)
 B=$(mktemp -d /var/tmp/omacvm-vulkan-virtio.XXXXXX)
 cleanup() {
+  local added
+  # shellcheck disable=SC2086 # one package per word
+  added=$([[ -z $missing ]] || pacman -Qq $missing 2>/dev/null || true)
   rm -rf "$B"
-  if [[ -n $missing ]]; then
+  if [[ -n $added ]]; then
     # shellcheck disable=SC2086 # one package per word
-    pacman -Rns --noconfirm $missing >>"$LOG" 2>&1 || echo "Vulkan (Venus): build tools left installed (pacman -Rns did not take them all)"
+    pacman -Rns --noconfirm $added >>"$LOG" 2>&1 || echo "Vulkan (Venus): build tools left installed (pacman -Rns did not take them all)"
   fi
 }
 trap cleanup EXIT
 fail() { echo "Vulkan (Venus): $1 (OpenGL is unaffected; details in $LOG)" >&2; exit 1; }
-: > "$LOG"
-if [[ -n $missing ]]; then
+add_tools() {   # pkg-add's status; its line in $B/pkg-add.err
+  [[ -n $missing ]] || return 0
   # shellcheck disable=SC2086 # one package per word
-  "$PKG_ADD" --asdeps $missing || fail "the build tools are not installed"
+  "$PKG_ADD" --asdeps $missing 2>"$B/pkg-add.err"
+}
+: > "$LOG"
+rc=0; add_tools || rc=$?
+# The VM's package list is older than the mirrors (they 404), or the tools
+# need newer versions of what the VM has: a prebuilt VM a day or more after
+# its image. Graphics -> Vulkan (--want) updates the whole system first.
+if (( rc == 3 )) && [[ ${1:-} == --want ]]; then
+  echo "Vulkan (Venus): the build tools need a newer system than the VM has (Arch Linux ARM moved on): updating the whole system first"
+  urc=0; "$SYSTEM_UPDATE" || urc=$?
+  # 2: updated, but the desktop's graphics would not start (system-update said so).
+  (( urc != 2 )) || { echo "Vulkan (Venus): stopped before the build: the graphics need fixing first" >&2; exit 1; }
+  (( urc == 0 )) || fail "stopped: the VM's system update did not go through (see above)"
+  # The update can bring the distro's own fixed driver: nothing to build then.
+  if ready; then
+    echo "Vulkan (Venus): the update brought $(pacman -Q vulkan-virtio 2>/dev/null || echo "a Venus driver") for 16 KiB pages, nothing to build"
+    exit 0
+  fi
+  echo "Vulkan (Venus): system updated; building Mesa's vulkan-virtio ${FIXED#*:} now"
+  missing=$(pacman -T "${deps[@]}" || true)
+  rc=0; add_tools || rc=$?
+fi
+if (( rc )); then
+  cat "$B/pkg-add.err" >&2
+  fail "the build tools are not installed"
 fi
 install -m644 PKGBUILD "$B/"
 chown -R nobody: "$B"

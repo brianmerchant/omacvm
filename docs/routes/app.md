@@ -97,7 +97,12 @@ VM runs, and goes back by itself when a new version does not start
   apply builds Mesa 26.2.4's Venus driver as Arch's own `vulkan-virtio`
   package ([`src/app/guest/venus`](../../src/app/guest/venus), a few
   minutes the first time) when the setting gives the VM Vulkan (also
-  `omacvm graphics --vm NAME vulkan` on a running VM). Arch's 26.2.4
+  `omacvm graphics --vm NAME vulkan` on a running VM). When the VM's
+  package list is too old for its build tools (a prebuilt VM a day after
+  its image: the mirrors no longer have those versions), that step first
+  updates the whole system the way `omarchy update` does
+  ([`src/guest/system-update`](../../src/guest/system-update), then the GBM
+  test) and stops with the reason if the update fails. Arch's 26.2.4
   replaces it on an update. Until the driver is there the VM starts with
   OpenGL only, and the app, `omacvm graphics` and the control centre say
   "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the

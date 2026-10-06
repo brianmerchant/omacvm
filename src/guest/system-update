@@ -1,0 +1,98 @@
+#!/bin/bash
+# system-update (root, in the VM): the VM's whole system up to date the way
+# the control centre's "update Omarchy" does it (omarchy update -y, then
+# gbm-guard test), but without a terminal or a password. For an OmacVM job
+# whose packages the VM's old package list can no longer download: Graphics
+# -> Vulkan on a prebuilt VM a day after its image was made
+# (app/guest/venus/vulkan-virtio.sh). Never pacman -Sy alone (guest/pkg-add
+# says why).
+#   system-update      exit 0 updated, graphics open; 1 not updated (one
+#                      line why); 2 updated, but the graphics would not start
+#                      (the line says not to restart)
+# omarchy update runs as the desktop user in its own unit
+# (omacvm-system-update), so a dropped SSH connection does not cut pacman
+# off. Its sudo needs no password while it runs: a sudoers file the unit
+# removes when it ends (and the next boot, if the VM went off meanwhile).
+# Progress lines on stdout; the update's output in
+# /var/log/omacvm-system-update.log. Tests: src/tests/pkg-safe.sh
+# (OMACVM_SYSTEM_UPDATE_RUN stands in for the unit).
+set -uo pipefail
+G=$(cd "$(dirname "$0")" && pwd)/gbm-guard
+LOG=${OMACVM_SYSTEM_UPDATE_LOG:-/var/log/omacvm-system-update.log}
+UNIT=omacvm-system-update
+SUDOERS=/etc/sudoers.d/zz-omacvm-update
+TMPF=/etc/tmpfiles.d/omacvm-update-sudo.conf
+RC=/run/omacvm-system-update.rc
+say() { echo "OmacVM: $*"; }
+
+# What pacman does now: "(12/340) upgrading mesa", from the log.
+progress() {
+  tr '\r' '\n' < "$LOG" 2>/dev/null | grep -aoE '\( *[0-9]+/[0-9]+\) (upgrading|installing|reinstalling|removing|downloading|checking) [^ ]+' |
+    tail -1 | tr -s ' '
+}
+
+run_unit() {   # -> the update's exit status
+  local u h path cmd
+  u=$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+  [[ -n $u ]] || u=$(getent passwd 1000 | cut -d: -f1)
+  h=$(getent passwd "$u" | cut -d: -f6)
+  [[ -n $u && -d $h ]] || { say "no desktop user to run omarchy update as" >&2; return 1; }
+  # OMARCHY_PATH must be the checkout the command comes from (Omarchy checks).
+  if [[ -x $h/.local/share/omarchy/bin/omarchy-update ]]; then
+    path=$(realpath "$h/.local/share/omarchy"); cmd=$path/bin/omarchy-update
+  elif [[ -x /usr/share/omarchy/bin/omarchy-update ]]; then
+    path=/usr/share/omarchy; cmd=/usr/bin/omarchy-update
+  else
+    say "no omarchy update in this VM" >&2; return 1
+  fi
+  if ! { printf 'Defaults:%s verifypw=any\n%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$u" "$u" > "$SUDOERS.new" &&
+         chmod 440 "$SUDOERS.new" && visudo -cqf "$SUDOERS.new" && mv -f "$SUDOERS.new" "$SUDOERS"; }; then
+    rm -f "$SUDOERS.new"; say "could not let omarchy update use sudo" >&2; return 1
+  fi
+  echo "r $SUDOERS" > "$TMPF"
+  rm -f "$RC"; systemctl reset-failed "$UNIT" >/dev/null 2>&1
+  # The user's runtime folder when logged in: Omarchy's update lock is there,
+  # so an update the user starts meanwhile waits for this one.
+  local env=(-E HOME="$h" -E USER="$u" -E LOGNAME="$u" -E LANG=C.UTF-8 -E TERM=xterm-256color
+             -E OMARCHY_PATH="$path" -E PATH="$path/bin:/usr/local/bin:/usr/bin")
+  [[ -d /run/user/$(id -u "$u") ]] && env+=(-E XDG_RUNTIME_DIR="/run/user/$(id -u "$u")")
+  # $$ is systemd's escape for $: sh gets $EXIT_STATUS (the update's status).
+  systemd-run --quiet --unit="$UNIT" --uid="$u" --gid="$(id -g "$u")" -p WorkingDirectory="$h" \
+    -p StandardInput=null -p "StandardOutput=append:$LOG" -p "StandardError=append:$LOG" \
+    -p "ExecStopPost=+/bin/sh -c 'rm -f $SUDOERS $TMPF; echo \$\${EXIT_STATUS:-1} > $RC'" \
+    "${env[@]}" "$cmd" -y || { rm -f "$SUDOERS" "$TMPF"; say "could not start omarchy update" >&2; return 1; }
+  local t=0 p
+  while [[ ! -s $RC ]] && systemctl is-active -q "$UNIT"; do
+    sleep 5; t=$((t + 5))
+    if (( t % 60 == 0 )); then p=$(progress); say "still updating ($((t / 60)) min${p:+: $p})"; fi
+  done
+  for _ in 1 2 3 4 5 6; do [[ -s $RC ]] && break; sleep 0.5; done
+  rm -f "$SUDOERS" "$TMPF"   # the unit did; also when it could not
+  local rc; rc=$(cat "$RC" 2>/dev/null)
+  [[ $rc =~ ^[0-9]+$ ]] || rc=1   # killed: a signal's name
+  return "$rc"
+}
+
+if [[ -z ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then
+  (( EUID == 0 )) || { echo "system-update: run as root" >&2; exit 1; }
+  if systemctl is-active -q "$UNIT" || pgrep -x pacman >/dev/null 2>&1; then
+    say "the VM's system is not updated: an update (or pacman) runs already: try again when it is done" >&2; exit 1
+  fi
+  # A sudoers file left from an update cut off (the unit was not there to remove it).
+  rm -f "$SUDOERS" "$TMPF"
+fi
+say "updating the VM's system with omarchy update (all packages at once; often 5-15 minutes, log $LOG)"
+{ echo "== $(date '+%F %T') omarchy update -y (OmacVM)"; } >>"$LOG" 2>/dev/null
+if [[ -n ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then $OMACVM_SYSTEM_UPDATE_RUN >>"$LOG" 2>&1; rc=$?
+else run_unit; rc=$?; fi
+(( rc == 0 )) || say "omarchy update stopped (exit $rc; see $LOG)" >&2
+# Also after a stop: it may have changed some packages already.
+line=$("$G" test 2>&1); ok=$?
+if (( ok != 0 )); then
+  say "$line: do not restart the VM; see docs/troubleshooting.md, \"Black screen after an update\"" >&2; exit 2
+fi
+(( rc == 0 )) || exit 1
+# An OmacVM install around this (guest/install.sh) puts back only what it
+# changes after the update.
+"$G" rebase
+say "the VM's system is up to date ($line; restart the VM when it suits)"

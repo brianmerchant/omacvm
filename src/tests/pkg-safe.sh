@@ -23,6 +23,10 @@ ver() { awk -v n="$1" '$1 == n { print $2 }' "$2"; }
 loc() { if [[ ${LC_ALL:-${LANG:-C}} == C* ]]; then cat; else sed 's/installed/installiert/; s/^Depends On     /Hängt ab von   /'; fi; }
 case $1 in
   -T) shift; rc=0; for p in "$@"; do [[ -n $(ver "$p" "$db") ]] || { echo "$p"; rc=127; }; done; exit $rc ;;
+  -Qq) shift; rc=0; for p in "$@"; do [[ -n $(ver "$p" "$db") ]] && echo "$p" || rc=1; done; exit $rc ;;
+  -Qi) echo "Install Reason  : Explicitly installed" ;;
+  -Rns) shift; echo "pacman -Rns $*" >> "$T/calls"
+      for p in "$@"; do [[ $p == -* ]] || { grep -v "^$p " "$db" > "$db.n"; mv "$db.n" "$db"; }; done ;;
   -Q) [[ $# == 1 ]] && { cat "$db"; exit 0; }
       v=$(ver "$2" "$db"); [[ -n $v ]] && { echo "$2 $v"; exit 0; }; exit 1 ;;
   -S) shift
@@ -92,13 +96,13 @@ out=$("$P" --asdeps jq 2>&1); rc=$?
 
 vm
 out=$("$P" opencl-mesa 2>&1); rc=$?
-[[ $rc == 1 && ! -s $T/calls && $out == *"mesa 1:26.2.3-1 -> 1:26.2.4-1"* && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* && $out == *"omarchy update"* ]] &&
+[[ $rc == 3 && ! -s $T/calls && $out == *"mesa 1:26.2.3-1 -> 1:26.2.4-1"* && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* && $out == *"omarchy update"* ]] &&
   pass "a missing package that would update Mesa and LLVM alone: refused, says why" ||
   fail "partial update not refused: rc $rc, calls '$(cat "$T/calls")', said '$out'"
 
 vm
 out=$("$P" lldb 2>&1); rc=$?
-[[ $rc == 1 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
+[[ $rc == 3 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
   pass "a missing package built for a newer LLVM (unversioned dependency): refused" ||
   fail "lldb 23 beside LLVM 22: rc $rc, calls '$(cat "$T/calls")', said '$out'"
 
@@ -106,7 +110,7 @@ out=$("$P" lldb 2>&1); rc=$?
 # must not go blind in a German VM (the boot timer gets the VM's locale).
 vm
 out=$(LANG=de_CH.UTF-8 LC_ALL= "$P" lldb 2>&1); rc=$?
-[[ $rc == 1 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
+[[ $rc == 3 && ! -s $T/calls && $out == *"llvm-libs 22.1.8-2 -> 23.1.1-1"* ]] &&
   pass "the same in a German VM: refused" ||
   fail "German locale: rc $rc, calls '$(cat "$T/calls")', said '$out'"
 
@@ -119,7 +123,7 @@ out=$("$P" lldb 2>&1); rc=$?
 # downloads are 404s; it says to update the system, not just "pacman failed".
 vm; : > "$T/mirrors-gone"
 out=$("$P" jq 2>&1); rc=$?; rm -f "$T/mirrors-gone"
-[[ $rc == 1 && $out == *"older than the mirrors"*"omarchy update"* && $(grep -c "error: 404" "$T/pacman.log") -ge 1 ]] &&
+[[ $rc == 3 && $out == *"older than the mirrors"*"omarchy update"* && $(grep -c "error: 404" "$T/pacman.log") -ge 1 ]] &&
   pass "mirrors no longer have the listed versions: says to update the system, log kept" ||
   fail "stale package list: rc $rc, said '$out'"
 
@@ -157,6 +161,116 @@ vm; echo "mesa 1:26.2.4-1" > "$T/db.n"; grep -v '^mesa ' "$T/db" >> "$T/db.n"; m
 # A full update (Mesa and LLVM together) is fine for the test.
 vm; printf '%s\n' "mesa 1:26.2.4-1" "llvm-libs 23.1.1-1" > "$T/db"
 [[ $("$G" test) == "GBM opens" ]] && pass "test: Mesa 26.2.4 with LLVM 23 opens" || fail "test: full update said broken"
+
+# guest/system-update: omarchy update (a stand-in here: the whole system to the
+# mirrors' versions), then the GBM test. Exit 0 / 1 not updated / 2 graphics broken.
+cat > "$T/bin/omarchy-update" <<'EOF'
+#!/bin/bash
+echo "omarchy update $*" >> "$T/calls"
+[[ -e $T/update-fails ]] && { echo "error: failed to synchronize all databases"; exit 1; }
+[[ -e $T/mirror ]] && cp "$T/mirror" "$T/sync"
+rm -f "$T/mirrors-gone"
+awk 'NR == FNR { v[$1] = $2; next } { print $1, ($1 in v) ? v[$1] : $2 }' "$T/sync" "$T/db" > "$T/db.n"; mv "$T/db.n" "$T/db"
+if [[ -e $T/update-mesa-only ]]; then
+  grep -v '^llvm-libs ' "$T/db" > "$T/db.n"; echo "llvm-libs 22.1.8-2" >> "$T/db.n"; mv "$T/db.n" "$T/db"
+fi
+exit 0
+EOF
+chmod +x "$T/bin/omarchy-update"
+S=src/guest/system-update
+export OMACVM_SYSTEM_UPDATE_RUN="omarchy-update -y" OMACVM_SYSTEM_UPDATE_LOG=$T/system-update.log
+
+vm; "$G" begin
+out=$("$S" 2>&1); rc=$?
+[[ $rc == 0 && $(cat "$T/calls") == "omarchy update -y" && $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.4-1" &&
+   $out == *"up to date (GBM opens;"* ]] && pass "system-update: omarchy update -y, then the GBM test" ||
+  fail "system-update: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+out=$("$G" end 2>&1); rc=$?
+[[ $rc == 0 && $(cat "$T/calls") == "omarchy update -y" ]] && pass "system-update inside an install: end keeps the update" ||
+  fail "end after a system update: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+vm; : > "$T/update-fails"
+out=$("$S" 2>&1); rc=$?; rm -f "$T/update-fails"
+[[ $rc == 1 && $out == *"omarchy update stopped (exit 1"* && $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.3-1" ]] &&
+  pass "system-update: the update fails: exit 1, says so" || fail "system-update fails: rc $rc, said '$out'"
+
+vm; : > "$T/update-mesa-only"
+out=$("$S" 2>&1); rc=$?; rm -f "$T/update-mesa-only"
+[[ $rc == 2 && $out == *"libLLVM.so.23.1"*"do not restart"* ]] && pass "system-update: graphics broken after it: exit 2, do not restart" ||
+  fail "system-update, GBM broken: rc $rc, said '$out'"
+
+# Graphics -> Vulkan on a prebuilt VM a day after its image (air-notch F4):
+# its package list names versions the mirrors no longer have, so the Venus
+# driver's build tools 404. --want (omacvm graphics, apply) updates the whole
+# system first, then builds; the boot timer does not update on its own.
+V=$T/vm/app/guest/venus; rm -rf "$T/vm"; mkdir -p "$V"
+cp -R src/app/guest/venus/. "$V/"
+sed -e "s#/var/log/#$T/#" -e '/^(( EUID == 0 )) ||/d' src/app/guest/venus/vulkan-virtio.sh > "$V/vulkan-virtio.sh"
+printf '#!/bin/bash\nexit 0\n' > "$T/bin/chown"
+printf '#!/bin/bash\nwhile [[ $1 != -- ]]; do shift; done; shift; exec "$@"\n' > "$T/bin/runuser"
+printf '#!/bin/bash\n: > "$PKGDEST/vulkan-virtio-1:26.2.4-0.1-aarch64.pkg.tar.zst"\n' > "$T/bin/makepkg"
+cat > "$T/bin/vercmp" <<'EOF'
+#!/usr/bin/env python3
+import re, sys
+def key(v):
+    e, _, v = v.rpartition(":")
+    v, _, r = v.partition("-")
+    num = lambda s: [int(x) for x in re.findall(r"\d+", s)]
+    return (int(e or 0), num(v), num(r))
+a, b = key(sys.argv[1]), key(sys.argv[2])
+print((a > b) - (a < b))
+EOF
+chmod +x "$T/bin/"*
+tools=$(cd "$V" && bash -c 'source ./PKGBUILD; printf "%s\n" base-devel "${depends[@]}" "${makedepends[@]}"' | sort -u)
+prebuilt() {   # VERSION of the distro's vulkan-virtio on the mirrors. Installed = package list = the image's
+  vm; rm -f "$T/mirrors-gone" "$T/mirror"
+  printf '%s\n' "mesa 1:26.2.3-1 llvm-libs" "llvm-libs 22.1.8-2" "vulkan-virtio 1:26.2.3-1" > "$T/sync"
+  for t in $tools; do
+    if [[ $t == vulkan-mesa-implicit-layers ]]; then echo "$t 1:26.2.3-1"; else echo "$t 1.0-1"; fi
+  done >> "$T/sync"
+  grep -vE '^(mesa|llvm-libs|vulkan-virtio|vulkan-mesa-implicit-layers) ' "$T/sync" > "$T/mirror"
+  printf '%s\n' "mesa 1:26.2.4-1 llvm-libs" "llvm-libs 23.1.1-1" "vulkan-virtio 1:${1:-26.2.3}-1" \
+    "vulkan-mesa-implicit-layers 1:26.2.4-1" >> "$T/mirror"
+  [[ -n ${1:-} ]] && echo "vulkan-virtio 1:26.2.3-1" >> "$T/db"
+  : > "$T/mirrors-gone"
+}
+vv() {   # PROBE ARGS...
+  local probe=$1; shift
+  OMACVM_PKG_ADD=$PWD/$P OMACVM_SYSTEM_UPDATE=$PWD/$S OMACVM_VENUS_PROBE=$probe \
+    OMACVM_MESA_ICD=$T/none.json "$V/vulkan-virtio.sh" "$@" 2>&1
+}
+OFF="venus=0 blob_alignment=0"
+
+prebuilt
+out=$(vv "$OFF" --want); rc=$?
+c=$(cut -d' ' -f1-3 "$T/calls" | uniq | tr '\n' ',')
+[[ $rc == 0 && $c == "pacman -S --noconfirm,omarchy update -y,pacman -S --noconfirm,pacman -U --noconfirm,pacman -Rns --noconfirm," &&
+   $(awk '$1 == "vulkan-virtio"' "$T/db") == "vulkan-virtio 1:26.2.4-0.1" && $(awk '$1 == "mesa"' "$T/db") == "mesa 1:26.2.4-1" &&
+   $out == *"updating the whole system first"*"up to date"*"building"*"ready for the VM's next start"* &&
+   $out != *"Update the system with omarchy update"* ]] &&
+  pass "Graphics Vulkan, old package list: system updated, then the driver built" ||
+  fail "Vulkan on a stale prebuilt VM: rc $rc, calls '$c', said '$out'"
+[[ -z $(grep -E 'pacman -Sy|pacman -S .*(mesa|llvm-libs)( |$)' "$T/calls") ]] && pass "... and never pacman -Sy or Mesa alone" ||
+  fail "partial update: $(cat "$T/calls")"
+
+prebuilt 26.2.4
+out=$(vv "$OFF" --want); rc=$?
+[[ $rc == 0 && $(grep -c 'pacman -U' "$T/calls") == 0 && $(awk '$1 == "vulkan-virtio"' "$T/db") == "vulkan-virtio 1:26.2.4-1" &&
+   $out == *"nothing to build"* ]] && pass "the update brings the distro's fixed driver: no build" ||
+  fail "update with the distro's 26.2.4: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+prebuilt; : > "$T/update-fails"
+out=$(vv "$OFF" --want); rc=$?; rm -f "$T/update-fails"
+[[ $rc == 1 && $(grep -c 'pacman -U\|pacman -Rns' "$T/calls") == 0 && $out == *"stopped: the VM's system update did not go through"* ]] &&
+  pass "the update fails: stops with the reason, nothing built or removed" ||
+  fail "update fails: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+
+prebuilt
+out=$(vv "venus=1 blob_alignment=16384"); rc=$?
+[[ $rc == 1 && $(grep -c 'omarchy update' "$T/calls") == 0 && $out == *"older than the mirrors"*"omarchy update"* ]] &&
+  pass "boot timer (no --want): no system update on its own, says what to do" ||
+  fail "boot timer, stale list: rc $rc, calls '$(cat "$T/calls")', said '$out'"
+unset OMACVM_SYSTEM_UPDATE_RUN
 
 # Wired in, and no other way to pacman -S in guest code.
 grep -q '"$R/guest/gbm-guard" begin && GBM_GUARD=1' src/guest/install.sh &&
