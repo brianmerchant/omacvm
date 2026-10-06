@@ -201,9 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.isRestorable = false
             window = w
         }
-        // Each time it comes back (first open, after the VM): centred on the
-        // built-in display. Left where the user put it while it stays open.
-        let placing = window.map { !$0.isVisible } ?? false
+        // Each time it opens (first open, after closing it, after the VM):
+        // centred on the built-in display. Left where the user put it while
+        // it stays open or sits in the Dock.
+        let placing = window.map { !$0.isVisible && !$0.isMiniaturized } ?? false
         if placing { window?.centreOnAppScreen() }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
