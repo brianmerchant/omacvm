@@ -63,6 +63,7 @@ Until then, other ways work for some of these:
 
 ### Safety
 
+- With no device on, QEMU gets no USB controller and never uses USB.
 - The app lists devices by reading macOS's device list only; it opens no
   device.
 - Only a device nothing on the Mac uses can be switched on.
