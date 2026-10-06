@@ -304,6 +304,20 @@ class Clone(unittest.TestCase):
         self.assertEqual(json.loads(shell_json.read_text())["bar"]["layout"]["right"],
                          [{"id": "gilles.monitor"}])
 
+    def test_remove_keeps_users_own_panel(self):
+        # Disabling the clone would put omarchy.monitor next to the user's panel.
+        self.main()
+        own = self.plugins / "gilles.monitor"
+        own.mkdir()
+        (own / "manifest.json").write_text(json.dumps({**MANIFEST, "id": "gilles.monitor",
+                                                       "omarchy": {"clonedFrom": "omarchy.monitor"}}))
+        shell_json = self.write_shell_json([{"id": "gilles.monitor"}, {"id": "omanotch.monitor"}])
+        self.main("--remove")
+        self.assertFalse(self.clone.exists())
+        self.assertEqual(self.disabled, [])
+        self.assertEqual(json.loads(shell_json.read_text())["bar"]["layout"]["right"],
+                         [{"id": "gilles.monitor"}])
+
     def test_patch_file(self):
         f = self.tmp / "Panel.qml"
         f.write_text(PANEL)

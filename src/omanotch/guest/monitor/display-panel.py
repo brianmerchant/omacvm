@@ -219,12 +219,15 @@ def bar_back(shell_json, own=None):
 
 def remove(clone, shell=True):
     """Back to Omarchy's panel. Disabling the clone puts omarchy.monitor in its
-    place only, so a display panel of the user's own stays where it is."""
+    place. With a display panel of the user's own, only the clone goes from
+    shell.json (the shell reloads it): disabling would add omarchy.monitor
+    next to theirs."""
     tidy(clone)
     if not clone.exists():
         return
-    if not (shell and run("omarchy-plugin-disable", CLONE_ID).startswith("Disabled")):
-        bar_back(clone.parent.parent / "shell.json", other_clone(clone.parent))
+    own = other_clone(clone.parent)
+    if own or not (shell and run("omarchy-plugin-disable", CLONE_ID).startswith("Disabled")):
+        bar_back(clone.parent.parent / "shell.json", own)
     shutil.rmtree(clone, ignore_errors=True)
     if shell:
         run("omarchy-shell", "-q", "shell", "rescanPlugins")
