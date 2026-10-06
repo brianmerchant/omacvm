@@ -43,7 +43,8 @@ hook)
     fi
     rm -rf "$T"
   fi
-  systemctl is-active -q omacvm-vdecd || systemctl restart --no-block omacvm-vdecd.service 2>/dev/null
+  # (No systemd to ask in a chroot: nothing to start.)
+  systemctl is-active -q omacvm-vdecd 2>/dev/null || systemctl restart --no-block omacvm-vdecd.service 2>/dev/null
   exit 0 ;;
 why)
   m=$(missing)
