@@ -99,8 +99,10 @@ local function notch_rule()
       }
     end
   end
-  -- Before the built-in display exists (first start): notchcast sizes it later.
-  return { output = NOTCH_OUTPUT, mode = "1024x52@60", position = "0x0", scale = 2 }
+  -- Before the built-in display exists (first start): notchcast sizes and
+  -- places it later. Under OmacVM.app above y = 0, where no display is (they
+  -- all start at 0 or below), so not even this first place overlaps one.
+  return { output = NOTCH_OUTPUT, mode = "1024x52@60", position = omacvm_app() and "0x-26" or "0x0", scale = 2 }
 end
 
 hl.monitor(notch_rule())
