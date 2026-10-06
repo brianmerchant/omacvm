@@ -19,12 +19,13 @@ final class Creator: ObservableObject {
     private var exitStatus: Int32?
     private var logURL: URL?
 
+    /// What runs: a new VM (create-vm.sh, prebuilt-vm.sh) or an existing VM's
+    /// OmacVM brought up to this app's (update-vm.sh).
+    enum Job { case build, update }
+    @Published private(set) var job = Job.build
+
     func start(config: VMConfig, password: String, prebuilt: Bool = false, graphics: GraphicsChoice = .auto) {
-        failed = nil; finished = false; step = 0
-        reader?.readabilityHandler = nil
-        reader = nil; run += 1; buffer = ""; exitStatus = nil
-        let id = run
-        title = "Preparing"
+        reset(.build)
         do {
             try config.write()
             // Read by omacvm apply at the end of the build (the VM's Venus driver).
@@ -33,16 +34,40 @@ final class Creator: ObservableObject {
             failed = "Could not write the VM settings: \(error.localizedDescription)"
             return
         }
+        launch(script: prebuilt ? "prebuilt-vm.sh" : "create-vm.sh", folder: config.folder,
+               log: "create.log", input: password + "\n")
+    }
+
+    /// An existing VM (made by an older app): started without a window,
+    /// OmacVM applied as at the end of a build, shut down. The VM's
+    /// settings stay as they are.
+    func update(config: VMConfig) {
+        reset(.update)
+        launch(script: "update-vm.sh", folder: config.folder, log: "update.log", input: nil)
+    }
+
+    /// The log of the last build or update.
+    var log: URL? { logURL }
+
+    private func reset(_ j: Job) {
+        job = j
+        failed = nil; warning = nil; finished = false; step = 0
+        reader?.readabilityHandler = nil
+        reader = nil; run += 1; buffer = ""; exitStatus = nil
+        title = "Preparing"
+    }
+
+    private func launch(script: String, folder: URL, log logName: String, input text: String?) {
+        let id = run
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [Paths.scripts.appendingPathComponent(prebuilt ? "prebuilt-vm.sh" : "create-vm.sh").path,
-                       config.folder.path]
+        p.arguments = [Paths.scripts.appendingPathComponent(script).path, folder.path]
         p.environment = TestIdentity.environment()
         let input = Pipe(), output = Pipe()
         p.standardInput = input
         p.standardOutput = output
         p.standardError = output
-        let logURL = config.folder.appendingPathComponent("create.log")
+        let logURL = folder.appendingPathComponent(logName)
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         self.logURL = logURL
         let log = try? FileHandle(forWritingTo: logURL)
@@ -69,13 +94,13 @@ final class Creator: ObservableObject {
         }
         do {
             try p.run()
-            input.fileHandleForWriting.write((password + "\n").data(using: .utf8)!)
+            if let text { input.fileHandleForWriting.write(Data(text.utf8)) }
             try? input.fileHandleForWriting.close()
             process = p
         } catch {
             reader?.readabilityHandler = nil
             reader = nil
-            failed = "Could not start the build: \(error.localizedDescription)"
+            failed = "Could not start the \(job == .build ? "build" : "update"): \(error.localizedDescription)"
         }
     }
 
@@ -102,7 +127,7 @@ final class Creator: ObservableObject {
         if status == 0 {
             finished = true
         } else if failed == nil {
-            failed = "The build stopped (exit \(status)). Log: \(logURL?.path ?? "")"
+            failed = "The \(job == .build ? "build" : "update") stopped (exit \(status)). Log: \(logURL?.path ?? "")"
         }
     }
 
