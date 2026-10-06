@@ -1,4 +1,4 @@
-# 0037: The desktop restarts by itself after a lost GPU context
+# 0038: The desktop restarts by itself after a lost GPU context
 
 Status: accepted, built (`gpu-auto-recovery`, 3.0.1). Builds on 0034 (the
 GPU memory budget, which also names every lost context).

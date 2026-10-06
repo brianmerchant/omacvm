@@ -290,6 +290,10 @@ one VM at a time: the build stops at the start while another one runs.
   Mission Control); the pointer goes to Omarchy again once its window shows.
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
   it checks for them before a build and offers to install them.
+- Instant resume (save the VM when you quit, continue where you were at the
+  next start): QEMU cannot save a VM that uses the Mac's GPU, so Quit still
+  shuts Omarchy down and the next start boots it
+  ([why, and what could change it](../adr/0037-no-instant-resume-yet.md)).
 
 ## How it talks to the Mac
 
@@ -760,7 +764,7 @@ desktopAutoRestart -bool false`). When only the shell (Omarchy's bar and
 launcher, Quickshell) is lost, only the shell starts again, and no app
 closes. `logs/qemu.log` says which app lost its context and why, and each
 restart the app made; `journalctl -t omacvm-desktop-recover` in the VM
-says what was closed (ADR 0037).
+says what was closed (ADR 0038).
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses

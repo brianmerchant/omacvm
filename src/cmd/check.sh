@@ -565,6 +565,20 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     else ok "Mac links (app)" "$l"; fi
   fi
 fi
+# OmacVM.app's USB devices (off by default, docs/usb.md): which ones this
+# start passed, and a chosen one macOS kept (QEMU leaves it alone). Per
+# device the last line counts: one QEMU took after a replug is no warning.
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
+  u=$(sed -n 's/^OmacVM: USB devices: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+  busy=$(sed -n -e 's/.*usb-host: \([0-9a-f]\{4\}:[0-9a-f]\{4\}\) .* is in use on the host: not taken.*/\1 busy/p' \
+    -e 's/.*usb-host: \([0-9a-f]\{4\}:[0-9a-f]\{4\}\) (bus [0-9]*, addr [0-9]*) taken$/\1 taken/p' \
+    "$d/logs/qemu.log" 2>/dev/null | awk '{ s[$1] = $2 } END { for (i in s) if (s[i] == "busy") print i }' \
+    | sort | tr '\n' ' ')
+  if [[ -n $u && $u != off ]]; then
+    if [[ -n $busy ]]; then warn "USB devices (app)" "$u; macOS uses ${busy% }: not passed (docs/usb.md)"
+    else ok "USB devices (app)" "$u"; fi
+  fi
+fi
 FEATURE=""
 if [[ $TYPE == app ]]; then
   # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
