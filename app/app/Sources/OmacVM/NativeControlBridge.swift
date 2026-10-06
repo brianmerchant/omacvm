@@ -25,14 +25,28 @@ final class NativeControlBridge: @unchecked Sendable {
 
     private let descriptor: Int32
     private let vmName: String
+    /// The VM's logs/gpu-memory (GPUMemory.swift): sent with its requests.
+    private let gpuMemoryFile: URL?
     private let writeLock = NSLock()
     private let slots = DispatchSemaphore(value: 4)
     private let stopLock = NSLock()
     private var stopped = false
 
-    init(socketPath: String, vmName: String) throws {
+    init(socketPath: String, vmName: String, gpuMemoryFile: URL? = nil) throws {
         descriptor = try NativeBridgeSocket.connectSecure(path: socketPath, label: "control port")
         self.vmName = vmName
+        self.gpuMemoryFile = gpuMemoryFile
+    }
+
+    /// GET /omacvm/gpu-memory: the app reads the VM's graphics memory file and
+    /// sends it along (base64; "-": none), as the Bridge may not read the VM's
+    /// folder itself (an external drive: macOS asks the app, not the Bridge).
+    static func gpuMemoryHeader(path: String, file: URL?) -> String? {
+        guard let file, path.split(separator: "?").first == "/omacvm/gpu-memory" else { return nil }
+        guard let fh = try? FileHandle(forReadingFrom: file) else { return "-" }
+        defer { try? fh.close() }
+        let d = (try? fh.read(upToCount: 4097)) ?? Data()
+        return d.count > 4096 ? "-" : (d.isEmpty ? "-" : d.base64EncodedString())
     }
 
     deinit { stop() }
@@ -138,6 +152,7 @@ final class NativeControlBridge: @unchecked Sendable {
             ("X-OmacVM-Proto", String(r.proto)),
         ]
         if !r.version.isEmpty { headers.append(("X-OmacVM-Version", r.version)) }
+        if let g = Self.gpuMemoryHeader(path: r.path, file: gpuMemoryFile) { headers.append(("X-OmacVM-GPU-Memory", g)) }
         if r.body != nil { headers.append(("Content-Type", "application/json")) }
         // Once connected, the answer comes from there: a request is never sent
         // twice (a job must not start twice).

@@ -204,6 +204,8 @@ while IFS= read -r -d '' f; do
 done < <(find "$C" -type f -perm -u+x -print0)
 
 # The app carries the version of the OmacVM it is part of.
+# OmacVMControlRun: OmacVM Bridge may run the control centre's omacvm through
+# this app (OmacVM --control-run, ControlRun.swift); an older app has no key.
 # Bluetooth: macOS charges Bluetooth, the camera and the microphone of a
 # helper run from inside this bundle (Contents/Helpers) to the app, and kills
 # the helper if the app's Info.plist has no reason for it (OS_REASON_TCC).
@@ -230,6 +232,7 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>OmacVMCommit</key><string>$COMMIT</string>
+  <key>OmacVMControlRun</key><true/>
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
