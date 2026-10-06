@@ -90,6 +90,9 @@ jobs:
           src/gestures/mac/build.sh
           src/bridge/mac/build.sh
 
+      - name: Omanotch wallpaper runs through the notch strip (patch on Omarchy's file, both NOTCH places)
+        run: src/tests/notch-wallpaper.sh
+
       - name: Omanotch offline tests
         run: |
           src/omanotch/mac/test.sh

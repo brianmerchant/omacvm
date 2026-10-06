@@ -29,6 +29,14 @@ in more words.
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
 
+- Omanotch: with the bar hidden (Super+Shift+Space) the notch strip shows
+  the wallpaper's rows right above the VM's picture again, as one picture
+  over the whole MacBook screen. Since 3.0.0 NOTCH sits right above the
+  built-in display in OmacVM.app (#130); the wallpaper patch no longer
+  found its display there, and every output drew its own copy: the strip
+  a zoomed piece of the image's middle. Background patch v6 finds the
+  display in both places.
+
 ## 3.0.0
 
 In short: OmacVM.app updates itself, the control centre in Omarchy (a
