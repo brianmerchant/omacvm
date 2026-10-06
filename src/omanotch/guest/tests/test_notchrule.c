@@ -68,6 +68,10 @@ int main(void) {
     CHECK(!layer_on_output(LAYERS, "NOTCH2", "omarchy-bar"), "other output");
     CHECK(!layer_on_output("{}", "NOTCH", "omarchy-bar"), "no outputs");
     CHECK(!layer_on_output(NULL, "NOTCH", "omarchy-bar"), "no reply");
+    CHECK(layer_height_on_output(LAYERS, "NOTCH", "omarchy-bar") == 33, "bar height on NOTCH");
+    CHECK(layer_height_on_output(LAYERS, "Virtual-1", "omarchy-bar") == 26, "bar height on Virtual-1");
+    CHECK(layer_height_on_output(LAYERS_UNSIZED, "NOTCH", "omarchy-bar") == 0, "no size: 0");
+    CHECK(layer_height_on_output(LAYERS_NO_BAR, "NOTCH", "omarchy-bar") == 0, "no bar: 0");
 
     geom_line(buf, sizeof buf, "646", "825", "33", "0");
     CHECK(!strcmp(buf, "646 825 33 0\n"), "geom line");

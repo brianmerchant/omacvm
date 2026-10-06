@@ -338,9 +338,6 @@ def main():
       }
       return
     }
-    // Parked on the boot hint: any other word from before this shell started
-    // may be the last boot's (a power-off leaves it); wait for a new one.
-    if (notchBootPark && beat < notchStartedAt) return
     if (beat > notchLastBeat) notchLastBeat = beat
     notchBootPark = false
     if (p[0] === "1" && p.length === 2 && /^[A-Za-z0-9_.-]+$/.test(p[1])) {
@@ -414,9 +411,8 @@ def main():
       notchHeight = g[2] > 0 && g[2] < 200 ? g[2] : 0
       notchBarHeight = g[3] > 0 && g[3] < 200 ? g[3] : 0
     }
-    // The hint first: parked on it, the park file is only followed with a
-    // beat from after this shell's start (a power-off leaves the last
-    // boot's beat and park file behind).
+    // The hint first, then notchcast's word if it has one already (a fresh
+    // beat: notchcast removes a beat it did not write itself when it starts).
     var e = String(notchExpectFile.text()).trim().split(/\\s+/)
     if (e[0] === "1" && e.length === 2 && /^[A-Za-z0-9_.-]+$/.test(e[1])) notchBootParkOn(e[1])
     notchFollowParkFile()

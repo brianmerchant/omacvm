@@ -995,6 +995,12 @@ static void handle_command(char *line) {
     if (!strcmp(c, "park") && (argc == 2 || gone)) {
         int on = !strcmp(argv[1], "1");
         double now = now_ms();
+        // The hint first, before any slow IPC call: a shell starting right
+        // now reads it once. Outside the throttle below: a "park 0" right
+        // after the helper went away (bar already back) must still clear it.
+        // The file, not a copy here: the bar writes "0" into it itself when
+        // its guess was not confirmed.
+        if (!gone && on != read_expect()) write_expect(on);
         if (on != bar_parked || park_waiting || now - bar_beat_ms > BEAT_EVERY_MS) {
             int fresh = 0;
             if (on && bar_parked == 1) {
@@ -1031,11 +1037,6 @@ static void handle_command(char *line) {
             atomic_store(&parked_now, on == 1);
             bar_beat_ms = now;
         }
-        // Outside the throttle: a "park 0" right after the helper went away
-        // (bar already back) must still clear the hint. The file, not a copy
-        // here: the bar writes "0" into it itself when its guess was not
-        // confirmed.
-        if (!gone && on != read_expect()) write_expect(on);
     } else if (!strcmp(c, "screen") && argc == 1) {
         // The built-in display is another output now (update_screen).
         char scr[64];
@@ -1979,11 +1980,20 @@ static void fill_cursor(uint8_t *px, double cx, double cy) {
 // or Hyprland's grey, and the strip would flash it on its way to the bar. Not
 // longer than BAR_GATE_MS: a bar that never comes must not keep the strip dark.
 #define BAR_GATE_MS 4000
+// When this notchcast started (CLOCK_REALTIME ms, as the bar's "started").
+static double started_real_ms;
+// Omarchy's shell maps its stock bar first and swaps in the patched clone a
+// moment later: the stock bar's copy on NOTCH is barSize tall and goes away
+// again (a frame of it, then an empty strip). The patched copy fills the
+// output (taller than barSize), or reports a start after this notchcast's.
 static int bar_on_output(void) {
     char *j = hypr_request("j/layers");
-    int on = layer_on_output(j, cfg_output, "omarchy-bar");
+    int h = layer_height_on_output(j, cfg_output, "omarchy-bar");
     free(j);
-    return on;
+    if (h <= 0) return 0;
+    struct bar_state st;
+    if (!read_bar_state(&st)) return 1;  // a bar patched before v9: any copy
+    return h > st.bar_size + 0.5 || st.started >= started_real_ms;
 }
 
 // Runs one capture session until it stops or the output disappears.
@@ -2135,6 +2145,11 @@ static void *signal_thread(void *arg) {
 
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        started_real_ms = ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+    }
     static sigset_t term;
     sigemptyset(&term);
     sigaddset(&term, SIGTERM);

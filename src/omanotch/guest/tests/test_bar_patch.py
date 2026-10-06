@@ -389,14 +389,12 @@ class Behaviour(unittest.TestCase):
         r = self.run_js({"expect": "1 Virtual-1\n", "builtin": "../x\n"}, self.ticks(1))
         self.assertEqual(r["seen"][0], {"parked": True, "screen": "Virtual-1"})
 
-    def test_power_off_beat_of_the_last_boot_is_ignored(self):
-        # Killed notchcast (power-off): its beat stays, and a reboot within
-        # 15 s finds it fresh next to the new notchcast's start-up "0".
-        steps = [{"tick": True, "at": self.START, "files": {"beat": str(self.START - 6000)}},
-                 {"at": self.START + 1000, "files": {"park": "0\n"}},
-                 {"tick": True, "at": self.START + 3000}]
-        r = self.run_js({"expect": "1 Virtual-1\n", "park": "1 Virtual-1\n"}, steps)
-        self.assertEqual([s["parked"] for s in r["seen"]], [True, True, True])
+    def test_hidden_said_before_the_shell_started(self):
+        # Windowed boot with the hint "1": Omanotch's park 0 at connect came
+        # 0.8 s before the shell's bar (expect still "1" when it read it).
+        steps = self.ticks(1) + [{"tick": True, "at": self.START + 3000}]
+        r = self.run_js({"expect": "1 Virtual-1\n", "park": "0\n", "beat": str(self.START - 800)}, steps)
+        self.assertEqual([s["parked"] for s in r["seen"]], [False, False])
 
     def test_shell_restart_with_the_hint_keeps_the_bar_parked(self):
         # Mid-session restart while the strip shows: parked from the hint, the

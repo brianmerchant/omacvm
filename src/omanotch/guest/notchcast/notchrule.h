@@ -28,10 +28,10 @@ static inline void notch_rule_lua(char *out, size_t size, const char *output, in
              output, w, h, sx, sy, ss);
 }
 
-// Whether a `j/layers` reply lists a layer surface of namespace `ns` on the
-// output `output` with a size (the bar copy there exists and is laid out).
+// The tallest layer surface of namespace `ns` on the output `output` in a
+// `j/layers` reply, in logical px; 0: none there, or none with a size yet.
 // The search is limited to that output's own JSON object (brace-matched).
-static inline int layer_on_output(const char *json, const char *output, const char *ns) {
+static inline int layer_height_on_output(const char *json, const char *output, const char *ns) {
     char pat[128];
     snprintf(pat, sizeof pat, "\"%s\":", output);
     const char *p = json ? strstr(json, pat) : NULL;
@@ -46,15 +46,21 @@ static inline int layer_on_output(const char *json, const char *output, const ch
     }
     snprintf(pat, sizeof pat, "\"namespace\": \"%s\"", ns);
     size_t plen = strlen(pat);
+    int best = 0;
     for (const char *q = start; q + plen <= end; q++) {
         if (memcmp(q, pat, plen)) continue;
         // The surface's own object: from its '{' to here, for "w"/"h".
         const char *o = q;
         while (o > start && *o != '{') o--;
         const char *w = strstr(o, "\"w\": "), *h = strstr(o, "\"h\": ");
-        if (w && h && w < q && h < q && atoi(w + 5) > 0 && atoi(h + 5) > 0) return 1;
+        if (w && h && w < q && h < q && atoi(w + 5) > 0 && atoi(h + 5) > best) best = atoi(h + 5);
     }
-    return 0;
+    return best;
+}
+
+// Whether such a surface is there with a size (the bar copy exists and is laid out).
+static inline int layer_on_output(const char *json, const char *output, const char *ns) {
+    return layer_height_on_output(json, output, ns) > 0;
 }
 
 // The geometry file the bar reads when it starts (bar patch v17+):
