@@ -37,6 +37,28 @@ if [[ $(uname) == Linux ]] && pkg-config --exists libva gbm egl glesv2 libavcode
     done
     x=1; [[ -e $T/run/status ]] || x=0; expect "daemon: no status from an earlier run" 0 $x
     has "daemon: says the GPU is not usable" "$T/real.err" "the GPU is not usable (open on /dev/dri/renderD128 failed)"
+    # With the real unit under systemd (CI only: it installs into the system).
+    if [[ ${OMACVM_VDECD_SYSTEMD:-} == 1 ]]; then
+      sudo install -m755 "$T/real" /usr/local/bin/omacvm-vdecd
+      getent group render >/dev/null || sudo groupadd -r render
+      sudo useradd -r -M -s /usr/sbin/nologin omacvm-vdec 2>/dev/null
+      grep -v '^ConditionPathExists=' "$G/omacvm-vdecd.service" | sudo tee /etc/systemd/system/omacvm-vdecd.service >/dev/null
+      sudo systemctl daemon-reload && sudo systemctl start omacvm-vdecd
+      # Starts at 0 s, 2 s (no wait), 6 s (waits 2 s before), then waits 6 s.
+      sleep 8
+      sd() { systemctl show -p "$1" --value omacvm-vdecd; }
+      expect "systemd: restarted twice, the 3rd run waits, count kept" "2 running 3" \
+        "$(sd NRestarts) $(sd SubState) $(sudo cat /run/omacvm-vdec/gpu-tries)"
+      expect "systemd: why = this run's line" \
+        "the GPU is not usable (open on /dev/dri/renderD128 failed): apps decode on the CPU, trying again" \
+        "$(sudo "$G/vdecd.sh" why)"
+      inv=$(sd InvocationID)
+      sudo "$G/vdecd.sh" hook; sleep 1
+      x=1; [[ $(sd InvocationID) != "$inv" ]] && x=0
+      expect "systemd: the hook starts a daemon that waits for the GPU again" 0 $x
+      sudo systemctl stop omacvm-vdecd
+      x=1; [[ -e /run/omacvm-vdec ]] || x=0; expect "systemd: stopped, the count goes" 0 $x
+    fi
   else
     cat "$T/real.log"; echo "FAIL daemon builds"; fail=1
   fi
