@@ -78,6 +78,7 @@ expect "the folder set in the app, without a trailing /" "$T/ext$case_n/OmacVM" 
 expect "folders: set, older ones once each, the old place" "$T/ext$case_n/OmacVM|$H/OmacVM|/Volumes/OmacVM-no-such-drive/VMs|$OLD|" \
   "$(HOME=$H app_vms_roots | tr '\n' '|')"
 expect "VMs of every folder" "Ext|New|Omarchy|" "$(names)"
+expect "a terminal that forces ls colours (CLICOLOR_FORCE): the same VMs" "Ext|New|Omarchy|" "$(TERM=xterm-256color CLICOLOR=1 CLICOLOR_FORCE=1 names)"
 expect "a VM in an older folder by its folder name" "$H/OmacVM/New" "$(HOME=$H app_dir New)"
 for d in Ext New Omarchy; do f=$(HOME=$H app_dir "$d"); echo "SSH_PORT=5222$((${#d} % 7))" >> "$f/vm.env"; done
 p=$(HOME=$H app_free_port)

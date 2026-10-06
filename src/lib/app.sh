@@ -79,9 +79,10 @@ app_vm_dirs() {   # every app VM folder (with vm.env), one per line
     # ls, not a glob: on macOS 26 a glob in a forked bash (this runs in a
     # process substitution) can see a folder on an external drive as empty
     # until a program it starts has read it (the removable-volume check).
+    # macOS's own ls, without the colours a terminal may force (CLICOLOR_FORCE).
     while IFS= read -r d; do
       [[ -f $r/$d/vm.env ]] && echo "$r/$d"
-    done < <(ls -1 "$r" 2>/dev/null)
+    done < <(env -u CLICOLOR -u CLICOLOR_FORCE /bin/ls -1 "$r" 2>/dev/null)
   done < <(app_vms_roots)
 }
 
