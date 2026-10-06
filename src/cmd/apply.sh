@@ -287,12 +287,15 @@ if (( TOKEN && NAMED )) && on control-centre; then
     install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
     install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/vm-key\"" < "$vk"
 fi
-# Touch ID (ADR 0041): its own key and the Bridge token, root's alone in the
-# VM (PAM asks as root); off: the Mac's copy goes (the VM's goes in guest/install.sh).
+# Touch ID (ADR 0041): its own key, root's alone in the VM (PAM asks as
+# root), and for Parallels/UTM/Fusion the Bridge token (they reach the Bridge
+# over the network). OmacVM.app's VMs ask through the app's port: no Bridge
+# token in them. Off: the Mac's copy goes (the VM's goes in guest/install.sh).
 if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
-  gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"
+  if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token"
+  else gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"; fi
 else
   if (( NAMED )); then rm -f "$(vm_key_file "$TYPE" "$VM").touchid"; fi
   # On without a key: the VM's PAM line gets 403 and the password comes.

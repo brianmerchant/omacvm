@@ -159,7 +159,7 @@ if [[ $BRIDGE == on ]]; then
   # Mac's side shows only with a finger, so not asked here.
   FEATURE=touch-id
   if [[ $TOUCH_ID != on ]]; then skip "Touch ID" "off (omacvm enable touch-id)"
-  elif [[ ! -s /etc/omacvm/touchid-key || ! -s /etc/omacvm/touchid-token ]]; then bad "Touch ID" "no key in the VM (omacvm apply on the Mac, with the VM by name and without --no-token)"
+  elif [[ ! -s /etc/omacvm/touchid-key || ( $TYPE != app && ! -s /etc/omacvm/touchid-token ) ]]; then bad "Touch ID" "no key in the VM (omacvm apply on the Mac, with the VM by name and without --no-token)"
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/sudo; then bad "Touch ID" "not in /etc/pam.d/sudo (omacvm apply)"
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/polkit-1; then bad "Touch ID" "not in /etc/pam.d/polkit-1 (omacvm apply)"
   elif [[ ! -f /etc/polkit-1/rules.d/00-omacvm-touchid.rules || ! -x /usr/lib/omacvm/omacvm-touchid-note ]]; then bad "Touch ID" "the polkit rule is missing (omacvm apply)"

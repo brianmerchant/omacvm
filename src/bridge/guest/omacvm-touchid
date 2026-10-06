@@ -296,7 +296,7 @@ def open_port():
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(AUTH_PORT)
         s.setblocking(False)
-        return os.dup(s.detach())
+        return s.detach()
     return os.open(AUTH_PORT, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
 
 

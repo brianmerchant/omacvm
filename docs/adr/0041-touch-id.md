@@ -196,6 +196,14 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   `-`: a VM without the port yet starts the helper anyway (password).
 - A second sudo while one asks: the port is busy (`EBUSY`), "another Touch
   ID prompt is open", the password.
+- The guest is untrusted here too: one request to the Bridge at a time per
+  VM (a new one waits up to 1 s for the dropped one to end, else the
+  password), at most 20 a minute (more: status 0, the password), and an
+  answer the VM does not take within 2 s drops the port's socket (the app
+  connects again). Only the reading thread closes that socket. When the
+  Bridge's relay socket cannot be used, the app goes to 127.0.0.1, as for
+  the control centre. The HTTP lines to the Bridge are one helper
+  (`BridgeHTTP`) for both.
 - Who shows the dialog: the Bridge, as for Parallels, UTM and Fusion (the
   system dialog, no click needed). An Omarchy-style panel shown from the
   process that owns the VM window is the panel's own step.

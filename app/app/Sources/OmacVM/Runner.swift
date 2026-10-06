@@ -596,9 +596,8 @@ final class Runner {
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
                    let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "auth port") {
-                    let relay = AuthRelay(guest: fd, connectBridge: {
-                        try? NativeBridgeSocket.connectSecure(path: NativeControlBridge.relaySocketPath, label: "Bridge relay")
-                    }, headers: { NativeControlBridge.relayHeaders(vmName: name) },
+                    let relay = AuthRelay(guest: fd, connectBridge: { NativeControlBridge.connectForAuth() },
+                                          headers: { NativeControlBridge.relayHeaders(vmName: name) },
                        log: { FileHandle.standardError.write(Data("[auth] \($0)\n".utf8)) })
                     DispatchQueue.main.sync { self?.auth = relay }
                     try? relay.run()

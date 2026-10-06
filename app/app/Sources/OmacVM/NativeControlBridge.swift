@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OmacVMAuth
 
 /// The control centre for this app's VMs (docs/adr/0031): the virtio port
 /// org.omacvm.control carries the VM's requests, one JSON line each
@@ -126,6 +127,36 @@ final class NativeControlBridge: @unchecked Sendable {
     private let fallbackLock = NSLock()
     private var saidFallback = false
 
+    private static let authFallbackLock = NSLock()
+    nonisolated(unsafe) private static var saidAuthFallback = false
+
+    /// A connection to the Bridge for Touch ID (AuthRelay): its relay socket,
+    /// or, as for the control centre, 127.0.0.1 when that cannot be used. Nil:
+    /// the Bridge is not there (the VM's client then asks for the password).
+    static func connectForAuth() -> Int32? {
+        if let fd = try? NativeBridgeSocket.connectSecure(path: relaySocketPath, label: "Bridge relay") { return fd }
+        authFallbackLock.lock()
+        if !saidAuthFallback {
+            saidAuthFallback = true
+            fputs("[auth] OmacVM Bridge's relay socket cannot be used (older Bridge, not running, or folder not 0700): 127.0.0.1\n", stderr)
+        }
+        authFallbackLock.unlock()
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(bridgePort).bigEndian)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard connected == 0 else { Darwin.close(fd); return nil }
+        return fd
+    }
+
     /// The app's own headers for a request it passes on: the Bridge token,
     /// the relay key and the VM's name. Nil: the Bridge is not set up.
     static func relayHeaders(vmName: String) -> [(String, String)]? {
@@ -176,29 +207,13 @@ final class NativeControlBridge: @unchecked Sendable {
 
     /// One HTTP/1.1 request; the Bridge answers with Content-Length and closes.
     static func httpRequest(method: String, path: String, headers: [(String, String)], body: Data?) -> Data {
-        var head = "\(method) \(path) HTTP/1.1\r\nHost: omacvm-bridge\r\n"
-        for (k, v) in headers { head += "\(k): \(v)\r\n" }
-        head += "Content-Length: \(body?.count ?? 0)\r\nConnection: close\r\n\r\n"
-        return Data(head.utf8) + (body ?? Data())
+        BridgeHTTP.request(method: method, path: path, headers: headers, body: body)
     }
 
     /// Status and JSON body of the Bridge's answer, or nil (not one).
     static func parseResponse(_ data: Data) -> (Int, [String: Any])? {
-        guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let lines = String(decoding: data[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
-        let first = lines[0].split(separator: " ")
-        guard first.count >= 2, first[0].hasPrefix("HTTP/1."), let status = Int(first[1]), (100...599).contains(status) else { return nil }
-        var body = data[end.upperBound...]
-        for l in lines.dropFirst() {
-            let kv = l.split(separator: ":", maxSplits: 1)
-            if kv.count == 2, kv[0].lowercased() == "content-length",
-               let n = Int(kv[1].trimmingCharacters(in: .whitespaces)), n >= 0 {
-                guard body.count >= n else { return nil }   // cut short
-                body = body.prefix(n)
-            }
-        }
-        let o = (try? JSONSerialization.jsonObject(with: Data(body))) as? [String: Any] ?? [:]
-        return (status, o)
+        guard let r = BridgeHTTP.parse(data) else { return nil }
+        return (r.status, (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any] ?? [:])
     }
 
     /// Sends the request on the relay socket and reads the answer until the

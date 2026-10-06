@@ -104,9 +104,10 @@ final class FakeBridge: @unchecked Sendable {
     var closedEarly: [Bool] = []
     var answer: Data? = resp   // nil: never answers (a dialog up)
     var connects = 0
+    var open = 0, mostOpen = 0   // Bridge connections open at once
     func connect() -> Int32? {
         let (a, b) = pair()
-        lock.lock(); connects += 1; lock.unlock()
+        lock.lock(); connects += 1; open += 1; mostOpen = max(mostOpen, open); lock.unlock()
         Thread.detachNewThread { [self] in
             let (req, _) = readAll(b, timeout: 5, untilHeaders: true)
             lock.lock(); requests.append(req); let a = answer; lock.unlock()
@@ -117,6 +118,7 @@ final class FakeBridge: @unchecked Sendable {
                 lock.lock(); closedEarly.append(closed); lock.unlock()
             }
             close(b)
+            lock.lock(); open -= 1; lock.unlock()
         }
         return a
     }
@@ -242,6 +244,75 @@ do {
     expect(fb.wait({ fb.closedEarly.count == 1 }, 2), "relay: and the open request is dropped")
     r.stop()
 }
+
+// stop() from another thread while run() reads: run() ends and closes the socket.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread { try? r.run(); done.signal() }
+    usleep(100_000)
+    r.stop()
+    expect(done.wait(timeout: .now() + 2) == .success, "stop: run() returns")
+    expect(fcntl(app, F_GETFD) == -1, "stop: run() closed the port's socket")
+    r.stop()   // again, after the close: no shutdown on a closed (maybe reused) number
+    close(vm)
+}
+
+// A VM that floods requests while the Bridge's dialog is up: one Bridge
+// connection at a time, and at most requestsPerMinute of them.
+do {
+    let fb = FakeBridge(); fb.answer = nil
+    let (vm, r) = relay(fb)
+    r.requestsPerMinute = 5
+    for i in 0..<12 {
+        send(vm, requestLine(id: String(format: "%032x", i + 1)))
+        usleep(30_000)
+    }
+    _ = fb.wait({ fb.closedEarly.count >= 4 }, 3)
+    usleep(300_000)
+    fb.lock.lock(); let most = fb.mostOpen, connects = fb.connects; fb.lock.unlock()
+    expect(most == 1, "flood: one Bridge connection at a time (\(most))")
+    expect(connects == 5, "flood: at most requestsPerMinute connections (\(connects))")
+    var zeros = 0
+    let (got, _) = readAll(vm, timeout: 1)
+    for l in got.split(separator: 0x0A) {
+        if let o = try? JSONSerialization.jsonObject(with: Data(l)) as? [String: Any], o["status"] as? Int == 0 { zeros += 1 }
+    }
+    expect(zeros >= 7, "flood: the others get status 0 at once (\(zeros))")
+    r.stop(); close(vm)
+}
+
+// A VM that never reads its answers: the write gives up, the port is dropped.
+do {
+    let fb = FakeBridge()
+    fb.answer = Data("HTTP/1.1 200 OK\r\nContent-Length: 4000\r\n\r\n".utf8) + Data(repeating: 0x7B, count: 4000)
+    let (vm, app) = pair()
+    var small: Int32 = 2048
+    setsockopt(app, SOL_SOCKET, SO_SNDBUF, &small, socklen_t(MemoryLayout<Int32>.size))
+    setsockopt(vm, SOL_SOCKET, SO_RCVBUF, &small, socklen_t(MemoryLayout<Int32>.size))
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers)
+    r.writeTimeout = 0.3
+    r.requestsPerMinute = 1000
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread { try? r.run(); done.signal() }
+    let t0 = Date()
+    for i in 0..<40 {
+        send(vm, requestLine(id: String(format: "%032x", i + 100)))
+        send(vm, ["op": "ping", "id": String(format: "%032x", i + 100)])
+        usleep(20_000)
+        if done.wait(timeout: .now()) == .success { done.signal(); break }
+    }
+    expect(done.wait(timeout: .now() + 5) == .success, "slow reader: the port is dropped, run() ends (\(String(format: "%.1f", Date().timeIntervalSince(t0))) s)")
+    close(vm)
+}
+
+// Shared HTTP helper: headers in lower case, a bad length is no answer.
+if let h = BridgeHTTP.parse(Data("HTTP/1.1 204 No Content\r\nX-A: b\r\nContent-Length: 0\r\n\r\n".utf8)) {
+    expect(h.status == 204 && h.headers["x-a"] == "b" && h.body.isEmpty, "http helper: status, headers, body")
+} else { expect(false, "http helper: status, headers, body") }
+expect(BridgeHTTP.parse(Data("HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n{}".utf8)) == nil, "http helper: a bad Content-Length is no answer")
 
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

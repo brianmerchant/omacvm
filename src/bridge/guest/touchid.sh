@@ -79,7 +79,7 @@ case ${1:-} in
     [[ -n $ROOT ]] || systemctl daemon-reload 2>/dev/null || true
     mkdir -p "$(dirname "$PORT_RULE")"
     echo 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' > "$PORT_RULE"
-    if [[ -z $ROOT ]]; then udevadm control --reload 2>/dev/null; udevadm trigger --subsystem-match=virtio-ports 2>/dev/null || true; fi
+    if [[ -z $ROOT ]]; then udevadm control --reload 2>/dev/null || true; udevadm trigger --subsystem-match=virtio-ports 2>/dev/null || true; fi
     for s in $SERVICES; do pam_add "$s"; done ;;
   off)
     for s in $SERVICES; do pam_remove "$s"; done

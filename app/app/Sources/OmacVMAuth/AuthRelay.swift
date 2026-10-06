@@ -72,34 +72,17 @@ public final class AuthRelay: @unchecked Sendable {
 
     /// One HTTP/1.1 request on the Bridge's relay socket.
     public static func httpRequest(_ r: Request, headers: [(String, String)]) -> Data {
-        var head = "POST /omacvm/touchid HTTP/1.1\r\nHost: omacvm-bridge\r\n"
-        for (k, v) in headers + [("X-OmacVM-Auth", r.auth), ("X-OmacVM-Proto", String(r.proto)), ("Content-Type", "application/json")] {
-            head += "\(k): \(v)\r\n"
-        }
-        head += "Content-Length: \(r.body.count)\r\nConnection: close\r\n\r\n"
-        return Data(head.utf8) + r.body
+        BridgeHTTP.request(method: "POST", path: "/omacvm/touchid",
+                           headers: headers + [("X-OmacVM-Auth", r.auth), ("X-OmacVM-Proto", String(r.proto)), ("Content-Type", "application/json")],
+                           body: r.body)
     }
 
-    /// The Bridge's answer, or nil (none, cut short, not HTTP).
+    /// The Bridge's answer, or nil (none, cut short, not HTTP, too big).
     public static func parseResponse(_ data: Data) -> Answer? {
-        guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let lines = String(decoding: data[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
-        let first = lines[0].split(separator: " ")
-        guard first.count >= 2, first[0].hasPrefix("HTTP/1."), let status = Int(first[1]), (100...599).contains(status) else { return nil }
-        var body = Data(data[end.upperBound...]), signature = ""
-        for l in lines.dropFirst() {
-            let kv = l.split(separator: ":", maxSplits: 1)
-            guard kv.count == 2 else { continue }
-            let k = kv[0].lowercased(), v = kv[1].trimmingCharacters(in: .whitespaces)
-            if k == "content-length" {
-                guard let n = Int(v), n >= 0, body.count >= n else { return nil }   // cut short
-                body = body.prefix(n)
-            } else if k == "x-omacvm-answer", v.utf8.count <= 128, v.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) {
-                signature = v
-            }
-        }
-        guard body.count <= 4096 else { return nil }
-        return Answer(status: status, signature: signature, body: body)
+        guard let r = BridgeHTTP.parse(data), r.body.count <= 4096 else { return nil }
+        var signature = r.headers["x-omacvm-answer"] ?? ""
+        if signature.utf8.count > 128 || !signature.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) { signature = "" }
+        return Answer(status: r.status, signature: signature, body: r.body)
     }
 
     /// The line to the VM; nil answer: status 0.
@@ -115,6 +98,12 @@ public final class AuthRelay: @unchecked Sendable {
     }
 
     // MARK: The relay
+    //
+    // Threads: run() reads the VM's lines on its own thread and owns the
+    // guest socket (it closes it when it returns). Each request to the Bridge
+    // runs on one exchange thread; `slot` lets only one exist at a time.
+    // Answers to the VM are written under `writeLock`, never longer than
+    // `writeTimeout`.
 
     private let guest: Int32
     private let connectBridge: () -> Int32?
@@ -123,15 +112,28 @@ public final class AuthRelay: @unchecked Sendable {
     public var pingTimeout: TimeInterval = 3
     /// The Bridge's dialog waits 30 s; the client gives up at 40 s.
     public var answerTimeout: TimeInterval = 45
+    /// A VM that does not take its answer within this is dropped: its port's
+    /// socket is shut down, and the app connects to it again.
+    public var writeTimeout: TimeInterval = 2
+    /// Requests to the Bridge per minute; more get status 0 (the password).
+    /// The Bridge has its own growing pauses after misses; this one keeps a
+    /// VM from making threads and connections on the Mac.
+    public var requestsPerMinute = 20
+    /// How long a new request waits for the one before it to end (dropped, it
+    /// ends at once).
+    public var handoverTimeout: TimeInterval = 1
     private let lock = NSLock()
     private var current: (id: String, fd: Int32, lastPing: Date, cancelled: Bool)?
-    private let writeLock = NSLock()
     private var stopped = false
-    private var closed = false   // the guest's socket (under writeLock: no write after the close)
+    private let slot = DispatchSemaphore(value: 1)
+    private var recent: [Date] = []   // run()'s thread only
+    private var saidLimit = false     // run()'s thread only
+    private let writeLock = NSLock()
+    private var closed = false   // the guest's socket (under writeLock: no write or shutdown after the close)
 
-    /// `guest`: the connected chardev socket. `connectBridge`: a connected
-    /// socket to the Bridge, or nil. `headers`: the app's own headers (token,
-    /// relay key, VM name), or nil when the Bridge is not set up.
+    /// `guest`: the connected chardev socket; run() closes it. `connectBridge`:
+    /// a connected socket to the Bridge, or nil. `headers`: the app's own
+    /// headers (token, relay key, VM name), or nil when the Bridge is not set up.
     public init(guest: Int32, connectBridge: @escaping () -> Int32?, headers: @escaping () -> [(String, String)]?,
                 log: @escaping (String) -> Void = { _ in }) {
         self.guest = guest
@@ -140,11 +142,16 @@ public final class AuthRelay: @unchecked Sendable {
         self.log = log
     }
 
-    /// Reads the VM's lines until the port's socket closes.
+    /// Reads the VM's lines until the port's socket closes (or stop()), then
+    /// closes it.
     public func run() throws {
         var line = Data(), skipping = false
         var chunk = [UInt8](repeating: 0, count: 4096)
-        defer { drop(nil) }
+        defer {
+            lock.lock(); stopped = true; lock.unlock()
+            drop(nil)
+            writeLock.lock(); closed = true; Darwin.close(guest); writeLock.unlock()
+        }
         while true {
             let count = chunk.withUnsafeMutableBytes { Darwin.read(guest, $0.baseAddress, $0.count) }
             if count > 0 {
@@ -171,16 +178,13 @@ public final class AuthRelay: @unchecked Sendable {
         }
     }
 
+    /// Ends run() from another thread. Only shuts the socket down: run() may
+    /// be in a read on it, so run() closes it.
     public func stop() {
-        lock.lock()
-        guard !stopped else { lock.unlock(); return }
-        stopped = true
-        lock.unlock()
+        lock.lock(); stopped = true; lock.unlock()
         drop(nil)
         writeLock.lock(); defer { writeLock.unlock() }
-        closed = true
-        Darwin.shutdown(guest, SHUT_RDWR)
-        Darwin.close(guest)
+        if !closed { Darwin.shutdown(guest, SHUT_RDWR) }
     }
 
     /// Drops the request in flight (`id` nil: any), so the Bridge closes its dialog.
@@ -201,6 +205,22 @@ public final class AuthRelay: @unchecked Sendable {
             drop(id)
         case .request(let r):
             drop(nil)   // one opener at a time: the client of the old one is gone
+            // A dropped exchange ends at once; one at a time, so a VM that
+            // floods requests never piles up threads and connections.
+            guard slot.wait(timeout: .now() + handoverTimeout) == .success else {
+                return answer(r.id, nil, note: "Touch ID: the request before is still ending, this one gets the password")
+            }
+            var handed = false
+            defer { if !handed { slot.signal() } }
+            let now = Date()
+            recent.removeAll { now.timeIntervalSince($0) >= 60 }
+            guard recent.count < requestsPerMinute else {
+                let note = saidLimit ? nil : "Touch ID: more than \(requestsPerMinute) requests a minute from this VM, the password for now"
+                saidLimit = true
+                return answer(r.id, nil, note: note)
+            }
+            saidLimit = false
+            recent.append(now)
             guard let h = headers() else {
                 return answer(r.id, nil, note: "OmacVM Bridge is not set up on this Mac (or is older)")
             }
@@ -209,22 +229,42 @@ public final class AuthRelay: @unchecked Sendable {
             if stopped { lock.unlock(); Darwin.close(fd); return }
             current = (r.id, fd, Date(), false)
             lock.unlock()
-            Thread.detachNewThread { [self] in exchange(r, fd: fd, headers: h) }
+            handed = true
+            Thread.detachNewThread { [self] in
+                defer { slot.signal() }
+                exchange(r, fd: fd, headers: h)
+            }
         }
     }
 
+    /// One line to the VM. Never blocks longer than `writeTimeout`: a VM that
+    /// does not read is dropped (its socket shut down, run() ends).
     private func answer(_ id: String, _ a: Answer?, note: String? = nil) {
         if let note { log(note) }
         writeLock.lock(); defer { writeLock.unlock() }
         guard !closed else { return }
         let d = Self.answerLine(id: id, a)
-        _ = d.withUnsafeBytes { b -> Bool in
+        let deadline = Date().addingTimeInterval(writeTimeout)
+        // SO_SNDTIMEO, not MSG_DONTWAIT: macOS blocks a Unix socket's send
+        // larger than the free buffer even with MSG_DONTWAIT. Only answer()
+        // writes this socket, so the option is ours to set.
+        let sent = d.withUnsafeBytes { b -> Bool in
             var off = 0
             while off < b.count {
+                let left = deadline.timeIntervalSinceNow
+                guard left > 0 else { return false }
+                var tv = timeval(tv_sec: Int(left), tv_usec: Int32((left - left.rounded(.down)) * 1_000_000))
+                setsockopt(guest, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
                 let n = Darwin.write(guest, b.baseAddress!.advanced(by: off), b.count - off)
-                if n > 0 { off += n } else if n < 0 && errno == EINTR { continue } else { return false }
+                if n > 0 { off += n; continue }
+                if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue }
+                return false
             }
             return true
+        }
+        if !sent {
+            log("Touch ID: the VM does not take its answers, its port is dropped")
+            Darwin.shutdown(guest, SHUT_RDWR)
         }
     }
 
@@ -241,6 +281,8 @@ public final class AuthRelay: @unchecked Sendable {
             guard let c = current, c.fd == fd else { return true }
             return c.cancelled || Date().timeIntervalSince(c.lastPing) > pingTimeout
         }
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         let request = Self.httpRequest(r, headers: headers)
         let wrote = request.withUnsafeBytes { b -> Bool in
             var off = 0
