@@ -20,6 +20,13 @@ itself. Details below.
   the strip beside the notch (as with Parallels and UTM); the switch "Use
   the notch for the menu bar" is gone. With two displays the escape combo
   no longer jumps back into the VM a moment after leaving it.
+- OmacVM.app no longer quits with "OmacVM quit unexpectedly" when the VM
+  shuts down: a key or mouse event that came in while QEMU was closing
+  read its freed keyboard state. A VM that starts in full screen now shows
+  nothing until it is there (no windowed frame, no macOS menu bar over the
+  splash). Hyprland no longer warns "Monitor Virtual-2 overlaps with other
+  monitor(s)" when an external display comes back into the VM's full
+  screen.
 - The escape combo is now **⌃⌥ Esc** (Control + Option + Escape), easy
   with one hand (brianmerchant, #42). Only exactly these keys count: with
   Shift (or another key) added they go on as ordinary keys. Neither Omarchy
