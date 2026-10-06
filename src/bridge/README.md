@@ -397,7 +397,10 @@ for 60 s, then 5 min, then 30 min, until a yes. The log has the VM, the
 kind and the result, never the command. In the VM the client asks only
 for the person at the VM's screen (logind's display session; sudo from a
 terminal of theirs, not over SSH) and only for a sudo command it can show
-whole.
+whole. OmacVM.app's VMs ask through the virtio port `org.omacvm.auth` (only
+with `touch-id=on` at the VM's start); the app passes the request on to
+the relay socket with the relay key and the VM's name, the guest's
+signature along, and the signed answer back unchanged (`AuthRelay`).
 
 ### Not built: Wi-Fi control
 

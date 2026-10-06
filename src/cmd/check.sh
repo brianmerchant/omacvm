@@ -603,6 +603,7 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
   else
     fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
+    fs+="touch-id=$(feat touch_id off)"   # Touch ID's port (off by default)
     open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
     m=""
     [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"

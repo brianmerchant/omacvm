@@ -163,6 +163,7 @@ if [[ $BRIDGE == on ]]; then
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/sudo; then bad "Touch ID" "not in /etc/pam.d/sudo (omacvm apply)"
   elif ! grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/polkit-1; then bad "Touch ID" "not in /etc/pam.d/polkit-1 (omacvm apply)"
   elif [[ ! -f /etc/polkit-1/rules.d/00-omacvm-touchid.rules || ! -x /usr/lib/omacvm/omacvm-touchid-note ]]; then bad "Touch ID" "the polkit rule is missing (omacvm apply)"
+  elif [[ $TYPE == app && ! -e /dev/virtio-ports/org.omacvm.auth ]]; then bad "Touch ID" "the VM has no Touch ID port yet: shut it down and start it again once (OmacVM.app adds the port at the start)"
   else ok "Touch ID" "sudo and polkit ask the Mac first; the password keeps working"; fi
   FEATURE=bridge
   # Right after the first login omacvm-plugins may still be enabling the widgets.

@@ -126,17 +126,20 @@ final class NativeControlBridge: @unchecked Sendable {
     private let fallbackLock = NSLock()
     private var saidFallback = false
 
+    /// The app's own headers for a request it passes on: the Bridge token,
+    /// the relay key and the VM's name. Nil: the Bridge is not set up.
+    static func relayHeaders(vmName: String) -> [(String, String)]? {
+        guard let token = secret("token"), let relayKey = secret("relay-key") else { return nil }
+        return [("Authorization", "Bearer " + token), ("X-OmacVM-Relay", relayKey),
+                ("X-OmacVM-App-VM", Data(vmName.utf8).base64EncodedString())]
+    }
+
     /// The request to the Bridge, with the app's headers only.
     private func relay(_ r: Request) -> (Int, [String: Any]) {
-        guard let token = Self.secret("token"), let relayKey = Self.secret("relay-key") else {
+        guard var headers = Self.relayHeaders(vmName: vmName) else {
             return (0, ["error": "OmacVM Bridge is not set up on this Mac (or is older): omacvm update on the Mac"])
         }
-        var headers: [(String, String)] = [
-            ("Authorization", "Bearer " + token),
-            ("X-OmacVM-Relay", relayKey),
-            ("X-OmacVM-App-VM", Data(vmName.utf8).base64EncodedString()),
-            ("X-OmacVM-Proto", String(r.proto)),
-        ]
+        headers.append(("X-OmacVM-Proto", String(r.proto)))
         if !r.version.isEmpty { headers.append(("X-OmacVM-Version", r.version)) }
         if r.body != nil { headers.append(("Content-Type", "application/json")) }
         // Once connected, the answer comes from there: a request is never sent

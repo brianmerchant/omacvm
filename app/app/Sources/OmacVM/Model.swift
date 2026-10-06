@@ -184,6 +184,7 @@ struct VMConfig: Equatable {
     var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
     var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
+    var authSocket: URL { Paths.runDir.appendingPathComponent("\(id).auth") }
 
     func write() throws {
         try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)

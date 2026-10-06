@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import OmacVMAuth
 import OmacVMNet
 import OmacVMUpdate
 import OmacVMUSB
@@ -111,6 +112,14 @@ final class Runner {
               // The control centre's requests (omacvm in the VM), passed on to OmacVM Bridge.
               "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=6,chardev=ctl0,name=org.omacvm.control"]
+        // Touch ID (docs/adr/0041): the VM's PAM client asks through it, the
+        // app passes it on to OmacVM Bridge (AuthRelay). Only for a VM with
+        // touch-id on at this start: other VMs keep their device list. A
+        // port on vser0 moves no PCI device; the VM finds it by its name.
+        if MacLinks.load(folder: c.folder).touchID {
+            a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
+                  "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
+        }
         // The fast network: an empty PCIe slot for the user network's NIC
         // should vmnet fail while the VM runs (useUserNetwork). Last,
         // so no other device moves.
@@ -289,6 +298,7 @@ final class Runner {
                 self?.clipboard?.stop()
                 self?.battery?.stop()
                 self?.control?.stop()
+                self?.auth?.stop()
                 self?.onExit?(status)
             }
         }
@@ -315,6 +325,7 @@ final class Runner {
         if links.battery { startBattery() }
         if links.camera { startCamera() }
         startControl()
+        if links.touchID { startAuth() }
         // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
         Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
     }
@@ -565,6 +576,31 @@ final class Runner {
                     DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
+    // MARK: Touch ID's port (OmacVMAuth), reconnected while QEMU runs.
+
+    private var auth: AuthRelay?
+
+    private func startAuth() {
+        let path = config.authSocket.path, name = config.name
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "auth port") {
+                    let relay = AuthRelay(guest: fd, connectBridge: {
+                        try? NativeBridgeSocket.connectSecure(path: NativeControlBridge.relaySocketPath, label: "Bridge relay")
+                    }, headers: { NativeControlBridge.relayHeaders(vmName: name) },
+                       log: { FileHandle.standardError.write(Data("[auth] \($0)\n".utf8)) })
+                    DispatchQueue.main.sync { self?.auth = relay }
+                    try? relay.run()
+                    relay.stop()
                 }
                 Thread.sleep(forTimeInterval: 1)
             }

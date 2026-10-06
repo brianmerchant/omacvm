@@ -85,6 +85,10 @@ jobs:
         working-directory: app/app
         run: swift run features-tests
 
+      - name: OmacVM.app Touch ID port relay (org.omacvm.auth, no Bridge, no dialog)
+        working-directory: app/app
+        run: swift run auth-tests
+
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 

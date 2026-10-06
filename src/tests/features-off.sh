@@ -256,7 +256,7 @@ if command -v swiftc >/dev/null; then
 import Foundation
 let a = CommandLine.arguments
 let l = a.count > 1 ? MacLinks.load(folder: URL(fileURLWithPath: a[1])) : MacLinks()
-print("ports=\(l.hostPorts) battery=\(l.battery) camera=\(l.camera) test=\(l.hostPorts(test: true))")
+print("ports=\(l.hostPorts) battery=\(l.battery) camera=\(l.camera) test=\(l.hostPorts(test: true))" + (a.count > 2 ? " touchid=\(l.touchID) record=\(l.record)" : ""))
 EOF
   if swiftc -O -o "$T/links" "$R/app/app/Sources/OmacVM/MacLinks.swift" "$T/main.swift" 2>"$T/swiftc.log"; then
     expect "app: only gestures' port, camera served, battery not" "ports=47830 battery=false camera=true test=47830>47930" "$("$T/links" "$T/vm")"
@@ -265,7 +265,12 @@ EOF
     app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on"
     # The test identity: its own helpers' ports, never Omanotch (it has none).
     expect "app: all on" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/vm")"
+    expect "app: Touch ID's port off unless named on" "touchid=false" "$("$T/links" "$T/vm" x | grep -o 'touchid=[a-z]*')"
+    app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on touch-id=on"
+    expect "app: touch-id=on: its port, and named in the record" "touchid=true record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID on" \
+      "$("$T/links" "$T/vm" x | sed 's/.* touchid=/touchid=/')"
     mkdir -p "$T/old"
+    expect "app: a VM from before: no Touch ID port" "touchid=false" "$("$T/links" "$T/old" x | grep -o 'touchid=[a-z]*')"
     expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47830>47930,47831>47931" "$("$T/links" "$T/old")"
   else
     echo "FAIL MacLinks.swift does not compile:"; cat "$T/swiftc.log"; fail=1
@@ -314,7 +319,7 @@ ck=$(awk '/^# OmacVM.app: what of the Mac this start of the VM may use/ {on = 1}
 check_app() {   # FEATURES -> the row
   ( TYPE=app VM=x F=" $1 "
     app_dir() { echo "$V"; }
-    feat() { [[ $F == *" $1=off "* ]] && echo off || echo on; }
+    feat() { if [[ $F == *" $1=off "* ]]; then echo off; elif [[ $F == *" $1=on "* ]]; then echo on; else echo "${2:-on}"; fi; }
     ok() { echo "ok: $2"; }
     bad() { echo "fail: $2"; }
     skip() { echo "skip: $2"; }
@@ -331,6 +336,20 @@ expect "check, app: camera turned off while it runs: fails, says restart" \
 expect "check, app: both: one row with both" \
   "fail: off for this VM, but the app still serves it: camera; on, but closed to the VM since its start: Omanotch (shut the VM down and start it again)" \
   "$(check_app "bridge=off battery=off camera=off")"
+# Touch ID (off by default): its port only when touch-id=on at the start.
+printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID off" > "$V/logs/qemu.log"
+expect "app: Touch ID turned on while it runs: restart" "Touch ID" "$(app_links_stale "$V" "omanotch=off battery=off touch-id=on" on)"
+expect "app: Touch ID not named: off, nothing to say" "" "$(app_links_stale "$V" "omanotch=off battery=off" on)$(app_links_stale "$V" "omanotch=off battery=off" off)"
+expect "check, app: Touch ID turned on while it runs: fails, says restart" \
+  "fail: on, but closed to the VM since its start: Touch ID (shut the VM down and start it again)" \
+  "$(check_app "omanotch=off battery=off touch_id=on")"
+printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID on" > "$V/logs/qemu.log"
+expect "app: Touch ID turned off while it runs: still served" "Touch ID" "$(app_links_stale "$V" "omanotch=off battery=off touch-id=off" off)"
+expect "check, app: Touch ID on as at the start: ok" "ok: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID on" \
+  "$(check_app "omanotch=off battery=off touch_id=on")"
+printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery off, camera on" > "$V/logs/qemu.log"
+expect "app from before Touch ID: Touch ID on means a restart (with the new app)" "Touch ID" "$(app_links_stale "$V" "omanotch=off battery=off touch-id=on" on)"
+expect "app from before Touch ID: off, nothing to say" "" "$(app_links_stale "$V" "omanotch=off battery=off touch-id=off" off)"
 expect "check, app from before the line: skip" "skip: this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)" "$(V=$T/older check_app "")"
 
 # In the VM: the rows that find no link to the Mac hint at the restart on

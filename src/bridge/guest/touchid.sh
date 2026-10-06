@@ -9,6 +9,8 @@
 # polkit 127) gets a copy in /etc/pam.d with our line; off removes the copy.
 # polkit 127 starts its helper in a sandbox without network: a drop-in lets
 # it (and so the PAM client) reach the Mac's Bridge address, nothing else.
+# OmacVM.app's VMs ask through the virtio port org.omacvm.auth: a udev rule
+# keeps it root's alone (0600), so no user program can hold it open.
 # OMACVM_TOUCHID_ROOT: another root folder (tests).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -20,6 +22,7 @@ OLDRULE=$ROOT/etc/polkit-1/rules.d/49-omacvm-touchid.rules
 TMPF=$ROOT/etc/tmpfiles.d/omacvm-touchid.conf
 DROPIN=$ROOT/etc/systemd/system/polkit-agent-helper@.service.d/omacvm-touchid.conf
 PAMD=$ROOT/etc/pam.d
+PORT_RULE=$ROOT/etc/udev/rules.d/70-omacvm-auth.rules
 VENDOR=$ROOT/usr/lib/pam.d
 SERVICES="sudo sudo-i polkit-1"
 MARK='# omacvm touch-id (ADR 0041): the Mac'"'"'s Touch ID first, the password after'
@@ -62,11 +65,15 @@ case ${1:-} in
     printf '%s\n' "# omacvm touch-id (ADR 0041): polkit's helper may reach the Mac's Bridge ($host), nothing else" \
       '[Service]' 'PrivateNetwork=no' 'RestrictAddressFamilies=AF_UNIX AF_INET' 'IPAddressDeny=any' "IPAddressAllow=$host" > "$DROPIN"
     [[ -n $ROOT ]] || systemctl daemon-reload 2>/dev/null || true
+    mkdir -p "$(dirname "$PORT_RULE")"
+    echo 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' > "$PORT_RULE"
+    if [[ -z $ROOT ]]; then udevadm control --reload 2>/dev/null; udevadm trigger --subsystem-match=virtio-ports 2>/dev/null || true; fi
     for s in $SERVICES; do pam_add "$s"; done ;;
   off)
     for s in $SERVICES; do pam_remove "$s"; done
     rm -f "$RULE" "$OLDRULE" "$TMPF" "$BIN" "$NOTE" "$ROOT/etc/omacvm/touchid-key" "$ROOT/etc/omacvm/touchid-token"
     rm -rf "$ROOT/run/omacvm-touchid"
+    if [[ -e $PORT_RULE ]]; then rm -f "$PORT_RULE"; [[ -n $ROOT ]] || udevadm control --reload 2>/dev/null || true; fi
     if [[ -e $DROPIN ]]; then
       rm -f "$DROPIN"; rmdir "$(dirname "$DROPIN")" 2>/dev/null || true
       [[ -n $ROOT ]] || systemctl daemon-reload 2>/dev/null || true
