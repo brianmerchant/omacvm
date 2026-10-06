@@ -54,7 +54,15 @@ final class CentredWindow {
         guard let w = window, let p = placed else { return }
         // Moved by the user (or grown from another corner): leave it there.
         if Self.topLeft(w) != p { placed = nil; return }
-        if w.isVisible { place() }
+        guard w.isVisible else { return }
+        // On the display it is on: a display added since (lid opened, a
+        // monitor plugged in) does not pull an open window across.
+        if let s = w.screen {
+            w.setFrameOrigin(WindowPlacement.centred(w.frame.size, in: s.visibleFrame))
+            placed = Self.topLeft(w)
+        } else {
+            place()
+        }
     }
 
     private static func topLeft(_ w: NSWindow) -> CGPoint { CGPoint(x: w.frame.minX, y: w.frame.maxY) }
