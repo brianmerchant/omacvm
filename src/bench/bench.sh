@@ -36,8 +36,10 @@ else
 fi
 # The free version prints only a link to the result; report.py reads the
 # scores from there later, on the Mac.
-gb_run() {   # args... -> url
-  "$GB" "$@" 2>&1 | grep -o 'https://browser.geekbench.com/v7/[a-z]*/[0-9]*' | tail -1
+GB_LOG=$(mktemp); trap 'rm -f "$GB_LOG"' EXIT
+gb_run() {   # args... -> url; Geekbench's own output stays in $GB_LOG
+  "$GB" "$@" >"$GB_LOG" 2>&1
+  grep -o 'https://browser.geekbench.com/v7/[a-z]*/[0-9]*' "$GB_LOG" | tail -1
 }
 if want geekbench; then
   for ((i = 1; i <= RUNS; i++)); do
@@ -67,19 +69,25 @@ gpu_device() {   # OpenCL|Vulkan -> prints the device; exit 1 with the reason on
   head -1 <<<"$devs"
 }
 if want gpu; then
-  # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where Geekbench lists
-  # them and the VM has a GPU device for them (OmacVM.app with Venus and
-  # rusticl); the other VMs have none.
+  # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where the VM has a GPU
+  # device for them (OmacVM.app with Venus and rusticl); the other VMs have none.
   apis=$([[ $OS == Darwin ]] && echo "Metal OpenCL" || echo "Vulkan OpenCL")
   for api in $apis; do
     dev=
     if [[ $OS != Darwin ]]; then
       dev=$(gpu_device "$api") || { rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: $dev\""; continue; }
-      "$GB" --gpu-list 2>&1 | grep -qi "$api" || { rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: Geekbench lists no $api device\""; continue; }
     fi
+    # No check with --gpu-list: in the VMs it listed no OpenCL device although
+    # clinfo had the rusticl GPU and --gpu OpenCL ran fine. Run it; when the
+    # first run gives no result, Geekbench has no such device: say why.
     for ((i = 1; i <= RUNS; i++)); do
       say "Geekbench 7 GPU ($api), run $i/$RUNS"
       url=$(gb_run --gpu "$api")
+      if [[ -z $url && $i == 1 && $OS != Darwin ]]; then
+        why=$(grep -v '^ *$' "$GB_LOG" | tail -1 | tr -d '"\\' | cut -c1-200)
+        rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: Geekbench ran no $api workload (${why:-no output})\""
+        break
+      fi
       rec "geekbench-gpu-$api" "$i" null "\"url\":\"${url:-}\",\"device\":\"${dev//\"/}\""
     done
   done

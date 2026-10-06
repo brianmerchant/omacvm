@@ -42,7 +42,10 @@ low_power() { [ "$(pm_value powermode)" = 1 ] || [ "$(pm_value lowpowermode)" = 
 
 # Everything that belongs to a hypervisor, by executable path: the apps,
 # their VM processes and their background services (Parallels' prl_disp_service
-# and prl_naptd, Fusion's vmnet daemons). Only the target's own may run.
+# and prl_naptd, Fusion's vmnet daemons). Listed for the record only: an idle
+# service runs no guest (Parallels' stays up after any prlctl call, and it
+# refused the Mac mini's Fusion run). Only a running VM of another kind (or a
+# second one of the target) makes the Mac busy.
 HV_PROCS='Parallels Desktop\.app/|VMware Fusion\.app/|UTM\.app/|OmacVM[^/]*\.app/|/prl_|/vmware-|/vmnet-|qemu-system-aarch64|com\.apple\.Virtualization\.VirtualMachine'
 VM_PROCS='qemu-system-aarch64|/runtime/bin/OmacVM$|/prl_vm_app$|/vmware-vmx$|/QEMULauncher$|com\.apple\.Virtualization\.VirtualMachine$'
 
@@ -50,11 +53,12 @@ VM_PROCS='qemu-system-aarch64|/runtime/bin/OmacVM$|/prl_vm_app$|/vmware-vmx$|/QE
 # second VM of the target, Claude agents, the bench lock. Prints a JSON
 # object; busy=true if anything of it runs.
 busy_check() {   # [pattern of the target's processes, kept out of "other"]
-  local keep=${1:-NONE} procs other same agents lock load busy=false
+  local keep=${1:-NONE} procs hv other same agents lock load busy=false
   procs=$(ps -axo comm=)
   # FINAL_ROUND_NOT_VM: processes under a VM app's name that are no VM (e.g. the user's installed
   # OmacVM Bridge and Gestures helpers on the Mac mini): not counted.
-  other=$(echo "$procs" | grep -E "$HV_PROCS" | grep -Ev -- "$keep" | grep -Ev -- "${FINAL_ROUND_NOT_VM:-^$}" | grep -c .)
+  hv=$(echo "$procs" | grep -E "$HV_PROCS" | grep -Ev -- "$keep" | grep -Ev -- "${FINAL_ROUND_NOT_VM:-^$}" | grep -c .)
+  other=$(echo "$procs" | grep -E "$VM_PROCS" | grep -Ev -- "$keep" | grep -c .)
   same=$(echo "$procs" | grep -E "$VM_PROCS" | grep -E -- "$keep" | grep -c .)
   agents=$(echo "$procs" | grep -Ec '(^|/)claude$')
   # FINAL_ROUND_IDLE_AGENTS_OK=1: Claude sessions that sit idle (under 10 % CPU, e.g. the user's open
@@ -67,8 +71,8 @@ busy_check() {   # [pattern of the target's processes, kept out of "other"]
   # round.sh holds the lock for the whole round ("final-round ..."): that one is ours.
   if [ "$other" -gt 0 ] || [ "$same" -gt 1 ] || [ "$agents" -gt 1 ]; then busy=true; fi
   case $lock in ''|final-round*) ;; *) busy=true ;; esac
-  printf '{"other_vm_processes":%s,"target_vms":%s,"claude_processes":%s,"bench_lock":%s,"load1":%s,"busy":%s}' \
-    "$other" "$same" "$agents" "$(jstr "$lock")" "$load" "$busy"
+  printf '{"other_vm_processes":%s,"other_hypervisor_processes":%s,"target_vms":%s,"claude_processes":%s,"bench_lock":%s,"load1":%s,"busy":%s}' \
+    "$other" "$hv" "$same" "$agents" "$(jstr "$lock")" "$load" "$busy"
 }
 
 # Facts about the Mac for each line.
@@ -102,7 +106,7 @@ preflight_why() {
     why="$why; the energy mode changed in the round ($(cat "$state") at the start, $pm now): set it back"
   fi
   b=$(busy_check "${1:-}")
-  case $b in *'"busy":true'*) why="$why; the Mac is not quiet: $b (quit the other VM apps, Parallels' service, agents, test VMs)" ;; esac
+  case $b in *'"busy":true'*) why="$why; the Mac is not quiet: $b (stop the other VMs and test VMs, quit working agents)" ;; esac
   echo "${why#; }"
 }
 preflight() {   # [target pattern]

@@ -107,10 +107,12 @@ scripts check what they can and refuse otherwise:
   `round-state` next to the results and refuses later if it changed.
 - Thermal state nominal. Checked (macOS's own state, and `pmset -g therm` is
   recorded).
-- Nothing else running: no other VM app, **Parallels' service included**
-  (`prl_disp_service`, `prl_naptd`; `omacvm apply` restarts it, so quit it
-  again), Fusion's vmnet daemons, UTM, no second VM of the app under test,
-  no agents, no test VMs, no bench lock held. Checked.
+- Nothing else running: no VM of another hypervisor, no second VM of the
+  app under test, no agents, no test VMs, no bench lock held. Checked. Idle
+  services of the other hypervisors (Parallels' `prl_disp_service` and
+  `prl_naptd`, which stay up after any `prlctl` call; Fusion's vmnet daemons)
+  run no guest: they are recorded in each line, not refused. Quit the other
+  VM apps anyway.
 - External monitor unplugged, built-in display only, brightness 50 % (set by
   you; the scripts only read and record it). Automatic brightness off.
 - Each VM in full screen on the built-in display. Checked: the guest at least
@@ -251,7 +253,7 @@ also removes them (`pacman -Rns`).
   `vm_name`.
 - `mac_state`: Mac model, macOS version, display mode, brightness (read only),
   charging, charger, battery %, energy mode, thermal state.
-- `quiet`: other hypervisor processes, VMs of the target, Claude processes,
+- `quiet`: VMs of other hypervisors, their idle processes, VMs of the target, Claude processes,
   the bench lock, load.
 
 `summarize.py` leaves out of the medians, and lists apart with the reason:
