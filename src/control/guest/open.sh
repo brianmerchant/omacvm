@@ -16,7 +16,7 @@ APP_ID=org.omarchy.omacvm
 CMD="omarchy-launch-or-focus-tui omacvm --window"
 
 U=$(sed -n 's/^OMACVM_USER=//p' "$ENV" 2>/dev/null | tail -1)
-if [[ -z $U ]] || ! uid=$(id -u "$U" 2>/dev/null); then
+if [[ -z $U ]] || ! uid=$(id -u "$U" 2>/dev/null) || ! gid=$(id -g "$U" 2>/dev/null); then
   echo "OmacVM is not set up in this VM (on the Mac: omacvm apply)"
   exit 1
 fi
@@ -27,9 +27,11 @@ fi
 H=$(getent passwd "$U" | cut -d: -f6)
 RUN=$RUNS/$uid
 sig=""
-hypr() {   # hyprctl ARGS... as the desktop user, in the session $sig
-  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$RUN" HYPRLAND_INSTANCE_SIGNATURE="$sig" \
-    timeout 3 hyprctl "$@" 2>/dev/null
+# hyprctl ARGS... as the desktop user, in the session $sig. setpriv, not
+# sudo: no PAM session and no journal lines for each of these calls.
+hypr() {
+  setpriv --reuid="$uid" --regid="$gid" --init-groups \
+    env HOME="$H" XDG_RUNTIME_DIR="$RUN" HYPRLAND_INSTANCE_SIGNATURE="$sig" timeout 3 hyprctl "$@" 2>/dev/null
 }
 
 # The desktop session: the newest Hyprland of this user that answers (a

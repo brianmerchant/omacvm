@@ -1,6 +1,6 @@
 #!/bin/bash
 # The control centre opened from the Mac (src/control/guest/open.sh), offline:
-# a made-up Hyprland (hyprctl, sudo, id ... as stand-ins on the PATH) for the
+# a made-up Hyprland (hyprctl, setpriv, id ... as stand-ins on the PATH) for the
 # cases the Mac's two routes report: not set up, the control centre off,
 # nobody logged in (also with a folder an earlier login left), opened with
 # Omarchy 4's Lua dispatcher or the classic exec, behind the lock screen, and
@@ -18,10 +18,10 @@ ok()  { printf 'ok   %s\n' "$*"; }
 bad() { printf 'FAIL %s\n' "$*"; fail=1; }
 
 stub() { printf '#!/bin/bash\n%s\n' "$2" > "$B/$1"; chmod +x "$B/$1"; }
-stub sudo 'shift 2; exec "$@"'          # sudo -u USER CMD...
+stub setpriv 'while [[ $1 == --* ]]; do shift; done; exec "$@"'   # setpriv --reuid=.. CMD...
 stub timeout 'shift; exec "$@"'
 stub sleep ':'
-stub id '[[ $1 == -u && $2 == zorro ]] && echo 1000'
+stub id '[[ $1 == -[ug] && $2 == zorro ]] && echo 1000'
 stub getent 'echo "zorro:x:1000:1000:Zorro:/home/zorro:/bin/bash"'
 stub pgrep "[[ -e $S/locked ]]"
 # hyprctl: alive only for the session named in $S/live; a window comes when
