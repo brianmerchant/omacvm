@@ -97,7 +97,14 @@ rm -f /etc/systemd/system/multi-user.target.wants/omacvm-venus-driver.service
 install -Dm644 venus/omacvm-venus-driver.service /etc/systemd/system/omacvm-venus-driver.service
 install -Dm644 venus/omacvm-venus-driver.timer /etc/systemd/system/omacvm-venus-driver.timer
 systemctl daemon-reload
-systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
+# Only for a VM whose Graphics gives it Vulkan (or with the vulkan feature):
+# with OpenGL nothing of it runs (2026-10-06: it ran at every boot).
+vfeat=$(sed -n 's/^OMACVM_FEATURE_vulkan=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+if [[ $graphics == vulkan || $vfeat == on ]]; then
+  systemctl enable omacvm-venus-driver.timer >/dev/null 2>&1 || true
+else
+  systemctl disable --now omacvm-venus-driver.timer >/dev/null 2>&1 || true
+fi
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then
