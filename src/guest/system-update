@@ -75,8 +75,20 @@ run_unit() {   # -> the update's exit status
 
 if [[ -z ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then
   (( EUID == 0 )) || { echo "system-update: run as root" >&2; exit 1; }
-  if systemctl is-active -q "$UNIT" || pgrep -x pacman >/dev/null 2>&1; then
-    say "the VM's system is not updated: an update (or pacman) runs already: try again when it is done" >&2; exit 1
+  if systemctl is-active -q "$UNIT"; then
+    say "the VM's system is not updated: an update runs already: try again when it is done" >&2; exit 1
+  fi
+  # Another pacman with the lock (the user's, or Omarchy's update check
+  # right after login): wait for it, as guest/install.sh does. A lock
+  # without pacman is from an install that was cut off.
+  for ((i = 0; i < 120; i++)); do
+    [[ -e /var/lib/pacman/db.lck ]] && pgrep -x pacman >/dev/null || break
+    (( i )) || say "waiting for pacman ($(pgrep -ax pacman | head -1 | cut -c1-80))"
+    sleep 5
+  done
+  if [[ -e /var/lib/pacman/db.lck ]]; then
+    pgrep -x pacman >/dev/null && { say "the VM's system is not updated: pacman still runs after 10 minutes: try again when it is done" >&2; exit 1; }
+    rm -f /var/lib/pacman/db.lck
   fi
   # A sudoers file left from an update cut off (the unit was not there to remove it).
   rm -f "$SUDOERS" "$TMPF"
