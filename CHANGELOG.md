@@ -12,6 +12,15 @@ in more words.
 - USB devices (experimental, OmacVM.app, off by default): give a VM a USB
   device macOS does not use itself (debug probes, SDR sticks, boards in DFU
   mode), per VM in the app's window ([docs/usb.md](docs/usb.md)).
+- Building a VM behind a proxy (Vocllum, #122). The build takes the Mac's
+  proxy (http_proxy/https_proxy/all_proxy in the terminal, else the fixed
+  proxies in macOS's network settings) into the VM: pacman, git and the
+  Omarchy installer use it, through sudo and the installer's systemd unit
+  too. A proxy on the Mac's 127.0.0.1 (Clash and the like) is reached as
+  10.0.2.2 in OmacVM.app: its port gets through at the build and at every
+  VM start. pacman and git clone try a failed download again (3 tries)
+  while Omarchy installs. PAC files are not read. Details: docs/guide.md,
+  "Behind a proxy".
 - In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
   which gives them real-time priority, took a VM that had been stopped for
   a runaway thread and put them back to normal priority for the rest of the
