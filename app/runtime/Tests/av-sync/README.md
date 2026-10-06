@@ -24,6 +24,10 @@ screen.
   never tells the VM).
 - `mini/`: the run on the Mac mini (plain QEMU from a copy of the test app's
   runtime, with the app's options; native Chrome on the Mac as reference).
+  `mini/fix.sh` (after the matrix): the 3.0.1 fix, re-measured: installs
+  `omacvm-audio-latency` in the test VM, sets the delay as the app would and
+  plays the clips again (expected: about minus the device's latency, since
+  avcap takes the sound before the device).
 
 ScreenCaptureKit takes the sound before the output device and the picture
 before the display's scan-out: add the device latency `outlat` prints for

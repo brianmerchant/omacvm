@@ -647,3 +647,31 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   as the full update.
 - **Where:** `src/guest/pkg-add`, `src/guest/gbm-guard`,
   `src/guest/install.sh` (runs both), `src/tests/pkg-safe.sh`.
+
+## 28. app: the sound is late in videos (YouTube looks out of sync)
+
+- **Symptom:** in a video in the VM (YouTube in Chromium, a film in mpv)
+  the sound comes a bit after the picture: lips move before the words.
+  Worse with AirPods or other Bluetooth headphones.
+- **Cause:** players hold the picture back by the sound delay the system
+  tells them. In the VM, PipeWire only knows the VM's own buffers. After
+  the VM's sound card come QEMU's buffers (about 150 ms: the card's buffer,
+  QEMU's ring, SDL's queue) and the Mac's output device (about 13 ms wired,
+  about 170 ms for AirPods), and nothing told the VM about them. Not new in
+  3.0.0: the sound path and its delay are the same as in 2.x.
+- **Fix (3.0.1):** the app works out that delay (QEMU's part plus what
+  CoreAudio says about the Mac's default output) and sends it to the VM at
+  the start and whenever the output changes. In the VM,
+  `omacvm-audio-latency` sets it as PipeWire's latency offset on the sound
+  card's output (pavucontrol shows it under Output Devices, "Latency
+  offset"); Chromium, Firefox and mpv then wait with the picture.
+  `qemu.log` says what was sent ("OmacVM: sound delay for the VM: ...");
+  in the VM `omacvm-audio-latency --show` says what is set.
+- **Still off a little?** `defaults write org.omacvm.app audioDelayExtraMs
+  -int N` (ms, -500 to 500): negative when the sound now comes early,
+  positive when it is still late; it applies at the next VM start or output
+  change.
+- **Where:** `app/app/Sources/OmacVMAudio/AudioDelay.swift`,
+  `app/app/Sources/OmacVM/AudioLatencyWatch.swift`,
+  `src/app/guest/omacvm-audio-latency`, the measurement tools in
+  `app/runtime/Tests/av-sync/`.

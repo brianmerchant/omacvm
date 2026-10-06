@@ -29,6 +29,16 @@ in more words.
   0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
   watchdog, and `omacvm check` shows "sound priority".
 
+- OmacVM.app: the sound is in step with the picture in videos (YouTube in
+  Chromium, Firefox, mpv). The VM never knew how late the Mac plays its
+  sound (QEMU's buffers, about 150 ms, plus the Mac's output: about 13 ms
+  wired, 170 ms with AirPods), so the sound came that much after the
+  picture. The app now tells the VM, at the start and whenever the Mac's
+  output changes, and PipeWire passes it on to the players. Not a 3.0.0
+  change: the delay was the same before. Fine-tuning:
+  `defaults write org.omacvm.app audioDelayExtraMs -int N`
+  (troubleshooting 28).
+
 ## 3.0.0
 
 In short: OmacVM.app updates itself, the control centre in Omarchy (a
