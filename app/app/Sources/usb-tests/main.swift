@@ -51,8 +51,14 @@ let cam = dev(0x03e7, 0xf63d, "Opal C1", cls: 0xef, [
 expect(cam.availability == .usedByMac("macOS uses it as a camera"), "a webcam stays with the Mac")
 let hub = dev(0x05e3, 0x0610, "USB2.0 Hub", cls: 9, [I(number: 0, interfaceClass: 9, users: [])])
 expect(hub.availability == .notOffered("a USB hub"), "a hub is never offered")
-let billboard = dev(0x0b05, 0x1c55, "DMC Device", [I(number: 0, interfaceClass: 0x11, users: [])])
-expect(billboard.availability == .notOffered("a USB-C adapter's info device"), "a USB-C billboard is never offered")
+let billboard = dev(0x0b05, 0x1c55, "DMC Device", [
+    I(number: 0, interfaceClass: 0x11, users: ["AppleUSBHostBillboardDevice"]),
+    I(number: 1, interfaceClass: 0xff, users: []),
+])
+expect(billboard.availability == .notOffered("a USB-C adapter's info device"),
+       "a USB-C billboard is never offered, also with a vendor interface next to it")
+let billboardOnly = dev(0x0b05, 0x1c56, "Adapter", [I(number: 0, interfaceClass: 0x11, users: [])])
+expect(billboardOnly.availability == .notOffered("a USB-C adapter's info device"), "a billboard-only device is never offered")
 
 // What a VM can have: nothing on the Mac uses any interface.
 let stlink = dev(0x0483, 0x3748, "STM32 STLink", [I(number: 0, interfaceClass: 0xff, users: [])])
@@ -84,6 +90,8 @@ let parsed = USBChoice.parse("# comment\n0483:3748 ST-Link V2\nnonsense\n0483:37
 expect(parsed == [.init(id: USBDeviceID(vendor: 0x0483, product: 0x3748), name: "ST-Link V2"),
                   .init(id: USBDeviceID(vendor: 0x1d50, product: 0x6089), name: "")],
        "parse: comments and nonsense skipped, a device once")
+expect(USBChoice.parse("0483:3748\tST-Link V2\n") == [.init(id: USBDeviceID(vendor: 0x0483, product: 0x3748), name: "ST-Link V2")],
+       "parse: a tab parts the id from the name")
 let many = (1...6).map { "00\(String(format: "%02x", $0)):0001" }.joined(separator: "\n")
 expect(USBChoice.parse(many).count == USBChoice.maxDevices, "at most \(USBChoice.maxDevices) devices")
 expect(USBChoice.parse(USBChoice.format(parsed)) == parsed, "format and parse agree")
@@ -94,9 +102,9 @@ expect(USBChoice.format([.init(id: USBDeviceID(vendor: 1, product: 2), name: "a\
 expect(USBChoice.arguments([]).isEmpty, "no device: no controller, the VM is as before")
 expect(USBChoice.arguments(parsed) == [
     "-device", "qemu-xhci,id=usb0",
-    "-device", "usb-host,bus=usb0.0,vendorid=0x0483,productid=0x3748,guest-reset=off,id=usbhost0",
-    "-device", "usb-host,bus=usb0.0,vendorid=0x1d50,productid=0x6089,guest-reset=off,id=usbhost1",
-], "one xHCI controller, a usb-host per device, matched by vendor and product")
+    "-device", "usb-host,bus=usb0.0,vendorid=0x0483,productid=0x3748,id=usbhost0",
+    "-device", "usb-host,bus=usb0.0,vendorid=0x1d50,productid=0x6089,id=usbhost1",
+], "one xHCI controller, a usb-host per device, matched by vendor and product, guest resets allowed (DFU)")
 expect(USBChoice.record([]) == "off" && USBChoice.record(parsed) == "0483:3748 ST-Link V2, 1d50:6089", "the qemu.log record")
 
 // The file in a VM folder: no device removes it.

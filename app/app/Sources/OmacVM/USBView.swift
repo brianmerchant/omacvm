@@ -16,7 +16,7 @@ struct USBSection: View {
     var body: some View {
         DisclosureGroup(isExpanded: $open) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("A device that is on goes to the VM while it runs. macOS lets a VM have only devices it does not use itself: debug probes, SDR sticks, logic analysers, phones in fastboot. Keyboards, security keys, USB disks, serial adapters, audio and cameras stay with the Mac.")
+                Text("A device that is on goes to the VM while it runs. macOS lets a VM have only devices it does not use itself: debug probes, SDR sticks, logic analysers, phones in fastboot. Keyboards, security keys, USB disks, serial adapters, audio and cameras stay with the Mac. If a Mac app has a device open when the VM looks for it, plug it in again once the app is done.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ForEach(rows, id: \.id) { row in
@@ -72,7 +72,14 @@ struct USBSection: View {
         for d in devices where !seen.contains(d.id) {
             let on = chosen.contains { $0.id == d.id }
             switch d.availability {
-            case .notOffered: continue
+            case .notOffered(let why):
+                // Plugged in, but never for a VM: shown only when the file
+                // names it (switch it off), never as "not plugged in".
+                seen.insert(d.id)
+                guard on else { continue }
+                out.append(Row(id: d.id, name: d.name, on: on, canChoose: false,
+                               why: "Not for a VM (\(why)): switch it off."))
+                continue
             case .free:
                 out.append(Row(id: d.id, name: d.name, on: on, canChoose: true, why: nil))
             case .usedByMac(let why):

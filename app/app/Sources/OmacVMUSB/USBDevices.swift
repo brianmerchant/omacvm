@@ -83,8 +83,10 @@ public struct USBDevice: Equatable, Sendable {
         if deviceClass == 0x09 || interfaces.contains(where: { $0.interfaceClass == 0x09 }) {
             return .notOffered("a USB hub")
         }
-        // Billboard: a USB-C adapter tells macOS which modes it has; nothing for a VM.
-        if deviceClass == 0x11 || (!interfaces.isEmpty && interfaces.allSatisfy { $0.interfaceClass == 0x11 }) {
+        // Billboard: a USB-C adapter or display tells macOS which modes it has;
+        // nothing for a VM (macOS's billboard driver holds it, also when the
+        // device has a vendor interface next to it).
+        if deviceClass == 0x11 || interfaces.contains(where: { $0.interfaceClass == 0x11 }) {
             return .notOffered("a USB-C adapter's info device")
         }
         let users = drivers + interfaces.flatMap(\.users)
@@ -136,13 +138,14 @@ public enum USBChoice {
     }
 
     /// From the file's text: lines that are not a device are skipped, a
-    /// device named twice counts once, at most maxDevices.
+    /// device named twice counts once, at most maxDevices. Spaces or tabs
+    /// part the id from the name.
     public static func parse(_ text: String) -> [Entry] {
         var out: [Entry] = []
         for line in text.split(whereSeparator: \.isNewline) {
             let t = line.trimmingCharacters(in: .whitespaces)
             guard !t.hasPrefix("#") else { continue }
-            let parts = t.split(separator: " ", maxSplits: 1)
+            let parts = t.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" })
             guard let first = parts.first, let id = USBDeviceID(text: String(first)),
                   !out.contains(where: { $0.id == id }) else { continue }
             out.append(Entry(id: id, name: parts.count > 1 ? clean(String(parts[1])) : ""))
@@ -182,15 +185,16 @@ public enum USBChoice {
     /// QEMU's arguments: an xHCI controller and one usb-host per device,
     /// matched by vendor and product, so QEMU takes the device when it is
     /// plugged in (also later, while the VM runs) and gives it back when the
-    /// VM stops. guest-reset=off: a reset on macOS re-enumerates the device
-    /// (QEMU then loses it for a moment); QEMU's own port reset is enough.
+    /// VM stops. The guest may reset the device (QEMU's default: DFU and
+    /// firmware tools need it); qemu-usb-host-busy-device.patch sends a reset
+    /// only to a device QEMU really has, since on macOS it re-enumerates it.
     /// Last on the command line, so no other device moves.
     public static func arguments(_ entries: [Entry]) -> [String] {
         let list = Array(entries.prefix(maxDevices))
         guard !list.isEmpty else { return [] }
         var a = ["-device", "qemu-xhci,id=usb0"]
         for (i, e) in list.enumerated() {
-            a += ["-device", String(format: "usb-host,bus=usb0.0,vendorid=0x%04x,productid=0x%04x,guest-reset=off,id=usbhost%d",
+            a += ["-device", String(format: "usb-host,bus=usb0.0,vendorid=0x%04x,productid=0x%04x,id=usbhost%d",
                                     e.id.vendor, e.id.product, i)]
         }
         return a
