@@ -625,7 +625,8 @@ patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
 # OmacVM: a main loop stall > 2 s is logged with its place.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
-# full screen beside the notch; the window keeps its size; full screen at the
+# a borderless full screen (tests only: see omacvm-cocoa-fullscreen-own-space);
+# the window keeps its size; full screen at the
 # window's real size; modifiers only from input events; the recording device
 # opens off the BQL.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patch"
@@ -755,6 +756,13 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tes
   "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
   -framework OpenGL -o "$display_tests/test-boot-splash-fade"
 "$display_tests/test-boot-splash-fade"
+# OmacVM: full screen is always macOS's own, in a Space of its own (beside the
+# notch too: Omanotch fills the strip); a display the escape combo moved off
+# the VM's Space is not pulled back by the VM's other window.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-own-space.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-head-key-same-space.patch"
+"$native_dir/Tests/display/test-fullscreen-space.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: full screen without a Space of its own (test-fullscreen-space.sh)"
 
 # Notch full screen: the window sits above the menu bar while it has the keys,
 # so clicks beside the notch reach the guest, not macOS's hidden menu bar.

@@ -70,7 +70,7 @@ src/tests/vulkan-feature.sh && src/tests/venus-build-tools.sh && src/tests/graph
 src/tests/app-paths.sh
 app/runtime/Tests/display/test-pointer-guard.sh
 app/runtime/Tests/display/test-pointer-start.sh
-src/tests/app-notch.sh
+src/tests/app-fullscreen-space.sh
 src/tests/keyboard-light.sh
 src/tests/features-off.sh
 src/tests/app-storage.sh
