@@ -131,6 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Another launcher (or `omacvm`) asks to start a VM.
     private func startRequested(_ name: String) {
         if runner?.isRunning == true { Self.qemuApp?.activate(); return }
+        // A build or an update runs a VM without a window; the screen stays on
+        // it (startVM checks the same, but only after the lines below).
+        if state.screen == .building { showWindow(); return }
         if !name.isEmpty, let c = VMConfig.named(name) { state.config = c; state.screen = c.isReady ? .ready : .setup }
         if state.config.isReady { startVM() } else { showWindow() }
     }
@@ -167,6 +170,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateLater
         }
         if state.screen == .building {
+            if state.creator.job == .update {
+                // Stopping the update script would leave its apply running in
+                // the user's VM while the VM shuts down: quit once it is done
+                // (it shuts the VM down itself).
+                showWindow()
+                func wait() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                        guard let c = self?.state.creator, !c.finished, c.failed == nil else {
+                            NSApp.reply(toApplicationShouldTerminate: true)
+                            return
+                        }
+                        wait()
+                    }
+                }
+                wait()
+                return .terminateLater
+            }
             state.creator.cancel()
         }
         return .terminateNow
