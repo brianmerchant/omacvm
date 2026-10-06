@@ -622,6 +622,9 @@ patch -d "$source_dir" -p1 -f -i "$precise_scroll_patch"
 patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
+# OmacVM: usb-host leaves a device the Mac uses alone (no reset: on macOS that
+# re-enumerates it); the app's USB devices (docs/usb.md).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-usb-host-busy-device.patch"
 # OmacVM: a main loop stall > 2 s is logged with its place.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-main-loop-stall-watchdog.patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
