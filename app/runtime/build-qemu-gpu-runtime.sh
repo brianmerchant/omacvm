@@ -749,6 +749,12 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-graphics-memo
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-features-menu.patch"
 grep -q '^    omacvm_add_features_item(menu);$' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m has no Features... item in the app menu (features-menu patch)"
+# OmacVM: "Restart the Desktop…" in the app menu after Later on the app's
+# "desktop stopped drawing" window (shown in the memory menu's update).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-restart-desktop.patch"
+"$native_dir/Tests/display/test-restart-desktop.sh"
+grep -q '^    omacvm_restart_desktop_update();$' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not update Restart the Desktop when the menu opens (restart-desktop patch)"
 # OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
 # logo until the guest's desktop, and instead of "Display output is not
 # active."; the cells must be the firmware's logo, the animation's table the

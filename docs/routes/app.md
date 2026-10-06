@@ -907,7 +907,10 @@ closed. A session that was locked locks itself again. At most once in 10 minutes
 soon (macOS still short of memory), the app shows "The VM's desktop
 stopped drawing" with a button that restarts it, as it always did with
 the automatic restart off (`defaults write org.omacvm.app
-desktopAutoRestart -bool false`). When only the shell (Omarchy's bar and
+desktopAutoRestart -bool false`). After Later in that window the app menu
+(beside the Apple menu, under "Graphics memory") has "Restart the
+Desktop…", which brings the window back; it goes away once the desktop
+restarts or the VM stops. When only the shell (Omarchy's bar and
 launcher, Quickshell) is lost, only the shell starts again, and no app
 closes. `logs/qemu.log` says which app lost its context and why, and each
 restart the app made; `journalctl -t omacvm-desktop-recover` in the VM

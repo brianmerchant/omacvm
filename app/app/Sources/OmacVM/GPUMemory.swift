@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OmacVMDesktop
 
 /// The VM's graphics memory on the Mac: textures and buffers its apps draw
 /// with. It comes from the Mac's memory as the VM needs it, on top of the VM's
@@ -69,7 +70,8 @@ struct GPUMemory: Equatable {
 ///   the Mac gets them back (virtio-balloon free page reporting).
 /// - When the desktop's GPU context is lost (the VM would stay black), the
 ///   desktop session starts again by itself, or a window says so and offers
-///   to restart it (DesktopRecovery says which).
+///   to restart it (DesktopRecovery says which). After Later, QEMU's app menu
+///   has "Restart the Desktop…", which shows the window again (DesktopRestart).
 @MainActor
 final class GPUMemoryWatch {
     private let config: VMConfig
@@ -82,13 +84,28 @@ final class GPUMemoryWatch {
     private var alert: NSAlert?
     private var lastDesktopRestart: Date?
     private var lastShellRestart: Date?
+    private let restart: DesktopRestart
+    private var restartObserver: NSObjectProtocol?
+    /// What the window said when the user picked Later: it says the same when
+    /// it comes again from the menu (by then the numbers have changed).
+    private var laterWith: (m: GPUMemory, again: Bool)?
+    /// After stop() nothing writes desktop-lost again (a window the stop
+    /// closed, a restart answered late).
+    private var stopped = false
 
     init(config: VMConfig, log: @escaping (String) -> Void) {
         self.config = config
         self.log = log
+        restart = DesktopRestart(for: config)
     }
 
     func start() {
+        stopped = false
+        restart.clear()
+        restartObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(restart.requestName), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restartChosen() }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
@@ -106,6 +123,10 @@ final class GPUMemoryWatch {
         timer = nil
         pressure?.cancel()
         pressure = nil
+        stopped = true
+        if let o = restartObserver { DistributedNotificationCenter.default().removeObserver(o) }
+        restartObserver = nil
+        restart.clear()
         if let w = alert?.window, w.isVisible { NSApp.abortModal(); w.orderOut(nil) }
     }
 
@@ -160,6 +181,7 @@ final class GPUMemoryWatch {
             log("OmacVM: the VM's shell (Quickshell) lost its GPU context: restarting the shell by itself")
             guest("/usr/local/bin/omacvm-desktop-recover", ["shell"]) { _ in }
         case .restartDesktop:
+            restart.clear()
             log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), pressure \(m.pressure), \(m.refused) refused")
             log("OmacVM: restarting the VM's desktop by itself: apps open in the VM close (once per 10 min, else the app asks)")
             let why = DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)
@@ -229,16 +251,45 @@ final class GPUMemoryWatch {
         NSApp.activate()
         let answer = a.runModal()
         alert = nil
+        // The VM stopped while the window was up (stop() closed it).
+        guard !stopped, answer != .abort else { return }
         guard answer == .alertFirstButtonReturn else {
-            log("OmacVM: the desktop stays black for now (Later)")
+            log("OmacVM: the desktop stays black for now (Later; the app menu has Restart the Desktop…)")
+            laterWith = (m, again)
+            restart.markLost("Hyprland lost its GPU context; Later")
             return
         }
+        restart.clear()
         log("OmacVM: restarting the VM's desktop session")
         // Counts as a restart: lost again soon after, the app asks again.
         // The login manager starts again and logs the user in again (SDDM's
         // autologin), or shows its login screen.
         restartDesktop(DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)) { [weak self] result in
-            if result == .refused { self?.log("OmacVM: the VM's agent refused to restart the desktop") }
+            guard let self, result == .refused else { return }
+            self.log("OmacVM: the VM's agent refused to restart the desktop")
+            // Nothing restarted: the menu item stays, to try again. Not on no
+            // answer: a restart may be under way.
+            if !self.stopped {
+                self.laterWith = (m, again)
+                self.restart.markLost("Hyprland lost its GPU context; the agent refused the restart")
+            }
         }
+    }
+
+    /// "Restart the Desktop…" in QEMU's app menu: the window again, as it was.
+    private func restartChosen() {
+        guard !stopped, alert == nil, restart.takesRequest() else { return }
+        log("OmacVM: Restart the Desktop… chosen in the app menu")
+        let w = laterWith ?? (GPUMemory(), false)
+        desktopLost(w.m, again: w.again)
+    }
+}
+
+extension DesktopRestart {
+    /// This VM's file and this app's request name (the same in Runner, which
+    /// hands both to QEMU, and in GPUMemoryWatch).
+    init(for config: VMConfig) {
+        self.init(logs: config.folder.appendingPathComponent("logs"),
+                  bundleID: Bundle.main.bundleIdentifier, pid: getpid())
     }
 }
