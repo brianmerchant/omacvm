@@ -52,8 +52,10 @@ have shown.
    off screen. It is not gone, though — your clicks are pressed on that hidden
    copy, so Omarchy opens its panels (clock, audio, network, …) on the visible
    display, right below the notch. The wallpaper is patched the same way: it is
-   laid out once across the strip and the display, so with the bar hidden
-   (Super+Shift+Space) the image runs straight through the notch strip.
+   laid out once across the strip and the display (as one screen, the strip
+   on top), so with the bar hidden (Super+Shift+Space) the image runs straight
+   through the notch strip, wherever NOTCH sits (over the display's top edge
+   or, in OmacVM.app, right above it).
    Omarchy's display panel gets a patched copy too (`omanotch.monitor`), so
    `NOTCH` is not listed there as a display to scale or switch off.
 3. **Streaming only what changes.** `notchcast`, a small C program in the VM,

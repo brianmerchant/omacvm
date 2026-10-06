@@ -57,6 +57,17 @@ int main(void) {
     up = notch_place(alone, 32, &beside, 1, 1, &x, &y);
     CHECK(up == 1, "a display beside the screen does not block the place above");
 
+    // Cursor masking (Air layout: Virtual-1 at 0x0, NOTCH 1470x33 at 0x-33).
+    NotchRect strip = {0, -33, 1470, 33};
+    CHECK(notch_cursor_masked(strip, 700, -10, 0), "cursor on NOTCH, shown: masked");
+    CHECK(!notch_cursor_masked(strip, 1469, 0, 0), "cursor on the display's top row: not masked (no frozen box)");
+    CHECK(!notch_cursor_masked(strip, 1469, 0, 5000), "cursor left hidden below the strip: not masked");
+    CHECK(!notch_cursor_masked(strip, 700, -10, 5000), "cursor on NOTCH, hidden by notchcast: not masked");
+    CHECK(notch_cursor_masked(strip, 700, -10, 100), "cursor just hidden: still masked (the next frame may still show it)");
+    CHECK(!notch_cursor_masked(strip, 1470, -10, 0), "cursor beside NOTCH: not masked");
+    NotchRect over = {0, 0, 1470, 33};  // Parallels/UTM: NOTCH over the top edge
+    CHECK(notch_cursor_masked(over, 20, 5, 0), "overlap layout: cursor in the top rows masked as before");
+
     printf("%s\n", fails ? "notch-place: FAILED" : "notch-place: all ok");
     return fails != 0;
 }

@@ -246,6 +246,22 @@ in more words.
 - OmacVM.app with its VMs folder on another drive: downloads go there too
   (`.downloads` in that folder), not to the Mac's own disk.
 
+- Omanotch: with the bar hidden (Super+Shift+Space) the notch strip shows
+  the wallpaper's rows right above the VM's picture again, as one picture
+  over the whole MacBook screen. Since 3.0.0 NOTCH sits right above the
+  built-in display in OmacVM.app (#130); the wallpaper patch no longer
+  found its display there, and every output drew its own copy: the strip
+  a zoomed piece of the image's middle. Background patch v6 finds the
+  display in both places. In a window (no strip on screen) the VM's
+  wallpaper is now laid out the same way, so it sits a little lower and
+  larger than in 3.0.0.
+- Omanotch: no more box of the old bar (the clock's last digits) at the
+  strip's end after hiding the bar while the pointer was at the top edge.
+  notchcast froze the pixels around a cursor that was not on NOTCH at all.
+- Omanotch: at fractional scales (such as 1.6) the strip trims the extra
+  rounding rows at its top only, so its bottom row meets the display's top
+  row and the wallpaper runs through without a step.
+
 ## 3.0.0
 
 In short: OmacVM.app updates itself, the control centre in Omarchy (a

@@ -139,18 +139,13 @@ final class StripView: NSView {
             guestPerPoint = k
             DispatchQueue.main.async { [weak self] in self?.onGuestScaleChange?() }
         }
-        // Full width, the height following the image's aspect (it equals the
-        // strip once the guest has sized NOTCH to it), centred. A bar taller
-        // than the strip (its minimum height) is shrunk to fit instead.
-        // A few guest px too tall only means the hidden output was rounded up
-        // to whole pixels (fractional scales): keep the full width and trim
-        // that padding top and bottom. Only a really taller bar is shrunk.
-        let excess = barHeight - bounds.height * k
-        drawScale = bounds.height > 0 && excess > 4 ? max(k, barHeight / bounds.height) : k
+        let place = StripLayout.place(barWidth: barWidth, barHeight: barHeight,
+                                      width: bounds.width, height: bounds.height)
+        drawScale = place.scale
+        drawLeft = place.left
+        drawTop = place.top
         let w = barWidth > 0 ? barWidth / drawScale : bounds.width
         let h = barHeight / drawScale
-        drawLeft = ((bounds.width - w) / 2).rounded(.down)
-        drawTop = ((bounds.height - h) / 2).rounded(.down)
         // Layer geometry is bottom-left based even in a flipped view.
         barLayer.frame = CGRect(x: drawLeft, y: bounds.height - drawTop - h, width: w, height: h)
         lockLayer.frame = bounds
