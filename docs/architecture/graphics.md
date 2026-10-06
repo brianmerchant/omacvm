@@ -408,9 +408,10 @@ Patches (all in `app/runtime/patches`, one per concern):
   texture, filled from the heap when a draw samples it (Metal blit into a
   shared buffer, then `glTexSubImage2D`, once per command buffer); memory
   that cannot be read leaves it blank. The app says so at start (OEM string
-  `omacvm.vkwindows=1`, only with MoltenVK: KosmicKrisp's exported memory is
-  not tested yet); the guest then keeps Mesa's normal WSI, otherwise (older
-  app, KosmicKrisp) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
+  `omacvm.vkwindows=1`, with MoltenVK and with KosmicKrisp since 3.0.1:
+  KosmicKrisp's heaps are shared memory, so the texture is filled straight
+  from them, without the blit); the guest then keeps Mesa's normal WSI,
+  otherwise (older app) it sets `MESA_VK_WSI_DEBUG=sw` (`omacvm-vulkan-present`).
 
 Switch: the VM's Graphics setting (ADR 0035; up to 2.9 the hidden `venus`
 default, moved into it at the first 3.0.0 launch) adds

@@ -5,6 +5,11 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- Graphics Vulkan on macOS 26 and newer (KosmicKrisp): Vulkan apps in a
+  window or full screen now show through the Mac's GPU like on MoltenVK,
+  not through the slow CPU copy (vkmark full screen at 5K on a Mac mini M4:
+  about 260; 203 with the CPU copy in 3.0.0, other scenes). Automatic stays
+  OpenGL.
 - Mission Control from the escape combo (pressed twice): Esc often did not
   close it, because the VM took the key, and ⌃⌥ Esc in it did nothing or
   gave the keyboard to Finder. It took up to three presses to get back into
