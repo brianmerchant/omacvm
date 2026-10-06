@@ -22,8 +22,9 @@ others say what macOS uses them for. Switch a device on, then start the VM.
   `usb-host: VVVV:PPPP ... is in use on the host: not taken` when macOS had a
   chosen device.
 
-In the VM, `lsusb` lists the device. Linux needs its driver as usual (most are
-in Arch's kernel; some tools want a udev rule for your user).
+In the VM, `lsusb` (`sudo pacman -S usbutils`) lists the device. Linux needs
+its driver as usual (most are in Arch's kernel; some tools want a udev rule
+for your user).
 
 ## What works and what does not
 
@@ -80,10 +81,15 @@ Until then, other ways work for some of these:
   probe examples; the VM's file; QEMU's arguments.
 - `swift run usb-tests --list` prints this Mac's devices and what the app
   would offer. Reads the IORegistry only.
-- On the Mac mini with the patched QEMU: a VM with a USB device switched on
-  starts, Linux sees the xHCI controller; a chosen device macOS uses is not
-  taken and not reset (its IORegistry entry stays the same).
-- Not tested yet: a real free device end to end (none was plugged into the
+- On a Mac mini M4 (macOS 27) with the patched QEMU, 2026-10-06:
+  `usb-tests --list` put all 16 devices right (10 hubs not offered; iPhone,
+  two webcams, two audio devices, the display's HID controls kept by macOS).
+  QEMU with the display's webcam chosen (macOS uses it): one line
+  `usb-host: 043e:9a4d (bus 32, addr 9) is in use on the host: not taken`
+  over six scans, and its IORegistry id stayed the same (no re-enumeration).
+  A VM (Linux 7.2.8) with that webcam and an absent device chosen booted, its
+  xHCI controller came up (USB 2 and USB 3 bus), no device attached.
+- Not tested yet: a real free device end to end (none is plugged into the
   test Mac).
 
 ## Known limits
