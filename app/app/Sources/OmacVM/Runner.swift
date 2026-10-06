@@ -42,6 +42,9 @@ final class Runner {
             "-m", "\(c.memoryMB)M",
             "-nodefaults",
             "-action", "reboot=reset,shutdown=poweroff",
+            // The firmware boots at once instead of waiting 5 s for a key
+            // (Settings.firmwareWait; it sets the VM's Timeout variable each start).
+            "-boot", "menu=on,splash-time=\(Settings.firmwareWait * 1000)",
             // UEFI firmware (read-only) and this VM's own boot variables.
             "-drive", "if=pflash,format=raw,readonly=on,file=\(q(Paths.firmware.path))",
             "-drive", "if=pflash,format=raw,file=\(q(c.efiVars.path))",
