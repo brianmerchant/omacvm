@@ -251,6 +251,10 @@ expect "polkit's helper may reach the Bridge (no env: the default address), noth
 mkdir -p "$T/root/etc/omacvm"; echo "OMACVM_HOST='10.0.2.2'" > "$T/root/etc/omacvm/env"
 OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" on
 expect "... the Bridge's address from the VM's env" "IPAddressAllow=10.0.2.2" "$(grep IPAddressAllow "$D")"
+echo "OMACVM_VM_TYPE=app" >> "$T/root/etc/omacvm/env"; OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" on
+expect "OmacVM.app: polkit's helper gets the port, no network" "BindPaths=-/dev/virtio-ports/org.omacvm.auth DeviceAllow=char-virtio-portsdev rw" \
+  "$(grep -v '^[#[]' "$D" | tr '\n' ' ' | sed 's/ $//')"
+echo "OMACVM_HOST='10.0.2.2'" > "$T/root/etc/omacvm/env"
 expect "the port rule: org.omacvm.auth root's alone" 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' "$(cat "$T/root/etc/udev/rules.d/70-omacvm-auth.rules")"
 expect "the old rule's name gone" no "$([[ -e $T/root/etc/polkit-1/rules.d/49-omacvm-touchid.rules ]] && echo yes || echo no)"
 touch "$T/root/etc/omacvm/touchid-key" "$T/root/etc/omacvm/touchid-token"

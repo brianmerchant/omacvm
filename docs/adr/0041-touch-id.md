@@ -188,6 +188,11 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   one opener at a time, so the old client is gone) drops the Bridge
   connection, and the Bridge closes the dialog (`peerGone`). Answers for an
   earlier client still in the port are skipped by their id.
+- polkit's helper (polkit 127, a sandbox with `PrivateDevices=yes` and
+  `DevicePolicy=strict`): on app VMs its drop-in binds the port into the
+  helper's private `/dev` (`BindPaths=-/dev/virtio-ports/org.omacvm.auth`,
+  `DeviceAllow=char-virtio-portsdev rw`) and gives it no network. The
+  `-`: a VM without the port yet starts the helper anyway (password).
 - A second sudo while one asks: the port is busy (`EBUSY`), "another Touch
   ID prompt is open", the password.
 - Who shows the dialog: the Bridge, as for Parallels, UTM and Fusion (the
@@ -362,6 +367,17 @@ sensor) and the last result.
   smaller ones (main thread, fast noes in the log, unsigned `off`, `VM
   clock off`, `sudo-i`, user names with dots, the client stops with its
   caller, a sh note writer).
+- App port VM pass (2026-10-06, MacBook Pro, QEMU-direct test VM with the
+  port as `Runner.swift` adds it, `AuthRelay` in a harness as
+  `Runner.startAuth` runs it, a stand-in Bridge on a Unix socket; no Touch
+  ID dialog): sudo in a uwsm foot terminal asked through the port and was
+  let in (224-250 ms), `pkexec true` too (506-526 ms; needs the device
+  drop-in above), a no gave the password prompt, Ctrl+C dropped the
+  Bridge connection at once, `kill -9` of the client after 2.9 s (pings
+  stopped), the port held by another opener: "another Touch ID prompt is
+  open", the app not relaying: "OmacVM.app does not answer", SSH never
+  asked, no Bridge token in the VM. A helper without the port still asks
+  for the password.
 - Test VM pass (2026-10-06, OmacVM.app test VM on the MacBook Pro, Arch
   ARM: sudo 1.9.17p2, polkit 127, systemd 262, Hyprland 0.56 through uwsm;
   the real PAM stacks and polkit, a stand-in Bridge on 127.0.0.1 in the

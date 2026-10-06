@@ -62,8 +62,15 @@ case ${1:-} in
     host=$( { sed -n "s/^OMACVM_HOST=['\"]\{0,1\}\([0-9.]*\).*/\1/p" "$ROOT/etc/omacvm/env" 2>/dev/null || true; } | tail -1)
     [[ $host =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || host=10.211.55.2   # the client's default too
     mkdir -p "$(dirname "$DROPIN")"
-    printf '%s\n' "# omacvm touch-id (ADR 0041): polkit's helper may reach the Mac's Bridge ($host), nothing else" \
-      '[Service]' 'PrivateNetwork=no' 'RestrictAddressFamilies=AF_UNIX AF_INET' 'IPAddressDeny=any' "IPAddressAllow=$host" > "$DROPIN"
+    if grep -qsE "^OMACVM_VM_TYPE=['\"]?app['\"]?$" "$ROOT/etc/omacvm/env"; then
+      # OmacVM.app: no network, only the port (bound into its private /dev; "-": a VM
+      # started before touch-id was on has none yet, and polkit must still work).
+      printf '%s\n' "# omacvm touch-id (ADR 0041): polkit's helper may open OmacVM.app's Touch ID port, nothing else" \
+        '[Service]' 'BindPaths=-/dev/virtio-ports/org.omacvm.auth' 'DeviceAllow=char-virtio-portsdev rw' > "$DROPIN"
+    else
+      printf '%s\n' "# omacvm touch-id (ADR 0041): polkit's helper may reach the Mac's Bridge ($host), nothing else" \
+        '[Service]' 'PrivateNetwork=no' 'RestrictAddressFamilies=AF_UNIX AF_INET' 'IPAddressDeny=any' "IPAddressAllow=$host" > "$DROPIN"
+    fi
     [[ -n $ROOT ]] || systemctl daemon-reload 2>/dev/null || true
     mkdir -p "$(dirname "$PORT_RULE")"
     echo 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' > "$PORT_RULE"
