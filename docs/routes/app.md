@@ -544,6 +544,16 @@ What is missing before it can become the default: [below](#fast-network-not-done
   route, which the service did not count. Fixed: it follows route changes
   too (not ARP entries or per-destination routes); `ipsec0` now gets its
   rule within a second, and pf translates to its address.
+  Then an app VM's QEMU (headless clone of a test VM) on the fast network
+  with the fixed service and the same client: NAT on 1.1 s after the
+  tunnel; the VM reaches the server over IPv4 and IPv6 (seen as
+  `10.99.0.1` and `2001:db8:99::1`), 20 MiB down and 20 MiB up through the
+  tunnel's MTU of 1420 (VM 1500) at about 70 MB/s each; anchor emptied by
+  hand: dropped by the server, back 1.1 s later on the next change. A full
+  tunnel for 25 s: the VM's requests to `1.1.1.1` and `9.9.9.9` went
+  through it as `10.99.0.1`; internet as before after. The VM restarting
+  with the tunnel up: NAT in the same second, all of the above again.
+  pf outside the service's anchor, Parallels and Tailscale unchanged.
 - Not tested yet: a VPN app's own tunnel (WireGuard app, an IKEv2 profile in
   System Settings; the tests above use the same kernel interfaces without
   touching the Mac's VPN settings), real trackpad gestures over the fast network
