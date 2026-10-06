@@ -146,6 +146,9 @@ install -m644 "$TOUCHID_PANEL" "$C/Resources/runtime/lib/OmacVMTouchIDPanel.dyli
 install_name_tool -id @rpath/OmacVMTouchIDPanel.dylib "$C/Resources/runtime/lib/OmacVMTouchIDPanel.dylib"
 mkdir -p "$C/Resources/fonts"
 install -m644 "$ROOT/fonts/JetBrainsMono-Regular.ttf" "$ROOT/fonts/JetBrainsMono-Bold.ttf" "$ROOT/fonts/OFL.txt" "$C/Resources/fonts/"
+# The app starts QEMU through this link, so macOS counts it as this app: one
+# icon in the Dock (DockIdentity.swift). The kernel still names it OmacVM.
+ln -s ../Resources/runtime/bin/OmacVM "$C/MacOS/OmacVM-VM"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$RT/firmware/firmware-source" "$C/Resources/firmware/"
 install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/prebuilt-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" \
   "$ROOT/scripts/update-vm.sh" \
@@ -224,10 +227,10 @@ done < <(find "$C" -type f -perm -u+x -print0)
 # a Bridge started in place alive (src/tests/prebuilt-helpers.sh checks).
 # NSPrefersDisplaySafeAreaCompatibilityMode false: macOS never shrinks the
 # whole display below the camera for the launcher's windows (no "Scale to fit
-# below built-in camera" box in Get Info). It has no effect on the VM's
-# windows: QEMU runs as Contents/Resources/runtime/bin/OmacVM without a bundle
-# of its own, so AppKit never reads this file for it; its full screen is
-# macOS's own and sits below the camera.
+# below built-in camera" box in Get Info). Since 3.0.1 it holds for the VM's
+# windows too: QEMU, started as Contents/MacOS/OmacVM-VM, counts as this app
+# (DockIdentity.swift), so AppKit reads this file for it as well; its full
+# screen is macOS's own and sits below the camera.
 VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

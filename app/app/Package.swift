@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "OmacVMTouchIDPanel", type: .dynamic, targets: ["OmacVMTouchIDPanel"]),
     ],
     targets: [
-        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress"]),
+        .executableTarget(name: "OmacVM", dependencies: ["OmacVMUpdate", "OmacVMNet", "OmacVMUSB", "OmacVMFolder", "OmacVMFeatures", "OmacVMAuth", "OmacVMBuildProgress", "OmacVMWindow"]),
         // The self-update's checks, apart from the UI so they can be tested
         // without Xcode: `swift run update-tests`.
         .target(name: "OmacVMUpdate"),
@@ -38,6 +38,10 @@ let package = Package(
         // without a VM: `swift run build-progress-tests`.
         .target(name: "OmacVMBuildProgress"),
         .executableTarget(name: "build-progress-tests", dependencies: ["OmacVMBuildProgress"]),
+        // The VM window's rules: custom resources, disk Grow/Compact,
+        // "omacvm in Terminal", the keyboard note: `swift run window-tests`.
+        .target(name: "OmacVMWindow"),
+        .executableTarget(name: "window-tests", dependencies: ["OmacVMWindow"]),
         // Touch ID's port for the app's VMs (org.omacvm.auth), relayed to
         // OmacVM Bridge: `swift run auth-tests`.
         .target(name: "OmacVMAuth"),
