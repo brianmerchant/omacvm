@@ -75,6 +75,33 @@ build waits.
 `omacvm build --help` lists the options for unattended builds. Your keyboard
 layout, timezone and language come from the Mac.
 
+## Behind a proxy
+
+When the Mac goes through a proxy, the build passes it on to the VM; nothing
+changes without one.
+
+- **Where it comes from**: `http_proxy`, `https_proxy`, `all_proxy` and
+  `no_proxy` (either case) in the terminal you build from, else the fixed
+  proxies in System Settings > Network > Details > Proxies (Web, Secure web,
+  SOCKS, and the bypass list). `scutil --proxy` shows what macOS has.
+  `OMACVM_PROXY=off omacvm build ...` builds without it.
+- **In the VM**: the same variables in `/etc/environment.d/90-omacvm-proxy.conf`
+  (the desktop), `/etc/profile.d/omacvm-proxy.sh` (shells) and
+  `/etc/sudoers.d/05-omacvm-proxy` (sudo keeps them). The build's pacman, git
+  and the Omarchy installer use them. Delete the three files to stop.
+- **A proxy on the Mac's 127.0.0.1** (Clash, V2Ray, Surge and the like):
+  OmacVM.app's VMs reach it as `10.0.2.2:<port>`; the app lets that port
+  through at the build and at every start (`qemu.log`: "Mac proxy"). On the
+  fast network, and in Parallels, UTM and Fusion, the VM cannot reach the
+  Mac's 127.0.0.1: let the proxy accept LAN connections and set
+  `http_proxy`/`https_proxy` to the Mac's address before building.
+- **Not read**: proxy auto-config (PAC) files and automatic discovery (WPAD).
+  The build says so; set `http_proxy` and `https_proxy` in the terminal.
+- **Flaky connections**: while Omarchy installs, pacman and `git clone` try
+  a failed download again (3 tries, "Operation too slow" included).
+- **Proxy changed later**: edit the three files in the VM. The app follows
+  a new port on the Mac by itself from the next start.
+
 ## After the build
 
 Once, on the Mac:

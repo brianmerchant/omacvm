@@ -545,6 +545,25 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `omacvm check` shows both ("sound timing");
   `defaults write org.omacvm.app audioClassic -bool true` goes back to
   2.9.1's timing.
+- **In the VM (3.0.1):** PipeWire's sound threads run real-time through
+  RTKit, so a busy VM does not starve them. But RTKit's watchdog (its
+  "canary") takes 10 seconds in which the VM's threads did not run while
+  its clock went on for a runaway real-time thread, and demotes every one
+  of them for the rest of the session (`journalctl -u rtkit-daemon`: "The
+  canary thread is apparently starving"). Seen when QEMU itself was
+  stopped (`kill -STOP` for 15 s, as test locks do; once in a test VM's
+  history); the app's own pause keeps the VM's clock and does not do it. PipeWire then runs at normal priority, and the
+  sound can break when the VM is busy. Measured on a Mac mini M4, VM with
+  8 CPUs, its CPUs and GPU busy and 2 busy threads on the Mac, 5 minutes
+  each, breaks in a test tone: real-time PipeWire 2, 6, 2, 0 (guest xruns
+  0-4); demoted 81 (22 / 68 xruns, the mini also busy with two builds) and
+  0 (mini less busy). In the VM, systemd's slices already give PipeWire its
+  share of the CPUs; real-time matters when the VM's CPUs get less time
+  from a busy Mac. From 3.0.1 `omacvm apply` runs
+  RTKit without the watchdog (`src/guest/sound/rtkit-no-canary.conf`;
+  RTKit's other limits stay), and `omacvm check` shows "sound priority".
+  By hand: `systemctl --user restart pipewire pipewire-pulse wireplumber`
+  makes PipeWire real-time again until the next stop.
 - **For 2.9.0 and 2.9.1:** a bigger safety buffer in the VM. As root in
   the VM (USER = your user):
 
@@ -562,7 +581,9 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Where:** `app/runtime/patches/qemu-darwin-main-loop-qos.patch`,
   `app/runtime/patches/qemu-hda-no-catch-up.patch`,
   `app/app/Sources/OmacVM/Runner.swift` (`audioClassic`), `src/cmd/check.sh`,
-  the measurement tools in `app/runtime/Tests/audio/`, ADR 0036.
+  the measurement tools in `app/runtime/Tests/audio/`, ADR 0036; in the
+  VM `src/guest/sound/rtkit-no-canary.conf`, `src/guest/install.sh`,
+  `src/guest/check.sh` ("sound priority").
 
 ## 26. app: the VM does not start (no window), or freezes when sound starts
 
