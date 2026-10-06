@@ -739,6 +739,11 @@ OMACVM_IDLE_REFRESH=0 "$display_tests/test-idle-refresh" off
 # OmacVM: VM memory and graphics memory in the app menu (read when it opens).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-graphics-memory.patch"
 "$native_dir/Tests/display/test-gpu-memory-menu.sh"
+# OmacVM: "Features…" in the app menu: the launcher opens the control centre
+# in the VM (ControlCentreRoute.swift, src/control/guest/open.sh).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-features-menu.patch"
+grep -q '^    omacvm_add_features_item(menu);$' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m has no Features... item in the app menu (features-menu patch)"
 # OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
 # logo until the guest's desktop, and instead of "Display output is not
 # active."; the cells must be the firmware's logo, the animation's table the

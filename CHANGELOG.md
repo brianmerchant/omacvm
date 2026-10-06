@@ -20,6 +20,15 @@ in more words.
   why OmacVM asks: it reaches the VM on the Mac's own VM network.
 - OmacVM.app: a VM build, and each apply in a VM without a window, is about
   a minute shorter. The QEMU guest agent no longer waits for its port there.
+- The control centre opens from the Mac: *Features…* in OmacVM.app's menu
+  (while the VM runs) or `omacvm features --vm NAME --in-vm` (also in
+  `omacvm`'s menu) open it on the VM's desktop, one window, in front. It
+  says what is missing when it cannot: nobody logged in, the control centre
+  off, an older OmacVM in the VM.
+- Control centre: `r` on a feature that works asks first (it installs that
+  feature again) instead of starting at once without a word. "Report a
+  problem" keeps sudo's working folder (`PWD=/`), which it used to take out
+  as a secret, and counts only what it really took out.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
   with external displays: after a Hyprland config reload (a theme change, a
   saved hypr file, a feature switched in the control centre) the pointer

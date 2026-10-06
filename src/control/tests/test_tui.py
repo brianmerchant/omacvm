@@ -280,6 +280,48 @@ def test_lost_job_ends_failed_and_offers_a_retry(world, monkeypatch):
     asyncio.run(go())
 
 
+async def yes_to_repair_a_working_row(pilot):
+    """r on a row that works asks first (test_repair_a_working_row_asks_first)."""
+    from omacvm_cc.tui import ConfirmScreen
+    assert await settle(pilot, lambda: isinstance(pilot.app.screen, ConfirmScreen))
+    await pilot.press("y")
+
+
+def test_repair_a_working_row_asks_first(world):
+    """The e2e: r on a row that works did nothing visible for a while (a
+    reinstall started without a word). Now it says so and asks; on a failing
+    row r still starts at once."""
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            world.version = a.c.local.version
+            assert await settle(pilot, lambda: a.c.linked and a.c.vm_checks is not None)
+            from omacvm_cc.state import Status
+            from omacvm_cc.tui import ConfirmScreen
+            assert rows(a)["bridge"].status is Status.WORKS
+            _move_to(a, "bridge")
+            await pilot.press("r")
+            assert await settle(pilot, lambda: isinstance(a.screen, ConfirmScreen))
+            assert a.screen.title_text == "Repair OmacVM Bridge"
+            assert "OmacVM Bridge works: nothing to repair. Install it again anyway?" in a.screen.text
+            await pilot.press("n")
+            await pilot.pause(0.3)
+            assert not [p for _, p, _ in world.requests if p == "/omacvm/jobs"], "nothing ran after n"
+            await pilot.press("r")
+            await yes_to_repair_a_working_row(pilot)
+            assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests))
+            assert [b for _, p, b in world.requests if p == "/omacvm/jobs"][-1] == {"action": "reinstall", "features": ["bridge"]}
+            assert await settle(pilot, lambda: not a.c.active_job())
+            # A failing row: no question.
+            assert rows(a)["camera"].status is Status.FAILING
+            _move_to(a, "camera")
+            await pilot.press("r")
+            assert await settle(pilot, lambda: [b for _, p, b in world.requests if p == "/omacvm/jobs"][-1]
+                                == {"action": "reinstall", "features": ["camera"]})
+            assert not isinstance(a.screen, ConfirmScreen)
+    asyncio.run(go())
+
+
 def test_rolled_back_says_what_next(world):
     world.job_end = ("rolled-back", "omacvm apply: rolled back")
 
@@ -291,6 +333,7 @@ def test_rolled_back_says_what_next(world):
             from textual.widgets import DataTable
             a.screen.query_one(DataTable).move_cursor(row=names.index("mac-clock"))
             await pilot.press("r")
+            await yes_to_repair_a_working_row(pilot)
             assert await settle(pilot, lambda: bool(a.last_result))
             assert a.last_result == ("Repair The Mac's clock: failed. This VM went back to its features from before "
                                      "(r tries again; ! reports the problem).")
@@ -420,6 +463,7 @@ def test_rollback_says_which_part_failed(world):
             from textual.widgets import DataTable
             a.screen.query_one(DataTable).move_cursor(row=names.index("mac-clock"))
             await pilot.press("r")
+            await yes_to_repair_a_working_row(pilot)
             assert await settle(pilot, lambda: bool(a.last_result))
             assert a.last_result.startswith("Repair The Mac's clock: the Mac's clock was not set up. This VM went back")
     asyncio.run(go())

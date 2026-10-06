@@ -144,7 +144,8 @@ omacvm resources --vm NAME      # change its CPUs and memory
 omacvm graphics --vm NAME       # OmacVM.app: OpenGL, Vulkan or Automatic
 ```
 
-In Omarchy, `omacvm` (also in the Omarchy menu and the bar) opens the control
+In Omarchy, `omacvm` (also in the Omarchy menu and the bar; from the Mac,
+OmacVM.app's *Features…* or `omacvm features --in-vm`) opens the control
 centre: every feature with its status, on or off with space, repair, updates,
 and "report a problem" without personal data.
 
