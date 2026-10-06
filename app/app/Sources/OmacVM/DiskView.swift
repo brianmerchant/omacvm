@@ -42,6 +42,11 @@ enum VMDisk {
         let newBytes = Int64(newGB) * DiskSize.gib
         guard let now = info(c) else { throw HelperError.io("No disk.img in \(c.folder.path).") }
         guard newBytes > now.maxBytes else { throw HelperError.io("The disk is already \(DiskSize.text(now.maxBytes)).") }
+        // A QEMU this app does not know (started by hand, another copy of
+        // the app) has it open: QEMU takes no file lock on macOS.
+        if !Mac.run("/usr/sbin/lsof", ["-t", "--", c.disk.path]).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw HelperError.io("disk.img is in use (the VM runs?): shut the VM down first.")
+        }
         guard truncate(c.disk.path, off_t(newBytes)) == 0 else {
             throw HelperError.io("Could not grow disk.img: \(String(cString: strerror(errno))).")
         }
