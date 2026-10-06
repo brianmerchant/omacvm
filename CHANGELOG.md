@@ -5,6 +5,8 @@ in more words.
 
 ## 3.0.1 (unreleased)
 
+- OmacVM.app: macOS's "find devices on local networks" question now says
+  why OmacVM asks: it reaches the VM on the Mac's own VM network.
 - OmacVM.app: a VM build, and each apply in a VM without a window, is about
   a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
