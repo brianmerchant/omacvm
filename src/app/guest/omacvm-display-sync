@@ -682,10 +682,11 @@ apply_preferred_modes() {
   [[ -z ${lock_fd:-} ]] || exec {lock_fd}>&-
 }
 
-# OmacVM.app: when the window covers the strip beside the notch (full screen
-# in notch mode), Omarchy's bar gets that strip's height, so nothing but the
+# OmacVM.app before 3.0.0: when the window covers the strip beside the notch
+# (full screen in notch mode), Omarchy's bar gets that strip's height, so nothing but the
 # bar sits beside the camera. Elsewhere the bar keeps its own size. Writes only
 # lines marked "omacvm-notch" in ~/.config/omarchy/shell.toml (watched live).
+# A 3.0.0 app sends no omacvm.notch: the marked lines are taken out.
 notch_bar() {
   local mode=$1 scale=$2 w h want="" f=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.toml
   read -r _ _ w _ _ _ h _ <<<"$mode"
