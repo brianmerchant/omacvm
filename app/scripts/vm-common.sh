@@ -135,7 +135,7 @@ qemu_headless() {
   OMACVM_SLIRP_HOST_PORTS=$HOST_PORTS \
   "$QEMU" -name "$(qe "$NAME")" -machine virt,gic-version=3 -accel hvf -cpu host,pmu=off \
     -smp "$CPUS" -m "${MEM_MB}M" -nodefaults -display none -monitor none \
-    -action reboot=reset,shutdown=poweroff \
+    -action reboot=reset,shutdown=poweroff -boot menu=on,splash-time=0 \
     -serial "file:$(qe "$LOG/$name-console.log")" \
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22" -device virtio-net-pci,netdev=net0,romfile= \
     -device virtio-rng-pci -qmp "unix:$(qe "$QMP"),server=on,wait=off" "$@" \
