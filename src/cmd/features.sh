@@ -7,7 +7,8 @@
 #   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
 #   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre. A feature that needs another one brings it
+# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel control-centre
+# fast-network vulkan x86-apps. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
@@ -40,7 +41,7 @@ while (( $# )); do
     --in-vm) INVM=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,24s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,25s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
        WANT+=("$1"); shift ;;

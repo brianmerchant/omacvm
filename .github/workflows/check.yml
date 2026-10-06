@@ -173,6 +173,9 @@ jobs:
       - name: The vulkan feature's Mesa build (build tools come and go)
         run: src/tests/venus-build-tools.sh
 
+      - name: The x86-apps feature (box64 package, binfmt rule, off)
+        run: src/tests/x86-apps.sh
+
       - name: Graphics setting (OpenGL, Vulkan, Automatic; app and omacvm agree)
         run: src/tests/graphics-setting.sh
 
@@ -244,3 +247,8 @@ jobs:
         run: |
           python3 src/app/guest/tests/test_omacvm_displays.py -v
           python3 src/app/guest/tests/test_idle_waits.py -v
+
+      - name: Hyprland Lua files parse (omacvm_app.lua)
+        run: |
+          sudo apt-get install -y -qq lua5.4 >/dev/null
+          luac5.4 -p src/app/guest/omacvm_app.lua
