@@ -21,6 +21,13 @@ in more words.
   VM start. pacman and git clone try a failed download again (3 tries)
   while Omarchy installs. PAC files are not read. Details: docs/guide.md,
   "Behind a proxy".
+- In the VM (every route): PipeWire's sound threads stay real-time. RTKit,
+  which gives them real-time priority, took a VM that had been stopped for
+  a runaway thread and put them back to normal priority for the rest of the
+  session; after that the sound could break while the VM and the Mac were
+  busy (on a Mac mini, 5 minutes of a test tone: up to 81 breaks, against
+  0-6 with real-time PipeWire). `omacvm apply` now runs RTKit without that
+  watchdog, and `omacvm check` shows "sound priority".
 
 ## 3.0.0 (unreleased)
 
