@@ -76,8 +76,19 @@ loops on the Mac): offset 0: 41 breaks per 10 min, 0 sink xruns; offset 286
 quantum 2048 (sink) / 8192 (pacat), ALSA period 1024 and buffer 32768 in
 both, and the same in the Chromium runs with and without it.
 
-Two things that are not this fix, seen on the way: WirePlumber came up
-broken at one boot (no stream linked to the sink, every player silent, fixed
-by restarting WirePlumber; `review.sh` checks for it), and Chromium's loop of
-the 180 s H.264 clip with hardware decode hung at its end (t=180.000, not
-paused), so long runs use a 700 s clip.
+Drift, 10 minutes with offset 128: Chromium (700 s H.264 clip, hardware
+decode) median +14.2, drift +1.2 ms/min; the offset moves only between
+-3, +14 and +31 ms (one 60 Hz frame apart: which frame the flash lands on),
+the same levels at the start and the end. mpv: median -2.1, drift -0.1
+ms/min. No drift.
+
+Two things that are not this fix, seen on the way:
+- WirePlumber came up broken in both boots of the fresh clone: no stream
+  linked to the sink, every player silent, until WirePlumber was restarted.
+  Both times DKMS built `omacvm_vdec` at boot (the clone's kernel had no
+  module yet) and loaded it 18 s after WirePlumber started; WirePlumber's
+  V4L2 monitor logged "Cannot open '/dev/video0': No such device" at that
+  moment. A user VM could hit this on the first boot after a kernel update
+  (chromium-video on). `review.sh` checks and restarts WirePlumber.
+- Chromium's loop of the 180 s H.264 clip with hardware decode hung at its
+  end (t=180.000, not paused), so long runs use a 700 s clip.
