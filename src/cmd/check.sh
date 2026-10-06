@@ -455,6 +455,18 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *"works again"*) ok "sound" "the Mac's audio device stopped answering earlier in this run and works again" ;;
   esac
 fi
+# The Mac folder (the app's setting, off by default): what this start shared,
+# and whether the VM has it at ~/Mac.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  mf=$(sed -n 's/^OmacVM: Mac folder: //p' "$miclog" | tail -1)
+  case $mf in
+    ""|off) ;;   # off, or an app from before the setting
+    "off this start: "*) warn "Mac folder" "${mf#off this start: }" ;;
+    *)
+      if gssh "$IP" "mountpoint -q ~$U/Mac" < /dev/null 2>/dev/null; then ok "Mac folder" "$mf"
+      else bad "Mac folder" "shared, but not at ~/Mac in the VM (omacvm apply installs omacvm-mac-folder; then restart the VM)"; fi ;;
+  esac
+fi
 FEATURE=gestures
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
