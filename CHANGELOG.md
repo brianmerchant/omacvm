@@ -91,6 +91,9 @@ in more words.
 - Omanotch: at fractional scales (such as 1.6) the strip trims the extra
   rounding rows at its top only, so its bottom row meets the display's top
   row and the wallpaper runs through without a step.
+- Omanotch: the first session of a new VM on a MacBook with a notch no
+  longer blinks. The top of the screen went black for a frame every 2
+  seconds until the VM restarted (the 3.0.1 known issue, also in 3.0.0).
 
 ## 3.0.1 (unreleased)
 
