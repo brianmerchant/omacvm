@@ -137,6 +137,9 @@ jobs:
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
 
+      - name: Magic Mouse swipe setting (3 or 4 fingers) and its row, only with a Magic Mouse
+        run: src/tests/app-mouse-swipe.sh
+
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
 

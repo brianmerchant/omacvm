@@ -97,6 +97,7 @@ struct SetupView: View {
     @State private var prebuilt = PrebuiltImage.Lookup.checking
     @State private var usePrebuilt = true
     @State private var graphics = GraphicsChoice.auto
+    @StateObject private var mouse = MagicMouseWatch()
 
     private var userOK: Bool {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
@@ -154,6 +155,7 @@ struct SetupView: View {
                 }
                 Toggle("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar", isOn: $bridge)
                 Toggle("Trackpad gestures in full screen", isOn: $gestures)
+                if gestures && mouse.connected { MagicMouseRow() }
                 Toggle("Log in automatically (the Mac's own lock protects Omarchy)", isOn: $autologin)
                 GraphicsPicker(choice: $graphics)
                 Picker("Disk", selection: $state.config.diskGB) {
@@ -278,6 +280,7 @@ struct ReadyView: View {
     @State private var fullScreen = Settings.startFullScreen
     @State private var keepDockAway = Settings.keepDockAway
     @State private var escape = EscapeSetting.current()
+    @StateObject private var mouse = MagicMouseWatch()
     @State private var resourcesNote: String?
     @State private var fastNetOn = false
     @State private var fastNetBusy = false
@@ -350,6 +353,7 @@ struct ReadyView: View {
             }
             .help("In a full-screen VM, Control-Option-Esc moves the monitor under the pointer (or all monitors) to the Space beside the VM's with macOS's own animation; the VM stays full screen. Pressed in macOS, it goes back into the VM. The keyboard follows the pointer's monitor.")
             .onChange(of: escape) { _, v in EscapeSetting.set(v) }
+            if mouse.connected { MagicMouseRow(inForm: false) }
             GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
                 .onChange(of: graphics) { _, v in setGraphics(v) }
             if let n = graphicsNote {
