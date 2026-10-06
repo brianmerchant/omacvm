@@ -14,6 +14,17 @@ in more words.
   asked. The app also sends the VM's graphics memory numbers with the
   request. Listing the app's VMs no longer misses one on an external drive
   now and then (a glob in bash could see the folder as empty, #151).
+- `omacvm enable vulkan` when OmacVM's Mesa does not build in the VM: the
+  VM goes back to what it had and the command fails (exit 4), as in the
+  control centre. Before, it ended with 0 and the record said Vulkan was on,
+  so a second `omacvm enable vulkan` said "Nothing to change". `omacvm
+  enable` and `disable` now always work this way. An apply that finds no
+  OmacVM Mesa also keeps the record at off.
+- The memory-optimized kernel says how long it really takes: a kernel build
+  in the VM, about 10 minutes with 16 CPUs, over an hour with 4 (it said
+  about 10 minutes). The control centre and `omacvm features` say it only
+  while it is off. A control centre job may now run 4 hours (it was 1 hour,
+  which could stop a kernel build on a 4-CPU VM).
 - OmacVM.app: a VM build, and each apply in a VM without a window, is about
   a minute shorter. The QEMU guest agent no longer waits for its port there.
 - OmacVM.app in full screen on a MacBook with a notch (Omanotch on), or
@@ -77,6 +88,23 @@ in more words.
   MacBook's built-in display, not somewhere on an external monitor. With
   the lid closed or on a Mac without a built-in display, it opens centred
   on the main display. The VM's window still opens where you are.
+- The feature "Screensaver and lock" is now "Screensaver and lock
+  disabled" (`no-idle-lock`), ticked when OmacVM keeps Omarchy's own
+  screensaver and lock off. Before, switching them off showed an empty
+  row, as if something was missing. Nothing changes on a VM: its old
+  choice is read the other way round, and `omacvm enable/disable
+  idle-lock` still works as before. New VMs keep Omarchy's own screensaver
+  and lock, as before.
+- Omanotch: the right bar from the first frame after login. The bar no
+  longer shows up on the display right under the notch strip for a few
+  seconds at boot (a second copy came back for 3 s about 8 s after login),
+  and the strip no longer shows a stretched or empty frame first. When the
+  strip showed at the end of the last session, or Omanotch sees the VM full
+  screen when it connects (also the first full-screen start after a windowed
+  one), the bar starts in the strip with the notch layout of then. A Mac
+  restart or an Omanotch quit with the VM running keeps that. If the VM is
+  windowed now, Omanotch gives the bar back as soon as it connects (an older
+  Omanotch, or none running: after 8 s).
 
 ## 3.0.0
 

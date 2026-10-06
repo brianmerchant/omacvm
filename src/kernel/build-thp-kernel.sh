@@ -2,7 +2,7 @@
 # Build and install linux-aarch64-thp: Arch Linux ARM's current linux-aarch64,
 # with transparent huge pages "always" and MGLRU on (see thp-pkgbuild.py).
 # Run as root inside the VM: ./build-thp-kernel.sh <desktop-user>
-# Takes ~10 min on 16 vCPUs. The stock kernel stays installed as the fallback
+# Takes ~10 min on 16 vCPUs, over an hour on 4 (an M2 MacBook Air). The stock kernel stays installed as the fallback
 # entry in GRUB's advanced menu; GRUB boots the THP kernel by default.
 # Re-run it to follow a new ALARM kernel release; when the installed one is
 # already ALARM's current release it does nothing (OMACVM_REBUILD_KERNEL=1

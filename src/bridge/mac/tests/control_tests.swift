@@ -47,6 +47,12 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["bridge"], "graphics": "auto"}"#))?.code == "bad-body", "graphics on another action")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "run", "features": ["bridge"]}"#))?.code == "bad-action", "unknown action")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["rm"]}"#))?.code == "unknown-feature", "unknown feature")
+    // A control centre from before 3.0.1 says idle-lock for no-idle-lock.
+    let renamed = controlRoute(method: "POST", path: "/omacvm/jobs", body: Data(#"{"action": "disable", "features": ["idle-lock"]}"#.utf8),
+                               known: known.union(["no-idle-lock"]))
+    expect(renamed == .success(.startJob(JobRequest(action: .disable, features: ["idle-lock"]))), "the old name of a renamed feature")
+    expect(err(route("POST", "/omacvm/jobs", #"{"action": "disable", "features": ["idle-lock"]}"#))?.code == "unknown-feature",
+           "the old name only when the Mac has the new one")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["bridge; rm -rf ~"]}"#))?.code == "bad-features", "shell metacharacters")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["$(id)"]}"#))?.code == "bad-features", "substitution")
     expect(err(route("POST", "/omacvm/jobs", #"{"action": "enable", "features": ["--vm"]}"#))?.code == "bad-features", "an option as a name")
