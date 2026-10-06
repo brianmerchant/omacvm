@@ -168,6 +168,11 @@ cat > "$T/bin/omarchy-update" <<'EOF'
 #!/bin/bash
 echo "omarchy update $*" >> "$T/calls"
 [[ -e $T/update-fails ]] && { echo "error: failed to synchronize all databases"; exit 1; }
+# Omarchy asks this even with -y (omarchy-update-orphan-pkgs in a terminal).
+if [[ -e $T/orphans ]]; then
+  gum style "Orphan system packages"
+  if gum confirm --default=false "Remove 1 orphaned package(s)?"; then echo removed >> "$T/calls"; else echo kept >> "$T/calls"; fi
+fi
 [[ -e $T/mirror ]] && cp "$T/mirror" "$T/sync"
 rm -f "$T/mirrors-gone"
 awk 'NR == FNR { v[$1] = $2; next } { print $1, ($1 in v) ? v[$1] : $2 }' "$T/sync" "$T/db" > "$T/db.n"; mv "$T/db.n" "$T/db"
@@ -177,8 +182,11 @@ fi
 exit 0
 EOF
 chmod +x "$T/bin/omarchy-update"
+# Stand-in gum: says yes to every question.
+printf '#!/bin/bash\necho "gum $1" >> "$T/calls"\n' > "$T/bin/gum"; chmod +x "$T/bin/gum"
 S=src/guest/system-update
-export OMACVM_SYSTEM_UPDATE_RUN="omarchy-update -y" OMACVM_SYSTEM_UPDATE_LOG=$T/system-update.log
+export OMACVM_SYSTEM_UPDATE_RUN="omarchy-update -y" OMACVM_SYSTEM_UPDATE_LOG=$T/system-update.log \
+  OMACVM_SYSTEM_UPDATE_DIR=$T/system-update-run
 
 vm; "$G" begin
 out=$("$S" 2>&1); rc=$?
@@ -198,6 +206,12 @@ vm; : > "$T/update-mesa-only"
 out=$("$S" 2>&1); rc=$?; rm -f "$T/update-mesa-only"
 [[ $rc == 2 && $out == *"libLLVM.so.23.1"*"do not restart"* ]] && pass "system-update: graphics broken after it: exit 2, do not restart" ||
   fail "system-update, GBM broken: rc $rc, said '$out'"
+
+vm; : > "$T/orphans"
+out=$("$S" 2>&1); rc=$?; rm -f "$T/orphans"
+[[ $rc == 0 && $(tr '\n' ' ' < "$T/calls") == "omarchy update -y gum style kept " && ! -e $T/system-update-run ]] &&
+  pass "system-update: nobody to answer: a question gets no, the rest is gum" ||
+  fail "system-update, a question: rc $rc, calls '$(tr '\n' ' ' < "$T/calls")', said '$out'"
 
 # Graphics -> Vulkan on a prebuilt VM a day after its image (air-notch F4):
 # its package list names versions the mirrors no longer have, so the Venus

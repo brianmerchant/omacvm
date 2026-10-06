@@ -13,8 +13,9 @@
 # (omacvm-system-update), so a dropped SSH connection does not cut pacman
 # off. Its sudo needs no password while it runs: a sudoers file the unit
 # removes when it ends (and the next boot, if the VM went off meanwhile).
-# Progress lines on stdout; the update's output in
-# /var/log/omacvm-system-update.log. Tests: src/tests/pkg-safe.sh
+# Nobody is at the keyboard: a question Omarchy asks even with -y (remove
+# orphaned packages?) gets no. Progress lines on stdout; the update's output
+# in /var/log/omacvm-system-update.log. Tests: src/tests/pkg-safe.sh
 # (OMACVM_SYSTEM_UPDATE_RUN stands in for the unit).
 set -uo pipefail
 G=$(cd "$(dirname "$0")" && pwd)/gbm-guard
@@ -22,13 +23,38 @@ LOG=${OMACVM_SYSTEM_UPDATE_LOG:-/var/log/omacvm-system-update.log}
 UNIT=omacvm-system-update
 SUDOERS=/etc/sudoers.d/zz-omacvm-update
 TMPF=/etc/tmpfiles.d/omacvm-update-sudo.conf
-RC=/run/omacvm-system-update.rc
+RUN=${OMACVM_SYSTEM_UPDATE_DIR:-/run/omacvm-system-update}   # wrapper, gum, status
 say() { echo "OmacVM: $*"; }
 
-# What pacman does now: "(12/340) upgrading mesa", from the log.
+# What the update does now: "(12/340) upgrading mesa" while pacman runs.
 progress() {
-  tr '\r' '\n' < "$LOG" 2>/dev/null | grep -aoE '\( *[0-9]+/[0-9]+\) (upgrading|installing|reinstalling|removing|downloading|checking) [^ ]+' |
-    tail -1 | tr -s ' '
+  local p
+  p=$(awk '/ omarchy update -y \(OmacVM\)$/ { b = "" } { b = b $0 "\n" } END { printf "%s", b }' "$LOG" 2>/dev/null |
+    tr '\r' '\n' | grep -aoE '\( *[0-9]+/[0-9]+\) (upgrading|installing|reinstalling|removing|downloading|checking) [^ ]+' |
+    tail -1 | tr -s ' ')
+  if [[ -z $p ]] || pgrep -x pacman >/dev/null; then echo "$p"; else echo "packages done, Omarchy's own steps now"; fi
+}
+
+# $RUN/run CMD...: runs it, its status to $RUN/rc (the unit's own status is
+# gone with the unit). $RUN/bin/gum: the answer no to every question, the
+# rest is gum. $1: the user who writes the status.
+helpers() {
+  local gum; gum=$(command -v gum 2>/dev/null) || gum=/usr/bin/gum
+  rm -rf "$RUN" && mkdir -p "$RUN/bin" && : > "$RUN/rc" || return 1
+  cat > "$RUN/run" <<EOF || return 1
+#!/bin/bash
+"\$@"; rc=\$?
+echo "== omarchy update exit \$rc"
+echo "\$rc" > "$RUN/rc"
+EOF
+  cat > "$RUN/bin/gum" <<EOF || return 1
+#!/bin/bash
+# OmacVM's update without a person (guest/system-update): no to questions.
+case \${1:-} in confirm|choose|input|filter|write|file|table|pager) exit 1 ;; esac
+exec "$gum" "\$@"
+EOF
+  chmod 755 "$RUN" "$RUN/bin" "$RUN/run" "$RUN/bin/gum" &&
+    { [[ -z ${1:-} ]] || chown "$1:" "$RUN/rc"; }
 }
 
 run_unit() {   # -> the update's exit status
@@ -50,26 +76,25 @@ run_unit() {   # -> the update's exit status
     rm -f "$SUDOERS.new"; say "could not let omarchy update use sudo" >&2; return 1
   fi
   echo "r $SUDOERS" > "$TMPF"
-  rm -f "$RC"; systemctl reset-failed "$UNIT" >/dev/null 2>&1
+  helpers "$u" || { rm -f "$SUDOERS" "$TMPF"; say "could not prepare omarchy update" >&2; return 1; }
+  systemctl reset-failed "$UNIT" >/dev/null 2>&1
   # The user's runtime folder when logged in: Omarchy's update lock is there,
   # so an update the user starts meanwhile waits for this one.
   local env=(-E HOME="$h" -E USER="$u" -E LOGNAME="$u" -E LANG=C.UTF-8 -E TERM=xterm-256color
-             -E OMARCHY_PATH="$path" -E PATH="$path/bin:/usr/local/bin:/usr/bin")
+             -E OMARCHY_PATH="$path" -E PATH="$RUN/bin:$path/bin:/usr/local/bin:/usr/bin")
   [[ -d /run/user/$(id -u "$u") ]] && env+=(-E XDG_RUNTIME_DIR="/run/user/$(id -u "$u")")
-  # $$ is systemd's escape for $: sh gets $EXIT_STATUS (the update's status).
   systemd-run --quiet --unit="$UNIT" --uid="$u" --gid="$(id -g "$u")" -p WorkingDirectory="$h" \
     -p StandardInput=null -p "StandardOutput=append:$LOG" -p "StandardError=append:$LOG" \
-    -p "ExecStopPost=+/bin/sh -c 'rm -f $SUDOERS $TMPF; echo \$\${EXIT_STATUS:-1} > $RC'" \
-    "${env[@]}" "$cmd" -y || { rm -f "$SUDOERS" "$TMPF"; say "could not start omarchy update" >&2; return 1; }
+    -p "ExecStopPost=+/bin/rm -f $SUDOERS $TMPF" \
+    "${env[@]}" "$RUN/run" "$cmd" -y || { rm -f "$SUDOERS" "$TMPF"; say "could not start omarchy update" >&2; return 1; }
   local t=0 p
-  while [[ ! -s $RC ]] && systemctl is-active -q "$UNIT"; do
+  while [[ ! -s $RUN/rc ]] && systemctl is-active -q "$UNIT"; do
     sleep 5; t=$((t + 5))
     if (( t % 60 == 0 )); then p=$(progress); say "still updating ($((t / 60)) min${p:+: $p})"; fi
   done
-  for _ in 1 2 3 4 5 6; do [[ -s $RC ]] && break; sleep 0.5; done
-  rm -f "$SUDOERS" "$TMPF"   # the unit did; also when it could not
-  local rc; rc=$(cat "$RC" 2>/dev/null)
-  [[ $rc =~ ^[0-9]+$ ]] || rc=1   # killed: a signal's name
+  rm -f "$SUDOERS" "$TMPF"   # the unit does; also when it could not
+  local rc; rc=$(cat "$RUN/rc" 2>/dev/null); rm -rf "$RUN"
+  [[ $rc =~ ^[0-9]+$ ]] || rc=1   # killed before it could say
   return "$rc"
 }
 
@@ -95,7 +120,10 @@ if [[ -z ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then
 fi
 say "updating the VM's system with omarchy update (all packages at once; often 5-15 minutes, log $LOG)"
 { echo "== $(date '+%F %T') omarchy update -y (OmacVM)"; } >>"$LOG" 2>/dev/null
-if [[ -n ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then $OMACVM_SYSTEM_UPDATE_RUN >>"$LOG" 2>&1; rc=$?
+if [[ -n ${OMACVM_SYSTEM_UPDATE_RUN:-} ]]; then
+  # shellcheck disable=SC2086 # the stand-in command and its words
+  helpers && PATH=$RUN/bin:$PATH "$RUN/run" $OMACVM_SYSTEM_UPDATE_RUN >>"$LOG" 2>&1
+  rc=$(cat "$RUN/rc" 2>/dev/null); rm -rf "$RUN"; [[ $rc =~ ^[0-9]+$ ]] || rc=1
 else run_unit; rc=$?; fi
 (( rc == 0 )) || say "omarchy update stopped (exit $rc; see $LOG)" >&2
 # Also after a stop: it may have changed some packages already.
