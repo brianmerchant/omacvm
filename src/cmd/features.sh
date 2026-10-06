@@ -9,9 +9,11 @@
 # fast-network vulkan x86-apps (idle-lock, its name before 3.0.1, still works the other way round:
 # disable idle-lock = enable no-idle-lock). A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
-# also disables wallpaper). Changes go through omacvm apply: the Mac side
-# they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
-# started.
+# also disables wallpaper). Changes go through omacvm apply --transaction: the
+# Mac side they need, then the VM; if a feature it switches does not set up,
+# the VM goes back to what it had and the run ends with exit code 4, so the
+# record never says on for a feature that is not there. (--transaction is
+# still taken, for older callers.) A stopped VM is started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "reason", "needs", "title", "summary",
 # "fixed"}]}; reason: why this Mac or VM cannot have it ("" when available);
@@ -19,7 +21,8 @@
 # OmacVM's record had wrong and that it was fixed ("" when it was right).
 # Without --vm it starts nothing: the state of the VM it would pick if that
 # one runs, else the defaults ("vm": null).
-# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
+# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person, 4 failed and
+# rolled back.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -37,7 +40,7 @@ while (( $# )); do
     --json) JSON=1; shift ;;
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,23s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,25s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) read -r f v <<<"$(feature_alias "$1" "$( [[ $MODE == enable ]] && echo on || echo off)")"
        feature_index "$f" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
@@ -194,4 +197,6 @@ if (( ! YES )) && (( interactive )); then
 fi
 # --yes: apply asks nothing either (its control centre question).
 (( YES )) && APPLY_ARGS+=(--yes)
+# Strict for the features it switches, also from a terminal (see the top).
+[[ " ${APPLY_ARGS[*]:-} " == *" --transaction "* ]] || APPLY_ARGS+=(--transaction)
 exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}" ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}
