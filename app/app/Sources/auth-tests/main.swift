@@ -123,10 +123,15 @@ final class FakeBridge: @unchecked Sendable {
     var closedEarly: [Bool] = []
     var answer: Data? = resp   // nil: never answers (a dialog up)
     var connects = 0
-    var open = 0, mostOpen = 0   // Bridge connections open at once
+    var open = 0, mostOpen = 0   // Bridge connections open at once (this side's view, it closes late)
+    var overlaps = 0             // a new connection while the relay still had the last one open
+    var lastA: Int32 = -1
     func connect() -> Int32? {
+        lock.lock()
+        if lastA >= 0, fcntl(lastA, F_GETFD) != -1 { overlaps += 1 }
+        lock.unlock()
         let (a, b) = pair()
-        lock.lock(); connects += 1; open += 1; mostOpen = max(mostOpen, open); lock.unlock()
+        lock.lock(); connects += 1; open += 1; mostOpen = max(mostOpen, open); lastA = a; lock.unlock()
         Thread.detachNewThread { [self] in
             let (req, _) = readAll(b, timeout: 5, untilHeaders: true)
             lock.lock(); requests.append(req); let a = answer; lock.unlock()
@@ -353,8 +358,8 @@ do {
         usleep(30_000)
     }
     _ = fb.wait({ fb.closedEarly.count >= 10 }, 4)
-    fb.lock.lock(); let most = fb.mostOpen, connects = fb.connects; fb.lock.unlock()
-    expect(most == 1 && connects >= 2, "flood: one Bridge connection at a time (\(most), \(connects) in all)")
+    fb.lock.lock(); let overlaps = fb.overlaps, connects = fb.connects; fb.lock.unlock()
+    expect(overlaps == 0 && connects >= 2, "flood: one Bridge connection at a time (\(overlaps) overlaps, \(connects) in all)")
     r.stop(); close(vm)
 }
 
