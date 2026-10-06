@@ -116,8 +116,11 @@ itself. Details below.
   where they are and keep working. A VM that runs is never moved, nor one
   whose files change during the move, nor a VM folder that is a link. A
   half copy left by quitting during a move is deleted at the next launch.
-  Each VM's size with Show in Finder; Clear Downloads for
-  `~/Library/Caches/omacvm`.
+  Storage shows the VM in the window with its size and Show in Finder; All
+  VMs… lists every VM with size, Show in Finder and Delete. Downloaded
+  images (the Omarchy images the app downloaded to set up VMs, in
+  `~/Library/Caches/omacvm`) with Remove…: it asks first, names the size and
+  never touches the Mac's Downloads folder.
 - A drive that is not connected is named as such ("SD4TB is not
   connected"), and nothing is built into a stale /Volumes folder. A VM whose
   files are missing says which and does not start.
