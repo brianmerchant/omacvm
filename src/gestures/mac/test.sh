@@ -17,7 +17,8 @@
 #    with "all"), toward the Space it came from; in macOS back in; not moved
 #    or the shortcut off -> a Dock swipe; still not moved, or no Spaces
 #    information -> a notice in Omarchy, nothing else (never Mission
-#    Control); never out of full screen, never hidden; the keyboard follows the pointer's display; the posted key's
+#    Control); never out of full screen, never hidden; the keyboard follows the pointer's display; pressed in
+#    Mission Control (after the double press) it closes it and goes back into the VM; the posted key's
 #    shape and marker (test-escape.c, a made-up world of displays and Spaces:
 #    nothing posted, swiped or activated). The marker is the same in
 #    Gestures, the Bridge and QEMU's patch. The guest names the combo pressed,

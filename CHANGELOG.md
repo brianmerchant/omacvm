@@ -18,6 +18,11 @@ in more words.
   not through the slow CPU copy (vkmark full screen at 5K on a Mac mini M4:
   about 260; 203 with the CPU copy in 3.0.0, other scenes). Automatic stays
   OpenGL.
+- Mission Control from the escape combo (pressed twice): Esc often did not
+  close it, because the VM took the key, and ⌃⌥ Esc in it did nothing or
+  gave the keyboard to Finder. It took up to three presses to get back into
+  the VM. Now Esc closes Mission Control and the VM gets no Esc, and one
+  ⌃⌥ Esc closes it and goes back into the VM.
 - OmacVM.app VMs on an external drive: the control centre in the VM said
   "no such OmacVM.app VM" and could not switch features, update, change
   Graphics or show the Mac's checks. OmacVM Bridge ran omacvm as a program
