@@ -191,6 +191,8 @@ static CGWindowID otherWin, vmWin;
 // combo in macOS brings it back). Main thread, and the event tap (also on it).
 static pid_t winVMPid, leftWinPid;
 static CGWindowID winVMWin, leftWinWin;
+// The VM the combo hid out of the notch full screen (its way back: unhide).
+static pid_t notchHidden;
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
@@ -422,6 +424,14 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
 }
 
 // ---- capture mode: frontmost app + full-screen VM window ----
+// A VM window's layer: normal (0), or OmacVM.app's notch cover while it has
+// the keys (level 26, above macOS's menu bar so the strip's clicks reach the
+// VM). Only OmacVM's QEMU: Parallels and UTM keep invisible windows at 26.
+#define NOTCH_COVER_LAYER 26
+static int isQemu(pid_t pid);
+static int (*isQemuFn)(pid_t) = isQemu;
+static int vmLayer(pid_t pid, int layer) { return layer == 0 || (layer == NOTCH_COVER_LAYER && isQemuFn(pid)); }
+
 static int vmFullScreen(pid_t pid, CGWindowID *win) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
   if (!wins) return 0;
@@ -432,7 +442,7 @@ static int vmFullScreen(pid_t pid, CGWindowID *win) {
     int owner = 0, layer = -1; CGRect r;
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
-    if (owner != pid || layer != 0) continue;
+    if (owner != pid || !vmLayer(pid, layer)) continue;
     if (!CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r)) continue;
     for (uint32_t d = 0; d < nd; d++) {
       CGRect b = CGDisplayBounds(ds[d]);
@@ -458,7 +468,7 @@ static CGWindowID frontWindow(pid_t pid) {
     int owner = 0, layer = -1;
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
-    if (owner == pid && layer == 0) CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, &found);
+    if (owner == pid && vmLayer(pid, layer)) CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, &found);
   }
   CFRelease(wins);
   return found;
@@ -549,8 +559,6 @@ static void rearmTap(const char *why) {
 // its VM network (-1: not a VM app), whether its VM window covers a display,
 // that window's title, the window, and whether the app is one the escape
 // combo may go back to (other). Main thread.
-static int isQemu(pid_t pid);
-static int (*isQemuFn)(pid_t) = isQemu;
 static void noteCameFrom(int changed);
 static void frontChanged(pid_t pid, int net, int front, const char *title, CGWindowID win, int other) {
   // OmacVM.app's launcher has the VMs' process name too: only QEMU counts.
@@ -571,6 +579,7 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
     }
     pthread_mutex_unlock(&sendLock);
     vmPid = pid; vmWin = win;
+    notchHidden = 0;   // back (the combo, the Dock or Cmd+Tab)
   } else if (other) {
     otherPid = pid; otherWin = win;
   }
@@ -691,7 +700,7 @@ static int vmWindowAt(CGPoint p, pid_t pid) {
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &hitLayer);
     CFStringRef name = CFDictionaryGetValue(w, kCGWindowOwnerName);
     if (name) CFStringGetCString(name, hitOwner, sizeof hitOwner, kCFStringEncodingUTF8);
-    hit = owner == pid && hitLayer == 0;
+    hit = owner == pid && vmLayer(pid, hitLayer);
     // Only a window that fills its display: the VM's full-screen window, not
     // another window of the same app (VMware Fusion's library, say).
     CGRect r;
@@ -789,6 +798,10 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 // EscapeSwipe all) moves every display that shows the VM instead.
 // The VM stays full screen and is never hidden (user, 2026-10-05: "I want to
 // swipe away to macOS, not close its full screen").
+// Except the app's notch full screen (a borderless window on a desktop Space,
+// no Space of its own): there the combo hides the VM and brings it back
+// unhidden (user, 2026-10-06: "just allowing me to swipe away, but not switch
+// spaces etc. so we keep the notch").
 // Every move is checked. Out: the shortcut is off or the Space did not change
 // -> a Dock swipe (the events a three/four-finger swipe makes; macOS 27 on
 // the Mac mini ignores them) -> still in the VM's Space: Mission Control, so
@@ -878,6 +891,7 @@ typedef struct {
   uint64_t spaces[MAX_SPACES];   // left to right
   int n;
   uint64_t current;
+  int currentDesktop;   // 1: the current Space is a normal desktop Space (not a full-screen one); 0: not, or not known
 } DisplaySpaces;
 
 typedef int (*ConnFn)(void);
@@ -912,6 +926,14 @@ static uint64_t spaceID(CFDictionaryRef s) {
   return v > 0 ? (uint64_t)v : 0;
 }
 
+// A normal desktop Space (macOS's "type" 0; a full-screen app's Space is 4).
+static int spaceIsDesktop(CFDictionaryRef s) {
+  CFNumberRef n = s && CFGetTypeID(s) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(s, CFSTR("type")) : NULL;
+  int t = -1;
+  if (n && CFGetTypeID(n) == CFNumberGetTypeID()) CFNumberGetValue(n, kCFNumberIntType, &t);
+  return t == 0;
+}
+
 // Every active display with its Spaces, as macOS lists them (with "Displays
 // have separate Spaces" off, one list ("Main") for all). 0: not known.
 static int readSpaces(DisplaySpaces *out, int cap) {
@@ -943,6 +965,7 @@ static int readSpaces(DisplaySpaces *out, int cap) {
     d->id = ids[i];
     d->bounds = CGDisplayBounds(ids[i]);
     d->current = spaceID(CFDictionaryGetValue(entry, CFSTR("Current Space")));
+    d->currentDesktop = spaceIsDesktop(CFDictionaryGetValue(entry, CFSTR("Current Space")));
     CFArrayRef sp = CFDictionaryGetValue(entry, CFSTR("Spaces"));
     if (sp && CFGetTypeID(sp) == CFArrayGetTypeID())
       for (CFIndex j = 0; j < CFArrayGetCount(sp) && d->n < MAX_SPACES; j++) {
@@ -1161,7 +1184,7 @@ static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
   return dockSwipe(at, kSwipeBegan, right) && dockSwipe(at, kSwipeEnded, right);
 }
 
-// The on-screen windows of pid (layer 0), front to back, as rectangles.
+// The on-screen windows of pid (layer 0, or the notch cover's), front to back, as rectangles.
 static int windowsOf(pid_t pid, CGRect *out, int cap) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
   if (!wins) return 0;
@@ -1171,7 +1194,7 @@ static int windowsOf(pid_t pid, CGRect *out, int cap) {
     int owner = 0, layer = -1; CGRect r;
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
-    if (owner == pid && layer == 0 && CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) &&
+    if (owner == pid && vmLayer(pid, layer) && CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) &&
         r.size.width > 100 && r.size.height > 100)
       out[k++] = r;
   }
@@ -1518,11 +1541,40 @@ static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
   return 0;
 }
 
+// The app's notch full screen: a borderless VM window covering a whole
+// display that shows a normal desktop Space (no Space of its own). A Space
+// move cannot take it away (the user saw Space switches, a bounce and Mission
+// Control, 2026-10-06), so the combo hides the VM there instead.
+static int notchCover(const DisplaySpaces *ds, int nd, const CGRect *wins, int nw) {
+  for (int i = 0; i < nd; i++) {
+    if (!ds[i].currentDesktop) continue;
+    for (int j = 0; j < nw; j++)
+      if (fabs(wins[j].origin.x - ds[i].bounds.origin.x) < 2 && fabs(wins[j].origin.y - ds[i].bounds.origin.y) < 2 &&
+          fabs(wins[j].size.width - ds[i].bounds.size.width) < 2 && fabs(wins[j].size.height - ds[i].bounds.size.height) < 2)
+        return 1;
+  }
+  return 0;
+}
+
+// The VM hidden (it stays in its notch full screen), the keyboard to the app
+// from before. The combo again in macOS, or a click on the VM in the Dock,
+// brings it back as it was.
+static void hideNotchVM(void) {
+  char name[64] = "";
+  proc_name(vmPid, name, sizeof name);
+  int hid = hideFn(vmPid);
+  notchHidden = hid ? vmPid : 0;
+  logf_("escape combo: %s is in the notch full screen (no Space of its own): hidden%s, no Space move (the combo brings it back)",
+        name, hid ? "" : " (refused!)");
+  if (hid && alive(otherPid) && frontFn() != otherPid) goTo(otherPid, otherWin, "keyboard back to", NULL);
+}
+
 // Out of the VM: the pointer's display (or, with "all", each display that
 // shows the VM) moves one Space toward the one it showed before.
 static void leaveVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+  if (notchCover(ds, nd, wins, nw)) { hideNotchVM(); return; }
   CGPoint p = pointerFn();
   nMoves = 0; leaving = 1; signRetried = 0;
   int pointerOnVM = 0;
@@ -1554,6 +1606,11 @@ static void leaveVM(void) {
 // its Space).
 static void enterVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
+  if (notchHidden && notchHidden == vmPid) {
+    notchHidden = 0;
+    goTo(vmPid, vmWin, "back into the VM (unhidden, notch full screen):", NULL);
+    return;
+  }
   CGPoint p = pointerFn();
   uint64_t vmSpace = windowSpaceFn(vmWin);
   nMoves = 0; leaving = 0;

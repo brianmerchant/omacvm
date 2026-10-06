@@ -29,6 +29,8 @@ static int nWorld;
 #define MAX_SPACE_ID 512
 static pid_t owner[MAX_SPACE_ID];        // the app that is in front when this Space shows
 static CGWindowID winOn[MAX_SPACE_ID];   // its window there
+static int desktopSpace[MAX_SPACE_ID];   // 1: a normal desktop Space (the notch cover lies on one); 0: a full-screen Space
+static pid_t hiddenPid;                  // the app hidden now (its windows are off screen)
 static pid_t front, finder;
 static CGPoint pointer;
 static int worldSign = 1;     // 1: the Dock swipes as the helper thinks; -1: the other way
@@ -53,6 +55,7 @@ static int fakeSpaces(DisplaySpaces *out, int cap) {
   for (int i = 0; i < nWorld && k < cap; i++, k++) {
     memset(&out[k], 0, sizeof out[k]);
     out[k].id = world[i].id; out[k].bounds = world[i].b; out[k].current = world[i].cur; out[k].n = world[i].n;
+    out[k].currentDesktop = world[i].cur < MAX_SPACE_ID && desktopSpace[world[i].cur];
     memcpy(out[k].spaces, world[i].sp, sizeof world[i].sp);
   }
   return k;
@@ -110,6 +113,7 @@ static CGPoint fakePointer(void) { return pointer; }
 // The VM's on-screen windows: full screen on each display that shows its Space.
 static int fakeVMWindows(pid_t pid, CGRect *out, int cap) {
   int k = 0;
+  if (pid == hiddenPid) return 0;
   for (int i = 0; i < nWorld && k < cap; i++) if (owner[world[i].cur] == pid) out[k++] = world[i].b;
   return k;
 }
@@ -126,11 +130,12 @@ static int fakeActivate(pid_t pid, CGWindowID win) {
   wentTo = pid; wentWin = win; went++;
   if (refuse) return 0;
   front = pid;
+  if (pid == hiddenPid) hiddenPid = 0;   // activation unhides
   uint64_t s = fakeWindowSpace(win);
   for (int i = 0; s && i < nWorld; i++) if (idx(&world[i], s) >= 0) world[i].cur = s;
   return 1;
 }
-static int fakeHide(pid_t pid) { hidden++; if (front == pid) front = finder; return 1; }
+static int fakeHide(pid_t pid) { hidden++; hiddenPid = pid; if (front == pid) front = finder; return 1; }
 static pid_t fakeFront(void) { return front; }
 static pid_t fakeFinder(void) { return finder; }
 static int fakeAll(void) { return all; }
@@ -662,6 +667,76 @@ int main(void) {
   end(winvm);
   check(press(K, HID, 0) == 0 || wentTo != winvm, "the VM window's VM has quit: the combo does not go there");
   end(launcher); launcher = 0;
+
+  // ---- The app's notch full screen (a borderless window over the MacBook's
+  // display, on its desktop Space) + native full screen on the external:
+  // the combo hides the VM, no Space moves, no Dock swipe, no Mission
+  // Control; again in macOS (or the Dock) it comes back unhidden ----
+  {
+    const uint64_t mbp[] = { 451, 452 }, ext[] = { 461, 462 };
+    layout(2, mbp, 2, ext, 2);
+    memset(desktopSpace, 0, sizeof desktopSpace);
+    desktopSpace[451] = desktopSpace[452] = desktopSpace[461] = 1;   // 462: the VM's full-screen Space on the external
+    owner[451] = vm; winOn[451] = 24;   // the notch cover lies on the MacBook's Desktop 1
+    owner[452] = safari; winOn[452] = 33;
+    owner[461] = terminal; winOn[461] = 11; owner[462] = vm; winOn[462] = 23;
+    hiddenPid = 0;
+    front = terminal; world[0].cur = 451; world[1].cur = 461;
+    frontChanged(terminal, -1, 0, "", 11, 1);
+    world[1].cur = 462; front = vm; pointer = CGPointMake(1000, 700);   // on the MacBook
+    frontChanged(vm, NET_APP, 1, "Omarchy", 24, 0); sent();
+    check(capturing, "notch: VM in the notch full screen (MacBook) + native full screen (external): captured");
+    check(press(K, HID, 0) == 1 && !strcmp(sent(), "S esc ctrl-opt|"), "notch: combo in the VM: eaten, Omarchy lets go");
+    check(hidden == 1 && hiddenPid == vm, "notch: ... the VM is hidden");
+    check(!spaceKeys && !swipes && !mcKeys && !mcApp && world[0].cur == 451 && world[1].cur == 462,
+          "notch: ... no Space shortcut, no Dock swipe, no Mission Control, no display changed its Space");
+    check(went == 1 && wentTo == terminal && front == terminal, "notch: ... the keyboard back to the app from before (Terminal)");
+    frontChanged(terminal, -1, 0, "", 11, 1);
+    check(press(K, HID, 0) == 1 && went == 1 && wentTo == vm && front == vm && !hiddenPid,
+          "notch: the combo in macOS: the VM back, unhidden, with the keyboard");
+    check(!spaceKeys && !swipes && !mcKeys && !mcApp && world[0].cur == 451, "notch: ... still no Space move");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 24, 0);
+    check(capturing && !strcmp(sent(), "S on|"), "notch: ... and captured again");
+    // The pointer on the external (the VM's native full screen there): hidden as well, nothing moves.
+    pointer = CGPointMake(3000, 600);
+    check(press(K, HID, 0) == 1 && hidden == 1 && !spaceKeys && !swipes && !mcKeys && !mcApp && world[1].cur == 462,
+          "notch: pointer on the external: hidden too, no Space move");
+    sent(); frontChanged(terminal, -1, 0, "", 11, 1);
+    // Back with a click on the VM in the Dock (macOS unhides it): in front, captured; the combo hides it again.
+    hiddenPid = 0; front = vm;
+    frontChanged(vm, NET_APP, 1, "Omarchy", 24, 0);
+    check(capturing && !strcmp(sent(), "S on|"), "notch: back from the Dock: captured");
+    check(press(K, HID, 0) == 1 && hidden == 1 && hiddenPid == vm && !spaceKeys && front == terminal,
+          "notch: ... the combo hides it again");
+    sent(); frontChanged(terminal, -1, 0, "", 11, 1);
+    press(K, HID, 0); frontChanged(vm, NET_APP, 1, "Omarchy", 24, 0); sent();
+    // Native full screen only (the MacBook shows a desktop Space with Terminal, the VM's own Space on the
+    // external): the Space move as before, never hidden.
+    owner[451] = terminal; winOn[451] = 11;
+    world[0].cur = 451; world[1].cur = 462; front = vm; pointer = CGPointMake(3000, 600);
+    frontChanged(terminal, -1, 0, "", 11, 1); front = vm;
+    frontChanged(vm, NET_APP, 1, "Omarchy", 23, 0); sent();
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 461 && !hidden && !mcKeys,
+          "native full screen next to a desktop Space: the Space move as before, not hidden");
+    sent(); frontChanged(terminal, -1, 0, "", 11, 1);
+    check(press(K, HID, 0) == 1 && spaceKeys == 1 && world[1].cur == 462 && front == vm && !hidden, "... and back in by a Space move");
+    frontChanged(vm, NET_APP, 1, "Omarchy", 23, 0); sent();
+    // The check on its own: only a window covering the whole display on a desktop Space.
+    DisplaySpaces nd = { .bounds = CGRectMake(0, 0, 2056, 1329), .currentDesktop = 1 };
+    CGRect cover = CGRectMake(0, 0, 2056, 1329), zoomed = CGRectMake(0, 38, 2056, 1291);
+    check(notchCover(&nd, 1, &cover, 1) && !notchCover(&nd, 1, &zoomed, 1),
+          "notch check: the whole display yes, a zoomed window below the menu bar no");
+    nd.currentDesktop = 0;
+    check(!notchCover(&nd, 1, &cover, 1), "notch check: a full-screen Space (or not known): no");
+    // The notch cover above the menu bar while it has the keys (layer 26): still the VM's window, but only OmacVM's QEMU.
+    check(vmLayer(vm, 0) && vmLayer(vm, NOTCH_COVER_LAYER) && !vmLayer(vm, 25) && !vmLayer(vm, 27),
+          "notch cover layer: an OmacVM VM's window at 0 or 26 counts, not 25 or 27");
+    launcher = child();
+    check(vmLayer(launcher, 0) && !vmLayer(launcher, NOTCH_COVER_LAYER), "... another VM app's window at 26 (Parallels, UTM: invisible) does not");
+    end(launcher); launcher = 0;
+    memset(desktopSpace, 0, sizeof desktopSpace); hiddenPid = 0;
+    frontChanged(terminal, -1, 0, "", 11, 1); front = terminal; sent(); escaped = 0;
+  }
 
   // Which apps the combo goes back to.
   check(isOther(terminal, -1, "Terminal", 1), "back to: a regular app");
