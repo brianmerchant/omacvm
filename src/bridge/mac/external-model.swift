@@ -6,10 +6,28 @@ import CoreGraphics
 import Foundation
 
 enum BrightnessStep {
-  /// macOS's 16 steps on 0...1; fine (Option, Shift+Option) = 64.
-  static func next(_ v: Double, up: Bool, fine: Bool) -> Double {
-    let steps = fine ? 64.0 : 16.0
-    return max(0, min(1, ((v * steps).rounded() + (up ? 1 : -1)) / steps))
+  /// Steps on 0...1 for the display brightness keys while a VM is in front
+  /// (the built-in display, Apple displays, DDC/CI). macOS uses 16; the user
+  /// found that too rough (2026-10-06), so 32 by default. config.json
+  /// "brightness_steps" changes it (8...100, read again without a restart).
+  static let defaultSteps = 32
+  static func steps(_ n: Int?) -> Int { max(8, min(100, n ?? defaultSteps)) }
+  /// Option (Shift+Option): at least macOS's quarter steps (64), twice the
+  /// normal ones when they are finer already, at most 100.
+  static func fine(_ steps: Int) -> Int { min(100, max(64, 2 * steps)) }
+
+  /// One step up or down on the grid of `steps`, clamped to 0...1. With the
+  /// display's raw maximum (DDC/CI) the step goes on until the raw value moves,
+  /// so a coarse monitor (max 10, 50) never takes a press without a change.
+  static func next(_ v: Double, up: Bool, steps n: Int, max m: Int? = nil) -> Double {
+    let s = Double(n)
+    var grid = (max(0, min(1, v)) * s).rounded()
+    for _ in 0..<n {
+      grid = max(0, min(s, grid + (up ? 1 : -1)))
+      let to = grid / s
+      guard let m, m > 0, raw(to, max: m) == raw(v, max: m), grid > 0, grid < s else { return to }
+    }
+    return grid / s
   }
 
   /// A level 0...1 as the monitor's raw value 0...max, and back.
@@ -84,6 +102,21 @@ enum WritePace {
   static let vmGap = 0.25
   static func delay(sinceTransfer: Double, sinceWrite: Double, fromVM: Bool) -> Double {
     max(0, gap - sinceTransfer, fromVM ? vmGap - sinceWrite : 0)
+  }
+}
+
+/// A key's DDC/CI write in parts: a jump bigger than two steps (presses
+/// coalesced while the monitor was busy, a held key) goes out as one write
+/// per transfer gap of at most two steps each, so the level ramps instead of
+/// jumping. Single presses are one write. The latest target always wins.
+/// The VM's writes are not ramped (one write per 250 ms, see WritePace).
+enum Ramp {
+  static let stepsPerWrite = 2
+  static func limit(max m: Int, steps: Int) -> Int { Swift.max(1, Int((Double(stepsPerWrite * m) / Double(steps)).rounded())) }
+  /// The next raw value on the way from `from` (nil: unknown, so straight) to `to`.
+  static func next(from: Int?, to: Int, limit: Int) -> Int {
+    guard let from else { return to }
+    return from + Swift.max(-limit, Swift.min(limit, to - from))
   }
 }
 

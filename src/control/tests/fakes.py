@@ -255,4 +255,5 @@ def vm_env(tmp: str, mac_port: int, check_sock: str, extra: str = "") -> dict:
         f.write("2.9.0\n")
     return {"OMACVM_SHARE": share, "OMACVM_ENV": env_file, "OMACVM_INSTALLED": installed,
             "OMACVM_CHECK_SOCKET": check_sock, "OMACVM_BRIDGE_URL": f"http://127.0.0.1:{mac_port}",
-            "OMACVM_BRIDGE_TOKEN_FILE": token, "OMACVM_VM_KEY_FILE": vm_key, "XDG_CACHE_HOME": os.path.join(tmp, "cache")}
+            "OMACVM_BRIDGE_TOKEN_FILE": token, "OMACVM_VM_KEY_FILE": vm_key, "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
+            "OMACVM_SDDM_ROOT": os.path.join(tmp, "sddm-root")}   # no SDDM there unless a test makes it

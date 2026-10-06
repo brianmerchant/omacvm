@@ -90,6 +90,29 @@ defaults delete "$OMACVM_APP_ID" >/dev/null 2>&1
 expect "a drive that is not connected" "OmacVM-no-such-drive" "$(app_missing_drive /Volumes/OmacVM-no-such-drive/VMs)"
 app_missing_drive "$H/OmacVM" >/dev/null; expect "the home folder is no drive" 1 $?
 
+# The old place as the app made it on disk: ~/Library/Application Support/omacvm
+# (lowercase). The app starts QEMU with that spelling; the command spells it
+# OmacVM. A running VM there is found all the same, and only its own disk counts.
+fresh; LOW="$H/Library/Application Support/omacvm/VMs"; vm "$LOW/Old,VM"
+if [[ -d $OLD ]]; then   # a drive that ignores case (every Mac's default)
+  d=$(HOME=$H app_dir "Old,VM")
+  expect "lowercase old place: found under the command's spelling" "$OLD/Old,VM" "$d"
+  bash -c 'exec -a "qemu-system-aarch64 -drive if=none,file=$1/disk.img,format=raw" sleep 30' _ "$LOW/Old,,VM" &
+  q=$!; sleep 0.3
+  expect "lowercase old place: its running QEMU is found" "$q" "$(app_pid_dir "$d")"
+  expect "lowercase old place: listed as running" "Old,VM	app	running" "$(HOME=$H app_list)"
+  vm "$LOW/Old,VM2"
+  expect "lowercase old place: another VM's disk does not count" "" "$(app_pid_dir "$OLD/Old,VM2")"
+  kill "$q" 2>/dev/null; wait "$q" 2>/dev/null
+  expect "lowercase old place: stopped once QEMU is gone" "" "$(app_pid_dir "$d")"
+  defaults write "$OMACVM_APP_ID" otherVMsRoots -array "$LOW"
+  expect "lowercase old place from the app: listed once" "$H/OmacVM|$LOW|" "$(HOME=$H app_vms_roots | tr '\n' '|')"
+  expect "lowercase old place from the app: each VM once" "Old,VM|Old,VM2|" "$(names)"
+  defaults delete "$OMACVM_APP_ID" >/dev/null 2>&1
+else
+  echo "skip lowercase old place: this drive tells cases apart"
+fi
+
 # The app: ~/Applications first, then /Applications; new installs in ~/Applications.
 fakeapp() {   # DIR/NAME.app with the app's bundle id
   mkdir -p "$1/Contents/Resources/scripts"; : > "$1/Contents/Resources/scripts/create-vm.sh"

@@ -92,7 +92,7 @@ func controlCLI() -> Result<String, PolicyError> {
   let raw = env["OMACVM_CONTROL_CLI"] ?? (try? String(contentsOfFile: omacvmSupport + "/cli", encoding: .utf8)) ?? ""
   let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
   guard path.hasPrefix("/"), !path.contains("/../") else {
-    return .failure(PolicyError(503, "no-cli", "the Mac's OmacVM is not set up for the control centre: omacvm update on the Mac"))
+    return .failure(PolicyError(503, "no-cli", "the Mac's OmacVM is not set up for the control centre: open OmacVM.app once (or omacvm update on the Mac)"))
   }
   let root = (path as NSString).deletingLastPathComponent
   for p in [path, root, root + "/src", root + "/src/cmd", root + "/src/lib"] {
@@ -457,7 +457,9 @@ final class Control {
     DispatchQueue.global().async(group: g) {
       if let (_, out) = runCLI([cli, "features", "--vm", vm.name, "--vm-type", vm.type, "--json"], timeout: 60),
          let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any], let f = o["features"] as? [[String: Any]] {
-        feats = f.map { ["name": $0["name"] ?? "", "on": $0["on"] ?? false, "available": $0["available"] ?? true, "reason": $0["reason"] ?? ""] }
+        // fixed: what OmacVM's record had wrong about this feature, now fixed (omacvm features --json).
+        feats = f.map { ["name": $0["name"] ?? "", "on": $0["on"] ?? false, "available": $0["available"] ?? true, "reason": $0["reason"] ?? "",
+                         "fixed": $0["fixed"] ?? ""] }
       }
     }
     DispatchQueue.global().async(group: g) {
