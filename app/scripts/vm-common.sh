@@ -35,8 +35,9 @@ fi
 # The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Omanotch, Gestures, Bridge.
 # OMACVM_HOST_PORTS= (empty): none (image builds and test VMs leave the Mac's helpers alone).
 # The test identity (OMACVM_TEST_IDENTITY=1, from "OmacVM Test"): its own Gestures and
-# Bridge on 47930/47931 (libslirp maps the guest's ports), never Omanotch.
-if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then HOST_PORTS=${OMACVM_HOST_PORTS-47830>47930,47831>47931}
+# Bridge on 47930/47931 (libslirp maps the guest's ports); Omanotch on 47911, where
+# only a test Omanotch listens, never the installed one.
+if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then HOST_PORTS=${OMACVM_HOST_PORTS-47811>47911,47830>47930,47831>47931}
 else HOST_PORTS=${OMACVM_HOST_PORTS-47811,47830,47831}; fi
 source "$OMACVM_SRC/lib/proxy.sh"
 proxy_none

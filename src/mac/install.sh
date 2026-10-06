@@ -60,7 +60,7 @@ if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   rc=0
   (( BRIDGE )) && { test_helper "OmacVM Test Bridge" omacvm-test-bridge.log || rc=5; }
   (( GESTURES != -1 )) && { test_helper "OmacVM Test Gestures" omacvm-test-gestures.log || rc=5; }
-  (( CLIP || NOTCH )) && echo "==> test identity: no test clipboard helper or Omanotch (left out)"
+  (( CLIP || NOTCH )) && echo "==> test identity: no test clipboard helper or Omanotch (left out; a test Omanotch listens on 47911: src/omanotch/README.md)"
   exit "$rc"
 fi
 STAMPS=~/Library/Application\ Support/omacvm/installed
