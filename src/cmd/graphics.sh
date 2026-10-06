@@ -34,15 +34,16 @@ done
 d=$(app_dir "$VM") || usage "no OmacVM.app VM named '$VM' (omacvm vms lists them)"
 
 CHANGED=false; NOTE=""
-# A choice made by hand tries Vulkan again after the app fell back (as the app does).
-if [[ -n $SET ]] && graphics_fallback "$d" >/dev/null; then
-  rm -f "$d/graphics-fallback"; CHANGED=true; NOTE="Vulkan is tried again from the VM's next start"
-fi
 if [[ -n $SET && $SET != "$(graphics_choice "$d")" ]]; then
   printf '%s\n' "$SET" > "$d/graphics.new" && mv -f "$d/graphics.new" "$d/graphics" ||
     die "could not write $d/graphics"
   CHANGED=true
   NOTE="from the VM's next start"
+fi
+# A choice made by hand clears the app's Vulkan fallback (as the app does).
+if [[ -n $SET ]] && graphics_fallback "$d" >/dev/null; then
+  rm -f "$d/graphics-fallback"; CHANGED=true
+  if [[ $(graphics_wants "$d") == vulkan ]]; then NOTE="Vulkan is tried again from the VM's next start"; fi
 fi
 # A running VM that gets Vulkan builds its Venus driver now (also when the
 # setting stays: the control centre's repair).

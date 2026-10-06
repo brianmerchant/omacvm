@@ -12,6 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var runner: Runner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // M1/M2: read QEMU's binary for the small PCI window now, off the
+        // main thread, so the window never waits for it (Runner.graphicsPlan).
+        if (Mac.vmAddressBits ?? Graphics.highPCIWindowBits) < Graphics.highPCIWindowBits {
+            DispatchQueue.global(qos: .utility).async { _ = RuntimeQEMU.takesSmallHighWindow }
+        }
         // Scripted install: --install-as NAME [--into FOLDER]
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--install-as"), i + 1 < args.count {
@@ -248,6 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.state.message = fb.keep
                             ? "\(Graphics.didNotStart) (\(fb.why)). \"Try Vulkan again\" under Graphics tries it once more."
                             : "\(Graphics.didNotStart) for this start (\(fb.why)). The next start tries Vulkan again."
+                        self.tellFallback(fb.keep
+                            ? "\(fb.why). \(Product.name) started the VM again on OpenGL and keeps OpenGL until you click \"Try Vulkan again\" under Graphics."
+                            : "\(fb.why). \(Product.name) started the VM again on OpenGL for this start; the next start tries Vulkan again.")
                     }
                     return
                 }
@@ -284,6 +292,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             state.message = "Could not start the VM: \(error.localizedDescription)"
             showWindow()
+        }
+    }
+
+    /// The app's window is hidden while the VM runs: say why the VM just
+    /// started again, then give the VM its window back.
+    private func tellFallback(_ text: String) {
+        if ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil { return }
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = Graphics.didNotStartOnMac
+            alert.informativeText = text
+            alert.addButton(withTitle: "OK")
+            NSApp.activate()
+            alert.runModal()
+            Self.qemuApp?.activate()
         }
     }
 

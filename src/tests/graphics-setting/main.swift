@@ -38,8 +38,8 @@ if args.count > 1 && args[1] == "write" {
 }
 if args.count > 1 && args[1] == "watch" {
     // watch: VenusStartWatch scenarios, one line each "name verdict".
-    func run(_ name: String, _ polls: [VenusStartWatch.Poll], dt: Double = 3) {
-        var w = VenusStartWatch()
+    func run(_ name: String, _ polls: [VenusStartWatch.Poll], dt: Double = 3, small: Bool = false) {
+        var w = VenusStartWatch(smallAddressSpace: small)
         var v = VenusStartWatch.Verdict.wait
         for p in polls {
             v = w.poll(p, seconds: dt)
@@ -82,8 +82,13 @@ if args.count > 1 && args[1] == "watch" {
     // QMP first answers after 30 s (a slow start): 25 s from then, not from QEMU's start.
     run("late-qmp", Array(repeating: silent, count: 10) + Array(repeating: early, count: 8))
     run("late-qmp-hang", Array(repeating: silent, count: 10) + Array(repeating: early, count: 12))
-    // The window's no-picture line, after the firmware ran: shut down first.
-    run("no-picture", [ok, ok, VenusStartWatch.Poll(answered: true, pciMapped: true, consoleOutput: true, noPicture: true)])
+    // The window's no-picture line, after the firmware ran: on M1/M2 shut
+    // down first; on M3 and newer only a note (a slow boot is no hang).
+    let noPic = VenusStartWatch.Poll(answered: true, pciMapped: true, consoleOutput: true, noPicture: true)
+    run("no-picture", [ok, ok, noPic], small: true)
+    run("no-picture-m4", [ok, ok, noPic])
+    // ... before the firmware ran (QMP never reachable): OpenGL on every Mac.
+    run("no-picture-early", [silent, silent, VenusStartWatch.Poll(answered: false, noPicture: true)])
     // Only the console says the firmware ran (info pci not asked).
     run("console-only", Array(repeating: VenusStartWatch.Poll(answered: true, consoleOutput: true), count: 12))
     var w = VenusStartWatch()
