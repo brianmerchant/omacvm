@@ -191,6 +191,9 @@ jobs:
       - name: OmacVM.app's signed Mac helpers are used only for the same sources
         run: src/tests/prebuilt-helpers.sh
 
+      - name: A Mac without Xcode's Command Line Tools (OmacVM.app's route runs none of macOS's stubs)
+        run: src/tests/no-clt.sh
+
       - name: Escape combo setting and where a VM window opens
         run: src/tests/app-escape-window.sh
 
