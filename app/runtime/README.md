@@ -158,6 +158,15 @@ commit 82927e9. Changes here:
   resource is refused only when macOS's memory pressure says the Mac is
   short; a status file (`OMACVM_GPU_MEMORY_STATUS`) for the app and
   `omacvm check` (ADR 0034). Checked by `Tests/virgl/test-resource-budget.c`
+- `patches/virgl-gpu-guard-desktop-reserve.patch`: the guard's last part (a
+  sixteenth of the Mac's memory, 512 MB to 2 GB) is kept for the VM's
+  desktop (Hyprland, quickshell; `OMACVM_GPU_MEMORY_DESKTOP`,
+  `OMACVM_GPU_MEMORY_RESERVE_MB`). A resource past the apps' share, or one
+  macOS has no room for, is made "for the desktop only": the first GL
+  context that attaches it keeps it if it is the desktop's, else that
+  context is lost. The status file says why each context was lost (ADR 0034).
+  Checked by `Tests/virgl/test-gpu-guard-policy.sh` (CI) and
+  `Tests/virgl/test-resource-budget.c`
 - `patches/qemu-virgl-2d-resource-scanout.patch`: QEMU makes 2D resources
   (the guest's dumb buffers: console, plymouth, dumb screens and cursors)
   with the SCANOUT bind, so the budget's screen reserve covers them; the

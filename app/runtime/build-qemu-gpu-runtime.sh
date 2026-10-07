@@ -1010,7 +1010,8 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_draw_error_patch"
 verify_file_sha "Unused first vertex input" "$virgl_vertex_unused_patch" "$virgl_vertex_unused_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_unused_patch"
 # OmacVM: guest resources have a memory budget against a runaway guest (OMACVM_GPU_MEMORY_MB, default
-# three quarters of the Mac's memory); below it virgl-darwin-memory-pressure.patch asks macOS.
+# three quarters of the Mac's memory); below it virgl-darwin-memory-pressure.patch asks macOS, and
+# virgl-gpu-guard-desktop-reserve.patch keeps its last part for the VM's desktop.
 verify_file_sha "Resource memory budget" "$virgl_memory_budget_patch" "$virgl_memory_budget_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_memory_budget_patch"
 # OmacVM: QEMU's resource and transfer commands are flushed (Apple's GL keeps unflushed texture memory).
@@ -1067,6 +1068,10 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait-busy.patch"
 # OmacVM GPU: guest GPU memory follows the Mac's memory pressure; status file for the app.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-memory-pressure.patch"
+# OmacVM GPU: the budget's last part is kept for the VM's desktop (Hyprland, the shell): the app
+# that fills the memory loses its GPU context, not the compositor. Its rules on their own first.
+"$native_dir/Tests/virgl/test-gpu-guard-policy.sh"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-gpu-guard-desktop-reserve.patch"
 # OmacVM Venus: MoltenVK cannot compile zero-initialized workgroup memory.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
 # OmacVM: a compositor's dma-buf import (a Vulkan window) no longer ends its context on macOS OpenGL.
