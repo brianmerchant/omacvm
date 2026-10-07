@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 706" width="1000" height="706" role="img" aria-labelledby="t d">
+<title id="t">GPU speed of one Omarchy VM in each OmacVM.app release, against the oldest release measured</title>
+<desc id="d">OpenGL in the VM (glmark2, 3 s per scene, score): 2.7.0 1.00x (764), 2.8.0 1.00x (764), 2.9.1 1.93x (1,472), 3.0.0 2.39x (1,827), 3.0.3 2.38x (1,817). Browser graphics (WebGL Aquarium, 30,000 fish, fps): 2.7.0 1.00x (17.4 fps), 2.8.0 0.86x (15.0 fps), 2.9.1 0.87x (15.1 fps), 3.0.0 0.63x (11.0 fps), 3.0.3 1.07x (18.7 fps). Browser overall (Basemark Web 3.0, one run each, score): 2.7.0 1.00x (1,469), 2.8.0 0.93x (1,359), 2.9.1 0.88x (1,286), 3.0.0 0.90x (1,326), 3.0.3 1.05x (1,536). Vulkan in the VM (vkmark, Graphics set to Vulkan, score): 2.7.0 no Vulkan setting, 2.8.0 no Vulkan setting, 2.9.1 not tested: only a hidden Vulkan flag, 3.0.0 skipped: no picture at start on M1/M2 (#161, fixed in 3.0.1), 3.0.3 821, the only version measured. Each test as a multiple of its oldest version measured (1x); median of 3 runs unless noted.</desc>
+<defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><rect x="20" y="20" width="2" height="2" fill="#26233a"/></pattern>
+<pattern id="na" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="8" fill="#6e6a86" fill-opacity="0.35"/></pattern>
+</defs>
+<rect width="1000" height="706" fill="#191724"/><rect width="1000" height="706" fill="url(#dots)"/>
+<text x="500.0" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" fill="#e0def4" font-weight="600" text-anchor="middle">How much faster did the GPU get?</text>
+<text x="500.0" y="56" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#908caa" text-anchor="middle">MacBook Air M2 8 GB · macOS 26.6.2 · one VM, 4 CPUs, 4 GB · Google Chrome 155 · October 2026</text>
+<rect x="177" y="69" width="12" height="12" rx="3" fill="#ebbcba"/>
+<text x="195" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4" font-weight="600">OmacVM.app 3.0.3</text>
+<rect x="324" y="69" width="12" height="12" rx="3" fill="#908caa"/>
+<text x="342" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">earlier versions</text>
+<line x1="470" y1="67" x2="470" y2="83" stroke="#e0def4" stroke-opacity="0.6" stroke-dasharray="3 3"/>
+<text x="482" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">1x = oldest version measured</text>
+<path d="M682 72v6M682 75h12M694 72v6" stroke="#e0def4" stroke-opacity="0.8" fill="none"/>
+<text x="700" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">lowest to highest run</text>
+<text x="500.0" y="104" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4" text-anchor="middle">Longer is faster · the number on each bar is the median</text>
+<line x1="475.2" y1="122" x2="475.2" y2="650" stroke="#e0def4" stroke-opacity="0.45" stroke-dasharray="3 3"/>
+<rect x="24" y="120" width="952" height="126" rx="8" fill="#e0def4" fill-opacity="0.04"/>
+<text x="40" y="179.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#e0def4" font-weight="600">OpenGL in the VM</text>
+<text x="40" y="197.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">glmark2, 3 s per scene, score</text>
+<text x="288" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.7.0</text>
+<rect x="300" y="132.0" width="175.2" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M468.6 135.0v8M468.6 139.0H475.2M475.2 135.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="483.2" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">1.00x</text>
+<text x="531.5" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">764</text>
+<text x="288" y="165.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.8.0</text>
+<rect x="300" y="154.0" width="175.2" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M474.3 157.0v8M474.3 161.0H501.2M501.2 157.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="509.2" y="165.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">1.00x</text>
+<text x="557.5" y="165.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">764</text>
+<text x="288" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.9.1</text>
+<rect x="300" y="176.0" width="337.7" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M623.0 179.0v8M623.0 183.0H644.3M644.3 179.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="652.3" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">1.93x</text>
+<text x="700.6" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,472</text>
+<text x="288" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">3.0.0</text>
+<rect x="300" y="198.0" width="419.1" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M717.9 201.0v8M717.9 205.0H720.0M720.0 201.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="728.0" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">2.39x</text>
+<text x="776.3" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,827</text>
+<text x="288" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" font-weight="600" text-anchor="end">3.0.3</text>
+<rect x="300" y="220.0" width="416.8" height="14" rx="4" fill="#ebbcba"/>
+<path d="M716.1 223.0v8M716.1 227.0H719.5M719.5 223.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="727.5" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">2.38x</text>
+<text x="775.8" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,817</text>
+<text x="40" y="307.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Browser graphics</text>
+<text x="40" y="325.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">WebGL Aquarium, 30,000 fish,</text>
+<text x="40" y="340.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">fps</text>
+<text x="288" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.7.0</text>
+<rect x="300" y="268.0" width="175.2" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M431.9 271.0v8M431.9 275.0H480.3M480.3 271.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="488.3" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">1.00x</text>
+<text x="536.6" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">17.4 fps</text>
+<text x="288" y="301.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.8.0</text>
+<rect x="300" y="290.0" width="151.1" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M410.8 293.0v8M410.8 297.0H453.1M453.1 293.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="461.1" y="301.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">0.86x</text>
+<text x="509.4" y="301.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">15.0 fps</text>
+<text x="288" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.9.1</text>
+<rect x="300" y="312.0" width="152.1" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<text x="460.1" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">0.87x</text>
+<text x="508.4" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">15.1 fps</text>
+<text x="288" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">3.0.0</text>
+<rect x="300" y="334.0" width="110.8" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<path d="M410.8 337.0v8M410.8 341.0H452.1M452.1 337.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="460.1" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">0.63x</text>
+<text x="508.4" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">11.0 fps</text>
+<text x="288" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" font-weight="600" text-anchor="end">3.0.3</text>
+<rect x="300" y="356.0" width="188.3" height="14" rx="4" fill="#ebbcba"/>
+<path d="M487.3 359.0v8M487.3 363.0H492.4M492.4 359.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="500.4" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">1.07x</text>
+<text x="548.7" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">18.7 fps</text>
+<text x="40" y="443.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Browser overall</text>
+<text x="40" y="461.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">Basemark Web 3.0, one run</text>
+<text x="40" y="476.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">each, score</text>
+<text x="288" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.7.0</text>
+<rect x="300" y="404.0" width="175.2" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<text x="483.2" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">1.00x</text>
+<text x="531.5" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,469</text>
+<text x="288" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.8.0</text>
+<rect x="300" y="426.0" width="162.1" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<text x="470.1" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">0.93x</text>
+<text x="518.4" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,359</text>
+<text x="288" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.9.1</text>
+<rect x="300" y="448.0" width="153.4" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<text x="461.4" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">0.88x</text>
+<text x="509.7" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,286</text>
+<text x="288" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">3.0.0</text>
+<rect x="300" y="470.0" width="158.2" height="14" rx="4" fill="#908caa" fill-opacity="0.55"/>
+<text x="466.2" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">0.90x</text>
+<text x="514.5" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,326</text>
+<text x="288" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" font-weight="600" text-anchor="end">3.0.3</text>
+<rect x="300" y="492.0" width="183.2" height="14" rx="4" fill="#ebbcba"/>
+<text x="491.2" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">1.05x</text>
+<text x="539.5" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1,536</text>
+<text x="40" y="579.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Vulkan in the VM</text>
+<text x="40" y="597.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">vkmark, Graphics set to Vulkan,</text>
+<text x="40" y="612.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">score</text>
+<text x="288" y="551.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.7.0</text>
+<rect x="300" y="540.0" width="175.2" height="14" rx="4" fill="url(#na)" stroke="#6e6a86" stroke-opacity="0.5" stroke-dasharray="4 3"/>
+<text x="310" y="551.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">no Vulkan setting</text>
+<text x="288" y="573.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.8.0</text>
+<rect x="300" y="562.0" width="175.2" height="14" rx="4" fill="url(#na)" stroke="#6e6a86" stroke-opacity="0.5" stroke-dasharray="4 3"/>
+<text x="310" y="573.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">no Vulkan setting</text>
+<text x="288" y="595.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">2.9.1</text>
+<rect x="300" y="584.0" width="175.2" height="14" rx="4" fill="url(#na)" stroke="#6e6a86" stroke-opacity="0.5" stroke-dasharray="4 3"/>
+<text x="310" y="595.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">not tested: only a hidden Vulkan flag</text>
+<text x="288" y="617.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" text-anchor="end">3.0.0</text>
+<rect x="300" y="606.0" width="175.2" height="14" rx="4" fill="url(#na)" stroke="#6e6a86" stroke-opacity="0.5" stroke-dasharray="4 3"/>
+<text x="310" y="617.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">skipped: no picture at start on M1/M2 (#161, fixed in 3.0.1)</text>
+<text x="288" y="639.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" font-weight="600" text-anchor="end">3.0.3</text>
+<rect x="300" y="628.0" width="175.2" height="14" rx="4" fill="#ebbcba"/>
+<path d="M475.0 631.0v8M475.0 635.0H476.7M476.7 631.0v8" stroke="#e0def4" stroke-opacity="0.8" stroke-width="1.5" fill="none"/>
+<text x="484.7" y="639.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">821</text>
+<text x="518.9" y="639.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">the only version measured</text>
+<text x="500.0" y="676" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">Same MacBook Air and VM for every version; only the app changes. Graphics OpenGL (what Automatic picks in each), vkmark with Vulkan.</text>
+<text x="500.0" y="692" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">Median of 3 boots; the thin line runs from the lowest to the highest run. 3.0.0's Aquarium: the slowdown #173 fixed in 3.0.2.</text>
+</svg>
