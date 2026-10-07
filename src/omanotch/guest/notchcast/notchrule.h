@@ -28,6 +28,35 @@ static inline void notch_rule_lua(char *out, size_t size, const char *output, in
              output, w, h, sx, sy, ss);
 }
 
+// When the keeper sends NOTCH's rule (hyprctl eval) again. A new rule goes
+// at once. The same rule as last time goes at once too when NOTCH was seen
+// as that rule wants since it was sent: something else moved NOTCH after it
+// took (a config reload with notchbar.lua's older rule, another eval), and
+// waiting would leave the strip wrong for up to 30 s. Never seen so (Hyprland
+// keeps refusing or changing it): again only after 30 s, so Hyprland is not
+// asked every round.
+#define NOTCH_RULE_RETRY_MS 30000
+typedef struct {
+    char sent[256];  // the rule sent last
+    double sent_ms;  // when
+    int held;        // NOTCH was seen as `sent` wants since then
+} NotchRuleState;
+
+static inline int notch_rule_due(const NotchRuleState *st, const char *lua, double now_ms) {
+    return strcmp(lua, st->sent) || st->held || now_ms - st->sent_ms > NOTCH_RULE_RETRY_MS;
+}
+
+static inline void notch_rule_sent(NotchRuleState *st, const char *lua, double now_ms) {
+    snprintf(st->sent, sizeof st->sent, "%s", lua);
+    st->sent_ms = now_ms;
+    st->held = 0;
+}
+
+// NOTCH is as `lua` wants (the keeper's look found nothing to change).
+static inline void notch_rule_seen(NotchRuleState *st, const char *lua) {
+    if (!strcmp(lua, st->sent)) st->held = 1;
+}
+
 // The tallest layer surface of namespace `ns` on the output `output` in a
 // `j/layers` reply, in logical px; 0: none there, or none with a size yet.
 // The search is limited to that output's own JSON object (brace-matched).

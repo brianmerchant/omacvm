@@ -21,6 +21,11 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
+- Omanotch: when something moved the hidden NOTCH output after it was in
+  place (a Hyprland config reload with an older rule, another `hyprctl
+  eval`), the strip beside the notch could stay wrong for up to 30 s.
+  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
+  never takes is still sent again only every 30 s.
 
 ## 3.0.3
 

@@ -78,6 +78,24 @@ int main(void) {
     geom_line(buf, sizeof buf, "646", "825", "", "");
     CHECK(!strcmp(buf, "646 825 0 0\n"), "geom line, strip and bar not known");
 
+    // The keeper's rule: a new one at once; the same one at once after NOTCH
+    // took it and something moved NOTCH; one Hyprland never took, after 30 s.
+    NotchRuleState st = {.sent_ms = -1e9};
+    const char *a = "hl.monitor({ output = \"NOTCH\", position = \"0x-33\" })";
+    const char *b = "hl.monitor({ output = \"NOTCH\", position = \"0x-40\" })";
+    CHECK(notch_rule_due(&st, a, 0), "the first rule goes at once");
+    notch_rule_sent(&st, a, 1000);
+    CHECK(!notch_rule_due(&st, a, 3000), "the same rule, NOTCH not seen as it wants yet: wait");
+    CHECK(!notch_rule_due(&st, a, 30999), "... up to 30 s");
+    CHECK(notch_rule_due(&st, a, 31001), "... then again (Hyprland kept refusing it)");
+    CHECK(notch_rule_due(&st, b, 3000), "a changed rule goes at once");
+    notch_rule_seen(&st, a);   // the keeper's next look: NOTCH as the rule wants
+    CHECK(notch_rule_due(&st, a, 5000), "NOTCH took it, then was moved (a reload, another eval): again at once");
+    notch_rule_sent(&st, a, 5000);
+    CHECK(!notch_rule_due(&st, a, 7000), "sent again and not taken this time: wait again");
+    notch_rule_seen(&st, b);   // NOTCH as another rule wants: not this one's
+    CHECK(!notch_rule_due(&st, a, 9000), "seen as another rule wants: still waiting for this one");
+
     printf(failures ? "%d failed\n" : "all passed\n", failures);
     return failures != 0;
 }
