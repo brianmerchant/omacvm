@@ -1000,15 +1000,35 @@ struct VMListCache {
   /// run probes every VM over SSH). `waitFor`: the run the request waits for
   /// (VMListCache.unknownWait at most): the one it started or the one going;
   /// nil: answered from the list at once (no run due).
+  /// The first look for a VM refused this way comes after `refusedEvery`
+  /// (one that just started again is found by it); when that look still
+  /// could not reach it, the next ones wait 30, 60, then 120 s (`backOff`):
+  /// each look probes the VM over SSH, and while its sshd turns the Mac away
+  /// (PerSourcePenalties) more tries keep it that way. Per VM (`key`); a
+  /// request that finds it again (`reached`) starts over.
   static let refusedEvery: Double = 5
-  private var refusedAt = Date.distantPast
-  mutating func refused(now: Date) -> (start: Bool, waitFor: Int?) {
+  static let backOff: [Double] = [30, 60, 120]
+  private var refusedAt: [String: Date] = [:]
+  private var refusedRuns: [String: Int] = [:]
+  mutating func refused(key: String, now: Date) -> (start: Bool, waitFor: Int?) {
     guard now.timeIntervalSince(failedAt) >= Self.afterFailure else { return (false, nil) }
-    if running { return (false, started) }
-    guard now.timeIntervalSince(refusedAt) >= Self.refusedEvery, now.timeIntervalSince(at) >= Self.refusedEvery else { return (false, nil) }
-    refusedAt = now
+    let n = refusedRuns[key] ?? 0
+    let every = n == 0 ? Self.refusedEvery : Self.backOff[min(n - 1, Self.backOff.count - 1)]
+    let last = refusedAt[key] ?? .distantPast
+    // Only a run this VM's refusal started (or its first one) is waited for.
+    if running { return (false, n == 0 || now.timeIntervalSince(last) < Self.unknownWait ? started : nil) }
+    guard now.timeIntervalSince(last) >= every, now.timeIntervalSince(at) >= Self.refusedEvery else { return (false, nil) }
+    if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll() }   // a guest cannot grow these
+    refusedAt[key] = now
+    refusedRuns[key] = n + 1
     start()
     return (true, started)
+  }
+
+  /// A request found this VM in the list as it should be again: its back-off starts over.
+  mutating func reached(key: String) {
+    refusedAt[key] = nil
+    refusedRuns[key] = nil
   }
 
   /// A request from a VM the list has at this address did not prove with

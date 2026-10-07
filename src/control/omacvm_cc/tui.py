@@ -1058,7 +1058,13 @@ class ControlCentre(App):
     def ask_again_then_toggle(self, r: S.Row) -> None:
         self.c.refresh_mac()
         self.call_from_thread(self.refresh_all)
-        self.call_from_thread(self.toggle, r, True)
+        self.call_from_thread(self.toggle_again, r.feature.name)
+
+    def toggle_again(self, name: str) -> None:
+        """The switch after the second look, on the row as it is now."""
+        row = next((x for x in self.rows if x.feature.name == name), None)
+        if row is not None:
+            self.toggle(row, True)
 
     def brings_mac_version(self) -> str:
         """On a VM older than the Mac, a switch-off or a repair brings all of

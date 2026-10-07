@@ -183,8 +183,9 @@ enum FastNetwork {
         // password for a service that is fine, and a service that stopped
         // after vmnet failures waits for the Mac's restart (installing again
         // would end that back-off).
-        let st = serviceStatus()
-        if st != "ok" && st != "stopped", let err = runInstaller([]) { return err }
+        // nil: neither the script nor the app's own check found anything
+        // wrong (serviceStatus falls back to serviceProblem): no install.
+        if let st = serviceStatus(), st != "ok", st != "stopped", let err = runInstaller([]) { return err }
         let file = c.folder.appendingPathComponent("fast-network")
         if isOn(c) { record(c, on: true); return nil }
         let b = (0..<3).map { _ in String(format: "%02x", Int.random(in: 0...255)) }
