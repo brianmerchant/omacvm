@@ -21,18 +21,19 @@ SIGN=${OMACVM_SIGN_ID:?OMACVM_SIGN_ID}
 ROUT=omacvm-e2e/gate-${M:0:12}-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$LOUT"
 q() { printf '%q' "$1"; }
+# The ssh command as written (eval: a ~ in it is the home folder here), then one remote command line.
+rsh() { eval "$SSH" "$(q "$1")"; }
 echo "==> test Mac: checkout $M, test identity build"
-$SSH "set -e; cd; [ -d $(q "$D")/.git ] || git clone -q https://github.com/gillesgoetsch/OmacVM $(q "$D"); cd $(q "$D")
+rsh "set -e; cd; [ -d $(q "$D")/.git ] || git clone -q https://github.com/gillesgoetsch/OmacVM $(q "$D"); cd $(q "$D")
   git fetch -q origin; git checkout -q --detach $(q "$M"); git clean -qfdx -e app/runtime/.build
   export PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH OMACVM_SIGN_ID=$(q "$SIGN") ${OMACVM_E2E_BUILD_ENV:-}
   app/scripts/build-app.sh --test-identity > build-e2e.log 2>&1 || { tail -20 build-e2e.log; exit 1; }
   [ \"\$(/usr/libexec/PlistBuddy -c 'Print :OmacVMCommit' 'app/dist/OmacVM Test.app/Contents/Info.plist')\" = $(q "$M") ]"
 echo "==> test Mac: cc-switches.sh $ARGS"
 rc=0
-$SSH "cd $(q "$D") && OMACVM_SIGN_ID=$(q "$SIGN") src/tests/e2e/cc-switches.sh --app 'app/dist/OmacVM Test.app' --out \"\$HOME/$ROUT\" $ARGS" || rc=$?
-host=${SSH##* }
-scp_opts=$(sed -E 's/^ssh +//; s/ +[^ ]+$//' <<<"$SSH")
-# shellcheck disable=SC2086
-scp -q $scp_opts "$host:$ROUT/result.json" "$host:$ROUT/summary.tsv" "$LOUT/" || { echo "remote.sh: no result from the test Mac" >&2; exit 1; }
+rsh "cd $(q "$D") && OMACVM_SIGN_ID=$(q "$SIGN") src/tests/e2e/cc-switches.sh --app 'app/dist/OmacVM Test.app' --out \"\$HOME/$ROUT\" $ARGS" || rc=$?
+for f in result.json summary.tsv; do
+  rsh "cat \"\$HOME/$ROUT/$f\"" > "$LOUT/$f" || { echo "remote.sh: no $f from the test Mac" >&2; exit 1; }
+done
 echo "==> result: $(/usr/bin/python3 -c 'import json,sys; o=json.load(open(sys.argv[1])); print("pass" if o["pass"] else "NOT passed", o["counts"])' "$LOUT/result.json") (cc-switches exit $rc)"
 exit "$rc"
