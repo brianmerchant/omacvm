@@ -21,6 +21,11 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
+- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
+  Gestures took the other app's VMs as its own too: both captured the
+  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
+  VMs of its own app (read from the app the VM runs from), as the Bridge
+  does since 3.0.1.
 
 ## 3.0.3
 

@@ -518,6 +518,10 @@ static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int
 // A VM's full-screen window is a normal window (layer 0).
 static int isQemu(pid_t pid);
 static int (*isQemuFn)(pid_t) = isQemu;
+static int vmNet(pid_t pid, const char *name);
+// The app in front is a VM of the other identity's OmacVM app (vmNet):
+// to this Gestures any other app; its escape combo is the other one's.
+static int frontForeign;
 
 static int vmFullScreen(pid_t pid, CGWindowID *win) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
@@ -842,10 +846,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   logPermissions();
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  // Parallels' VM window, UTM's, or VMware Fusion's.
-  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
-          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
-          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
+  int net = vmNet(pid, name);
+  frontForeign = net < 0 && !strcmp(name, "OmacVM");
   CGWindowID win = 0;
   int front = net >= 0 && vmFullScreen(pid, &win);
   // Which of the app's VMs: its window title, on this check (every 0.2 s
@@ -1045,12 +1047,104 @@ static int comboAction(int vmFront, int esc, int haveVM, int winVM, int winBack)
   return haveVM ? COMBO_ENTER : COMBO_PASS;
 }
 
-// OmacVM.app's QEMU (Contents/Resources/runtime/bin/OmacVM, or a plain
-// qemu-system-aarch64), not its launcher (Contents/MacOS/OmacVM).
+// ---- whose VM: this identity's app or the other one's ----
+// OmacVM.app (org.omacvm.app) and the test identity's OmacVM Test.app
+// (org.omacvm.app.test, its own Gestures org.omacvm.test.gestures on 47930)
+// can run on one Mac. Both run their VMs (and launchers) as processes named
+// OmacVM, so each Gestures took every OmacVM VM as its own: it captured the
+// trackpad, re-armed its tap and acted on the escape combo for the other
+// app's VM too (the Bridge had the same, #146). Each Gestures now takes only
+// its own app's VMs; the app is read from the process's path
+// (<app>.app/Contents/...). An unknown one (a development build's QEMU
+// outside a bundle, a bundle that cannot be read) stays every Gestures', as
+// before. Main thread.
+#define TEST_APP_ID "org.omacvm.app.test"
+#define TEST_GESTURES_ID "org.omacvm.test.gestures"
+
+// 1: this is the test identity's Gestures (its bundle id); -1: not looked yet.
+static int identityTest = -1;
+static int testIdentity(void) {
+  if (identityTest < 0) {
+    CFBundleRef b = CFBundleGetMainBundle();
+    CFStringRef id = b ? CFBundleGetIdentifier(b) : NULL;
+    identityTest = id && CFStringCompare(id, CFSTR(TEST_GESTURES_ID), 0) == kCFCompareEqualTo;
+  }
+  return identityTest;
+}
+
+// The .app an executable runs from: its path up to the first
+// ".app/Contents/". 0 if it is in no bundle.
+static int vmAppPath(const char *exe, char *out, size_t cap) {
+  const char *c = strstr(exe, ".app/Contents/");
+  if (!c) return 0;
+  size_t n = (size_t)(c - exe) + 4;
+  if (n >= cap) return 0;
+  memcpy(out, exe, n);
+  out[n] = 0;
+  return 1;
+}
+
+// appID: the VM app's bundle id (NULL: unknown). The test Gestures takes only
+// OmacVM Test.app's VMs, every other Gestures all the others.
+static int vmOursRule(const char *appID, int test) {
+  if (!appID) return 1;
+  return !strcmp(appID, TEST_APP_ID) == !!test;
+}
+
+// The bundle id of the app at `app` (read once per path; a failed read is not
+// kept, so an app being swapped by an update is read again next time).
+#define APP_IDS 8
+static struct { char path[PROC_PIDPATHINFO_MAXSIZE]; char id[128]; } appIds[APP_IDS];
+static int appIdsNext;
+static int appBundleID(const char *app, char *out, size_t cap) {
+  for (int i = 0; i < APP_IDS; i++)
+    if (appIds[i].path[0] && !strcmp(appIds[i].path, app)) { snprintf(out, cap, "%s", appIds[i].id); return 1; }
+  // Its Info.plist itself: CFBundle keeps what it read about a path for the
+  // life of the process, a failed read too.
+  char plist[PROC_PIDPATHINFO_MAXSIZE + 32];
+  snprintf(plist, sizeof plist, "%s/Contents/Info.plist", app);
+  FILE *f = fopen(plist, "rb");
+  if (!f) return 0;
+  char buf[65536];
+  size_t n = fread(buf, 1, sizeof buf, f);
+  fclose(f);
+  CFDataRef data = CFDataCreate(NULL, (const UInt8 *)buf, (CFIndex)n);
+  CFPropertyListRef pl = data ? CFPropertyListCreateWithData(NULL, data, kCFPropertyListImmutable, NULL, NULL) : NULL;
+  CFTypeRef id = pl && CFGetTypeID(pl) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(pl, CFSTR("CFBundleIdentifier")) : NULL;
+  int ok = id && CFGetTypeID(id) == CFStringGetTypeID() && CFStringGetCString(id, out, (CFIndex)cap, kCFStringEncodingUTF8);
+  if (pl) CFRelease(pl);
+  if (data) CFRelease(data);
+  if (!ok) return 0;
+  int k = appIdsNext++ % APP_IDS;
+  snprintf(appIds[k].path, sizeof appIds[k].path, "%s", app);
+  snprintf(appIds[k].id, sizeof appIds[k].id, "%s", out);
+  return 1;
+}
+
+// An executable of this identity's OmacVM app, or of no known app.
+static int ourExe(const char *exe) {
+  char app[PROC_PIDPATHINFO_MAXSIZE], id[128];
+  if (!vmAppPath(exe, app, sizeof app) || !appBundleID(app, id, sizeof id)) return vmOursRule(NULL, testIdentity());
+  return vmOursRule(id, testIdentity());
+}
+
+// Which VM app a front process `name` is: Parallels' VM window, UTM's,
+// VMware Fusion's, or this identity's OmacVM app (-1: none of them).
+static int vmNet(pid_t pid, const char *name) {
+  if (!strcmp(name, "prl_client_app")) return 0;
+  if (!strcmp(name, "UTM")) return NET_UTM;
+  if (!strcmp(name, "VMware Fusion")) return listenAddrs[NET_FUSION][0] ? NET_FUSION : -1;
+  if (strcmp(name, "OmacVM")) return -1;
+  char exe[PROC_PIDPATHINFO_MAXSIZE];
+  return proc_pidpath(pid, exe, sizeof exe) <= 0 || ourExe(exe) ? NET_APP : -1;
+}
+
+// This identity's OmacVM.app QEMU (Contents/Resources/runtime/bin/OmacVM, or
+// a plain qemu-system-aarch64), not its launcher (Contents/MacOS/OmacVM).
 static int isQemu(pid_t pid) {
   char path[PROC_PIDPATHINFO_MAXSIZE];
   if (proc_pidpath(pid, path, sizeof path) <= 0) return 0;
-  return !strstr(path, "/Contents/MacOS/");
+  return !strstr(path, "/Contents/MacOS/") && ourExe(path);
 }
 
 static int alive(pid_t p) { return p > 0 && (kill(p, 0) == 0 || errno == EPERM); }
@@ -2040,7 +2134,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     // so this press keeps its own up.
     if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo) swallowEscUp = 0;
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
-    int act = combo
+    // The other identity's VM in front: its Gestures' combo, not ours.
+    int act = combo && !frontForeign
               ? comboAction(frontIsVM, escaped, alive(vmPid) && (vmPid != appPid || vmOffSpace) && vmWindowFn(vmPid, vmWin),
                             winVMPid > 0 && winVMPid == appPid,
                             alive(leftWinPid) && leftWinPid != appPid && vmWindowFn(leftWinPid, leftWinWin))
@@ -2048,7 +2143,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     // In Mission Control (no VM in front there) with a full-screen VM to go
     // back to: back into it, whatever macOS says is in front (enterVM closes
     // Mission Control first). Asked only for a combo from the keyboard.
-    if (combo && !frontIsVM && type == kCGEventKeyDown && act != COMBO_ENTER && act != COMBO_WINDOW_BACK &&
+    if (combo && !frontIsVM && !frontForeign && type == kCGEventKeyDown && act != COMBO_ENTER && act != COMBO_WINDOW_BACK &&
         CGEventGetIntegerValueField(e, kCGEventSourceStateID) == kCGEventSourceStateHIDSystemState &&
         !CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) &&
         alive(vmPid) && vmWindowFn(vmPid, vmWin) && missionControlOpenFn())

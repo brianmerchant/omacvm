@@ -35,6 +35,9 @@
 #    swipe's start; anything else four), macOS's scroll for them dropped; one finger
 #    flicked sideways = Back/Forward; a resting finger and scrolling = nothing
 #    extra (test-mouse.c, made-up Magic Mouse frames through the real callback).
+# 8. Each Gestures takes only its own OmacVM app's VMs: the normal one
+#    OmacVM.app's, the test identity's OmacVM Test.app's, both a development
+#    build's QEMU; the combo in the other app's VM is passed on (test-identity.c).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -232,4 +235,10 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-mouse" "$HERE/test-mouse.c" "$H
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-mouse" > "$T/mouse" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/mouse"
+# 8. Whose VM: this identity's app or the other one's.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-identity" "$HERE/test-identity.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-identity" > "$T/identity" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/identity"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }
