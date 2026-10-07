@@ -73,4 +73,35 @@ expect "vm-common: a lane's copy" "test=1" "$(vmc org.omacvm.app.test.fixid)"
 expect "vm-common: OmacVM" "test=" "$(vmc org.omacvm.app)"
 grep -q '^app_test_identity "\$_root/\.\."$' "$R/app/scripts/vm-common.sh" &&
   echo "ok   vm-common.sh uses the helper" || { echo "FAIL vm-common.sh does not call app_test_identity"; fail=1; }
+# src/lib/app.sh under the test identity: app_bundle takes the lane's copy
+# whose omacvm runs (not OmacVM Test.app or OmacVM.app), and app_start never
+# opens OmacVM.app. A throwaway HOME; `open` is a stand-in that prints.
+H=$T/home; mkdir -p "$H/Applications"
+appdir() {   # PATH BUNDLE_ID
+  mkdir -p "$1/Contents/Resources/scripts"; : > "$1/Contents/Resources/scripts/create-vm.sh"
+  plutil -create xml1 "$1/Contents/Info.plist" && plutil -insert CFBundleIdentifier -string "$2" "$1/Contents/Info.plist"
+}
+appdir "$H/Applications/OmacVM.app" org.omacvm.app
+appdir "$T/Drive/OmacVM Test lane.app" org.omacvm.app.test.fixid
+appdir "$T/Drive/Tester.app" org.omacvm.app.tester
+lib() {   # TEST RUNTIME_APP CODE: CODE after sourcing app.sh
+  env -u OMACVM_APP_ID HOME="$H" OMACVM_TEST_IDENTITY="$1" OMACVM_APP_RUNTIME="$2/Contents/Resources/runtime" \
+    bash -c 'set -euo pipefail; source "$1/src/lib/app.sh"; open() { echo "open $*"; }; app_ip() { :; }; eval "$2"' _ "$R" "$3" 2>&1
+}
+expect "app_bundle, test identity, a lane's copy runs: that copy" "$T/Drive/OmacVM Test lane.app" \
+  "$(lib 1 "$T/Drive/OmacVM Test lane.app" app_bundle)"
+expect "app_bundle, OmacVM: never a lane's copy" "$H/Applications/OmacVM.app" \
+  "$(lib "" "$T/Drive/OmacVM Test lane.app" app_bundle)"
+# A test app in /Applications (as on a test Mac) is found after ~/Applications.
+sysT=""
+for a in /Applications/*.app; do
+  [[ -f $a/Contents/Resources/scripts/create-vm.sh &&
+     $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app.test ]] && { sysT=$a; break; }
+done
+expect "app_bundle, test identity: not org.omacvm.app.tester" "$sysT" "$(lib 1 "$T/Drive/Tester.app" 'app_bundle || true')"
+want="open -n -b org.omacvm.app.test --args --start --vm V"; [[ -n $sysT ]] && want="open -n $sysT --args --start --vm V"
+expect "app_start, test identity, no test app found: never opens OmacVM.app" "$want" \
+  "$(lib 1 "$T/Drive/Tester.app" 'app_start V')"
+expect "app_start, OmacVM: OmacVM.app" "open -n $H/Applications/OmacVM.app --args --start --vm V" \
+  "$(lib "" "$T/none.app" 'app_start V')"
 exit $fail

@@ -9,7 +9,8 @@ in more words.
   now works as the test app (its own Bridge and Gestures), as when the app
   runs it. Before, it set up the normal helpers from the test app. The
   Bridge also counts a re-signed copy of the test app as the test app, as
-  the app and Gestures do.
+  the app and Gestures do, and such a copy's omacvm starts VMs in that copy.
+  The test app's omacvm never opens OmacVM.app.
 
 ## 3.0.5 (unreleased)
 
