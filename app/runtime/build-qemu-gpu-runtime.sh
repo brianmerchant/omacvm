@@ -825,6 +825,11 @@ grep -q 'full = isFullscreen && omacvm_present_layer() &&' "$source_dir/ui/cocoa
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-touchid-panel.patch"
 grep -q 'dlsym(handle, "omacvm_touchid_panel_start")' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not load the Touch ID panel (touchid-panel patch)"
+# Accessibility taken away: the full-grab tap goes at once, never enabled again
+# (issue #192: enabling it again held the Mac's keys).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-permission.patch"
+"$native_dir/Tests/keys/test-tap-permission.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the full-grab tap stays without Accessibility (test-tap-permission.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

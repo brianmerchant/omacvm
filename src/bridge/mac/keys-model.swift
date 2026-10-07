@@ -29,6 +29,32 @@ struct TapRearm {
   mutating func worked() { failureLogged = false }
 }
 
+/// The permissions an event tap was created with, and when it must go
+/// (issue #192). The tap is an active filter in the HID chain: when the user
+/// took Accessibility (or Input Monitoring) away while it existed, macOS kept
+/// it there but no longer took what it handed back and disabled it on
+/// timeout, and enabling it again held the Mac's keys and clicks until the
+/// process was killed. So it goes at once when Accessibility, or any
+/// permission it was created with, is missing, and is enabled or created
+/// again only once Accessibility is back. Same rule as the Gestures helper's.
+struct TapPermissions: OptionSet {
+  let rawValue: Int
+  static let accessibility = TapPermissions(rawValue: 1)
+  static let inputMonitoring = TapPermissions(rawValue: 2)
+}
+
+struct TapGuard {
+  private(set) var made: TapPermissions = []
+
+  mutating func created(_ with: TapPermissions) { made = with }
+
+  /// True: remove the tap now; never enable it again.
+  func lost(_ now: TapPermissions) -> Bool { !now.contains(.accessibility) || !now.isSuperset(of: made) }
+
+  /// True: a tap may be created.
+  func mayCreate(_ now: TapPermissions) -> Bool { now.contains(.accessibility) }
+}
+
 // ---- where a media key goes (keys.swift asks; test-models.sh checks) ----
 
 /// The media keys the Bridge looks at (NX_KEYTYPE_*, IOKit/hidsystem/ev_keymap.h).

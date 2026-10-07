@@ -44,10 +44,14 @@ KEYS = [  # key, label, higher is better
     ("geekbench-gpu-opencl", "Geekbench 7 GPU, OpenCL", True),
     ("geekbench-gpu-vulkan", "Geekbench 7 GPU, Vulkan (macOS: Metal)", True),
     ("geekbench-gpu-metal", "Geekbench 7 GPU, Metal (macOS)", True),
+    ("geekbench-cpu-single", "Geekbench 7 CPU, single core", True),
+    ("geekbench-cpu-multi", "Geekbench 7 CPU, all cores", True),
+    ("speedometer", "Speedometer 3.1", True),
     ("vkmark", "vkmark (VMs only)", True),
     ("glmark2", "glmark2 (VMs only)", True),
     ("basemark", "Basemark Web 3.0", True),
     ("aquarium", "WebGL Aquarium 30k (fps)", True),
+    ("webgpu", "WebGPU matmul f32 2048 (GFLOPS)", True),
     ("idle-power", "Idle power (W)", False),
 ]
 BASE = {"geekbench-gpu-vulkan": "geekbench-gpu-metal"}   # the Mac has no Vulkan in Geekbench: Metal is its number
@@ -55,7 +59,7 @@ PAGE = {"throughput": "gpu-throughput", "alu": "gpu-alu", "fill": "gpu-fill"}
 TIMER_TARGET_MS = 40
 TIMER_OK = (0.98, 1.10)   # timer score / wall score
 MIN_WIDTH = int(os.environ.get("FINAL_ROUND_MIN_GUEST_WIDTH", 3000))
-VIEWPORT = os.environ.get("FINAL_ROUND_VIEWPORT", "1728x1080 at 2x")
+VIEWPORT = os.environ.get("FINAL_ROUND_VIEWPORT", "1728x1080 at 2x").split("|")   # agreed page sizes
 
 
 def not_available(reason):
@@ -89,7 +93,8 @@ def line_problems(line, round_mode):
     widths = (r.get("vm") or {}).get("monitor_widths")
     if widths and min(widths) < MIN_WIDTH:
         why.append(f"guest {min(widths)} px wide")
-    if line.get("test") == "browser" and "viewport" in r and r["viewport"] != VIEWPORT:
+    # WebGPU compute draws nothing: its page size does not count.
+    if line.get("test") == "browser" and r.get("test") != "webgpu" and "viewport" in r and r["viewport"] not in VIEWPORT:
         why.append(f"Chrome page {r['viewport'] or 'unknown'}")
     return why
 
@@ -152,16 +157,16 @@ def main():
             labels[tg] = lb
     for tg, lb in labels.items():
         NAMES[tg] = lb
-    gb = {}
+    gb = {}   # url -> [first, second] score on its page (CPU: single core, all cores)
     if a.geekbench_scores:
-        gb = json.load(open(a.geekbench_scores))
+        gb = {u: v if isinstance(v, list) else [v] for u, v in json.load(open(a.geekbench_scores)).items()}
     elif a.fetch_geekbench:
-        urls = sorted({l["result"]["url"] for l in lines if l["test"] == "geekbench" and l["result"].get("url")})
+        urls = sorted({l["result"]["url"] for l in lines if l["test"] in ("geekbench", "cpu") and l["result"].get("url")})
         here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "src", "bench", "report.py")
         spec = importlib.util.spec_from_file_location("report", here)
         rep = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(rep)
-        gb = {u: s[0] for u, s in rep.geekbench_scores(urls).items() if s}
+        gb = {u: s for u, s in rep.geekbench_scores(urls).items() if s}
 
     runs = collections.defaultdict(lambda: collections.defaultdict(list))   # target -> key -> values
     page = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))  # target -> method -> key
@@ -214,13 +219,24 @@ def main():
             key = geekbench_key(r.get("test", ""))
             if key == "geekbench-gpu-vulkan" and tg == "mac":
                 continue
-            v = r.get("value") if isinstance(r.get("value"), (int, float)) else gb.get(r.get("url") or "")
+            v = r.get("value") if isinstance(r.get("value"), (int, float)) else (gb.get(r.get("url") or "") or [None])[0]
             if v is not None:
                 runs[tg][key].append(v)
             elif r.get("error"):
                 missing[tg][key] = not_available(r["error"])
             elif r.get("url"):
                 drop(line, key, f"Geekbench score not read ({r['url']}): --geekbench-scores or --fetch-geekbench")
+        elif t == "cpu":   # Geekbench CPU: single core and all cores from its page
+            sc = gb.get(r.get("url") or "") or []
+            if len(sc) >= 2:
+                runs[tg]["geekbench-cpu-single"].append(sc[0])
+                runs[tg]["geekbench-cpu-multi"].append(sc[1])
+            elif r.get("error"):
+                missing[tg]["geekbench-cpu-multi"] = not_available(r["error"])
+            elif r.get("url"):
+                drop(line, "geekbench-cpu-multi", f"Geekbench score not read ({r['url']}): --geekbench-scores or --fetch-geekbench")
+            else:
+                missing[tg].setdefault("geekbench-cpu-multi", "no result")
         elif t in ("vkmark", "glmark2"):
             if t == "glmark2" and r.get("scene_seconds") is not None:
                 scene_s.add(r["scene_seconds"])
@@ -229,11 +245,11 @@ def main():
             elif r.get("not_available") or r.get("error"):
                 missing[tg][t] = not_available(r.get("not_available")) if r.get("not_available") else r["error"]
         elif t == "browser":
-            if r.get("test") in ("aquarium", "basemark"):
+            if r.get("test") in ("aquarium", "basemark", "webgpu", "speedometer"):
                 if r.get("value") is not None:
                     runs[tg][r["test"]].append(r["value"])
                 else:
-                    missing[tg].setdefault(r["test"], r.get("error") or "no result")
+                    missing[tg].setdefault(r["test"], not_available(r["error"]) if r.get("error") else "no result")
         elif t == "idle-power":
             if r.get("valid"):
                 runs[tg]["idle-power"].append(r["watts_mean"])
