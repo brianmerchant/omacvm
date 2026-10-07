@@ -1743,8 +1743,7 @@ static int notch_target(const char *j, const char *scr, double sx, double sy, do
 // (notch-place.h).
 static void *keeper_thread(void *unused) {
     (void)unused;
-    char last_applied[256] = "";
-    double last_apply_ms = -1e9;
+    NotchRuleState rule = {.sent_ms = -1e9};
     int created_attempts = 0;
     double last_recreate_ms = -1e9;
     for (;;) {
@@ -1768,8 +1767,9 @@ static void *keeper_thread(void *unused) {
                 notch_target(j, scr, sx, sy, sw, ss, &w, &h, &px, &py, &above);
                 notch_rule_lua(lua, sizeof lua, cfg_output, w, h, (int)px, (int)py, ss);
                 LOG("creating headless output %s: %s", cfg_output, lua);
-                const char *rule[] = {"hyprctl", "eval", lua, NULL};
-                run_quiet(rule);
+                const char *eval[] = {"hyprctl", "eval", lua, NULL};
+                run_quiet(eval);
+                notch_rule_sent(&rule, lua, now_ms());
                 const char *argv[] = {"hyprctl", "output", "create", "headless", cfg_output, NULL};
                 run_quiet(argv);
                 created_attempts++;
@@ -1823,18 +1823,19 @@ static void *keeper_thread(void *unused) {
                     LOG("%s goes %s %s", cfg_output, above ? "right above" : "over the top edge of", scr);
                     atomic_store(&notch_above, above);
                 }
+                char lua[256];
+                notch_rule_lua(lua, sizeof lua, cfg_output, want_w, want_h, (int)px, (int)py, ss);
                 if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)px || (int)ny != (int)py ||
                     ns < ss - 0.01 || ns > ss + 0.01) {
-                    char lua[256];
-                    notch_rule_lua(lua, sizeof lua, cfg_output, want_w, want_h, (int)px, (int)py, ss);
-                    // Do not hammer Hyprland with a rule it keeps refusing.
-                    if (strcmp(lua, last_applied) || now_ms() - last_apply_ms > 30000) {
+                    // At once after an outside move, else backing off (notchrule.h).
+                    if (notch_rule_due(&rule, lua, now_ms())) {
                         LOG("resizing %s: %s", cfg_output, lua);
                         const char *argv[] = {"hyprctl", "eval", lua, NULL};
                         run_quiet(argv);
-                        snprintf(last_applied, sizeof last_applied, "%s", lua);
-                        last_apply_ms = now_ms();
+                        notch_rule_sent(&rule, lua, now_ms());
                     }
+                } else {
+                    notch_rule_seen(&rule, lua);
                 }
             }
             follow_preferred_mode(j);

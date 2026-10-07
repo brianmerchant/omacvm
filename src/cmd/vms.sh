@@ -31,7 +31,7 @@ while (( $# )); do
   shift
 done
 export OMA_KEY=~/.ssh/omacvm
-NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
+NOTCH=$(mac_tool mac-notch 2>/dev/null || echo none)
 first=1
 PERR=$(mktemp -t omacvm-vms); trap 'rm -f "$PERR"' EXIT
 (( JSON )) && printf '{"omacvm": %s, "vms": [' "$(json_str "$(cat "$R/src/VERSION")")"
