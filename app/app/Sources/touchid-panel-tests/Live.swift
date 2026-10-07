@@ -102,7 +102,7 @@ func runLive(_ out: String) -> Never {
         var answered: Double?
         let asked = uptime()
         controller.show(prompt) { _ in answered = uptime() }
-        // Long enough for every end to play out (the slowest closed at 1.6 s).
+        // Long enough for every end to play out (3.0.3's slowest closed at 1.6 s).
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
             results.append(["end": "\(end)", "reduce_motion": rm, "shown_ms": ms(watch.shownAt, asked),
                             "answer_ms": ms(answered, e.endedAt), "input_back_ms": ms(inputBack, e.endedAt),

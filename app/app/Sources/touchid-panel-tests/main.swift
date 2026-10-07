@@ -79,6 +79,12 @@ expect(panelEnd(.failed, after: 4) == (.no("failed"), .refused), "end: not recog
 expect(panelEnd(.lockout, after: 4) == (.no("lockout"), .refused), "end: lockout -> no lockout")
 expect(panelEnd(.other, after: 0.1) == (.error, nil), "end: an error at once -> error (the Mac's own dialog instead)")
 expect(panelEnd(.other, after: 2) == (.no("failed"), .refused), "end: an error later -> no failed (never asked twice)")
+expect(panelLinger(.done, reduceMotion: false) > 0 && panelLinger(.done, reduceMotion: false) <= 0.12,
+       "end: a yes shows its check for at most 120 ms (the answer went before)")
+expect(panelLinger(.done, reduceMotion: true) == 0, "end: a yes with Reduce Motion: gone at once")
+expect(panelLinger(nil, reduceMotion: false) == 0, "end: a cancel: gone at once")
+expect(panelLinger(.refused, reduceMotion: false) <= 0.7 && panelLinger(.refused, reduceMotion: true) <= 0.7,
+       "end: not recognised: red for a short moment")
 var once = PanelOnce()
 expect(once.finish(.no("timeout")) && !once.finish(.yes) && once.result == .no("timeout"), "end: the first end wins")
 
@@ -100,7 +106,7 @@ expect((png?.count ?? 0) > 1000, "view: draws off screen")
 if CommandLine.arguments.count > 1, let png {
     let dir = CommandLine.arguments[1]
     try? png.write(to: URL(fileURLWithPath: dir + "/panel-idle.png"))
-    for (name, look) in [("done", PanelLook.done), ("refused", .refused), ("reading", .reading)] {
+    for (name, look) in [("done", PanelLook.done), ("refused", .refused)] {
         let w = PanelView(prompt: prompt, theme: name == "done" ? t : .tokyoNight, authView: nil, reduceMotion: true)
         w.show(look)
         try? w.png()?.write(to: URL(fileURLWithPath: dir + "/panel-\(name).png"))

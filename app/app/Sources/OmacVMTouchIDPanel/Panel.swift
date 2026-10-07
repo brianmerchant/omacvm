@@ -44,10 +44,10 @@ enum PanelMetrics {
     static let button: CGFloat = 40
 }
 
-/// The glyph: five ridges and their traces, the check, and the animations.
+/// The glyph: five ridges, the check, and their animations.
 final class PanelGlyphView: NSView {
     private let ridges = CALayer()
-    private var paths: [CAShapeLayer] = [], traces: [CAShapeLayer] = []
+    private var paths: [CAShapeLayer] = []
     private let check = CAShapeLayer()
     private let theme: PanelTheme
     private let reduceMotion: Bool
@@ -64,18 +64,16 @@ final class PanelGlyphView: NSView {
         layer?.addSublayer(ridges)
         for d in PanelGlyph.ridges {
             guard let p = PanelGlyph.path(d)?.copy(using: &t) else { continue }
-            for trace in [false, true] {
-                let s = CAShapeLayer()
-                s.frame = bounds
-                s.path = p
-                s.fillColor = nil
-                s.lineWidth = width
-                s.lineCap = .round
-                s.lineJoin = .round
-                s.strokeColor = theme.foreground.cg
-                if trace { s.strokeEnd = 0; traces.append(s) } else { paths.append(s) }
-                ridges.addSublayer(s)
-            }
+            let s = CAShapeLayer()
+            s.frame = bounds
+            s.path = p
+            s.fillColor = nil
+            s.lineWidth = width
+            s.lineCap = .round
+            s.lineJoin = .round
+            s.strokeColor = theme.foreground.cg
+            paths.append(s)
+            ridges.addSublayer(s)
         }
         if let p = PanelGlyph.path(PanelGlyph.check)?.copy(using: &t) {
             check.frame = bounds
@@ -98,11 +96,12 @@ final class PanelGlyphView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         ridges.removeAllAnimations()
-        for s in paths + traces + [check] { s.removeAllAnimations() }
-        let now = CACurrentMediaTime()
+        for s in paths + [check] { s.removeAllAnimations() }
         switch look {
         case .idle:
-            for s in paths { s.strokeColor = theme.foreground.cg; s.opacity = 1 }
+            ridges.opacity = 1
+            check.strokeEnd = 0
+            for s in paths { s.strokeColor = theme.foreground.cg }
             if !reduceMotion {
                 let a = CAKeyframeAnimation(keyPath: "opacity")
                 a.values = [1, 0.72, 1]
@@ -111,56 +110,16 @@ final class PanelGlyphView: NSView {
                 a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 ridges.add(a, forKey: "breathe")
             }
-        case .reading:
-            for s in paths { s.strokeColor = theme.faint.cg }
-            for (i, s) in traces.enumerated() {
-                s.strokeColor = theme.accent.cg
-                if reduceMotion { s.strokeEnd = 1; continue }
-                let a = CABasicAnimation(keyPath: "strokeEnd")
-                a.fromValue = 0
-                a.toValue = 1
-                a.beginTime = now + Double(i) * 0.06
-                a.duration = 0.45
-                a.fillMode = .both
-                a.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.2, 1)
-                s.strokeEnd = 1
-                s.add(a, forKey: "trace")
-            }
         case .done:
-            let n = paths.count
-            for (i, s) in (paths + traces).enumerated() {
-                s.strokeColor = theme.success.cg
-                let ring = i % n   // 0 = the core
-                let a = CABasicAnimation(keyPath: "opacity")
-                a.fromValue = 1
-                a.toValue = 0
-                a.beginTime = now + (reduceMotion ? 0.2 : Double(n - 1 - ring) * 0.045 + 0.18)
-                a.duration = reduceMotion ? 0.3 : 0.3
-                a.fillMode = .both
-                s.opacity = 0
-                s.add(a, forKey: "fade")
-            }
-            let c: CABasicAnimation
-            if reduceMotion {
-                check.strokeEnd = 1
-                c = CABasicAnimation(keyPath: "opacity")
-            } else {
-                c = CABasicAnimation(keyPath: "strokeEnd")
-                c.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0.6, 0.2, 1)
-            }
-            c.fromValue = 0
-            c.toValue = 1
-            c.beginTime = now + 0.45
-            c.duration = 0.42
-            c.fillMode = .both
+            // The end at once: the yes is already with the VM.
+            ridges.opacity = 0
             check.strokeEnd = 1
-            check.add(c, forKey: "draw")
         case .refused:
-            for (i, s) in (paths + traces).enumerated() {
+            for (i, s) in paths.enumerated() {
                 s.strokeColor = theme.error.cg
                 guard !reduceMotion else { continue }
                 let a = CAKeyframeAnimation(keyPath: "transform.translation.x")
-                let d = 14 * PanelGlyph.transform(into: PanelMetrics.glyph).a * ((i % paths.count) % 2 == 0 ? -1 : 1)
+                let d = 14 * PanelGlyph.transform(into: PanelMetrics.glyph).a * (i % 2 == 0 ? -1 : 1)
                 a.values = [0, d, 0]
                 a.keyTimes = [0, 0.4, 1]
                 a.duration = 0.32
@@ -268,7 +227,6 @@ final class PanelView: NSView {
         glyph.show(look)
         switch look {
         case .idle: message.stringValue = "Touch ID or Esc"; message.textColor = theme.dim.ns
-        case .reading: message.stringValue = "Reading…"; message.textColor = theme.dim.ns
         case .done: message.stringValue = "Done"; message.textColor = theme.success.ns
         case .refused:
             message.stringValue = lockout ? "Touch ID is locked" : "Not recognized"
@@ -316,7 +274,7 @@ final class PanelWindow: NSPanel {
         isReleasedWhenClosed = false
         hasShadow = true
         backgroundColor = .clear
-        animationBehavior = .utilityWindow
+        animationBehavior = .none   // up and gone at once: no fade to wait for
     }
 
     override var canBecomeKey: Bool { true }
@@ -401,6 +359,8 @@ final class PanelController: NSObject {
     private var observers: [NSObjectProtocol] = []
     private var previousKey: NSWindow?
     private var generation = 0   // which panel a delayed close belongs to
+    private var released = false // its input went back to the VM
+    private var reduce = false   // Reduce Motion, as it was when it showed
 
     var busy: Bool { window != nil }
 
@@ -438,7 +398,8 @@ final class PanelController: NSObject {
         self.reply = reply
         evaluator = c
         let theme = PanelTheme(prompt.colors)
-        let reduce = reduceMotion()
+        reduce = reduceMotion()
+        released = false
         let size = CGSize(width: PanelMetrics.side, height: PanelMetrics.side)
         let frame = panelFrame(window: vm.frame, visible: screen.visibleFrame, size: size)
         let v = PanelView(prompt: prompt, theme: theme, authView: c.view, reduceMotion: reduce)
@@ -483,7 +444,10 @@ final class PanelController: NSObject {
         finish(result, look: look, lockout: e == .lockout)
     }
 
-    /// Answers once; then the last look plays and the panel closes.
+    /// Answers once and gives the person's input back to the VM at once;
+    /// then the end shows for its short linger (panelLinger) and the panel
+    /// goes. Nothing waits for the linger: the answer and the input are
+    /// already the VM's.
     private func finish(_ r: TouchIDPanelResult, look: PanelLook?, lockout: Bool = false) {
         guard window != nil, once.finish(r) else { return }
         timer?.invalidate(); timer = nil
@@ -493,30 +457,32 @@ final class PanelController: NSObject {
         evaluator = nil
         reply?(r)
         reply = nil
-        guard let look, let v = view else { return close() }
+        release()
+        let linger = panelLinger(look, reduceMotion: reduce)
+        guard let look, linger > 0, let v = view else { return close() }
+        v.show(look, lockout: lockout)
         let g = generation
-        let closeLater = { (after: TimeInterval) in
-            DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
-                if let self, self.generation == g { self.close() }
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + linger) { [weak self] in
+            if let self, self.generation == g { self.close() }
         }
-        if look == .done {
-            v.show(.reading)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { v.show(.done) }
-            closeLater(1.6)
-        } else {
-            v.show(look, lockout: lockout)
-            closeLater(1.0)
-        }
+    }
+
+    /// The VM's window gets the keyboard back and QEMU its input (didClose);
+    /// the panel, if it still shows its end, takes no clicks.
+    private func release() {
+        guard let w = window, !released else { return }
+        released = true
+        w.ignoresMouseEvents = true
+        didClose()
+        if NSApp.isActive, let k = previousKey, k.isVisible { k.makeKey() }
+        previousKey = nil
     }
 
     private func close() {
         guard let w = window else { return }
+        release()
         w.orderOut(nil)
         window = nil
         view = nil
-        didClose()
-        if NSApp.isActive, let k = previousKey, k.isVisible { k.makeKey() }
-        previousKey = nil
     }
 }

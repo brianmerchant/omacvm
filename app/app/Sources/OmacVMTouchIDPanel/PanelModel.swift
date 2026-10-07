@@ -165,11 +165,10 @@ public func panelKey(keyCode: UInt16, command: Bool, marker: Int64) -> PanelKey 
 
 // MARK: How it ends
 
-/// The panel's states (the Ridge design): idle (a slow breath), reading
-/// (the ridges trace from the core outwards), done (green, the ridges fade
-/// from the outside in, a check draws), refused (red, the ridges jolt, the
-/// panel shakes).
-public enum PanelLook: Equatable { case idle, reading, done, refused }
+/// The panel's states (the Ridge design): idle (a slow breath), done (the
+/// green check in the ridges' place, at once: the yes is already with the
+/// VM), refused (red, the ridges jolt, the panel shakes).
+public enum PanelLook: Equatable { case idle, done, refused }
 
 /// LocalAuthentication's end, as the panel cares.
 public enum PanelLAEnd: Equatable { case yes, cancelled, failed, lockout, notAvailable, other }
@@ -185,6 +184,18 @@ public func panelEnd(_ e: PanelLAEnd, after: TimeInterval) -> (TouchIDPanelResul
     case .lockout: return (.no("lockout"), .refused)
     case .notAvailable: return (.no("no-touch-id"), nil)
     case .other: return after < 0.5 ? (.error, nil) : (.no("failed"), .refused)
+    }
+}
+
+/// How long the panel stays after its end. By then the answer is with the
+/// VM and the person's input is back with it: nothing waits for this. A yes
+/// shows its check for one short moment (none with Reduce Motion); not
+/// recognised stays red long enough to read; a cancel goes at once.
+public func panelLinger(_ look: PanelLook?, reduceMotion: Bool) -> TimeInterval {
+    switch look {
+    case .done?: return reduceMotion ? 0 : 0.09
+    case .refused?: return 0.6
+    case .idle?, nil: return 0
     }
 }
 
