@@ -5,6 +5,9 @@ in more words.
 
 ## 3.0.4 (unreleased)
 
+- A new OmacVM.app VM on a Mac that never had OmacVM's Bridge, with Gestures
+  turned off at setup: the build stopped at "Adding OmacVM to the VM" (no
+  Bridge token yet). The token is now made for the VM's first setup too.
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
   Settings while it ran could freeze the Mac's keyboard and clicks (the
   pointer still moved) until the helper was killed. Gestures now removes
@@ -39,6 +42,11 @@ in more words.
   unpack the image (free disk space?)" although nothing was wrong. Closing
   the control centre while a job ran could end with a Python error; it
   closes cleanly now.
+- OmacVM.app on macOS 26: no light 1 pt line around the screen when the VM's
+  window is borderless over a whole display (2.9.1's notch full screen
+  had it; in 3.0 that window is left only for tests). macOS 26 draws that
+  line with a window's shadow; borderless windows now have none. macOS's
+  own full screen, which 3.0 uses, never had the line.
 
 ## 3.0.3
 
