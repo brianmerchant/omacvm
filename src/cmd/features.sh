@@ -213,6 +213,19 @@ for ((i = 0; i < ${#FN[@]}; i++)); do
   summary+="    ${FTITLE[$i]}: ${FV[$i]}"$'\n'
 done
 if (( ${#changes[@]} == 0 )); then
+  # The fast network is on already, but its service on the Mac is missing or
+  # needs an update (an app update brought another protocol): enabling it
+  # installs that (macOS asks for the password once).
+  if [[ $TYPE == app && $MODE == enable && " ${WANT[*]} " == *" fast-network "* ]] &&
+     [[ $("$R/src/net/mac/install.sh" --status 2>/dev/null | head -1) != ok ]]; then
+    rc=0; "$R/src/net/mac/install.sh" || rc=$?
+    case $rc in
+      0) echo "  '$VM': the fast network's service is up to date; the VM takes the fast network from its next start if it is not on it now." ;;
+      4) echo "omacvm enable: the password dialog was cancelled: the fast network's service was not updated, the VM starts on QEMU's own network" >&2 ;;
+      *) echo "omacvm enable: the fast network's service did not install (see above): the VM starts on QEMU's own network" >&2 ;;
+    esac
+    exit "$rc"
+  fi
   echo "  Nothing to change on '$VM'."
   exit 0
 fi
