@@ -5,7 +5,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
-# Waits 2 s for the switch to finish (and Hyprland to load the theme's rounding).
+# Waits for the switch's files to settle (0.8 s quiet, at most 3 s), sends,
+# and looks once more 1.5 s later (Hyprland reloads its border and rounding last).
 ExecStart=/usr/lib/omacvm/omacvm-touchid-theme
 
 [Install]

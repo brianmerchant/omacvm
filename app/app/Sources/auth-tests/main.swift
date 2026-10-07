@@ -242,6 +242,31 @@ do {
     r.stop(); close(vm)
 }
 
+// Touch ID off for the VM (its features now): refused in the app, the Bridge never asked;
+// on again (no restart): relayed. 3.0.4 gives every VM the port.
+do {
+    let fb = FakeBridge()
+    let (vm, app) = pair()
+    let on = NSLock(); var touchID = false
+    let r = AuthRelay(guest: app, connectBridge: { fb.connect() }, headers: headers,
+                      enabled: { on.lock(); defer { on.unlock() }; return touchID })
+    r.pingTimeout = 0.6; r.minimumGap = 0
+    Thread.detachNewThread { try? r.run() }
+    usleep(50_000)
+    send(vm, requestLine())
+    var (got, _) = readAnswer(vm, timeout: 2)
+    var o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
+    let offBody = Data(base64Encoded: o["body"] as? String ?? "").flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    expect(o["status"] as? Int == 403 && (o["answer"] as? String ?? "").isEmpty && offBody?["code"] as? String == "off" && fb.connects == 0,
+           "relay: Touch ID off -> 403 off from the app (as the Bridge says it, unsigned), the Bridge not asked")
+    on.lock(); touchID = true; on.unlock()
+    send(vm, requestLine(id: other, auth: "1 1760000000 \(other) \(sig)"))
+    (got, _) = readAnswer(vm, timeout: 5)
+    o = (try? JSONSerialization.jsonObject(with: got.dropLast())) as? [String: Any] ?? [:]
+    expect(o["id"] as? String == other && o["status"] as? Int == 200 && fb.connects == 1, "relay: turned on while it runs -> relayed, no restart")
+    r.stop(); close(vm)
+}
+
 // Junk from the VM never reaches the Bridge; the relay keeps reading.
 do {
     let fb = FakeBridge()

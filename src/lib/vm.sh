@@ -127,6 +127,8 @@ vm_find_ip() {   # NAME TYPE [seconds]
   esac
 }
 
+# vm_probe IP: the VM's OmacVM settings over SSH (nothing when SSH did not
+# get in). OMA_PROBE_ERR=FILE: ssh's own messages go there (ssh_failure_why).
 vm_probe() {
   gssh "$1" 'U=$(getent passwd 1000 | cut -d: -f1); H=$(getent passwd 1000 | cut -d: -f6)
     grep -q "^OMACVM_USER=" /etc/omacvm/env 2>/dev/null || echo "OMACVM_USER=$U"
@@ -142,7 +144,7 @@ vm_probe() {
         awk "/^[[:space:]]*\\[/ { s = (\$0 ~ /^[[:space:]]*\\[Autologin\\]/) } s && /^[[:space:]]*User[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, \"\"); sub(/[[:space:]]+\$/, \"\"); u = \$0 } END { print u }")
       [ -n "$u" ] && echo OMACVM_REAL_autologin=on || echo OMACVM_REAL_autologin=off
     fi
-    true' < /dev/null 2>/dev/null
+    true' < /dev/null 2>"${OMA_PROBE_ERR:-/dev/null}"
 }
 
 vm_boot() {   # NAME TYPE

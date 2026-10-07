@@ -81,10 +81,12 @@ struct OmarchyTheme: Equatable {
      "border": border.map { $0.hex }, "border_angle": borderAngle, "radius": radius, "success": success.hex, "muted": muted.hex]
   }
 
-  /// The colours OmacVM.app's panel draws with (TouchIDPanelPrompt's theme).
-  var panelColors: [String: String] {
+  /// What OmacVM.app's panel draws with (TouchIDPanelPrompt's theme): the
+  /// colours, and the frame of Omarchy's own prompt (border, rounding).
+  /// "muted" is for the panels of 3.0.2 and 3.0.3, which framed with it.
+  var panelTheme: [String: Any] {
     ["background": background.hex, "foreground": foreground.hex, "accent": accent.hex, "error": error.hex,
-     "success": success.hex, "muted": muted.hex]
+     "success": success.hex, "muted": muted.hex, "border": border.map { $0.hex }, "border_angle": borderAngle, "radius": radius]
   }
 
   /// Lines that stay visible on the background (else a mix of background and text).
