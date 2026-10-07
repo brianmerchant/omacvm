@@ -8,7 +8,8 @@
 #        and an extension that has YouTube send VP9 instead of AV1 (this
 #        Chromium decodes AV1 only on the CPU)
 #        A pacman hook builds the daemon again when FFmpeg's soname changes
-#        and starts it when it was down (vdecd.sh).
+#        and starts it when it was down (vdecd.sh). A WirePlumber rule
+#        keeps the sound from hanging on the decoder (50-omacvm-vdec.conf).
 #   off: all of it goes again (dkms and the kernel headers stay installed)
 # Arch Linux ARM's Chromium has no VA-API, only V4L2: see docs/adr/0025.
 # Google Chrome and Brave use VA-API directly and need none of this.
@@ -25,6 +26,7 @@ STAMP=/var/lib/omacvm/vdec-module
 LOG=/var/lib/omacvm/vdec-build.log
 LIB=/usr/local/lib/omacvm
 BIN=/usr/local/bin/omacvm-vdecd
+WP=/etc/wireplumber/wireplumber.conf.d/50-omacvm-vdec.conf
 say() { echo "  Chromium video: $*"; }
 as_user() { runuser -u "$U" -- env -i PATH=/usr/bin:/bin "$@"; }
 source ../../guest/dkms.sh
@@ -38,7 +40,7 @@ if [[ $ON == off ]]; then
   rm -rf /usr/local/share/omacvm/chromium-no-av1
   rm -f /etc/systemd/system/omacvm-vdecd.service "$BIN" "$LIB/chromium-flags.py" \
     /etc/udev/rules.d/70-omacvm-vdec.rules /etc/modules-load.d/omacvm-vdec.conf \
-    /etc/sysusers.d/omacvm-vdec.conf /etc/pacman.d/hooks/95-omacvm-vdecd.hook "$STAMP"
+    /etc/sysusers.d/omacvm-vdec.conf /etc/pacman.d/hooks/95-omacvm-vdecd.hook "$STAMP" "$WP"
   systemctl daemon-reload
   if [[ -e /sys/module/omacvm_vdec ]]; then say "off (the module goes at the next VM start: an app has it open)"
   else say "off"; fi
@@ -70,6 +72,13 @@ install -m644 70-omacvm-vdec.rules /etc/udev/rules.d/
 install -m644 omacvm-vdecd.service /etc/systemd/system/
 install -Dm644 95-omacvm-vdecd.hook /etc/pacman.d/hooks/95-omacvm-vdecd.hook
 echo omacvm_vdec | install -Dm644 /dev/stdin /etc/modules-load.d/omacvm-vdec.conf
+# WirePlumber leaves the decoder alone (50-omacvm-vdec.conf says why); a
+# running one reads the rule when it starts again, before the module loads
+# below (that also frees one that already hangs on it).
+if ! cmp -s 50-omacvm-vdec.conf "$WP"; then
+  install -Dm644 50-omacvm-vdec.conf "$WP"
+  systemctl --user -M "$U@" try-restart wireplumber.service 2>/dev/null || true
+fi
 udevadm control --reload 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable omacvm-vdecd.service >/dev/null 2>&1
