@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- UTM VMs can go on an external drive: `omacvm build --vm-type utm
+  --vm-dir PATH` (or another folder in the build's "Where should the VM
+  go?"). The drive needs about 30 GB free, the Mac's own disk only a little
+  ([UTM route](docs/routes/utm.md#utm-on-an-external-drive)).
+- A UTM build no longer stops at "Could not write domain" when macOS keeps
+  the terminal out of UTM's data: it says so and builds the VM without
+  UTM's speed settings.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's

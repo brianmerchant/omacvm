@@ -204,6 +204,9 @@ jobs:
       - name: Ctrl-C in omacvm build stops the running step (a terminal, no VM)
         run: src/tests/build-ctrlc.sh
 
+      - name: UTM VM on another drive (--vm-dir; a stand-in UTM, no VM)
+        run: src/tests/utm-vm-dir.sh
+
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
 

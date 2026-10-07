@@ -232,6 +232,13 @@ APP_OLD=0
 # The version the image must fit: the app's when it makes the VM (it may be
 # older or newer than this omacvm), so both find the same image.
 PB_FOR=$(cat "$R/src/VERSION")
+if [[ $TYPE == utm && -n ${VM_DIR:-} ]]; then
+  (( IMAGE )) && usage "--vm-dir: an image VM for UTM goes into UTM's library"
+  if [[ $SOURCE == prebuilt ]] && ! (( PLAN && JSON )); then
+    info "A prebuilt UTM VM goes into UTM's library: building it here instead, so it can go into $VM_DIR (about $(build_minutes) minutes)."
+  fi
+  SOURCE=build
+fi
 if [[ $SOURCE != build ]] && ! (( IMAGE || APP_OLD )); then
   if [[ $TYPE == app && -n ${APP:-} ]]; then
     PB_FOR=$(app_version "$APP" || cat "$R/src/VERSION")
@@ -332,8 +339,9 @@ if [[ $TYPE == fusion ]]; then
 fi
 
 # ---------- where the VM goes ----------
-# Parallels and Fusion take any folder (an external drive, say); UTM keeps its
-# VMs in its own library (moving one there is not safe through its scripting).
+# Any folder (an external drive, say). UTM keeps its VMs in its own library on
+# the Mac's disk; with a folder, the build has UTM move the new VM there
+# (utm_move). A prebuilt UTM VM goes into UTM's library (prebuilt_make_vm).
 default_dir() { case $TYPE in parallels) echo "$HOME/Parallels" ;; fusion) echo "$FUSION_DIR" ;; utm) echo "UTM's library" ;; app) app_vms_root ;; esac; }
 free_gb_at() {   # free GB on the drive of a folder, as Finder counts it
   local g
@@ -351,7 +359,7 @@ vm_dir_problem() {   # DIR -> a reason it does not work, or nothing
   (( $(free_gb_at "$1") >= 30 )) || echo "only $(free_gb_at "$1") GB free on that drive (the VM needs about 30)"
 }
 if [[ -n ${VM_DIR:-} && $TYPE == app ]]; then usage "--vm-dir: OmacVM.app keeps its VMs in the folder set in the app"; fi
-if [[ -z ${VM_DIR:-} && $TYPE != app ]] && (( ! YES )); then
+if [[ -z ${VM_DIR:-} && $TYPE != app ]] && (( ! YES )) && ! [[ $TYPE == utm && $SOURCE == prebuilt ]]; then
   ui_select loc "Where should the VM go?" 0 "Default|$(default_dir | sed "s|^$HOME|~|")" \
     "Another folder…|an external drive, for example (a Finder window opens)"
   while (( loc == 1 )); do
@@ -723,6 +731,7 @@ else
   if [[ -n ${VM_DIR:-} ]]; then
     LIVE="$VM_DIR/.$VM-live.img"
     "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub" --workdir "$VM_DIR/.omacvm-build-live"
+    rm -rf "$VM_DIR/.omacvm-build-live"   # its leftovers (kernel, boot files): not needed after
   else
     LIVE="$HOME/Library/Caches/omacvm/build-live/$VM-live.img"
     "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"

@@ -58,7 +58,9 @@ utm_create() {
 # folder, which is in UTM's container on the Mac's internal disk. UTM's
 # scripting exports it there, deletes the original and opens the copy, which
 # UTM keeps in its list (by a bookmark, as File > Open does). Only UTM touches
-# its container.
+# its container. The copy is opened through UTM's scripting: on the Mac mini
+# (macOS 27, UTM 5.0.6) a UTM started by an Apple event ignored `open -a UTM
+# bundle`; LaunchServices' open is only the fallback.
 utm_move() {
   local name=$1 b="$2/$1.utm" out i
   [[ ! -e $b ]] || die "$b already exists"
@@ -72,9 +74,10 @@ utm_move() {
   [[ -f $b/config.plist ]] || die "UTM could not put the VM into $2: $out"
   out=$(utm_osa -e 'on run argv' -e 'tell application "UTM" to delete (virtual machine named (item 1 of argv))' -e 'end run' "$name") ||
     die "UTM could not delete its own copy of the VM ($out): delete '$name' in UTM, then open $b in UTM"
-  open -a UTM "$b"
+  utm_osa -e 'on run argv' -e 'tell application "UTM" to open (POSIX file (item 1 of argv))' -e 'end run' "$b" >/dev/null
   for ((i = 0; i < 30; i++)); do
     "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { $1 = ""; $2 = ""; sub(/^  /, ""); print }' | grep -qxF "$name" && return 0
+    (( i == 10 )) && open -a UTM "$b"
     sleep 1
   done
   die "UTM did not open the VM in $b: open it in UTM (File > Open) and run omacvm build again"
