@@ -132,7 +132,11 @@ ssh_failure_why() {
   elif grep -qE 'Connection (reset|closed)|kex_exchange_identification|Broken pipe' "$2" 2>/dev/null; then
     echo "SSH at $ip closed the connection (the VM is busy or starting, or its SSH turns the Mac away for a while after many tries)"
   elif [[ -n $e ]]; then echo "SSH to $ip did not get in: $(printf '%s' "$e" | tr -d '\000-\037' | cut -c1-160)"
-  else echo "OmacVM's SSH key did not get in at $ip"; fi
+  else
+    # Nothing said: the VM's sshd closed the connection before a word (as it
+    # does while PerSourcePenalties turns the Mac away; seen 2026-10-07).
+    echo "SSH at $ip closed the connection (the VM is busy or starting, or its SSH turns the Mac away for a while after many tries)"
+  fi
 }
 
 # hostkey_changed IP [SECONDS]: the VM answers, with other host keys than the one

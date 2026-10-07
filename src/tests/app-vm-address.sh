@@ -159,7 +159,9 @@ check "no answer" "SSH at 127.0.0.1:52501 did not answer (the VM is busy, or its
 check "something else: its first line" "SSH to 127.0.0.1:52501 did not get in: Bad owner or permissions on /x/config" \
   "$(why 'Bad owner or permissions on /x/config')"
 : > "$E"
-check "nothing said" "OmacVM's SSH key did not get in at 127.0.0.1:52501" "$(ssh_failure_why 127.0.0.1:52501 "$E")"
+check "nothing said (sshd closed it at once: PerSourcePenalties, OpenSSH 10.5 in the guest)" \
+  "SSH at 127.0.0.1:52501 closed the connection (the VM is busy or starting, or its SSH turns the Mac away for a while after many tries)" \
+  "$(ssh_failure_why 127.0.0.1:52501 "$E")"
 # A real ssh to a port nobody takes.
 ssh -o BatchMode=yes -o ConnectTimeout=3 -o LogLevel=ERROR -p 1 root@127.0.0.1 true 2> "$E" < /dev/null
 check "a real refused connection" "nothing takes SSH at 127.0.0.1:1 (the VM is starting, or its SSH stopped)" "$(ssh_failure_why 127.0.0.1:1 "$E")"
