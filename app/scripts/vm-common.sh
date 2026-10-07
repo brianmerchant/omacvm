@@ -21,6 +21,9 @@ else
   OMACVM_SRC=$_root/omacvm/src
 fi
 [[ -x $QEMU && -f $FIRMWARE && -d $OMACVM_SRC ]] || die "the app is incomplete (QEMU, firmware or OmacVM missing under $_root)"
+# python3 without Xcode's Command Line Tools: the app's own (src/lib/tools.sh).
+source "$OMACVM_SRC/lib/tools.sh"
+tools_path
 # downloads_dir ROOT: where builds of VMs in the VMs folder ROOT keep their
 # downloads: ~/Library/Caches/omacvm when ROOT is on the home folder's drive,
 # else ROOT/.downloads, so VMs on another drive leave the Mac's disk alone.
@@ -106,8 +109,15 @@ vm_load() {
   fi
 }
 
-# Xcode's Command Line Tools (swiftc, clang), for OmacVM's Mac helpers.
-clt_ok() { xcode-select -p >/dev/null 2>&1 && xcrun -f swiftc >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; }
+# What a build runs on the Mac besides the app's own programs: python3 (the
+# prebuilt image's manifest, the password hash, apply). OmacVM.app carries one
+# and its Mac helpers ready made (src/lib/tools.sh, src/lib/helpers.sh), so a
+# Mac without Xcode's Command Line Tools builds too; a source tree takes them
+# from the Command Line Tools.
+tools_ok() {
+  tools_python >/dev/null ||
+    die "no python3 here: this OmacVM.app is incomplete (Contents/Resources/python); with Xcode's Command Line Tools (xcode-select --install) a source tree works"
+}
 
 # Grow (or create) a sparse file to SIZE bytes.
 truncate_file() { dd if=/dev/null of="$1" bs=1 seek="$2" 2>/dev/null; }

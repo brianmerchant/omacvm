@@ -50,6 +50,16 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   github.com/startergo/homebrew-virglrenderer (MIT).
 - **OmacVM** (github.com/gillesgoetsch/omacvm, the repository the app is
   part of), MIT: the VM side, the base and Omarchy installers, the icon.
+- **Python** 3.13.16 (CPython), PSF-2.0, in `Contents/Resources/python`: the
+  interpreter for OmacVM's Mac-side scripts on Macs without Xcode's Command
+  Line Tools. As built by python-build-standalone
+  (github.com/astral-sh/python-build-standalone, release 20261003; its build
+  scripts are BSD-3-Clause), fetched and cut by `scripts/fetch-python.sh`.
+  Linked into the interpreter: OpenSSL 3.5 (Apache-2.0), libffi (MIT),
+  mpdecimal (BSD-2-Clause), expat (MIT), xz (0BSD), bzip2 (bzip2-1.0.6),
+  SQLite (public domain) and HACL* (MIT). `LICENSE.python.txt` in the
+  licences folder is CPython's licence with the notices of the code it
+  includes.
 - In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come
   from their own servers during the setup, each package under its own licence.
   On Venus VMs `src/app/guest/venus/install.sh` downloads Mesa 26.2.4 (MIT,
