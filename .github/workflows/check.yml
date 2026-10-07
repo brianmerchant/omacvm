@@ -259,6 +259,9 @@ jobs:
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 
+      - name: QEMU's full-grab tap goes when Accessibility is taken away (issue 192)
+        run: app/runtime/Tests/keys/test-tap-permission.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
@@ -301,6 +304,9 @@ jobs:
       - name: Chromium's video decoder comes back (GPU retry, pacman hook, check says why)
         run: src/tests/vdecd-down.sh
 
+      - name: Sound does not hang on Chromium's video decoder (WirePlumber rule, install order, off); its device starts the daemon
+        run: src/tests/vdec-wireplumber.sh
+
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.
   guest:
@@ -322,6 +328,9 @@ jobs:
 
       - name: Touch ID's PAM client on Linux, as in the VM (fake Bridge and logind)
         run: src/tests/touchid-client.sh
+
+      - name: The guest's udev rules parse (udevadm verify)
+        run: udevadm verify --resolve-names=never src/vdec/guest/70-omacvm-vdec.rules
 
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |

@@ -11,7 +11,10 @@
 #    Gestures, the Bridge client and the guest check.
 # 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
 #    own tap sits ahead of ours) comes to the front, and when macOS invalidated
-#    it; a failed re-creation keeps the old tap and is logged once (test-tap.c).
+#    it; a failed re-creation keeps the old tap and is logged once. Accessibility
+#    (or Input Monitoring) taken away: the tap and its run-loop source go and
+#    the trackpads are let go at once, nothing enables or creates a tap again
+#    until it is back (issue #192) (test-tap.c).
 # 5. Ctrl+Option+Esc (and the old Ctrl+Option+Cmd+Esc, exact modifiers only): in the VM the display under the pointer moves out
 #    with macOS's own Space shortcut as the user set it (or every display
 #    with "all"), toward the Space it came from; in macOS back in; not moved
