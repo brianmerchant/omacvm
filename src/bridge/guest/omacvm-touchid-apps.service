@@ -1,0 +1,11 @@
+[Unit]
+Description=OmacVM: say which apps need their own switch for Touch ID (1Password)
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+# Once per app until Touch ID is turned on again; nothing while the app's switch is on.
+ExecStart=/usr/lib/omacvm/omacvm-touchid-apps --notify
+
+[Install]
+WantedBy=graphical-session.target
