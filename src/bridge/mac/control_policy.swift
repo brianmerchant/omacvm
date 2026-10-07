@@ -994,18 +994,21 @@ struct VMListCache {
   }
 
   /// A request about a VM the list has as running, but refused (the Mac
-  /// cannot reach it, or OmacVM did not set it up): answered from the list at
-  /// once, never waited for (a guest may ask again and again). True when the
-  /// caller starts a run in the background now: at most every `refusedEvery`
-  /// seconds, so a VM that just became reachable is found soon.
-  static let refusedEvery: Double = 10
+  /// cannot reach it, or OmacVM did not set it up; a VM that just started
+  /// again is one until a run sees it). `start`: the caller starts a run now,
+  /// at most every `refusedEvery` seconds however often a guest asks (each
+  /// run probes every VM over SSH). `waitFor`: the run the request waits for
+  /// (VMListCache.unknownWait at most): the one it started or the one going;
+  /// nil: answered from the list at once (no run due).
+  static let refusedEvery: Double = 5
   private var refusedAt = Date.distantPast
-  mutating func refused(now: Date) -> Bool {
-    guard !running, now.timeIntervalSince(failedAt) >= Self.afterFailure,
-          now.timeIntervalSince(refusedAt) >= Self.refusedEvery, now.timeIntervalSince(at) >= Self.refusedEvery else { return false }
+  mutating func refused(now: Date) -> (start: Bool, waitFor: Int?) {
+    guard now.timeIntervalSince(failedAt) >= Self.afterFailure else { return (false, nil) }
+    if running { return (false, started) }
+    guard now.timeIntervalSince(refusedAt) >= Self.refusedEvery, now.timeIntervalSince(at) >= Self.refusedEvery else { return (false, nil) }
     refusedAt = now
     start()
-    return true
+    return (true, started)
   }
 
   /// A request from a VM the list has at this address did not prove with

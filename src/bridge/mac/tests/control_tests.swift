@@ -526,13 +526,16 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     let unreach = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false, why: "no address")
     _ = ur.finished([unreach], now: t0 + 1)
     expect(appVMListed("Omarchy", ur.list) && !appVMListed("Other", ur.list), "listed: by name, running")
-    expect(!ur.refused(now: t0 + 2), "refused: no run within 10 s of the last list")
-    expect(ur.refused(now: t0 + 12) && ur.running, "refused: a background run 10 s after the last list")
-    expect(!ur.refused(now: t0 + 12.5), "refused: not while a run goes")
-    _ = ur.finished([unreach], now: t0 + 13)
+    var rr = ur.refused(now: t0 + 2)
+    expect(!rr.start && rr.waitFor == nil, "refused: no run within 5 s of the last list, answered at once")
+    rr = ur.refused(now: t0 + 7)
+    expect(rr.start && rr.waitFor == ur.started && ur.running, "refused: a run 5 s after the last list, waited for (a VM that just started again)")
+    rr = ur.refused(now: t0 + 7.5)
+    expect(!rr.start && rr.waitFor == ur.started, "refused: while a run goes, no second one; that one waited for")
+    _ = ur.finished([unreach], now: t0 + 8)
     var refusedRuns = 0
-    for i in 0..<60 where ur.refused(now: t0 + 14 + Double(i)) { refusedRuns += 1; _ = ur.finished([unreach], now: t0 + 14 + Double(i) + 0.5) }
-    expect(refusedRuns <= 6 && refusedRuns >= 4, "refused: a VM asking every second for a minute starts 4-6 runs (got \(refusedRuns))")
+    for i in 0..<60 where ur.refused(now: t0 + 9 + Double(i)).start { refusedRuns += 1; _ = ur.finished([unreach], now: t0 + 9 + Double(i) + 0.5) }
+    expect(refusedRuns <= 11 && refusedRuns >= 9, "refused: a VM asking every second for a minute starts about one run per 5-6 s (got \(refusedRuns))")
     expect(peerListed("10.211.55.5", [vmA]) && !peerListed("10.211.55.9", [vmA]) && !peerListed("", [VMEntry(name: "x", type: "app", state: "running", ip: "", omacvm: "", setup: true)]),
            "listed: by address, never an empty one")
     // jobEnded keeps whether the VM was reachable.

@@ -448,9 +448,10 @@ final class Control {
   /// has the VM that asks; then the cache at once, and a run in the
   /// background when it is due (`fresh` false: never for its age).
   /// `listed`: the list has it as running, but it is refused (the Mac cannot
-  /// reach it, or OmacVM did not set it up): the cache at once too, and a run
-  /// in the background at most every VMListCache.refusedEvery (a guest asking
-  /// again and again never makes the Bridge probe every VM each second). A VM
+  /// reach it, or OmacVM did not set it up; one that just started again): a
+  /// run at most every VMListCache.refusedEvery (a guest asking again and
+  /// again never makes the Bridge probe every VM each second), waited for as
+  /// below while it goes; else the cache at once. A VM
   /// it does not have (or has as not running): a fresh run first (at most
   /// once per `every` seconds), waited for up to VMListCache.unknownWait
   /// (`fresh` false: not waited for, graphics memory is asked every 2 s with
@@ -460,7 +461,7 @@ final class Control {
                       listed: ([VMEntry]) -> Bool, known: ([VMEntry]) -> Bool) -> [VMEntry] {
     let (list, start, waitFor) = q.sync { () -> ([VMEntry], Bool, Int?) in
       if known(vms.list) { return (vms.list, fresh && vms.shouldRefresh(known: true, now: Date()), nil) }
-      if listed(vms.list) { return (vms.list, vms.refused(now: Date()), nil) }
+      if listed(vms.list) { let r = vms.refused(now: Date()); return (vms.list, r.start, r.waitFor) }
       // Graphics memory (every 2 s while the control centre is open) asks no faster than an address.
       let u = vms.unknown(now: Date(), every: fresh ? every : max(every, VMListCache.addressEvery))
       return (vms.list, u.start, u.waitFor)
