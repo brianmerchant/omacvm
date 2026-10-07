@@ -40,6 +40,14 @@ in more words.
   desktop is still lost, the window and the note say why (the guard,
   macOS short of memory, or a graphics failure).
 
+- OmacVM.app: when the drive with a running VM drops off (unplugged, a
+  loose cable, ejected by force), the app stops the VM at once and its
+  window says "The drive with your VMs (NAME) is gone. Reconnect it and
+  start the VM again." The VM shows as unavailable until the drive is back,
+  then as ready again. Before, QEMU kept running on files that were gone.
+  A VMs folder whose drive was not plugged in at launch shows up by itself
+  once it is.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
