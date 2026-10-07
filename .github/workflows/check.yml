@@ -114,6 +114,9 @@ jobs:
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
+      - name: Fusion guest install (first Hyprland build from the source tree)
+        run: src/tests/fusion-install.sh
+
       - name: OmacVM.app update checks
         working-directory: app/app
         run: swift run update-tests

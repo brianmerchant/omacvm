@@ -5,6 +5,9 @@ in more words.
 
 ## 3.0.4 (unreleased)
 
+- VMware Fusion: setting up a new VM stopped at "failed during: VMware
+  Fusion" (3.0.0 to 3.0.3). The first Hyprland build ran from a copy that
+  could not install its build tools.
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
   Settings while it ran could freeze the Mac's keyboard and clicks (the
   pointer still moved) until the helper was killed. Gestures now removes
