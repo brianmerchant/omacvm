@@ -228,10 +228,35 @@ if (( MAC )); then
     die "the Mac side did not install (see above); the VM was not changed"
   fi
   rm -f "$MAC_FAILED"
-  # OmacVM.app's fast network: a system service (macOS asks for the password once).
+  # OmacVM.app's fast network: a system service (macOS asks for the password
+  # once). Installed (or updated) when this run turns the fast network on or
+  # repairs it. Any other run (another feature, an update) leaves it as it is:
+  # a service that needs an update after an app update never stops it, the VM
+  # then starts on QEMU's own network until the person updates the service.
   if [[ $TYPE == app ]] && on fast-network; then
-    rc=0; "$R/src/net/mac/install.sh" || rc=$?
-    (( rc == 0 )) || { echo "omacvm apply: the fast network did not install (omacvm disable fast-network keeps QEMU's own network)" >&2; exit "$rc"; }
+    fni=$(feature_index fast-network)
+    if [[ ${PREV[$fni]} != on || " ${SETN[*]:-} " == *" fast-network "* || " ${REINSTALL[*]:-} " == *" fast-network "* ]]; then
+      rc=0; "$R/src/net/mac/install.sh" || rc=$?
+      if (( rc == 3 )); then
+        # Nobody to ask for the password here (a job a VM asked for through
+        # the Bridge never becomes root, or no terminal): the switch is set
+        # for the VM's next start, and OmacVM.app asks on the Mac then.
+        info "fast network: its service on this Mac needs an administrator's password to install or update: OmacVM asks for it on the Mac at the VM's next start (or Update… under Fast network in OmacVM, or omacvm enable fast-network in Terminal); until then the VM starts on QEMU's own network"
+      elif (( rc )); then
+        if (( rc == 4 )); then why="the password dialog was cancelled: the fast network was not changed, the VM keeps its network"
+        else why="its service did not install: the fast network was not changed, the VM keeps its network"; fi
+        failed_part fast-network "$why" mac
+        echo "omacvm apply: $why" >&2
+        exit "$rc"
+      fi
+    else
+      case $("$R/src/net/mac/install.sh" --status 2>/dev/null | head -1) in
+        ok) ;;
+        stopped) info "fast network: its service stopped trying after vmnet failed too often; the VM starts on QEMU's own network until the Mac restarts or: omacvm enable fast-network --vm \"$VM\"" ;;
+        old) info "fast network: its service on this Mac needs an update for this OmacVM.app (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Update… in OmacVM. Until then the VM starts on QEMU's own network" ;;
+        *) info "fast network: its service is not installed (or not running) on this Mac (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Install… in OmacVM. Until then the VM starts on QEMU's own network" ;;
+      esac
+    fi
   fi
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
@@ -271,8 +296,11 @@ if (( MAC )) && needs_bridge; then
   fi
 fi
 # The gestures daemon says it too (OmacVM.app's VMs show it on 127.0.0.1 even
-# without the Bridge).
-if (( TOKEN )) && on gestures; then bridge_token_ensure; fi
+# without the Bridge). The Bridge's features need it in the VM before the Mac
+# side is there: OmacVM.app's first apply is --no-mac, and on a Mac that never
+# had the Bridge (Gestures off at setup) there was no token yet: the build
+# stopped at "Adding OmacVM to the VM". The Bridge installed later keeps it.
+if (( TOKEN )) && { on gestures || needs_bridge; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :
 elif [[ -f $T ]]; then
@@ -294,15 +322,20 @@ fi
 # root), and for Parallels/UTM/Fusion the Bridge token (they reach the Bridge
 # over the network). OmacVM.app's VMs ask through the app's port: no Bridge
 # token in them. Off: the Mac's copy goes (the VM's goes in guest/install.sh).
+# A rebuilt VM (--reset-host-key) starts without the old one's theme.
+if (( NEWKEY && NAMED )); then
+  rm -f "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+fi
 if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
   if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token" < /dev/null
   else gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"; fi
 else
-  # The key, and the theme the VM sent for the Bridge's Touch ID panel.
+  # The key. The theme the VM sent for the Touch ID panel stays (colours
+  # only): with Touch ID back on, the panel looks like the VM at once.
   if (( NAMED )); then
-    rm -f "$(vm_key_file "$TYPE" "$VM").touchid" "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+    rm -f "$(vm_key_file "$TYPE" "$VM").touchid"
   fi
   # On without a key: the VM's PAM line gets 403 and the password comes.
   if on touch-id; then log "Touch ID: not set up (it needs the VM by name and the Bridge token: not --ip, not --no-token)"; fi
@@ -481,25 +514,21 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
     [[ -z $l ]] || info "OmacVM.app: $l off in the VM now; the Mac stops serving it at the VM's next start"
   fi
   # The fast network from the VM's next start: its own MAC address (the VMs
-  # share vmnet's network), kept in fast-network, which the app reads.
+  # share vmnet's network), kept in fast-network, which the app reads. A VM
+  # that runs keeps its network until then (app_fast_network_wish).
   if on fast-network; then
-    [[ -s $d/fast-network ]] ||
-      printf 'mac=52:54:00:%02x:%02x:%02x\n' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)) > "$d/fast-network"
-    [[ $(app_net "$d") == vmnet ]] || info "fast network: from the VM's next start (shut it down, then start it again)"
-  elif [[ -e $d/fast-network ]]; then
-    rm -f "$d/fast-network"
+    l=$(app_fast_network_wish "$d" on) && info "$l"
+  elif l=$(app_fast_network_wish "$d" off); then
+    info "$l"
     # The root service only while one of this user's app VMs has the fast
-    # network; without it a VM still running on it switches to the user
-    # network within seconds, else at its next start.
+    # network or runs on it (it would take the network from under a VM
+    # that runs on it, which keeps it until it shuts down).
     if (( MAC )) && ! app_any_fast_network; then
-      if "$R/src/net/mac/install.sh" --remove; then
-        [[ $(app_net "$d") == vmnet ]] && info "fast network: off (the running VM switches to QEMU's own network now)"
-      else
+      if app_any_on_vmnet; then
+        info "the fast network's service stays installed while a VM runs on it (omacvm uninstall, or src/net/mac/install.sh --remove, takes it off)"
+      elif ! "$R/src/net/mac/install.sh" --remove; then
         info "the fast network's service stays installed (omacvm uninstall, or src/net/mac/install.sh --remove, takes it off)"
-        [[ $(app_net "$d") == vmnet ]] && info "fast network: off from the VM's next start"
       fi
-    elif [[ $(app_net "$d") == vmnet ]]; then
-      info "fast network: off from the VM's next start"
     fi
   fi
   # Vulkan (Venus) from the VM's next start: the app reads the vulkan file
@@ -534,5 +563,26 @@ if [[ $TYPE == parallels ]]; then
     info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
     parallels_shortcuts_alert
   fi
+fi
+# Touch ID turned on by this run: whether it works now, and an app that needs
+# its own switch for it (omacvm-touchid-apps in the VM: 1Password). Asked
+# from the VM itself, so "ready" means its key and PAM line are there.
+if on touch-id && [[ ${PREV[$(feature_index touch-id)]} != on ]] && (( TOKEN && NAMED )); then
+  tid=$(gssh "$IP" "test -s /etc/omacvm/touchid-key && grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/sudo && echo ready
+    if [ -x /usr/lib/omacvm/omacvm-touchid-apps ]; then
+      sudo -u '$U' env HOME=\"\$(getent passwd '$U' | cut -d: -f6)\" /usr/lib/omacvm/omacvm-touchid-apps 2>/dev/null
+    fi" < /dev/null 2>/dev/null || true)
+  if [[ $(head -1 <<<"$tid") != ready ]]; then
+    info "Touch ID: not set up in the VM (see above); the password keeps working"
+  elif [[ $TYPE == app ]] && td=$(app_dir "$VM" 2>/dev/null) && app_running_dir "$td" &&
+       { rc=0; app_touchid_port "$td" || rc=$?; (( rc == 1 )); }; then
+    # Started by OmacVM.app 3.0.3 or older: the port comes with the next start.
+    info "Touch ID: on - restart the VM once to finish (shut it down, then start it again)"
+  else
+    info "Touch ID is ready: try sudo -v in an Omarchy terminal"
+  fi
+  while IFS=$'\t' read -r _ st title text; do
+    if [[ $st == off && -n $title ]]; then info "Touch ID: $title: $text"; fi
+  done < <(tail -n +2 <<<"$tid")
 fi
 log "done$( [[ -n $had && $had != "$now" ]] && echo " (OmacVM $had -> $now)"): kernel, memory and keyboard changes apply after a reboot of the VM"

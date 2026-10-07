@@ -28,10 +28,13 @@ if [[ $(uname) == Linux ]] && pkg-config --exists libva gbm egl glesv2 libavcode
     echo "ok   daemon builds"
     # No render node here: the GPU is not usable. Run 1 exits at once, run 2
     # after 2 s (4 s with the unit's RestartSec); a stale status goes.
+    # The daemon waits in whole seconds (sleep 1): the time is rounded down,
+    # so its own start (FFmpeg's and Mesa's libraries, 0.05-0.7 s on CI's
+    # runners) does not count as a wait.
     mkdir "$T/run"; echo "H.264" > "$T/run/status"
     for want in "4 0 1" "4 2 2"; do
       t0=$(date +%s%3N); RUNTIME_DIRECTORY=$T/run "$T/real" 2>> "$T/real.err"; rc=$?
-      waited=$((($(date +%s%3N) - t0 + 500) / 1000))
+      waited=$((($(date +%s%3N) - t0) / 1000))
       expect "daemon: GPU not usable, try ${want##* }: exit, wait, count" "$want" \
         "$rc $waited $(cat "$T/run/gpu-tries" 2>/dev/null)"
     done

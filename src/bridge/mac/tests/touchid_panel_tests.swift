@@ -178,9 +178,12 @@ struct FrontMac: TouchIDMacState { var locked = false; var frontType: String? = 
     for junk in ["YES", "yes ", "", "no", "ok", "yes\r", "no yes"] {
       check(touchIDAppPanelOutcome(junk) == .no(.failed), "app panel: \(junk.debugDescription) is never a yes")
     }
-    let colours = OmarchyTheme.tokyoNight.panelColors
-    check(Set(colours.keys) == ["background", "foreground", "accent", "error", "success", "muted"] && colours["success"] == "#9ece6a"
-          && colours["muted"] == "#414868", "app panel: the colours it draws with")
+    let colours = OmarchyTheme.tokyoNight.panelTheme
+    check(Set(colours.keys) == ["background", "foreground", "accent", "error", "success", "muted", "border", "border_angle", "radius"]
+          && colours["success"] as? String == "#9ece6a" && colours["muted"] as? String == "#414868", "app panel: the colours it draws with")
+    let framed = theme(["background": "#101315", "foreground": "#cacccc", "border": ["#798186", "#cacccc"], "border_angle": 45, "radius": 6])!
+    check(framed.panelTheme["border"] as? [String] == ["#798186", "#cacccc"] && framed.panelTheme["border_angle"] as? Double == 45
+          && framed.panelTheme["radius"] as? Double == 6, "app panel: Omarchy's frame (border, angle, rounding) goes along")
 
     // ---- the decider hands the panel what it needs ----
     let pa = PromptAuth()

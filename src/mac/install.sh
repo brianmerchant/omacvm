@@ -78,8 +78,12 @@ install_app() {
   [[ -n $bundle ]] && pre=$(helpers_prebuilt "$R" "$dir" "$bundle")
   # Paths relative to src/, so another copy of the same OmacVM matches too.
   # The prebuilt copy's signature counts too: from built here to the app's
-  # signed copy is a change.
-  sum=$( { (cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
+  # signed copy is a change. In the C locale: the order of the names must not
+  # depend on who runs it (the control centre's jobs have LANG=en_US.UTF-8, a
+  # terminal may have none), else every switch between the two built and
+  # restarted all the helpers again (the Bridge restarted on each Touch ID
+  # switch, and its first request after that failed).
+  sum=$( export LC_ALL=C; { (cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
             sort -z | xargs -0 shasum); echo "args: $*"
            if [[ -n $pre ]]; then echo "prebuilt: $(shasum "$pre/Contents/_CodeSignature/CodeResources" "$pre"/Contents/MacOS/* | cut -c1-40)"; fi
          } | shasum | cut -c1-16)

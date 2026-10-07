@@ -14,7 +14,8 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d)
 OUT=${1:-$T/png}; mkdir -p "$OUT"
 D=org.omacvm.test.mouse-swipe.$$
-BIN=omacvm-mouse-swipe-render
+# The renderer's own defaults domain is its name: per run as well.
+BIN=org.omacvm.test.mouse-swipe-render.$$
 trap 'defaults delete "$D" >/dev/null 2>&1; defaults delete "$BIN" >/dev/null 2>&1; rm -rf "$T" "$HOME/Library/Preferences/$D.plist"' EXIT
 fail=0
 expect() {   # WHAT WANT GOT

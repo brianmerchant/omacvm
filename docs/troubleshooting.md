@@ -112,6 +112,16 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   pass no DDC/CI (USB-C or DisplayPort usually do). A display that was asleep
   when the Bridge looked is asked again after a minute (by the keys, the VM
   or `omacvm check`) or when displays change.
+- **Touch ID asks for the password instead**: the line above the password
+  prompt says why ("Touch ID not available (VM not in front), use your
+  password", "the Mac is still starting: try again in a moment", ...).
+  Nothing there means you cancelled on the Mac, or it does not ask here at
+  all (over SSH, or a program without a terminal). `omacvm check` has a
+  "Touch ID (Mac)" line (the VM's key, OmacVM Bridge, a fingerprint) and, in
+  the VM, "Touch ID last request"; `journalctl -t omacvm-touchid` in the VM
+  lists each request. 1Password asks for its own password until its
+  Settings › Security › Unlock using system authentication is on, and once
+  after it starts.
 - **"answers with another SSH host key"**: OmacVM remembers each VM's SSH key.
   After rebuilding or reinstalling the VM: `omacvm apply --vm NAME --reset-host-key`.
 - **Scrolling feels too fast or slow in one app**: Chromium-based apps get their
