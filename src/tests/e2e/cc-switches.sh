@@ -146,6 +146,8 @@ qemu_pid() { pgrep -f "$QPAT $VM( |$)" | head -1; }
 launcher_pid() { pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" | head -1; }
 SERVER=""
 cleanup() {
+  # While working on the test: the VM stays up this long first, to look at it (ssh, the cc's tmux).
+  [[ ${OMACVM_E2E_HOLD:-} =~ ^[0-9]+$ ]] && { log "holding ${OMACVM_E2E_HOLD} s (OMACVM_E2E_HOLD), VM at ${IP:-?}"; sleep "$OMACVM_E2E_HOLD"; }
   log "cleanup"
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then gssh "systemctl poweroff" >/dev/null 2>&1; for _ in $(seq 60); do kill -0 "$p" 2>/dev/null || break; sleep 1; done; kill "$p" 2>/dev/null; fi
@@ -248,30 +250,33 @@ reachable() {   # SECONDS: `omacvm vms --json` says running + reachable within S
   for ((i = 0; i < $1; i += 3)); do [[ $(vminfo | awk '{print $1, $2}') == "running true" ]] && return 0; sleep 3; done
   return 1
 }
-cc() {   # ARGS...: guest-cc.py in the VM; its JSON in $OUT/cc-<n>.json, a short line on stdout
+cc() {   # ARGS...: guest-cc.py in the VM. Sets CCJ (its JSON, kept as $OUT/cc-<n>-<what>.json) and CCS
+  # (a short line); call it directly, never in $(...): the two would be lost with the subshell.
   CCN=$(( ${CCN:-0} + 1 ))
-  local f=$OUT/cc-$CCN-$1.json q="" a
+  CCJ=$OUT/${PFX}cc-$CCN-$1.json
+  local q="" a rc
   for a in "$@"; do q+=" $(printf '%q' "$a")"; done
-  gssh "python3 /var/lib/omacvm-e2e/guest-cc.py$q" > "$f" 2> "$f.err"
-  local rc=$?
-  CCJ=$f
-  /usr/bin/python3 - "$f" <<'PY'
+  gssh "python3 /var/lib/omacvm-e2e/guest-cc.py$q" > "$CCJ" 2> "$CCJ.err"
+  rc=$?
+  CCS=$(/usr/bin/python3 - "$CCJ" <<'PY'
 import json, sys
 try:
     o = json.load(open(sys.argv[1]))
 except Exception:
     print("no answer from the VM"); sys.exit(0)
 bits = []
-for k in ("error", "already", "seconds", "asked"):
+for k in ("error", "already", "seconds", "asked", "answer"):
     if o.get(k): bits.append(f"{k}: {str(o[k])[:160]}")
 for k in ("before", "after"):
     v = o.get(k)
     if isinstance(v, dict): bits.append(f"{k}: {v.get('on')}, {v.get('status')} ({v.get('note', '')[:70]})")
 if o.get("trouble"): bits.append("trouble: " + " | ".join(o["trouble"])[:300])
-for k in ("got_in", "password_prompt", "linked", "body"):
+for k in ("got_in", "password_prompt", "linked"):
     if k in o: bits.append(f"{k}: {str(o[k])[:200]}")
 print("; ".join(bits))
 PY
+)
+  [[ -s $CCJ.err ]] && CCS+=" (stderr: $(tail -2 "$CCJ.err" | tr '\n' ' ' | cut -c1-200))"
   return $rc
 }
 ccok() { /usr/bin/python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("ok") else 1)' "$CCJ" 2>/dev/null; }
@@ -309,7 +314,7 @@ stop_vm() {   # as the person: shut down in Omarchy; QEMU and the launcher go
   for ((i = 0; i < 15; i++)); do [[ -z $(launcher_pid) ]] && break; sleep 1; done
   return 0
 }
-restart_vm() { stop_vm && start_vm && reachable 60 && cc start 120 > /dev/null && ccok; }
+restart_vm() { stop_vm && start_vm && reachable 60 && cc start 120 && ccok; }
 window() {   # the launcher's window on this VM (the VM must be stopped): its pid, or nothing
   local i p
   close_window   # a launcher from before keeps the VM it shows
@@ -435,7 +440,7 @@ start_pass() {   # start the VM, the control centre's driver into it, the featur
 
 baseline() {   # TAG: the control centre comes up linked; no row fails; the Mac reaches the VM
   local s bad
-  s=$(cc start 120)
+  cc start 120; s=$CCS
   if ccok; then
     bad=$(/usr/bin/python3 -c '
 import json, re, sys
@@ -452,7 +457,7 @@ switch_one() {   # NAME on|off: one press in the control centre, and every check
   local n=$1 to=$2 title s t0 b g m job why=""
   title=$(feat title "$n")
   bmark; t0=$(date +%s)
-  s=$(cc toggle "$title" "$to" 900)
+  cc toggle "$title" "$to" 900; s=$CCS
   b=$(bproblems); g=$(guest_feature "$n"); m=$(mac_feature "$n")
   job=$(bsince | grep -E "job [^ ]+ \((enable|disable) [^)]*\b$n\b" | tail -1 | sed 's/^.*control: //')
   ccok || why+="cc: $s; "
@@ -488,7 +493,7 @@ step_switches() {
     if [[ $(feat available "$n") != true ]]; then
       # Not for this Mac or VM: the row says so and Space changes nothing.
       title=$(feat title "$n")
-      s=$(cc row "$title")
+      cc row "$title"; s=$CCS
       [[ $s == *unavailable* || $s == *"off, off"* || $s == *"no row"* ]] \
         && res "switch-$n" skip "not on this Mac ($(feat reason "$n")); row: ${s:0:120}" \
         || res "switch-$n" FAIL "unavailable here ($(feat reason "$n")) but the row says: $s"
@@ -503,7 +508,7 @@ step_switches() {
   [[ -z $FEATS || $FEATS == *",control-centre,"* ]] || return 0
   # The control centre itself: off closes it (asked first); the Mac brings it back.
   bmark
-  s=$(cc toggle "OmacVM control centre" off 600)
+  cc toggle "OmacVM control centre" off 600; s=$CCS
   g=$(guest_feature control-centre)
   if [[ $g == off ]] && ! gssh "test -x /usr/local/bin/omacvm"; then res switch-control-centre-off ok "${s:0:160}"
   else res switch-control-centre-off FAIL "env ${g:-?}; $s"; fi
@@ -522,7 +527,7 @@ step_fastnet() {   # the fast network: while the VM runs, and after a restart
   if [[ -n $blk ]]; then res fastnet BLOCKED "$blk"; return; fi
   for to in on off; do
     bmark
-    s=$(cc toggle "Fast network" "$to" 600)
+    cc toggle "Fast network" "$to" 600; s=$CCS
     sleep 10
     why=""
     ccok || why+="cc: $s; "
@@ -552,18 +557,18 @@ step_touchid() {   # Touch ID: the test Bridge's stand-in answers (README)
   if [[ $(feat available touch-id) != true ]]; then res touchid BLOCKED "not available here: $(feat reason touch-id)"; return; fi
   echo yes > "$BDIR/touchid-test"
   bmark
-  s=$(cc toggle "Touch ID" on 600)
+  cc toggle "Touch ID" on 600; s=$CCS
   ccok && res touchid-on ok "${s:0:200}" || res touchid-on FAIL "after the switch, before a restart: $s"
   if restart_vm; then
-    bmark; s=$(cc sudo yes 60)
+    bmark; cc sudo yes 60; s=$CCS
     ccok && [[ $(bsince) == *"sudo yes (test stand-in"* ]] && res touchid-yes ok "${s:0:120}" \
       || res touchid-yes FAIL "$s; Bridge: $(bsince | grep -E 'touchid|unknown-vm' | tail -2 | tr '\n' '|')"
     echo no > "$BDIR/touchid-test"
-    bmark; s=$(cc sudo no 60)
+    bmark; cc sudo no 60; s=$CCS
     ccok && res touchid-no ok "the password prompt: ${s:0:120}" || res touchid-no FAIL "$s; Bridge: $(bsince | grep touchid | tail -2 | tr '\n' '|')"
     echo yes > "$BDIR/touchid-test"
     # The first request right after a Bridge restart (enable touch-id restarts the installed Bridge).
-    bmark; bridge_start; s=$(cc sudo yes 60)
+    bmark; bridge_start; cc sudo yes 60; s=$CCS
     b=$(bsince | grep -E 'touchid|unknown-vm|409' | tail -3 | tr '\n' '|')
     ccok && [[ $b != *unknown-vm* && $b != *" 409"* ]] && res touchid-after-bridge-restart ok "${s:0:120}" \
       || res touchid-after-bridge-restart FAIL "$s; Bridge: $b"
@@ -571,10 +576,10 @@ step_touchid() {   # Touch ID: the test Bridge's stand-in answers (README)
     res touchid-restart FAIL "the VM or its control centre did not come back after Touch ID on: $(vminfo)"
   fi
   bmark
-  s=$(cc toggle "Touch ID" off 600)
+  cc toggle "Touch ID" off 600; s=$CCS
   ccok && res touchid-off ok "${s:0:160}" || res touchid-off FAIL "$s"
   if restart_vm; then
-    s=$(cc sudo no 60)
+    cc sudo no 60; s=$CCS
     ccok && res touchid-off-password ok "off: the password as before" || res touchid-off-password FAIL "$s"
   else res touchid-off-restart FAIL "$(vminfo)"; fi
   echo no > "$BDIR/touchid-test"
@@ -587,7 +592,7 @@ step_graphics() {   # each choice from the control centre; the Mac agrees; Vulka
   g0=$(graphics_mac | awk '{print $1}')
   for to in opengl vulkan auto; do
     bmark
-    s=$(cc graphics "$to" 1500)
+    cc graphics "$to" 1500; s=$CCS
     m=$(graphics_mac); b=$(bproblems)
     if ccok && [[ $m == "$to "* && -z $b ]] && reachable 30; then res "graphics-$to" ok "Mac: $m"
     else res "graphics-$to" FAIL "cc: ${s:0:200}; Mac: $m; Bridge: $b"; fi
@@ -598,7 +603,7 @@ step_graphics() {   # each choice from the control centre; the Mac agrees; Vulka
       else res graphics-vulkan-start FAIL "the VM or its control centre did not come back: $(vminfo)"; fi
     fi
   done
-  [[ -n $g0 && $g0 != auto ]] && cc graphics "$g0" 1500 > /dev/null
+  [[ -n $g0 && $g0 != auto ]] && cc graphics "$g0" 1500
   return 0
 }
 
@@ -606,7 +611,7 @@ step_updates() {   # the control centre's update check, and the Bridge's log
   log "update checks (limit 5 min)"
   local s b
   bmark
-  s=$(cc updates 180)
+  cc updates 180; s=$CCS
   b=$(bsince | grep -E 'update check' | tail -1 | sed 's/^.*control: //')
   if ccok && [[ $b == *"update check: "*parts* ]]; then res updates-cc ok "Bridge: $b"
   else res updates-cc FAIL "cc: ${s:0:300}; Bridge: ${b:-no update check}"; fi
