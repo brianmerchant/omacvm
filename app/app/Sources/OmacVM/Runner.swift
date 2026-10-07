@@ -83,8 +83,8 @@ final class Runner {
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
         // This runtime shows a Vulkan window Hyprland imports (virgl-set-type-without-egl.patch),
-        // with MoltenVK and with KosmicKrisp: the guest then presents Vulkan on the GPU, not
-        // through a CPU copy (omacvm-vulkan-present).
+        // with MoltenVK and with KosmicKrisp: the guest then keeps Mesa's normal Vulkan present,
+        // not the software copy (omacvm-vulkan-present); the Mac copies each frame into GL.
         a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
