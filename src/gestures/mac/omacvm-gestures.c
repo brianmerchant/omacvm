@@ -27,7 +27,9 @@
 // VM stays full screen); pressed there again in macOS, it goes back into the
 // VM (escape section below).
 // Capture re-arms by itself when the VM is in front again. If this process
-// dies, the event tap goes with it and macOS gets its gestures back.
+// dies, the event tap goes with it and macOS gets its gestures back. If
+// Accessibility or Input Monitoring is taken away while it runs, it lets go of
+// the keyboard and trackpads at once and waits for the permission (#192).
 // Each VM says on connect what it wants (the handshake below). Capture
 // only covers a full-screen VM whose connected daemon wants the trackpad, so a
 // VM with gestures off (or not connected yet) leaves macOS its gestures.
@@ -122,6 +124,8 @@ typedef int (*MTFrameCallback)(MTDeviceRef, MTTouch *, int, double, int);
 extern CFArrayRef MTDeviceCreateList(void);
 extern void MTRegisterContactFrameCallback(MTDeviceRef, MTFrameCallback);
 extern void MTDeviceStart(MTDeviceRef, int);
+extern void MTUnregisterContactFrameCallback(MTDeviceRef, MTFrameCallback);
+extern void MTDeviceStop(MTDeviceRef);
 extern bool MTDeviceIsBuiltIn(MTDeviceRef);
 extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1/100 mm
 extern int MTDeviceGetDeviceID(MTDeviceRef, uint64_t *);
@@ -398,10 +402,11 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   pthread_mutex_lock(&padLock);
   int pad = -1;
   for (int i = 0; i < nPads; i++) if (pads[i].dev == dev) pad = i;
-  if (pad >= 0) pads[pad].fingers = k;
+  if (pad < 0) { pthread_mutex_unlock(&padLock); return 0; }   // one let go (stopTrackpads)
+  pads[pad].fingers = k;
   int switched = 0;
   if (pad != activePad) {
-    if (pad < 0 || k == 0 || (activePad >= 0 && pads[activePad].fingers > 0)) { pthread_mutex_unlock(&padLock); return 0; }
+    if (k == 0 || (activePad >= 0 && pads[activePad].fingers > 0)) { pthread_mutex_unlock(&padLock); return 0; }
     activePad = pad;
     switched = pads[pad].w != tpW || pads[pad].h != tpH;
     if (switched) { tpW = pads[pad].w; tpH = pads[pad].h; }
@@ -606,7 +611,15 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
 // through as well (omacvm-cocoa-escape-combo-tap.patch); the re-arm stays for
 // a QEMU from before that. The new tap goes in before the old one is removed:
 // no gap without one.
+// Never without Accessibility (an active tap needs it; issue #192, below).
+#define PERM_AX 1   // Accessibility
+#define PERM_IM 2   // Input Monitoring
+static int permNow(void) { return (AXIsProcessTrusted() ? PERM_AX : 0) | (CGPreflightListenEventAccess() ? PERM_IM : 0); }
+static int (*permFn)(void) = permNow;
+static int tapPerm;       // the permissions the tap was created with (main thread)
 static int installTap(void) {
+  int perm = permFn();
+  if (!(perm & PERM_AX)) return 0;
   CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
   if (!newTap) return 0;
   CFRunLoopSourceRef newSource = CFMachPortCreateRunLoopSource(NULL, newTap, 0);
@@ -621,18 +634,85 @@ static int installTap(void) {
   if (tapPort) { CFMachPortInvalidate(tapPort); CFRelease(tapPort); }
   tapPort = newTap;
   tapSource = newSource;
+  tapPerm = perm;
   return 1;
 }
 
-// Main thread only. A failure (permission taken away) keeps the old tap and
-// is logged once until a re-creation works again.
+// The tap out of the HID chain at once: disabled, its run-loop source and
+// its port gone.
+static void removeTap(void) {
+  if (!tapPort) return;
+  CGEventTapEnable(tapPort, false);
+  CFRunLoopRemoveSource(CFRunLoopGetMain(), tapSource, kCFRunLoopCommonModes);
+  CFRunLoopSourceInvalidate(tapSource);
+  CFRelease(tapSource);
+  CFMachPortInvalidate(tapPort);
+  CFRelease(tapPort);
+  tapPort = NULL;
+  tapSource = NULL;
+}
+
+// ---- a permission taken away: let go of all input at once (issue #192) ----
+// The tap is an active filter at the head of the HID chain. When the user
+// took Accessibility (or Input Monitoring) away in System Settings while it
+// ran, macOS kept it in the chain but no longer took the events it handed
+// back ("Sender is prohibited from synthesizing events") and disabled it on
+// timeout; the helper enabled it again at once (tapCb, and every capture
+// check), so every key, click and gesture on the Mac stayed held until the
+// helper was killed (the pointer still moved). Now: the tap is enabled or
+// created only while Accessibility is granted and every permission it was
+// created with still is. When one goes, the tap and its run-loop source are
+// removed, the trackpads and Magic Mice stopped (MultitouchSupport) and
+// capture is off, before anything else; it all comes back once Accessibility
+// is granted again. Looked at every second, when macOS says its
+// Accessibility list changed, and when macOS disables the tap.
+static int inputPaused;   // main thread: no tap, no trackpads until the permission is back
+static int permitted(int perm) { return (perm & PERM_AX) && (perm & tapPerm) == tapPerm; }
+static void stopTrackpads(void);
+static void startTrackpads(void);
+static void cursorTimerOn(int on);
+static void permissionsSeen(int perm);
+
+static void checkPermissions(void) {
+  if (tapPort && !inputPaused) {
+    int perm = permFn();
+    if (permitted(perm)) return;
+    removeTap();
+    inputPaused = 1;
+    permissionsSeen(perm);
+    logf_("permission taken away: event tap removed, trackpads let go (macOS has the keyboard, clicks and "
+          "gestures); waiting for Accessibility");
+    stopTrackpads();
+    if (capturing) { capturing = 0; logf_("capture off"); sendState("off"); }
+    cursorTimerOn(0);   // the macOS pointer shows again
+  } else if (inputPaused && installTap()) {
+    inputPaused = 0;
+    permissionsSeen(tapPerm);
+    if (trackpad) startTrackpads();
+    logf_("event tap and trackpads on again");
+  }
+}
+
+static void permissionTimer(CFRunLoopTimerRef t, void *info) { (void)t; (void)info; checkPermissions(); }
+// macOS's Accessibility list changed: look now, and once more when it has settled.
+static void accessibilityChanged(CFNotificationCenterRef c, void *o, CFNotificationName n, const void *obj, CFDictionaryRef info) {
+  (void)c; (void)o; (void)n; (void)obj; (void)info;
+  checkPermissions();
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ checkPermissions(); });
+}
+
+// Main thread only. A failed re-creation keeps the old tap while the
+// permissions are there (logged once until one works again), never without.
 static void rearmTap(const char *why) {
   static int failedLogged;
+  if (inputPaused) return;   // checkPermissions brings it back
   if (installTap()) {
     logf_("event tap created again (%s)", why);
     failedLogged = 0;
+  } else if (!permitted(permFn())) {
+    checkPermissions();   // the old one goes too
   } else if (!failedLogged) {
-    logf_("cannot create the event tap again (%s): Accessibility or Input Monitoring taken away? Keeping the old one", why);
+    logf_("cannot create the event tap again (%s); keeping the old one", why);
     failedLogged = 1;
   }
 }
@@ -679,32 +759,42 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
   if (!front) noteCameFrom(pid != appPid);
   appPid = pid;
   frontPid = front ? pid : 0;
-  cursorTimerOn(front);
+  cursorTimerOn(front && !inputPaused);
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
-  int now = front && !escaped;
+  // No capture without the tap and trackpads (a permission taken away).
+  int now = front && !escaped && !inputPaused;
   if (now != capturing) {
     capturing = now;
     logf_("capture %s", now ? "ON" : "off");
     if (rec) fprintf(rec, "C\t%.4f\t%d\n", unixNow(), now);
-    sendState(now ? "on" : (front ? "esc" : "off"));
+    sendState(now ? "on" : (front && !inputPaused ? "esc" : "off"));
   }
-  if (tapPort && !CFMachPortIsValid(tapPort)) rearmTap("macOS invalidated it");
-  else if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+  // Invalidated or disabled by macOS: back only with the permissions; without
+  // them it goes (enabling it again held all input, #192).
+  if (tapPort && (!CFMachPortIsValid(tapPort) || !CGEventTapIsEnabled(tapPort))) {
+    if (!permitted(permFn())) checkPermissions();
+    else if (!CFMachPortIsValid(tapPort)) rearmTap("macOS invalidated it");
+    else CGEventTapEnable(tapPort, true);
+  }
 }
 
 // Its two permissions, logged at start and whenever one changes (looked at
 // every 10 s at most); omacvm check reads the last line. A missing one is
 // named, not just "waiting".
+static void permissionsSeen(int perm) {
+  static int last = -1;
+  if (perm == last) return;
+  last = perm;
+  logf_("permissions: Accessibility %s, Input Monitoring %s", perm & PERM_AX ? "granted" : "MISSING",
+        perm & PERM_IM ? "granted" : "MISSING");
+}
 static void logPermissions(void) {
-  static int last = -1; static CFAbsoluteTime at;
+  static CFAbsoluteTime at;
   CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-  if (last >= 0 && now - at < 10) return;
+  if (at > 0 && now - at < 10) return;
   at = now;
-  int ax = AXIsProcessTrusted() != 0, im = CGPreflightListenEventAccess() != 0;
-  if ((ax | im << 1) == last) return;
-  last = ax | im << 1;
-  logf_("permissions: Accessibility %s, Input Monitoring %s", ax ? "granted" : "MISSING", im ? "granted" : "MISSING");
+  permissionsSeen(permFn());
 }
 
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
@@ -814,7 +904,7 @@ static void updateCursor(CFRunLoopTimerRef t, void *info) {
     cursorControl = enableCursorControl();
     if (!cursorControl) logf_("cannot hide the macOS pointer from the background");
   }
-  pid_t pid = frontPid;
+  pid_t pid = inputPaused ? 0 : frontPid;
   if (!cursorControl || !pid) { setCursorHidden(0); last.x = -1; return; }
   CGEventRef e = CGEventCreate(NULL);
   CGPoint p = CGEventGetLocation(e);
@@ -1876,7 +1966,11 @@ static int swallowEscUp, escClosedMC;
 static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u) {
   (void)p; (void)u;
   if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
-    CGEventTapEnable(tapPort, true); return e;
+    // Enabled again only with the permissions; without them the tap goes
+    // (after this callback has returned), never enabled again (#192).
+    if (permitted(permFn())) CGEventTapEnable(tapPort, true);
+    else dispatch_async(dispatch_get_main_queue(), ^{ checkPermissions(); });
+    return e;
   }
   if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
     // Ours for macOS (the combo's Space shortcut): never the VM's.
@@ -2356,7 +2450,35 @@ static void startTrackpads(void) {
 
 static void retryTrackpad(CFRunLoopTimerRef t, void *info) {
   (void)t; (void)info;
-  startTrackpads();
+  if (!inputPaused) startTrackpads();
+}
+
+// A permission taken away (checkPermissions): every trackpad and Magic Mouse
+// let go, so none of them waits on frames nobody takes; startTrackpads takes
+// them again. The callbacks run on MultitouchSupport's thread: the tables
+// are emptied under their locks first, the devices stopped outside them.
+static void stopDevice(MTDeviceRef d, MTFrameCallback cb) {
+  MTUnregisterContactFrameCallback(d, cb);
+  if (MTDeviceIsRunning(d)) MTDeviceStop(d);
+}
+static void (*stopDeviceFn)(MTDeviceRef, MTFrameCallback) = stopDevice;
+
+static void stopTrackpads(void) {
+  MTDeviceRef p[MAX_PADS], m[MAX_MICE];
+  pthread_mutex_lock(&padLock);
+  int np = nPads;
+  for (int i = 0; i < np; i++) p[i] = pads[i].dev;
+  nPads = 0; activePad = -1;
+  pthread_mutex_unlock(&padLock);
+  pthread_mutex_lock(&mouseLock);
+  int nm = nMice;
+  for (int i = 0; i < nm; i++) m[i] = mice[i].dev;
+  nMice = 0;
+  pthread_mutex_unlock(&mouseLock);
+  for (int i = 0; i < np; i++) stopDeviceFn(p[i], frameCb);
+  for (int i = 0; i < nm; i++) stopDeviceFn(m[i], mouseFrameCb);
+  fingers = 0;
+  if (np + nm) logf_("trackpads let go: %d trackpad%s, %d Magic Mouse", np, np == 1 ? "" : "s", nm);
 }
 
 static void appActivated(void) { updateCapture(captureTimer, NULL); }
@@ -2422,6 +2544,12 @@ int main(int argc, char **argv) {
   CFRunLoopTimerSetTolerance(captureTimer, 0.02);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), captureTimer, kCFRunLoopCommonModes);
   ns_on_app_activate(appActivated);
+  // A permission taken away while we run: let go at once (checkPermissions).
+  CFRunLoopTimerRef perm = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 1, 1, 0, 0, permissionTimer, NULL);
+  CFRunLoopTimerSetTolerance(perm, 0.1);
+  CFRunLoopAddTimer(CFRunLoopGetCurrent(), perm, kCFRunLoopCommonModes);
+  CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), NULL, accessibilityChanged,
+                                  CFSTR("com.apple.accessibility.api"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();

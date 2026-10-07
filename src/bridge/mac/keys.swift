@@ -211,6 +211,7 @@ final class MediaKeys {
   private var tap: CFMachPort?
   private var source: CFRunLoopSource?
   private var rearm = TapRearm()
+  private var guardTap = TapGuard()
   private var askedAX = false
   private let work = DispatchQueue(label: "omacvm-bridge.keys")
   private(set) var vmInFront = false
@@ -229,12 +230,19 @@ final class MediaKeys {
 
   /// Logged at start and whenever one changes; omacvm check reads the last
   /// line. The media keys need Accessibility; Input Monitoring is shown too.
-  private func logPermissions() {
-    let p = "Accessibility \(AXIsProcessTrusted() ? "granted" : "MISSING"), " +
-      "Input Monitoring \(CGPreflightListenEventAccess() ? "granted" : "MISSING")"
+  private func logPermissions(_ now: TapPermissions) {
+    let p = "Accessibility \(now.contains(.accessibility) ? "granted" : "MISSING"), " +
+      "Input Monitoring \(now.contains(.inputMonitoring) ? "granted" : "MISSING")"
     guard p != permissions else { return }
     permissions = p
     log("permissions: \(p)")
+  }
+
+  private func permissionsNow() -> TapPermissions {
+    var p: TapPermissions = []
+    if AXIsProcessTrusted() { p.insert(.accessibility) }
+    if CGPreflightListenEventAccess() { p.insert(.inputMonitoring) }
+    return p
   }
 
   func start() {
@@ -245,15 +253,40 @@ final class MediaKeys {
     // An app switch is checked at once, not up to 2 s later.
     NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                       object: nil, queue: .main) { [weak self] _ in self?.check() }
+    // macOS's Accessibility list changed (a permission taken away, #192):
+    // look now, and once more when it has settled.
+    DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.accessibility.api"),
+                                                        object: nil, queue: .main) { [weak self] _ in
+      self?.check()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.check() }
+    }
     check()
+  }
+
+  /// Out of the HID chain at once: disabled, its run-loop source and port gone.
+  private func removeTap() {
+    guard let t = tap else { return }
+    CGEvent.tapEnable(tap: t, enable: false)
+    if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes); CFRunLoopSourceInvalidate(source) }
+    CFMachPortInvalidate(t)
+    tap = nil
+    source = nil
   }
 
   /// Creates the tap once Accessibility is granted; keeps it enabled, and
   /// creates it again when an OmacVM VM comes to the front (TapRearm) or
-  /// macOS invalidated it. Main thread.
+  /// macOS invalidated it. A permission taken away removes it at once and
+  /// nothing enables or creates it again until Accessibility is back
+  /// (TapGuard, #192). Main thread.
   func check() {
     config.reloadIfChanged()
-    logPermissions()
+    let perms = permissionsNow()
+    logPermissions(perms)
+    if tap != nil, guardTap.lost(perms) {
+      removeTap()
+      askedAX = true   // no Accessibility prompt right after the user took it away
+      log("media keys: waiting for Accessibility permission (taken away: event tap removed, macOS has the media keys)")
+    }
     let front = NSWorkspace.shared.frontmostApplication
     // An OmacVM.app VM, also when LaunchServices names no executable for QEMU.
     let vm = VMApp.of(front) == .omacvm ? front?.processIdentifier : nil
@@ -266,7 +299,7 @@ final class MediaKeys {
       else if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
       return
     }
-    if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
+    if !guardTap.mayCreate(perms) || !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
       if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)") }
       askedAX = true
       return
@@ -279,6 +312,8 @@ final class MediaKeys {
   /// At the HID level: on macOS 27 (Mac mini, Magic Keyboard) the volume keys
   /// never reach a session-level tap, only play/next/previous do.
   private func install(again why: String?) {
+    let perms = permissionsNow()
+    guard guardTap.mayCreate(perms) else { return }   // never without Accessibility (#192)
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
     guard let t = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
@@ -298,6 +333,7 @@ final class MediaKeys {
     if let tap { CFMachPortInvalidate(tap) }
     tap = t
     source = s
+    guardTap.created(perms)
     rearm.worked()
     log(why.map { "media keys: event tap created again (\($0))" } ?? "media keys: event tap installed")
   }

@@ -1,7 +1,10 @@
 // Offline test of when the helper creates its event tap again (test.sh): no
 // permissions, no real tap. CGEventTapCreate is a stand-in that returns a
 // plain Mach port, so installTap's swap (new tap in, old one out) and the
-// re-arm rules run as they do in the helper.
+// re-arm rules run as they do in the helper. The permissions are made up
+// too (permFn), and so are the trackpads (stopDeviceFn): a permission taken
+// away removes the tap and lets go of them at once, and nothing enables or
+// creates a tap again until it is back (issue #192).
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
 static int created, failNext, enabled = 1;
@@ -23,6 +26,11 @@ static void fakeEnable(CFMachPortRef t, bool on) { (void)t; enabled = on; }
 
 static int fail;
 static int fakeQemu(pid_t pid) { return pid != 1200; }   // 1200: OmacVM.app's launcher
+static int perm = PERM_AX | PERM_IM;
+static int fakePerm(void) { return perm; }
+static int stopped;
+static void fakeStopDevice(MTDeviceRef d, MTFrameCallback cb) { (void)d; (void)cb; stopped++; }
+static void drain(void) { for (int i = 0; i < 5; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false); }
 static void check(int ok, const char *what) {
   printf("%s %s\n", ok ? "ok  " : "FAIL", what);
   fflush(stdout);
@@ -32,6 +40,12 @@ static void check(int ok, const char *what) {
 int main(void) {
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   isQemuFn = fakeQemu;
+  permFn = fakePerm;
+  stopDeviceFn = fakeStopDevice;
+  trackpad = 0;   // startTrackpads would open this Mac's real trackpad
+  perm = PERM_IM;
+  check(!installTap() && created == 0 && !tapPort, "no tap without Accessibility (Input Monitoring alone)");
+  perm = PERM_AX | PERM_IM;
   check(installTap() && created == 1, "the first tap");
   CFMachPortRef first = tapPort; CFRetain(first);
   // Front app, network, full screen, title, window, other: as updateCapture finds them.
@@ -80,5 +94,79 @@ int main(void) {
   frontChanged(500, -1, 0, "", 0, 0);
   frontChanged(1200, NET_APP, 0, "", 0, 0);
   check(created == 7, "no new tap for OmacVM.app's launcher window");
+
+  // ---- issue #192: Accessibility taken away while a VM is captured ----
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1300, NET_APP, 1, "Omarchy", 0, 0);
+  check(capturing && created == 8, "capturing a full-screen OmacVM VM");
+  static int devs[3];
+  pads[0].dev = &devs[0]; pads[1].dev = &devs[1]; nPads = 2; activePad = 0;
+  mice[0].dev = &devs[2]; nMice = 1;
+  CFMachPortRef old = tapPort; CFRunLoopSourceRef oldSource = tapSource;
+  CFRetain(old); CFRetain(oldSource);
+  checkPermissions();
+  check(tapPort == old, "nothing happens while every permission is there");
+  perm = PERM_IM;
+  checkPermissions();
+  check(!tapPort && !tapSource && !CFMachPortIsValid(old) && !CFRunLoopSourceIsValid(oldSource) &&
+        !CFRunLoopContainsSource(CFRunLoopGetMain(), oldSource, kCFRunLoopCommonModes),
+        "Accessibility taken away: the tap and its run-loop source are gone at once");
+  CFRelease(old); CFRelease(oldSource);
+  check(inputPaused && !capturing, "... capture off");
+  check(stopped == 3 && nPads == 0 && nMice == 0 && activePad == -1, "... both trackpads and the Magic Mouse let go");
+  check(frameCb(&devs[0], NULL, 0, 0, 0) == 0 && activePad == -1, "... a late frame from a trackpad let go changes nothing");
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);   // another VM comes to the front
+  frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);
+  checkPermissions();
+  check(!tapPort && created == 8 && !capturing, "no tap and no capture while it is missing (a VM in front, the checks)");
+  perm = PERM_AX | PERM_IM;
+  checkPermissions();
+  check(tapPort && created == 9 && !inputPaused, "Accessibility back: a new tap");
+  frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);
+  check(capturing, "... and capture again");
+
+  // macOS disables the tap (timeout): enabled again only with the permission.
+  CGEventRef ev = CGEventCreate(NULL);
+  enabled = 0;
+  tapCb(NULL, kCGEventTapDisabledByTimeout, ev, NULL);
+  check(enabled && tapPort, "disabled by timeout, permissions there: enabled again");
+  enabled = 0;
+  perm = PERM_IM;
+  tapCb(NULL, kCGEventTapDisabledByTimeout, ev, NULL);
+  check(!enabled, "disabled by timeout, Accessibility gone: not enabled again");
+  drain();
+  check(!tapPort && inputPaused && !capturing, "... and the tap removed right after the callback");
+  enabled = 1;
+  perm = PERM_AX | PERM_IM;
+  checkPermissions();
+  frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);
+  check(tapPort && created == 10 && capturing, "back again");
+  // The capture check finds it disabled while Accessibility is gone.
+  enabled = 0;
+  perm = 0;
+  frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);
+  check(!enabled && !tapPort && !capturing, "a disabled tap found by the capture check without Accessibility: removed, not enabled");
+  enabled = 1;
+  CFRelease(ev);
+
+  // Input Monitoring taken away (Accessibility stays): the tap made with both
+  // goes; the next one is made with Accessibility alone and stays.
+  perm = PERM_AX | PERM_IM;
+  checkPermissions();
+  check(tapPort && created == 11, "a tap with both permissions");
+  perm = PERM_AX;
+  checkPermissions();
+  check(!tapPort && inputPaused, "Input Monitoring taken away: that tap goes");
+  checkPermissions();
+  check(tapPort && created == 12 && !inputPaused, "... a new one with Accessibility alone");
+  checkPermissions();
+  check(tapPort && created == 12, "... which stays without Input Monitoring");
+  // A VM comes to the front just after Accessibility went (before a check saw it).
+  frontChanged(500, -1, 0, "", 0, 0);
+  perm = PERM_IM;
+  frontChanged(1400, NET_APP, 1, "Omarchy", 0, 0);
+  check(created == 12 && !tapPort && inputPaused && !capturing,
+        "a VM comes to the front just after Accessibility went: no new tap, the old one goes");
   return fail;
 }

@@ -259,6 +259,9 @@ jobs:
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
 
+      - name: QEMU's full-grab tap goes when Accessibility is taken away (issue 192)
+        run: app/runtime/Tests/keys/test-tap-permission.sh
+
       - name: OmacVM.app full screen always in its own Space (no notch cover; escape combo stays out)
         run: src/tests/app-fullscreen-space.sh
 
