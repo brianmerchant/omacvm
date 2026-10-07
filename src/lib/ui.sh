@@ -24,8 +24,10 @@ UB=$'\033[1m'; UD=$'\033[2m'; UR=$'\033[0m'; UACC=$'\033[36m'; UOK=$'\033[32m'; 
 
 ui_cols() { local c; c=$(tput cols 2>/dev/null < "$TTY"); echo "${c:-80}"; }
 
-# Restore the cursor whatever happens (Ctrl-C in a list included).
-ui_restore() { (( UI_FANCY )) || return 0; { printf '\033[?25h' > "$TTY"; stty echo icanon < "$TTY"; } 2>/dev/null || true; }
+# Restore the cursor whatever happens (Ctrl-C in a list included). A spinner
+# still drawing (Ctrl-C during ui_spin) goes first: a frame drawn after this
+# would land on the shell's prompt.
+ui_restore() { ui_spin_ticker_stop; (( UI_FANCY )) || return 0; { printf '\033[?25h' > "$TTY"; stty echo icanon < "$TTY"; } 2>/dev/null || true; }
 trap 'ui_restore' EXIT
 trap 'ui_restore; echo; exit 130' INT
 
@@ -180,6 +182,15 @@ ui_step() { printf '\n\033[1;36m[%s/%s]\033[0m \033[1m%s\033[0m\n' "$1" "$2" "$3
 # an EXIT trap: a script's background jobs ignore Ctrl-C and would go on).
 UI_FRAMES='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 UI_SPIN_PID="" UI_SPIN_TICKER=""
+# ui_spin_ticker_stop: the spinner's drawing loop goes, and is gone before
+# anything else is drawn. KILL: it holds nothing, and a TERM a parent made us
+# ignore would leave this waiting for a job that keeps running.
+ui_spin_ticker_stop() {
+  [[ -n ${UI_SPIN_TICKER:-} ]] || return 0
+  kill -KILL "$UI_SPIN_TICKER" 2>/dev/null || true
+  wait "$UI_SPIN_TICKER" 2>/dev/null || true
+  UI_SPIN_TICKER=""
+}
 ui_spin() {
   local msg=$1; shift
   local out rc pid i=0 t0=$SECONDS e
@@ -206,7 +217,7 @@ ui_spin() {
       done ) &
     UI_SPIN_TICKER=$!
     wait "$pid" && rc=0 || rc=$?
-    kill "$UI_SPIN_TICKER" 2>/dev/null || true; wait "$UI_SPIN_TICKER" 2>/dev/null || true; UI_SPIN_TICKER=""
+    ui_spin_ticker_stop
     printf '\r\033[2K\033[?25h' > "$TTY"
   fi
   UI_SPIN_PID=""
@@ -220,7 +231,7 @@ ui_spin() {
 ui_tree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do ui_tree "$c"; done; echo "$1"; }
 ui_spin_stop() {
   local pids p i
-  if [[ -n $UI_SPIN_TICKER ]]; then kill "$UI_SPIN_TICKER" 2>/dev/null || true; UI_SPIN_TICKER=""; fi
+  ui_spin_ticker_stop
   [[ -n $UI_SPIN_PID ]] || return 0
   pids=$(ui_tree "$UI_SPIN_PID"); UI_SPIN_PID=""
   kill -TERM $pids 2>/dev/null || true
