@@ -30,6 +30,8 @@
 #     --out DIR          results (default ~/omacvm-e2e/<time>): summary.tsv, result.json, logs
 #     --owner NAME       lock owner name (default cc-e2e)
 #     --keep-vm          keep a VM this run cloned (default: deleted at the end)
+# With --app, the test app that was installed comes back at the end (other
+# tests on this Mac use it) unless OMACVM_E2E_KEEP_APP=1.
 # Exit 0 only when every step passed (ok or a skip that says why it does not
 # apply on this Mac). FAIL = the product is wrong; BLOCKED = this Mac cannot
 # run the step (a person must do something once, e.g. install the fast
@@ -57,10 +59,10 @@ while (( $# )); do
     --out) OUT=$2; shift 2 ;;
     --owner) OWNER=$2; shift 2 ;;
     --keep-vm) KEEP=1; shift ;;
-    *) sed -n '19,37s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    *) sed -n '19,39s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
-[[ -n $VM ]] || { sed -n '19,37s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[[ -n $VM ]] || { sed -n '19,39s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 ONLY_ARG=${ONLY:-all}
 [[ -n $FEATS ]] && ONLY_ARG="$ONLY_ARG features$FEATS"
 want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
@@ -140,6 +142,8 @@ cleanup() {
   rm -f "$BDIR/touchid-test"
   # The update path put the release before (then a relabelled copy) over the test app: this build goes back.
   if [[ -n ${ORIG:-} && -d $ORIG ]]; then rm -rf "$APP"; ditto "$ORIG" "$APP"; fi
+  # --app: the test app that was there before.
+  if [[ -n ${PRE:-} && -d $PRE && ${OMACVM_E2E_KEEP_APP:-} != 1 ]]; then rm -rf "$APP"; ditto "$PRE" "$APP"; fi
   remove_clones
   fingerprint > "$OUT/fp-after.txt"
   if diff -q "$OUT/fp-before.txt" "$OUT/fp-after.txt" >/dev/null; then res cleanup ok "the person's helpers, app and VM unchanged"
@@ -180,6 +184,9 @@ if [[ -n $NEWAPP ]]; then
   [[ $(plist "$NEWAPP" CFBundleIdentifier) == "$APPID" ]] || die "$NEWAPP is not the test identity ($APPID)"
   codesign --verify --deep --strict "$NEWAPP" || die "$NEWAPP does not verify"
   [[ -n $(launcher_pid) || -n $(pgrep -f "OmacVM Test.app/Contents/" | head -1) ]] && die "the test app runs: quit it first"
+  # The test app other tests on this Mac use comes back at the end.
+  PRE=$OUT/app-before/OmacVM\ Test.app
+  [[ -d $APP ]] && { mkdir -p "$OUT/app-before"; ditto "$APP" "$PRE"; }
   rm -rf "$APP" && ditto "$NEWAPP" "$APP"
 fi
 [[ -x $CLI ]] || die "$CLI missing"
