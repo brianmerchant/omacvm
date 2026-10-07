@@ -374,7 +374,12 @@ run first, and its request waits up to 4 s for it before the answer is
 409 unknown-vm: at most once a second for an OmacVM.app VM (the app names
 it), every 10 s for an address, since any guest can add addresses. A VM
 that runs but whose SSH did not answer the Mac is told so ("the Mac cannot
-reach this VM"), not "not running". Also when a request does not prove with the key of the VM the
+reach this VM"), not "not running": a fresh look 5 s after the last list
+(waited for, up to 4 s: a VM that just started again is found by it); when
+that look still cannot reach it, the next ones wait 30, 60, then 120 s
+(each probes the VM over SSH, and its sshd may be turning the Mac away), and
+the answer comes from the list at once in between. Jobs a VM asks for never
+become root on the Mac (`OMACVM_ADMIN_PROMPT=none`). Also when a request does not prove with the key of the VM the
 list has at its address (that VM stopped and another took the address): at
 most once a minute, when the list is 5 s old or more; the 403 then says
 "looking" (`"looking": true`) and the VM asks again instead of telling the

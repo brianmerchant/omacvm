@@ -43,6 +43,10 @@ UNKNOWN_TRIES, UNKNOWN_WAIT = 20, 5.0
 # change from another window or the Mac) and asks the Mac again, also after
 # "no such OmacVM.app VM". Nothing runs while it is closed.
 LIVE_EVERY = 5.0
+# A switch the Mac refused with unknown-vm (its list caught the VM mid-job:
+# nothing started) is sent once more this much later (the Bridge looks again
+# at most every 5 s and waits for that look).
+JOB_RETRY_AFTER = 3.0
 # Said before Graphics -> Vulkan or its repair runs (src/cmd/graphics.sh).
 VULKAN_BUILD = ("The VM builds its Vulkan driver now, a few minutes (when its packages are too old for that, "
                 "after a whole system update with omarchy update, often 5-15 minutes); "
@@ -1001,7 +1005,7 @@ class ControlCentre(App):
             return f"{head} This VM went back to its features from before ({again}; ! reports the problem)."
         return f"{head} On the Mac, {self.on_the_mac('apply')} puts this VM right ({again}; ! reports the problem)."
 
-    def toggle(self, r: S.Row) -> None:
+    def toggle(self, r: S.Row, asked_again: bool = False) -> None:
         if r.feature.name == "graphics":
             self.choose_graphics()
             return
@@ -1013,6 +1017,12 @@ class ControlCentre(App):
             return
         if r.status is S.Status.UNAVAILABLE:
             self.notify(f"{r.feature.title}: {r.note}", severity="warning")
+            return
+        if not asked_again and self.mac_may_be_back():
+            # The last look found the Mac away (its Bridge restarting, the VM
+            # just started): ask it once more now, then switch, instead of a
+            # press that does nothing until the next look 5 s later.
+            self.ask_again_then_toggle(r)
             return
         if not self.can_ask():
             return
@@ -1029,11 +1039,32 @@ class ControlCentre(App):
             texts.append(f"{r.feature.title} {what}: {', '.join(others)}.")
         if not turn_on and self.brings_mac_version():
             texts.append(self.brings_mac_version())
+        later = S.next_start_note(r.feature.name, turn_on, self.c.local.vm_type)
+        if later:
+            texts.append(later)
         if not texts:
             self.run_job(ACTION_FOR[turn_on], list(plan))
             return
         self.push_screen(ConfirmScreen(f"{r.feature.title}: {'on' if turn_on else 'off'}", "\n".join(texts)),
                          lambda yes: yes and self.run_job(ACTION_FOR[turn_on], list(plan)))
+
+    def mac_may_be_back(self) -> bool:
+        """The last look did not reach the Mac, or the Mac did not list (or
+        reach) this VM: worth one more look before a switch says no."""
+        e = self.c.mac_error
+        return self.c.active_job() is None and e is not None and (e.kind == "offline" or e.code == "unknown-vm")
+
+    @work(thread=True, exclusive=True, group="ask-again")
+    def ask_again_then_toggle(self, r: S.Row) -> None:
+        self.c.refresh_mac()
+        self.call_from_thread(self.refresh_all)
+        self.call_from_thread(self.toggle_again, r.feature.name)
+
+    def toggle_again(self, name: str) -> None:
+        """The switch after the second look, on the row as it is now."""
+        row = next((x for x in self.rows if x.feature.name == name), None)
+        if row is not None:
+            self.toggle(row, True)
 
     def brings_mac_version(self) -> str:
         """On a VM older than the Mac, a switch-off or a repair brings all of
@@ -1255,7 +1286,17 @@ class ControlCentre(App):
     def run_job(self, action: str, features: list[str]) -> None:
         what = self.describe(action, features)
         try:
-            job = self.c.start(action, features)
+            try:
+                job = self.c.start(action, features)
+            except BridgeError as e:
+                # Refused because the Mac's list just had this VM as not
+                # reachable (a look during the last job's end): nothing started,
+                # and the Mac looks again within seconds. Ask once more.
+                if e.code != "unknown-vm":
+                    raise
+                time.sleep(JOB_RETRY_AFTER)
+                self.c.refresh_mac()
+                job = self.c.start(action, features)
         except BridgeError as e:
             msg = str(e)
             if e.code == "update-first":
@@ -1310,7 +1351,9 @@ class ControlCentre(App):
                                                       touchid_ready.apps_off())
                 self.call_from_thread(self.notify, self.last_result, timeout=12)
             else:
-                self.call_from_thread(self.notify, f"{what}: done", timeout=6)
+                later = " (from the VM's next start)" if action in ("enable", "disable") and any(
+                    S.next_start_note(f, action == "enable", self.c.local.vm_type) for f in features) else ""
+                self.call_from_thread(self.notify, f"{what}: done{later}", timeout=6)
         elif lost:
             self.last_result = (f"{what}: the Mac stopped answering about it (it may still finish there; "
                                 f"on the Mac, {self.on_the_mac('features')} shows how it went).")
