@@ -30,6 +30,10 @@
 #     --out DIR          results (default ~/omacvm-e2e/<time>): summary.tsv, result.json, logs
 #     --owner NAME       lock owner name (default cc-e2e)
 #     --keep-vm          keep a VM this run cloned (default: deleted at the end)
+#     --root DIR         the test app's VMs folder for this run (set back at the end)
+#     --hidden           no window on this Mac's screen (a Mac someone works on): VMs without a
+#                        window, Update VM through the app's own script, no window steps; never
+#                        counts for the gate
 # With --app, the test app that was installed comes back at the end (other
 # tests on this Mac use it) unless OMACVM_E2E_KEEP_APP=1.
 # Exit 0 only when every step passed (ok or a skip that says why it does not
@@ -46,7 +50,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$HERE/../../.." && pwd)
 
-VM=""; CLONE=""; NEWAPP=""; PREV=""; ONLY=""; SLOW=0; OUT=""; OWNER=cc-e2e; KEEP=0; FEATS=""
+VM=""; CLONE=""; NEWAPP=""; PREV=""; ONLY=""; SLOW=0; OUT=""; OWNER=cc-e2e; KEEP=0; FEATS=""; ROOTARG=""; HIDDEN=0
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -59,12 +63,15 @@ while (( $# )); do
     --out) OUT=$2; shift 2 ;;
     --owner) OWNER=$2; shift 2 ;;
     --keep-vm) KEEP=1; shift ;;
-    *) sed -n '19,39s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    --root) ROOTARG=$2; shift 2 ;;
+    --hidden) HIDDEN=1; shift ;;
+    *) sed -n '19,43s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
-[[ -n $VM ]] || { sed -n '19,39s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[[ -n $VM ]] || { sed -n '19,43s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 ONLY_ARG=${ONLY:-all}
 [[ -n $FEATS ]] && ONLY_ARG="$ONLY_ARG features$FEATS"
+(( HIDDEN )) && ONLY_ARG="$ONLY_ARG hidden"
 want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
 
 APP="$HOME/Applications/OmacVM Test.app"
@@ -145,6 +152,9 @@ cleanup() {
   # --app: the test app that was there before.
   if [[ -n ${PRE:-} && -d $PRE && ${OMACVM_E2E_KEEP_APP:-} != 1 ]]; then rm -rf "$APP"; ditto "$PRE" "$APP"; fi
   remove_clones
+  if [[ -n $ROOTARG ]]; then
+    if [[ -n $OLDROOT ]]; then defaults write "$APPID" vmsRoot "$OLDROOT"; else defaults delete "$APPID" vmsRoot 2>/dev/null; fi
+  fi
   fingerprint > "$OUT/fp-after.txt"
   if diff -q "$OUT/fp-before.txt" "$OUT/fp-after.txt" >/dev/null; then res cleanup ok "the person's helpers, app and VM unchanged"
   else res cleanup FAIL "the person's helpers, app or VM changed: diff $OUT/fp-before.txt $OUT/fp-after.txt"; fi
@@ -192,6 +202,8 @@ fi
 [[ -x $CLI ]] || die "$CLI missing"
 codesign --verify --deep --strict "$APP" 2>/dev/null && res app ok "$(plist "$APP" CFBundleShortVersionString) $(plist "$APP" OmacVMCommit | cut -c1-12) team $(codesign -dv "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')" \
   || res app FAIL "$APP does not verify"
+OLDROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null)
+if [[ -n $ROOTARG ]]; then mkdir -p "$ROOTARG"; ROOTARG=$(cd "$ROOTARG" && pwd); defaults write "$APPID" vmsRoot "$ROOTARG"; fi
 ROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null || echo "$HOME/OmacVM")
 VMD=$ROOT/$VM
 
@@ -271,7 +283,9 @@ start_vm() {
   local i
   for ((i = 0; i < 60; i++)); do [[ -z $(qemu_pid) ]] && break; sleep 1; done
   # The VM's clipboard on a pasteboard of its own, never the Mac's (STANDARDS 25).
-  open -n -g --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e "$APP" --args --start --vm "$VM"
+  local hide=()
+  (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1 --env OMACVM_BACKGROUND=1)
+  open -n -g --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e ${hide[@]+"${hide[@]}"} "$APP" --args --start --vm "$VM"
   for ((i = 0; i < 40; i++)); do [[ -n $(qemu_pid) ]] && break; sleep 1; done
   [[ -n $(qemu_pid) ]] || return 1
   for ((i = 0; i < 90; i++)); do gssh "test -d /run/user/\$(id -u \$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env))/hypr" 2>/dev/null && { sleep 5; return 0; }; sleep 2; done
@@ -310,7 +324,16 @@ appver() { cat "$APP/Contents/Resources/omacvm/src/VERSION" 2>/dev/null || cat "
 # The fast network's service for this app: ok | old | down | missing | stopped (src/net/mac/install.sh).
 netd() { "$APP/Contents/Resources/omacvm/src/net/mac/install.sh" --status --app "$APP" 2>/dev/null | head -1; }
 # Switching it needs root only when the service is not there for this app; nobody types a password here.
-netd_blocked() { local s; s=$(netd); [[ $s == missing || $s == down ]] && ! sudo -n true 2>/dev/null && echo "omacvm-netd is $s for this app and nobody can type the administrator's password here: install it once (README)"; }
+netd_blocked() {
+  local s f r
+  # The person's own VMs on this Mac use the fast network: its service is theirs; the test leaves it alone.
+  r=$(defaults read org.omacvm.app vmsRoot 2>/dev/null || echo "$HOME/OmacVM")
+  for f in "$r"/*/fast-network "$HOME"/OmacVM/*/fast-network; do
+    [[ -s $f ]] && { echo "the person's own VM ($(basename "$(dirname "$f")")) uses the fast network on this Mac: its service is not the test's to switch (run on a test Mac)"; return; }
+  done
+  s=$(netd)
+  [[ $s == missing || $s == down ]] && ! sudo -n true 2>/dev/null && echo "omacvm-netd is $s for this app and nobody can type the administrator's password here: install it once (README)"
+}
 use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept one, new name and SSH port)
   VM=$1; VMD=$ROOT/$VM; IP=""
   if [[ -n ${2:-} ]]; then
@@ -335,6 +358,13 @@ update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the 
   local p t0 i v want
   want=$(appver); t0=$(date +%s)
   rm -f "$VMD/logs/update.log"
+  if (( HIDDEN )); then   # the script the button runs, without the window
+    mkdir -p "$VMD/logs"
+    OMACVM_PROGRESS=1 tmo 1500 /bin/bash "$APP/Contents/Resources/scripts/update-vm.sh" "$VMD" > "$VMD/logs/update.log" 2>&1
+    v=$(cat "$VMD/omacvm-version" 2>/dev/null)
+    echo "update-vm.sh (hidden run, no window): $(tail -1 "$VMD/logs/update.log" | cut -c1-100); omacvm-version $v; $(( $(date +%s) - t0 )) s"
+    [[ $v == "$want" ]]; return
+  fi
   p=$(window) || { echo "no window on $VM"; return 1; }
   if ! "$OUT/ax" "$p" press "Update VM" > "$OUT/ax-update-vm.txt" 2>&1; then
     close_window
@@ -533,7 +563,7 @@ step_touchid() {   # Touch ID: the test Bridge's stand-in answers (README)
     s=$(cc sudo no 60)
     ccok && res touchid-off-password ok "off: the password as before" || res touchid-off-password FAIL "$s"
   else res touchid-off-restart FAIL "$(vminfo)"; fi
-  rm -f "$BDIR/touchid-test"
+  echo no > "$BDIR/touchid-test"
 }
 
 graphics_mac() { "$CLI" graphics --vm "$VM" --json 2>/dev/null | /usr/bin/python3 -c 'import json,sys; o=json.load(sys.stdin); print(o.get("graphics"), o.get("next_start"), "|", o.get("this_start"))' 2>/dev/null; }
@@ -571,6 +601,7 @@ step_updates() {   # the control centre's update check, and the Bridge's log
 step_window() {   # the app's window (the VM stopped): update checks, the fast network button
   log "the app's window (limit 10 min)"
   local p e was now lbl k blk
+  if (( HIDDEN )); then res window skip "hidden run: the window steps need a screen nobody works on"; return; fi
   stop_vm || res window-stop FAIL "the VM did not shut down"
   if ! p=$(window); then res window FAIL "the app's window did not show $VM"; start_vm; return; fi
   "$OUT/ax" "$p" text > "$OUT/${PFX}window-before.txt" 2>&1
@@ -613,7 +644,8 @@ steps() {   # every step on the running VM of this pass
   return 0
 }
 
-mkdir -p "$BDIR"; rm -f "$BDIR/touchid-test"
+# Touch ID: the stand-in says no unless a step wants yes, so nothing ever shows macOS's dialog here.
+mkdir -p "$BDIR"; echo no > "$BDIR/touchid-test"
 bridge_start || res bridge FAIL "the test Bridge does not listen on 47931 ($BLOG)"
 
 # ---- pass 1: this build, a VM brought to it with Update VM ----
