@@ -43,6 +43,13 @@ async def settle(pilot, until, seconds=8.0):
     return False
 
 
+async def asks(pilot):
+    """The question is on screen: waited for, not a fixed pause (a loaded CI
+    runner may take longer, and a y pressed before it is lost)."""
+    from omacvm_cc.tui import ConfirmScreen
+    return await settle(pilot, lambda: isinstance(pilot.app.screen, ConfirmScreen))
+
+
 def rows(a):
     return {r.feature.name: r for r in a.rows}
 
@@ -177,9 +184,7 @@ def test_dependency_asks_first(world):
             from textual.widgets import DataTable
             a.screen.query_one(DataTable).move_cursor(row=names.index("scroll-momentum"))
             await pilot.press("space")
-            await pilot.pause(0.2)
-            from omacvm_cc.tui import ConfirmScreen
-            assert isinstance(a.screen, ConfirmScreen)
+            assert await asks(pilot)
             await pilot.press("y")
             assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests))
             body = [b for _, p, b in world.requests if p == "/omacvm/jobs"][-1]
@@ -245,13 +250,11 @@ def test_updates_screen_and_silence(world):
         a = app()
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.updates is not None and a.c.updates.get("manifest"))
-            await pilot.pause(0.1)
-            r = rows(a)
-            assert r["gestures"].update and not r["bridge"].update
+            assert await settle(pilot, lambda: rows(a)["gestures"].update)
+            assert not rows(a)["bridge"].update
             await pilot.press("U")
-            await pilot.pause(0.2)
             from omacvm_cc.tui import UpdatesScreen
-            assert isinstance(a.screen, UpdatesScreen)
+            assert await settle(pilot, lambda: isinstance(a.screen, UpdatesScreen))
             await pilot.press("s")
             assert await settle(pilot, lambda: not world.checks_enabled and not a.c.checks_enabled)
             # Checks off: no marks, no count on the features screen; the Updates screen still shows it.
@@ -643,12 +646,10 @@ def test_details_and_back(world):
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.vm_checks is not None)
             await pilot.press("enter")
-            await pilot.pause(0.2)
             from omacvm_cc.tui import DetailsScreen, FeaturesScreen
-            assert isinstance(a.screen, DetailsScreen)
+            assert await settle(pilot, lambda: isinstance(a.screen, DetailsScreen))
             await pilot.press("escape")
-            await pilot.pause(0.1)
-            assert isinstance(a.screen, FeaturesScreen)
+            assert await settle(pilot, lambda: isinstance(a.screen, FeaturesScreen))
             await pilot.press("q")
     asyncio.run(go())
 
@@ -660,8 +661,7 @@ def test_escape_closes_it(world):
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.vm_checks is not None)
             await pilot.press("escape")
-            await pilot.pause(0.2)
-            assert a.return_code is not None
+            assert await settle(pilot, lambda: a.return_code is not None)
     asyncio.run(go())
 
 def test_rollback_says_which_part_failed(world):
@@ -697,7 +697,7 @@ def test_failed_update_says_the_mac_kept_it_and_the_way_out(world, monkeypatch, 
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
             await pilot.press("u")
-            await pilot.pause(0.2)
+            assert await asks(pilot)
             await pilot.press("y")
             assert await settle(pilot, lambda: bool(a.last_result), 10)
             r = a.last_result
@@ -718,7 +718,7 @@ def test_update_of_core_only_shows_progress_in_the_banner(world):
             assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
             assert not any(r.update for r in a.rows)      # no feature row changes
             await pilot.press("u")
-            await pilot.pause(0.2)
+            assert await asks(pilot)
             await pilot.press("y")
             assert await settle(pilot, lambda: "step 2 of 4" in a.banner())
             assert a.banner() == "Update: step 2 of 4: the VM side"
@@ -873,15 +873,13 @@ def test_off_or_repair_on_an_older_vm_asks_first(world, key):
             assert await settle(pilot, lambda: a.c.linked)
             _move_to(a, "camera")
             await pilot.press(key)
-            await pilot.pause(0.3)
-            from omacvm_cc.tui import ConfirmScreen
-            assert isinstance(a.screen, ConfirmScreen), a.screen
+            assert await asks(pilot), a.screen
             assert f"from OmacVM {a.c.local.version} to OmacVM 2.99.0" in a.screen.text
             await pilot.press("n")
             await pilot.pause(0.3)
             assert not [p for _, p, _ in world.requests if p == "/omacvm/jobs"], "nothing ran after n"
             await pilot.press(key)
-            await pilot.pause(0.3)
+            assert await asks(pilot)
             await pilot.press("y")
             assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests))
             posts = [b for m, p, b in world.requests if p == "/omacvm/jobs"]
@@ -949,7 +947,7 @@ def test_control_centre_part_failed_never_says_turn_it_off(world):
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
             await pilot.press("u")
-            await pilot.pause(0.2)
+            assert await asks(pilot)
             await pilot.press("y")
             assert await settle(pilot, lambda: bool(a.last_result), 10)
             r = a.last_result
@@ -1231,13 +1229,12 @@ def test_updates_screen_updates_omarchy_too(world, tmp_path, monkeypatch):
             assert isinstance(a.screen, UpdatesScreen)
             assert "Omarchy: 2 updates waiting" in body and "not OmacVM" in body
             await pilot.press("o")
-            await pilot.pause(0.2)
-            assert isinstance(a.screen, ConfirmScreen)
+            assert await asks(pilot)
             await pilot.press("n")
             await pilot.pause(0.2)
             assert not calls.exists()
             await pilot.press("o")
-            await pilot.pause(0.2)
+            assert await asks(pilot)
             await pilot.press("y")
             end = time.monotonic() + 3
             while time.monotonic() < end and not calls.exists():
