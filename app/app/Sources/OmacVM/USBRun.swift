@@ -1,4 +1,5 @@
 import AppKit
+import OmacVMUpdate
 import OmacVMUSB
 import SwiftUI
 
@@ -20,6 +21,15 @@ final class USBRun: ObservableObject {
     private var request: NSObjectProtocol?
     private var panel: NSPanel?
     private var stopped = false
+    /// Test builds with OMACVM_TEST_USB_FAKE=1: a made-up device plugs and
+    /// unplugs on the distributed notification "<requestName>.test" (object
+    /// "plug" or "unplug"), and QEMU gets its emulated tablet instead of a
+    /// Mac device, so the question and the VM's side run without hardware.
+    private let fake = TestHooks.value("OMACVM_TEST_USB_FAKE", bundleID: Bundle.main.bundleIdentifier) == "1"
+    private var testRequest: NSObjectProtocol?
+    static let fakeDevice = USBDevice(id: USBDeviceID(vendor: 0x1209, product: 0x0001), name: "OmacVM Test Device",
+                                      deviceClass: 0, interfaces: [.init(number: 0, interfaceClass: 0xff, users: [])],
+                                      maker: "OmacVM tests", location: 0xfe00_0001, address: 1)
 
     /// What the list shows (USBDeviceList).
     @Published private(set) var rows = USBListRows()
@@ -65,7 +75,7 @@ final class USBRun: ObservableObject {
     private func begin() {
         let folder = config.folder
         let memory = USBMemory.load(folder: folder) { [weak self] in self?.log($0) }
-        let machine = USBQMPMachine(socketPath: config.qmpSocket.path)
+        let machine = USBQMPMachine(socketPath: config.qmpSocket.path, emulated: fake)
         asker.qemuPID = { [pid] in pid }
         let s = USBSession(vmName: config.name, memory: memory, machine: machine, asker: asker, clock: MainClock(),
                            save: { [weak self] m in
@@ -95,6 +105,18 @@ final class USBRun: ObservableObject {
             self?.refreshRows()
         }
         watch.start()
+        if fake {
+            log("OmacVM: USB: test device on (OMACVM_TEST_USB_FAKE): QEMU gets an emulated tablet for it")
+            testRequest = DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name(requestName + ".test"), object: nil, queue: .main) { [weak self] note in
+                let what = note.object as? String
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let d = Self.fakeDevice
+                    if what == "plug" { self.watch.onPlug(d) } else if what == "unplug" { self.watch.onUnplug(d.location) }
+                }
+            }
+        }
     }
 
     /// The VM's window is in front, or this app is (its question or list):
@@ -115,6 +137,8 @@ final class USBRun: ObservableObject {
         observers.removeAll()
         if let request { DistributedNotificationCenter.default().removeObserver(request) }
         request = nil
+        if let testRequest { DistributedNotificationCenter.default().removeObserver(testRequest) }
+        testRequest = nil
         panel?.orderOut(nil)
         panel = nil
     }
@@ -183,10 +207,16 @@ final class MainClock: USBClock {
 /// network, sleep) must not wait for this one.
 struct USBQMPSocket: USBQMPTransport {
     let path: String
+    /// Test builds (OMACVM_TEST_USB_FAKE): usb-host becomes QEMU's emulated tablet, same id and bus.
+    var emulated = false
     func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
+        var args = arguments
+        if emulated, command == "device_add", args?["driver"] as? String == "usb-host" {
+            args = ["driver": "usb-tablet", "id": args?["id"] ?? "", "bus": args?["bus"] ?? ""]
+        }
         let q = try QMPConnection(socketPath: path, identifierPrefix: "omacvm-usb")
         defer { q.close() }
-        return try q.execute(command, arguments: arguments, timeoutMilliseconds: 3_000)
+        return try q.execute(command, arguments: args, timeoutMilliseconds: 3_000)
     }
 }
 
@@ -196,7 +226,7 @@ final class USBQMPMachine: USBMachine {
     private let qmp: USBQMPSocket
     private let queue = DispatchQueue(label: "org.omacvm.usb-qmp", qos: .userInitiated)
 
-    init(socketPath: String) { qmp = USBQMPSocket(path: socketPath) }
+    init(socketPath: String, emulated: Bool = false) { qmp = USBQMPSocket(path: socketPath, emulated: emulated) }
 
     func attach(_ device: USBDevice, done: @escaping (USBAttachResult) -> Void) {
         queue.async { [qmp] in
