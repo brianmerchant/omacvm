@@ -84,9 +84,9 @@ VM runs, and goes back by itself when a new version does not start
   as up to 2.9. Vulkan: the same, plus Vulkan on the Mac's GPU (Venus) for
   Vulkan apps: on KosmicKrisp on macOS 26 and newer (in the app since 3.0.0),
   on MoltenVK before (fewer Vulkan features). OpenGL stays on virgl either
-  way, so Vulkan only adds Vulkan apps; Vulkan windows show through the
-  Mac's GPU (on KosmicKrisp since 3.0.1, before through the CPU, slow in
-  full screen). Automatic is OpenGL on every Mac in 3.0.0
+  way, so Vulkan only adds Vulkan apps; Vulkan windows reach the screen
+  by a copy on the Mac (on KosmicKrisp since 3.0.1, before through the VM's
+  software copy, slow in full screen). Automatic is OpenGL on every Mac in 3.0.0
   ([numbers and why](../benchmarks/README.md#graphics-automatic-2026-10-05)).
   A change applies at the
   VM's next start; `omacvm check` shows what the start got ("Graphics" row)

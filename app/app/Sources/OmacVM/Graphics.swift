@@ -57,7 +57,7 @@ enum Graphics {
     static let readyFileName = "venus-ready"
 
     /// Automatic gives Vulkan at all. 3.0.1: no, on every Mac. Vulkan windows
-    /// show through the GPU (virgl-set-type-without-egl.patch), but what Vulkan
+    /// reach the screen (virgl-set-type-without-egl.patch), but what Vulkan
     /// costs the OpenGL desktop on KosmicKrisp is not measured yet, so Vulkan
     /// is the user's choice. true turns the macOS 26+ rule below on (src/lib/graphics.sh:
     /// GRAPHICS_AUTO_VULKAN, kept equal by src/tests/graphics-setting.sh).

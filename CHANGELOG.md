@@ -127,10 +127,11 @@ in more words.
   (or `omacvm apply`). `defaults write org.omacvm.app globeKeyToVM -bool
   false` leaves it with macOS.
 - Graphics Vulkan on macOS 26 and newer (KosmicKrisp): Vulkan apps in a
-  window or full screen now show through the Mac's GPU like on MoltenVK,
-  not through the slow CPU copy (vkmark full screen at 5K on a Mac mini M4:
-  about 260; 203 with the CPU copy in 3.0.0, other scenes). Automatic stays
-  OpenGL.
+  window or full screen now use Mesa's normal present path like on
+  MoltenVK, not the VM's software copy. The Mac still copies each frame
+  into Hyprland's OpenGL texture, straight from shared memory (vkmark full
+  screen at 5K on a Mac mini M4: about 260; 203 with the software copy in
+  3.0.0, other scenes). Automatic stays OpenGL.
 - OmacVM.app VMs on an external drive: the control centre in the VM said
   "no such OmacVM.app VM" and could not switch features, update, change
   Graphics or show the Mac's checks. OmacVM Bridge ran omacvm as a program
