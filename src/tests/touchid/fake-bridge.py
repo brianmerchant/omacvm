@@ -66,8 +66,12 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send(200, {"result": "yes"}, (key, "0" * 32))
         elif m == "off":   # as touchid.swift: no key for the VM, so not signed
             self.send(403, {"error": "Touch ID is off for this VM", "code": "off"})
-        elif m == "off-other":   # unsigned, another code: says nothing
+        elif m == "off-other":   # unsigned, another code: not believed
             self.send(403, {"error": "x", "code": "locked"})
+        elif m == "unknown-vm":   # as touchid.swift while its VM list does not have the VM yet: no key, not signed
+            self.send(409, {"error": "no such OmacVM.app VM", "code": "unknown-vm", "looking": True})
+        elif m == "vm-key":   # the request's signature did not check out: not signed
+            self.send(403, {"error": "key", "code": "vm-key"})
         elif m == "clock":
             self.send(403, {"error": "clock", "code": "clock"}, (key, nonce))
         elif m == "drip":   # a "Bridge" that never finishes its answer

@@ -16,9 +16,17 @@ VM's Touch ID key, the Mac has the same) and /etc/omacvm/touchid-token (the
 Bridge token, only sent to a Bridge that proved it knows it).
 
 Parallels, UTM, Fusion: TCP to the Bridge. OmacVM.app: the virtio port
-/dev/virtio-ports/org.omacvm.auth (root, 0600; the VM has it from the first
-start with touch-id on), which the app passes on to the Bridge; there the
-app adds the token. Lines, one JSON object each (app/app/Sources/OmacVMAuth).
+/dev/virtio-ports/org.omacvm.auth (root, 0600; every start of the VM has it
+from OmacVM.app 3.0.4, 3.0.2-3.0.3 only with touch-id on at the start), which
+the app passes on to the Bridge; there the app adds the token. Lines, one
+JSON object each (app/app/Sources/OmacVMAuth).
+
+It never falls back to the password silently where the person expected
+Touch ID: one short line says why ("Touch ID not available (...), use your
+password"), and every outcome goes to the journal (journalctl -t
+omacvm-touchid; omacvm check shows the last one). Only the person's own
+answer on the Mac (cancelled, no match, timeout) and the cases that never
+ask (SSH, cron, another session) say nothing in the prompt.
 """
 import base64
 import errno
@@ -36,6 +44,7 @@ import socket
 import stat
 import subprocess
 import sys
+import syslog
 import threading
 import time
 
@@ -64,7 +73,20 @@ ACTION_RE = r"[A-Za-z0-9._-]{1,128}"
 WHY = {"locked": "Mac locked", "not-front": "VM not in front", "no-touch-id": "no Touch ID",
        "lockout": "too many tries", "rate": "too many tries", "busy": "another Touch ID prompt is open",
        "off": "Touch ID off", "clock": "VM clock off",
-       "restart": "shut the VM down and start it again once", "app": "OmacVM.app does not answer"}
+       "restart": "shut the VM down and start it again once", "app": "OmacVM.app does not answer",
+       # The Mac had not found this VM yet (its Bridge or the VM just started).
+       "unknown-vm": "the Mac is still starting: try again in a moment",
+       "bridge": "OmacVM Bridge on the Mac does not answer",
+       "proof": "the Mac did not prove it is yours: omacvm apply on the Mac",
+       "vm-key": "this VM's Touch ID key is not the Mac's: omacvm enable touch-id on the Mac",
+       "token": "no Bridge token in the VM: omacvm enable touch-id on the Mac",
+       "answer": "the Mac's answer did not check out"}
+# Refusals the Bridge cannot sign (it has no key for the VM, or the request's
+# own signature failed): read unsigned, only to say why, never to let in.
+UNSIGNED = ("off", "unknown-vm", "vm-key")
+# The person's own answer on the Mac: the password prompt says enough.
+QUIET = ("cancelled", "failed", "timeout")
+LOG = E.get("OMACVM_TOUCHID_LOG", "")   # tests: the journal's lines go here
 PING = 0.5             # OmacVM.app's port: the app drops the request when the pings stop
 ACK_TIMEOUT = 2.0      # ... and says within this that it relays
 
@@ -75,6 +97,32 @@ class Deadline(Exception):
 
 def say(s):
     print(s, flush=True)
+
+
+def journal(line):
+    """One line in the journal (journalctl -t omacvm-touchid): what came of
+    a request, never the command. Never fails the client."""
+    try:
+        if LOG or TEST:
+            if LOG:
+                with open(LOG, "a") as f:
+                    f.write(line + "\n")
+            return
+        syslog.openlog("omacvm-touchid", 0, syslog.LOG_AUTHPRIV)
+        syslog.syslog(syslog.LOG_INFO, line)
+    except Exception:
+        pass
+
+
+WHAT = ""   # "sudo by vincent": who asked how, for the journal
+
+
+def password(why, show=True):
+    """The password after all: the reason in the prompt (show) and the journal. 1."""
+    if show:
+        say(f"Touch ID not available ({why}), use your password")
+    journal(f"{WHAT or 'a request'}: the password ({why})")
+    return 1
 
 
 def read(path, limit=4096):
@@ -354,13 +402,12 @@ def over_port(key, data):
     try:
         fd = open_port()
     except FileNotFoundError:
-        # The VM started before touch-id was on: the port comes with its next start.
-        say(f"Touch ID not available ({WHY['restart']}), use your password")
-        return 1
+        # Started by OmacVM.app 3.0.3 or older with touch-id off: the port comes with its next start.
+        return password(WHY["restart"])
     except OSError as e:
         if e.errno == errno.EBUSY:   # one opener at a time: another prompt is open
-            say(f"Touch ID not available ({WHY['busy']}), use your password")
-        return 1
+            return password(WHY["busy"])
+        return password(f"the Touch ID port did not open: {e.strerror}")
     nonce, auth = signed(key, data)
     stop, writing, sent, pinger = threading.Event(), threading.Lock(), False, None
 
@@ -374,8 +421,7 @@ def over_port(key, data):
     try:
         req = {"op": "touchid", "id": nonce, "auth": auth, "proto": 1, "body": base64.b64encode(data).decode()}
         if not send(req, CONNECT_TIMEOUT):
-            say(f"Touch ID not available ({WHY['app']}), use your password")
-            return 1
+            return password(WHY["app"])
         sent = True
         pinger = threading.Thread(target=pings, daemon=True)
         pinger.start()
@@ -388,9 +434,7 @@ def over_port(key, data):
         while True:
             left = (end if acked else ack_end) - time.monotonic()
             if left <= 0:
-                if not acked:
-                    say(f"Touch ID not available ({WHY['app']}), use your password")
-                return 1
+                return password(WHY["app"] if not acked else WHY["bridge"])
             ev = p.poll(left * 1000)
             if not ev:
                 continue
@@ -399,7 +443,7 @@ def over_port(key, data):
             except BlockingIOError:
                 continue
             if not chunk:
-                return 1   # the app went away (POLLHUP): the password
+                return password(WHY["app"])   # the app went away (POLLHUP)
             buf += chunk
             while b"\n" in buf:
                 one, buf = buf.split(b"\n", 1)
@@ -416,11 +460,11 @@ def over_port(key, data):
                     continue
                 status = o.get("status")
                 if not isinstance(status, int) or status == 0:
-                    return 1   # the Bridge did not answer: the password
+                    return password(WHY["bridge"])   # the app reached no Bridge
                 try:
                     answer = base64.b64decode(o.get("body", ""), validate=True)
                 except (ValueError, TypeError):
-                    return 1
+                    return password(WHY["answer"])
                 return answered(key, nonce, status, answer, o.get("answer", ""))
             if len(buf) > 16384:
                 buf = b""
@@ -439,15 +483,19 @@ def request():
     signal.signal(signal.SIGALRM, timeout)
     signal.alarm(DEADLINE)   # one deadline for all of it: a dripping "Bridge" cannot hold sudo
     watch_parent()
+    global WHAT
     user, service = os.environ.get("PAM_USER", ""), os.environ.get("PAM_SERVICE", "")
     if os.environ.get("PAM_TYPE", "auth") != "auth" or not re.fullmatch(USER_RE, user) or user == "root":
         return 1
     if service not in ("sudo", "sudo-i", "polkit-1"):
         return 1
+    WHAT = f"{'polkit' if service == 'polkit-1' else 'sudo'} for {user}"
     try:
         key = secret("touchid-key")
+    except FileNotFoundError:
+        return password("off in this VM: omacvm enable touch-id on the Mac")
     except (OSError, ValueError):
-        return 1   # the feature is off here
+        return password("this VM's Touch ID key is not root's alone: omacvm enable touch-id on the Mac")
     try:
         uid = uid_of(user)
     except (KeyError, ValueError):
@@ -457,13 +505,17 @@ def request():
         sid = read(f"{PROC}/{ppid}/sessionid", 32).decode().strip()
     except OSError:
         sid = ""
-    if not caller_ok(user, sid) or not at_the_screen(user, uid):
-        return 1
+    # Not the person at the VM's screen (SSH, cron, another session): never
+    # asks, says nothing in the prompt (it is not for them); the journal has it.
+    if not caller_ok(user, sid):
+        return password("not asked: not from the VM's own screen (SSH, a job, another session)", show=False)
+    if not at_the_screen(user, uid):
+        return password("not asked: the user is not at the VM's screen (not the active local session)", show=False)
     body = {"user": user}
     if service in ("sudo", "sudo-i"):
         tty = own_tty(uid)
         if not tty:
-            return 1
+            return password("not asked: sudo without a terminal of the user's", show=False)
         try:
             argv = read(f"{PROC}/{ppid}/cmdline", 8192).split(b"\0")
         except OSError:
@@ -471,12 +523,13 @@ def request():
         cmd = sudo_command(argv[:-1] if argv and argv[-1] == b"" else argv)
         if cmd is None:
             say("Touch ID not used for this command (too long or sets variables), use your password")
+            journal(f"{WHAT}: the password (a command too long to show whole, or one that sets variables)")
             return 1
         body["kind"], body["detail"], body["tty"] = "sudo", cmd, tty
     else:
         action = polkit_action(user)
         if action is None:
-            return 1
+            return password("not asked: no polkit check of this user's noted just now", show=False)
         if action.startswith("com.1password."):
             body["kind"] = "1password"
         else:
@@ -490,10 +543,10 @@ def request():
     try:
         token = secret("touchid-token")
     except (OSError, ValueError):
-        return 1
+        return password(WHY["token"])
     host = E.get("OMACVM_TOUCHID_HOST") or env.get("OMACVM_HOST") or "10.211.55.2"
     if not re.fullmatch(r"[0-9.]{7,15}", host):
-        return 1
+        return password("no Mac address in /etc/omacvm/env: omacvm apply on the Mac")
 
     # The Bridge proves it knows the token before the token goes out (as omacvm-bridge).
     n = secrets.token_hex(16)
@@ -503,11 +556,11 @@ def request():
         r = c.getresponse()
         proof = json.loads(r.read(4096) or b"{}").get("proof", "") if r.status == 200 else ""
     except (OSError, ValueError, AttributeError, http.client.HTTPException):
-        return 1
+        return password(WHY["bridge"])
     finally:
         c.close()
     if not isinstance(proof, str) or not hmac.compare_digest(mac(token, f"omacvm-bridge mac {host} {n}"), proof):
-        return 1
+        return password(WHY["proof"])
 
     say("Touch ID on your Mac, or wait for the password prompt")
     path = "/omacvm/touchid"
@@ -524,7 +577,7 @@ def request():
         got = r.getheader("X-OmacVM-Answer") or ""
         status = r.status
     except (OSError, http.client.HTTPException):
-        return 1
+        return password(WHY["bridge"])
     finally:
         c.close()
     return answered(key, nonce, status, answer, got)
@@ -535,22 +588,27 @@ def answered(key, nonce, status, answer, got):
     try:
         o = json.loads(answer)
     except ValueError:
-        return 1
+        return password(WHY["answer"])
     if not isinstance(o, dict) or not isinstance(got, str):
-        return 1
+        return password(WHY["answer"])
     want = mac(key, "\n".join(["omacvm-touchid-answer 1", nonce, str(status), hashlib.sha256(answer).hexdigest()]))
     if not hmac.compare_digest(want, got):
-        # The Bridge cannot sign "off" (it has no key for this VM then): only
-        # that message is taken unsigned, never anything that lets in.
-        if status == 403 and not got and o.get("code") == "off":
-            say(f"Touch ID not available ({WHY['off']}), use your password")
-        return 1   # else: not the Mac that has this VM's key
+        # The Bridge cannot sign some refusals (no key for this VM then, or
+        # the request's own signature failed): those are read unsigned, only
+        # to say why, never anything that lets in. Anything else unsigned is
+        # not from the Mac that has this VM's key: a plain "did not check out".
+        code = o.get("code")
+        if status in (403, 409) and not got and code in UNSIGNED:
+            return password(WHY[code])
+        return password(WHY["answer"])
     if status == 200 and o.get("result") == "yes":
+        journal(f"{WHAT}: Touch ID yes")
         return 0
-    why = WHY.get(o.get("reason") if status == 200 else o.get("code"))
-    if why:
-        say(f"Touch ID not available ({why}), use your password")
-    return 1
+    reason = o.get("reason") if status == 200 else o.get("code")
+    if status == 200 and reason in QUIET:
+        journal(f"{WHAT}: the password (Touch ID {reason} on the Mac)")
+        return 1
+    return password(WHY.get(reason) or f"the Mac said {reason or status}")
 
 
 def main():
@@ -559,11 +617,13 @@ def main():
     try:
         return request()
     except (KeyboardInterrupt, Deadline):
+        journal(f"{WHAT or 'a request'}: the password (stopped: Ctrl+C, the caller went, or no answer in {DEADLINE} s)")
         return 1
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception:   # never more than a "no": the password prompt follows
+    except Exception as e:   # never more than a "no": the password prompt follows
+        journal(f"{WHAT or 'a request'}: the password (the client failed: {type(e).__name__})")
         sys.exit(1)

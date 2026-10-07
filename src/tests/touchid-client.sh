@@ -49,40 +49,62 @@ export OMACVM_TOUCHID_TEST=1 OMACVM_TOUCHID_ETC=$T/etc OMACVM_TOUCHID_RUN=$T/run
 export OMACVM_TOUCHID_DEV=$T/dev OMACVM_TOUCHID_ACTIONS=$T/actions OMACVM_TOUCHID_UID_MIN=$ME
 export OMACVM_TOUCHID_LOGINCTL=$R/src/tests/touchid/fake-loginctl OMACVM_TOUCHID_LOGIND=$T/logind
 export OMACVM_TOUCHID_HOST=127.0.0.1 OMACVM_TOUCHID_PORT=$(cat "$T/bridge/port")
+export OMACVM_TOUCHID_LOG=$T/journal   # the journal's lines (journalctl -t omacvm-touchid in a VM)
 export PAM_TYPE=auth PAM_USER=vincent PAM_SERVICE=sudo PAM_TTY=/dev/pts/3
 # The client's parent is this shell ($$): its "sudo" command line and session are the fake ones above.
-run() {   # MODE -> rc in $rc, output in $T/out, the request's body in $last
-  echo "$1" > "$T/bridge/mode"; : > "$T/bridge/requests"
+run() {   # MODE -> rc in $rc, output in $T/out, the request's body in $last, the journal's line in $T/journal
+  echo "$1" > "$T/bridge/mode"; : > "$T/bridge/requests"; : > "$T/journal"
   python3 "$G/omacvm-touchid" > "$T/out" 2>&1; rc=$?
   last=$(tail -1 "$T/bridge/requests" | python3 -c 'import json, sys; l = sys.stdin.read(); print(json.loads(l)["body"] if l else "")')
 }
 asked() { expect "$1" "$2" "$last"; }
+journaled() { expect "$1" "$2" "$(tail -1 "$T/journal")"; }
 
 # ---- sudo: the answers ----
 run yes; expect "yes: let in" 0 "$rc"
 expect "asks on the screen" "Touch ID on your Mac, or wait for the password prompt" "$(head -1 "$T/out")"
+journaled "yes: in the journal" "sudo for vincent: Touch ID yes"
 asked "sudo: kind, command and terminal" '{"user":"vincent","kind":"sudo","detail":"pacman -Syu","tty":"pts/3"}'
 run no-cancelled; expect "cancelled: password" 1 "$rc"
 expect "cancelled: nothing more said" 1 "$(wc -l < "$T/out" | tr -d ' ')"
+journaled "cancelled: in the journal" "sudo for vincent: the password (Touch ID cancelled on the Mac)"
 run no-not-front; expect "VM not in front: password" 1 "$rc"
 expect "VM not in front: said" "Touch ID not available (VM not in front), use your password" "$(tail -1 "$T/out")"
+journaled "VM not in front: in the journal" "sudo for vincent: the password (VM not in front)"
 run no-locked; expect "Mac locked: said" "Touch ID not available (Mac locked), use your password" "$(tail -1 "$T/out")"
 run off; expect "off on the Mac (unsigned, as the Bridge sends it): password" 1 "$rc"
 expect "off on the Mac: said" "Touch ID not available (Touch ID off), use your password" "$(tail -1 "$T/out")"
-run off-other; expect "another unsigned refusal: nothing said" 1 "$(wc -l < "$T/out" | tr -d ' ')"
+run off-other; expect "another unsigned refusal: its reason not believed, never silent" \
+  "Touch ID not available (the Mac's answer did not check out), use your password" "$(tail -1 "$T/out")"
+# The first request right after the Bridge (or the VM) started: the Mac does
+# not know the VM yet (409, unsigned: no VM, no key). 3.0.3 fell to the password silently.
+run unknown-vm; expect "the Mac does not know the VM yet: password" 1 "$rc"
+expect "... and says so" "Touch ID not available (the Mac is still starting: try again in a moment), use your password" "$(tail -1 "$T/out")"
+journaled "... in the journal" "sudo for vincent: the password (the Mac is still starting: try again in a moment)"
+run vm-key; expect "the VM's key is not the Mac's: said" \
+  "Touch ID not available (this VM's Touch ID key is not the Mac's: omacvm enable touch-id on the Mac), use your password" "$(tail -1 "$T/out")"
 run clock; expect "VM clock off: said" "Touch ID not available (VM clock off), use your password" "$(tail -1 "$T/out")"
 run unsigned; expect "unsigned yes: password" 1 "$rc"
+expect "unsigned yes: said" "Touch ID not available (the Mac's answer did not check out), use your password" "$(tail -1 "$T/out")"
 run other-key; expect "yes signed with another key: password" 1 "$rc"
 run other-nonce; expect "yes for another request: password" 1 "$rc"
 run wrong-proof; expect "Bridge without the token: password" 1 "$rc"
 expect "... and the token never sent" 0 "$(wc -l < "$T/bridge/requests" | tr -d ' ')"
-mv "$T/etc/touchid-key" "$T/key.off"; run yes; expect "no key (off in the VM): password" 1 "$rc"; mv "$T/key.off" "$T/etc/touchid-key"
+expect "... and says so" "Touch ID not available (the Mac did not prove it is yours: omacvm apply on the Mac), use your password" "$(tail -1 "$T/out")"
+mv "$T/etc/touchid-key" "$T/key.off"; run yes; expect "no key (off in the VM): password" 1 "$rc"
+expect "... a PAM line without a key: said" "Touch ID not available (off in this VM: omacvm enable touch-id on the Mac), use your password" "$(tail -1 "$T/out")"
+mv "$T/key.off" "$T/etc/touchid-key"
+mv "$T/etc/touchid-token" "$T/token.off"; run yes; expect "no Bridge token in the VM: said" \
+  "Touch ID not available (no Bridge token in the VM: omacvm enable touch-id on the Mac), use your password" "$(tail -1 "$T/out")"
+mv "$T/token.off" "$T/etc/touchid-token"
 
 # ---- who may ask: the person at the VM's screen only ----
 PAM_SERVICE=login run yes; expect "another PAM service: password" 1 "$rc"; asked "... without asking" ""
 PAM_SERVICE=sudo-i run yes; expect "sudo -i: asks" 0 "$rc"
 session 9 vincent yes yes '' user; echo 9 > "$T/proc/$$/sessionid"
 run yes; expect "from an SSH login: password" 1 "$rc"; asked "... without asking" ""
+expect "... nothing said in the prompt (it is not for them)" "" "$(cat "$T/out")"
+journaled "... but in the journal" "sudo for vincent: the password (not asked: not from the VM's own screen (SSH, a job, another session))"
 session 9 bob no yes seat0 user; run yes; expect "from another user's session: password" 1 "$rc"
 session 9 vincent no yes '' background; run yes; expect "from a cron job's session: password" 1 "$rc"
 session 9 vincent no yes seat0 user; run yes; expect "from a text console of the user: asks" 0 "$rc"
@@ -104,6 +126,8 @@ session 1 vincent no yes seat0 user; session 2 vincent no yes '' manager
 
 # ---- sudo: a terminal of the user's, a command the dialog can show whole ----
 PAM_TTY= run yes; expect "sudo without a terminal (sudo -n in the background): password" 1 "$rc"; asked "... without asking" ""
+expect "... nothing said (a job's output stays clean)" "" "$(cat "$T/out")"
+journaled "... in the journal" "sudo for vincent: the password (not asked: sudo without a terminal of the user's)"
 PAM_TTY=/dev/pts/9 run yes; expect "a terminal that is not there: password" 1 "$rc"
 PAM_TTY=ssh run yes; expect "not a terminal name: password" 1 "$rc"
 PAM_TTY=/dev/tty3 run yes; expect "a console that is not there: password" 1 "$rc"
@@ -175,15 +199,19 @@ if (( took < 1500 )); then ok "app: answered in ${took} ms"; else bad "app: took
 mv "$T/token.off" "$T/etc/touchid-token"
 run no-not-front; expect "app: VM not in front: said" "Touch ID not available (VM not in front), use your password" "$(tail -1 "$T/out")"
 run off; expect "app: off on the Mac: said" "Touch ID not available (Touch ID off), use your password" "$(tail -1 "$T/out")"
+run unknown-vm; expect "app: the Mac does not know the VM yet: said" \
+  "Touch ID not available (the Mac is still starting: try again in a moment), use your password" "$(tail -1 "$T/out")"
 run unsigned; expect "app: unsigned yes: password" 1 "$rc"
 run other-key; expect "app: yes signed with another key: password" 1 "$rc"
 run other-nonce; expect "app: yes for another request: password" 1 "$rc"
 echo stale > "$T/bridge/port-mode"; run yes; expect "app: an earlier client's answer and junk skipped, ours taken" 0 "$rc"
 echo status0 > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
 expect "app: the Bridge did not answer: password" 1 "$rc"
+expect "app: ... and says so" "Touch ID not available (OmacVM Bridge on the Mac does not answer), use your password" "$(tail -1 "$T/out")"
 if (( took < 1500 )); then ok "app: ... at once (${took} ms)"; else bad "app: status 0 took ${took} ms"; fi
 echo close > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
 expect "app: the app hangs up: password" 1 "$rc"
+expect "app: ... and says so" "Touch ID not available (OmacVM.app does not answer), use your password" "$(tail -1 "$T/out")"
 if (( took < 2000 )); then ok "app: ... at once (${took} ms)"; else bad "app: hang-up took ${took} ms"; fi
 echo noack > "$T/bridge/port-mode"; s=$(ms); run yes; took=$(( $(ms) - s ))
 expect "app: nobody relays (writes taken, no ack): password" 1 "$rc"
@@ -243,6 +271,7 @@ kill "$FPID"; wait "$FPID" 2>/dev/null; FPID=
 export PAM_SERVICE=sudo
 s=$(ms); run yes; took=$(( $(ms) - s ))
 expect "Bridge down: password" 1 "$rc"
+expect "Bridge down: says so" "Touch ID not available (OmacVM Bridge on the Mac does not answer), use your password" "$(tail -1 "$T/out")"
 if (( took < 2000 )); then ok "Bridge down: answered in ${took} ms"; else bad "Bridge down: took ${took} ms"; fi
 
 # ---- touchid.sh: the PAM lines in before the first auth line, once; out again, files as before ----
@@ -288,6 +317,13 @@ expect "OmacVM.app: polkit's helper gets the port, no network" "BindPaths=-/dev/
 echo "OMACVM_HOST='10.0.2.2'" > "$T/root/etc/omacvm/env"
 expect "the port rule: org.omacvm.auth root's alone" 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' "$(cat "$T/root/etc/udev/rules.d/70-omacvm-auth.rules")"
 expect "the old rule's name gone" no "$([[ -e $T/root/etc/polkit-1/rules.d/49-omacvm-touchid.rules ]] && echo yes || echo no)"
+# OmacVM.app gives every VM the port (3.0.4): off keeps it root's alone there.
+echo "OMACVM_VM_TYPE=app" > "$T/root/etc/omacvm/env"; rm -f "$T/root/etc/udev/rules.d/70-omacvm-auth.rules"
+OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" off
+expect "off, OmacVM.app: the port stays root's alone" 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.auth", OWNER="root", GROUP="root", MODE="0600"' \
+  "$(cat "$T/root/etc/udev/rules.d/70-omacvm-auth.rules" 2>/dev/null)"
+echo "OMACVM_HOST='10.0.2.2'" > "$T/root/etc/omacvm/env"
+OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" on
 touch "$T/root/etc/omacvm/touchid-key" "$T/root/etc/omacvm/touchid-token"
 OMACVM_TOUCHID_ROOT=$T/root "$G/touchid.sh" off
 expect "off: sudo as before" "" "$(diff "$T/pam.orig/sudo" "$P/sudo")"
