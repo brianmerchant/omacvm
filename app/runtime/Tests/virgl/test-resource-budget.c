@@ -14,8 +14,9 @@
  *   test-resource-budget critical   pressure critical: a big resource is made for the
  *                                   desktop only after trying again (the next one at
  *                                   once): an app that takes it is lost, Hyprland keeps
- *                                   it; small ones, screens and cursors fit; an app's
- *                                   pipe resource is refused
+ *                                   it, also as the lost app's dropped buffer; small
+ *                                   ones, screens and cursors fit; an app's pipe
+ *                                   resource is refused
  *   test-resource-budget warn       pressure warn, 100 MB left: what fits
  *   test-resource-budget reserve    OMACVM_GPU_MEMORY_MB=64: the last 16 MB are kept for
  *                                   the desktop (virgl-gpu-guard-desktop-reserve.patch):
@@ -475,6 +476,8 @@ static void settle(void)
    virgl_renderer_poll();
 }
 
+static int sampler_view(int ctx_id, uint32_t handle, uint32_t res);
+
 static int run_critical(void)
 {
    char line[200], text[64] = "";
@@ -492,6 +495,11 @@ static int run_critical(void)
    check(status_value("refused", NULL, 0) == 1, "and refused=1");
    check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
          "and pressure=critical");
+   /* chromium was not told and hands that buffer to the compositor: Hyprland finds its
+    * empty stand-in (virgl-gpu-guard-dropped-placeholder.patch) and is not lost */
+   virgl_renderer_ctx_attach_resource(3, big);
+   check(sampler_view(3, 70, big) == 0 && alive(3, desk),
+         "Hyprland imports chromium's dropped buffer and samples it: Hyprland keeps drawing");
    /* the next big one within a second: after one look, no 100 ms hold */
    t = now_s();
    uint32_t big2 = tex2d(4096, 4096, 1);
