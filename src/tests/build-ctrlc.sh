@@ -7,7 +7,8 @@
 # whether this terminal may control UTM.
 # Driven through a terminal (a pty: ^C typed, the terminal sends SIGINT to the
 # build's process group), with the spinner drawn and without (TERM=dumb).
-# The real src/cmd/build.sh up to its first spinner step, whose command is a
+# The real src/cmd/build.sh (a route that needs the Command Line Tools, so
+# the Swift check runs) up to its first spinner step, whose command is a
 # stand-in that only sleeps; no VM, nothing of this Mac's setup touched (its
 # own HOME).
 #   src/tests/build-ctrlc.sh
@@ -136,7 +137,7 @@ PY
 for term in xterm-256color dumb; do
   rm -f "$T/pids"
   got=$(cd "$T" && HOME=$T/home PATH="$T/bin:$PATH" OMACVM_TEST_PIDS=$T/pids \
-    python3 "$T/drive.py" "Checking the Swift compiler" "$term" /bin/bash "$R/src/cmd/build.sh" --yes --no-mac)
+    python3 "$T/drive.py" "Checking the Swift compiler" "$term" /bin/bash "$R/src/cmd/build.sh" --yes --no-mac --vm-type parallels)
   expect "build: Ctrl-C during a spinner step (TERM=$term) stops it" "rc 130, exit in <5s, nothing left" "$got"
 done
 
