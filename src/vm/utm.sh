@@ -152,8 +152,12 @@ utm_set_icon() {
 # AGENTS.md): no Vulkan driver, so UTM stops forcing a 4K stage-2 page size
 # (2x slower on memory-heavy work); the default renderer (ANGLE on Metal):
 # with "Apple Core OpenGL" Chrome in the guest gets no GPU; no App Nap for UTM.
+# They live in UTM's container: when macOS keeps this terminal app out of other
+# apps' data (the "access data from other apps" question was answered Don't
+# Allow), the VM is still built, with UTM's settings as they are.
 utm_tune_app() {
-  defaults write com.utmapp.UTM QEMUVulkanDriver -int 1
-  defaults write com.utmapp.UTM QEMURendererBackend -int 0
-  defaults write com.utmapp.UTM NSAppSleepDisabled -bool YES
+  { defaults write com.utmapp.UTM QEMUVulkanDriver -int 1 &&
+    defaults write com.utmapp.UTM QEMURendererBackend -int 0 &&
+    defaults write com.utmapp.UTM NSAppSleepDisabled -bool YES; } 2>/dev/null && return 0
+  info "UTM's settings unchanged: macOS does not let this terminal app change UTM's data (it asked whether it may access data from other apps). The VM works; it is faster with them."
 }
