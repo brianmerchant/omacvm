@@ -270,7 +270,8 @@ if [[ $TYPE == parallels ]]; then
   if compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then skip "battery" "Parallels gives the VM the Mac's battery itself"
   else skip "battery" "none: this Mac has no battery (on a MacBook Parallels passes it itself)"; fi
 elif [[ $BATTERY == on ]]; then
-  if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
+  if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then
+    ok "battery module" "omacvm_battery $(cat /sys/module/omacvm_battery/version 2>/dev/null) loaded"
   else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
   # Every kernel that boots must have it (DKMS builds it with each kernel's headers).
   for k in /usr/lib/modules/*; do k=${k##*/}
@@ -289,6 +290,15 @@ elif [[ $BATTERY == on ]]; then
   if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
   elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update$(restart_hint))"
   else bad "battery in UPower" "no BAT0$(restart_hint)"; fi
+  # Watts and time left need the Mac's current (module 1.1.0, Mac side 3.0.6):
+  # without it UPower guesses watts from charge steps, and the guess is noise.
+  if [[ $st == charging || $st == discharging ]]; then
+    if w=$(cat /sys/class/power_supply/BAT0/power_now 2>/dev/null); then
+      ok "battery watts" "$(awk -v w="$w" 'BEGIN { printf "%.1f W", w / 1000000 }') $st (the Mac's)"
+    elif [[ -e /sys/class/power_supply/BAT0/power_now ]]; then
+      bad "battery watts" "the Mac sends no current: omacvm update$(restart_hint)"
+    else bad "battery watts" "the module is older than 1.1.0: omacvm apply, or reboot"; fi
+  fi
   if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
     ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
   else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
