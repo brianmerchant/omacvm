@@ -117,6 +117,25 @@ int main(void) {
     CHECK(!notch_rule_due(&t, a, 10000), "something keeps moving it back: not chased every look (4 in 30 s)");
     CHECK(notch_rule_due(&t, a, 30001), "... again once the 30 s are over");
 
+    // The guest's cursor stays for the strip (host.env from omacvm-app-host).
+    {
+        struct { const char *env; int keep; const char *what; } c[] = {
+            {"OMACVM_SCREEN=2560x1600\nOMACVM_VKWINDOWS=1\n", 0, "older app: the guest hides its cursor as before"},
+            {"OMACVM_VKWINDOWS=1\nOMACVM_NOTCHPOINTER=1\n", 1, "the app parks the pointer in NOTCH: never hidden"},
+            {"OMACVM_HWCURSOR=1\n", 1, "Mac pointer for the VM: never hidden"},
+            {"OMACVM_NOTCHPOINTER=1", 1, "last line without a newline"},
+            {"OMACVM_NOTCHPOINTER=0\nOMACVM_HWCURSOR=0\n", 0, "switched off"},
+            {"XOMACVM_NOTCHPOINTER=1\n", 0, "only the exact key"},
+            {"", 0, "empty"},
+        };
+        for (size_t i = 0; i < sizeof c / sizeof c[0]; i++) {
+            FILE *f = fmemopen((void *)c[i].env, strlen(c[i].env) + 1, "r");
+            CHECK(host_env_keeps_cursor(f) == c[i].keep, c[i].what);
+            if (f) fclose(f);
+        }
+        CHECK(!host_env_keeps_cursor(NULL), "no host.env (Parallels, UTM, Fusion)");
+    }
+
     printf(failures ? "%d failed\n" : "all passed\n", failures);
     return failures != 0;
 }

@@ -127,4 +127,23 @@ static inline void geom_line(char *out, size_t size, const char *l, const char *
     snprintf(out, size, "%s %s %s %s\n", *l ? l : "0", *r ? r : "0", *strip ? strip : "0", *bar ? bar : "0");
 }
 
+// /run/omacvm/host.env (what OmacVM.app tells the VM at start): 1 when the
+// guest's own cursor must never hide (or move) for the strip:
+//  - OMACVM_HWCURSOR=1: the Mac's cursor shows the guest's pointer, so there
+//    is only one cursor;
+//  - OMACVM_NOTCHPOINTER=1: the app moves the guest's pointer up into NOTCH
+//    (out of sight) in the same moment the Mac's pointer leaves for the
+//    strip, and back with the next motion over the VM. Hiding it through
+//    Hyprland's cursor:invisible lagged by its tick (85-540 ms): two arrows
+//    on the way up, none on the way back.
+static inline int host_env_keeps_cursor(FILE *f) {
+    char line[128];
+    int keep = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!strcmp(line, "OMACVM_HWCURSOR=1") || !strcmp(line, "OMACVM_NOTCHPOINTER=1")) keep = 1;
+    }
+    return keep;
+}
+
 #endif
