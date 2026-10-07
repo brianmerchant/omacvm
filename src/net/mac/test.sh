@@ -9,6 +9,8 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 FW=(-framework vmnet -framework Security -framework CoreFoundation -lbsm)
 xcrun clang -O2 -Wall -Wextra -Werror -mmacosx-version-min=14.0 -o "$T/omacvm-netd" "$HERE/omacvm-netd.c" "${FW[@]}"
 echo "ok   omacvm-netd builds without warnings"
+p=$("$T/omacvm-netd" --protocol); [[ $p == "$(sed -n 's/^#define NETD_PROTOCOL  *\([0-9]*\).*/\1/p' "$HERE/omacvm-netd.c")" ]] &&
+  echo "ok   omacvm-netd --protocol says $p, no root needed" || { echo "FAIL omacvm-netd --protocol: '$p'"; exit 1; }
 # A pfctl stand-in: says what it got (arguments, stdin, open descriptors,
 # environment); "fail" exits 1, "hang" never ends.
 cat > "$T/pfctl" <<'SH'
@@ -44,3 +46,47 @@ end run
 AS
 [[ $(cat "$T/args") == "$(printf '[%s]\n' "${args[@]:1}")" ]] && echo "ok   password dialog path: the root script's arguments arrive unchanged" ||
   { echo "FAIL password dialog path: got"; cat "$T/args"; exit 1; }
+
+# --status after an app update: an installed daemon of the same protocol (an
+# older build too, also one from before --protocol) serves the new app as it
+# is; another protocol, an unknown old build or another app's requirement
+# says "old" (the app offers Update...). Made-up daemons and plists in a
+# folder of their own (OMACVM_NETD_TEST_ROOT), launchctl stood in for.
+S=$(mktemp -d /tmp/netd.XXXXXX)   # short: a socket's path has at most 103 bytes
+trap 'kill "$FAKE" 2>/dev/null; rm -rf "$T" "$S"' EXIT
+mkdir -p "$S/root/Library/PrivilegedHelperTools" "$S/root/Library/LaunchDaemons" "$S/root/var/run" "$S/bin"
+printf '#!/bin/bash\n[[ $1 == print ]]\n' > "$S/bin/launchctl"; chmod +x "$S/bin/launchctl"
+python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$S/root/var/run/org.omacvm.netd.sock"
+APP=$S/OmacVM.app; mkdir -p "$APP/Contents/Resources/runtime/bin"
+cp /usr/bin/true "$APP/Contents/Resources/runtime/bin/OmacVM"   # Apple-signed: a cdhash to require
+QREQ="cdhash H\"$(codesign -dvvv "$APP/Contents/Resources/runtime/bin/OmacVM" 2>&1 | sed -n 's/^CDHash=//p' | head -1)\""
+NOW=$(shasum -a 256 "$HERE/omacvm-netd.c" | cut -c1-16)
+PROTO=$(sed -n 's/^#define NETD_PROTOCOL  *\([0-9]*\).*/\1/p' "$HERE/omacvm-netd.c")
+daemon() {   # VERSION [PROTOCOL]: a daemon that answers as that build (no PROTOCOL: from before --protocol)
+  printf '#!/bin/bash\ncase $1 in --version) echo %s ;; --protocol) [[ -n "%s" ]] || { echo usage >&2; exit 2; }; echo %s ;; *) exit 2 ;; esac\n' \
+    "$1" "${2:-}" "${2:-}" > "$S/root/Library/PrivilegedHelperTools/org.omacvm.netd"
+  chmod +x "$S/root/Library/PrivilegedHelperTools/org.omacvm.netd"
+}
+plist() {   # REQUIREMENT UID
+  python3 -c 'import plistlib,sys; plistlib.dump({"ProgramArguments": ["/Library/PrivilegedHelperTools/org.omacvm.netd",
+    "--requirement", sys.argv[2], "--user", sys.argv[3]]}, open(sys.argv[1], "wb"))' \
+    "$S/root/Library/LaunchDaemons/org.omacvm.netd.plist" "$1" "$2"
+}
+status_is() {   # WANT WHAT
+  local got
+  got=$(PATH="$S/bin:$PATH" OMACVM_NETD_TEST_ROOT=$S/root "$HERE/install.sh" --status --app "$APP" | head -1)
+  [[ $got == "$1" ]] && echo "ok   status $1: $2" || { echo "FAIL status: $2: got '$got', want '$1'"; exit 1; }
+}
+plist "$QREQ" "$(id -u)"
+daemon "$NOW" "$PROTO";                 status_is ok "this source's build"
+daemon 0123456789abcdef "$PROTO";       status_is ok "another build of the same protocol (no new install after an app update)"
+daemon 47acb85b894557f3;                status_is ok "3.0.0's build, from before --protocol (protocol 1)"
+daemon f141e093f466a64a;                status_is ok "3.0.1-3.0.3's build, from before --protocol (protocol 1)"
+daemon 35049a2bfcceb419;                status_is old "2.9's build (no VPN NAT): installed again"
+daemon 0123456789abcdef "$((PROTO + 1))"; status_is old "another protocol"
+daemon 0123456789abcdef;                status_is old "an unknown build without --protocol"
+daemon "$NOW" "$PROTO"
+plist 'cdhash H"0000000000000000000000000000000000000000"' "$(id -u)"; status_is old "installed for another app's QEMU"
+plist "$QREQ" 4242;                     status_is missing "installed for another Mac user only"
+plist "$QREQ" "$(id -u)"
+printf '#!/bin/bash\nexit 1\n' > "$S/bin/launchctl"; status_is down "installed, launchd does not run it"
