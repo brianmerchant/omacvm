@@ -20,8 +20,8 @@ source "$HERE/vm-common.sh"
 vm_load "$VM_DIR"
 IFS= read -r PASSWORD || true
 [[ -n $PASSWORD ]] || die "no password on stdin"
-# OmacVM's Mac helpers and the clock format are built here with Apple's tools.
-clt_ok || die "Xcode's Command Line Tools are missing: run xcode-select --install, then build again"
+# python3 for the build (the app's own on a Mac without Xcode's Command Line Tools).
+tools_ok
 
 STEPS=7
 step() { echo "STEP $1/$STEPS $2"; }

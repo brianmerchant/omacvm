@@ -2,7 +2,9 @@
 # Build OmacVM.app into dist/: the launcher, QEMU (built from source on the
 # first run and when its patches or build scripts change, about 70 seconds),
 # UEFI firmware, the VM scripts and OmacVM's VM side (src/ of the repo this
-# lives in, as committed). Signed ad hoc, or with OMACVM_SIGN_ID (below).
+# lives in, as committed), its Mac helpers and a python3 (scripts/fetch-python.sh),
+# so a Mac without Xcode's Command Line Tools needs nothing else. Signed ad
+# hoc, or with OMACVM_SIGN_ID (below).
 #   scripts/build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]
 #   scripts/build-app.sh --test-identity [--install]
 #     --name     the app's name and Dock title (default OmacVM)
@@ -191,15 +193,34 @@ xcrun clang -O2 -Wall -Wextra -Werror -mmacosx-version-min=14.0 \
 # these copies (src/lib/helpers.sh), so the user's Mac compiles nothing and,
 # with the Developer ID, macOS keeps their Accessibility and Input Monitoring
 # grants across updates. Built in a copy: nothing lands in the app's src/.
-log "Mac helpers (Bridge, Gestures)"
+# Omanotch (src/omanotch, on with a notch) the same way: without Xcode's
+# Command Line Tools on the user's Mac, nothing can build it there.
+log "Mac helpers (Bridge, Gestures, Omanotch)"
 HB=$(mktemp -d)
 cp -R "$C/Resources/omacvm/src" "$HB/src"
 OMACVM_HELPER_TEST=$TEST "$HB/src/bridge/mac/build.sh" >/dev/null 2>&1 || { echo "the Bridge did not build" >&2; rm -rf "$HB"; exit 1; }
 OMACVM_HELPER_TEST=$TEST "$HB/src/gestures/mac/build.sh" >/dev/null 2>&1 || { echo "Gestures did not build" >&2; rm -rf "$HB"; exit 1; }
+"$HB/src/omanotch/mac/build.sh" >/dev/null 2>&1 || { echo "Omanotch did not build" >&2; rm -rf "$HB"; exit 1; }
 mkdir -p "$C/Helpers"
 ditto "$HB/src/bridge/mac/build/OmacVMBridge.app" "$C/Helpers/$BRIDGE_APP"
 ditto "$HB/src/gestures/mac/build/OmacVMGestures.app" "$C/Helpers/$GESTURES_APP"
+ditto "$HB/src/omanotch/mac/build/Omanotch.app" "$C/Helpers/Omanotch.app"
 rm -rf "$HB"
+
+# What else the Mac side would ask Xcode's Command Line Tools for (src/lib/tools.sh):
+# the Swift answers it runs (is there a notch, the built-in display, the clock
+# format, free space), built here, and a python3 for the scripts (prebuilt
+# images, the password hash, apply, report). On a Mac without them
+# /usr/bin/python3 and swift only ask to install the tools.
+log "Mac tools and python3"
+mkdir -p "$C/Resources/tools"
+for t in display/mac-notch display/mac-display clock/mac-clock lib/mac-free-gb; do
+  xcrun swiftc -O -swift-version 5 -target arm64-apple-macos14.0 -o "$C/Resources/tools/${t#*/}" \
+    "$C/Resources/omacvm/src/$t.swift" || { echo "${t#*/}.swift did not build" >&2; exit 1; }
+done
+PYDIR=$("$ROOT/scripts/fetch-python.sh")
+ditto "$PYDIR" "$C/Resources/python"
+install -m644 "$PYDIR/../LICENSE.python.txt" "$C/Resources/licenses/"
 
 # Every program in the app must start on the macOS the app says it needs
 # (LSMinimumSystemVersion 15.0 below): a helper built without a minimum takes
@@ -271,9 +292,11 @@ EOF
 if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   log "signing ($OMACVM_SIGN_ID)"
   SIGN=(--force --sign "$OMACVM_SIGN_ID" --options runtime --timestamp)
-  for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
+  for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd" "$C/Resources/tools"/*; do
     codesign "${SIGN[@]}" "$f"
   done
+  codesign "${SIGN[@]}" --identifier "$ID.python" "$C/Resources/python/bin/python3.13"
+  codesign "${SIGN[@]}" --identifier ch.gillesgoetsch.omanotch "$C/Helpers/Omanotch.app"
   codesign "${SIGN[@]}" --identifier "$ID.qemu" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign "${SIGN[@]}" --identifier org.omacvm.netd "$NETD"
@@ -283,7 +306,8 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
     --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
   log "signing (ad hoc)"
-  for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
+  for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd" "$C/Resources/tools"/* \
+           "$C/Resources/python/bin/python3.13"; do
     codesign --force --sign - "$f" 2>/dev/null
   done
   # The designated requirement names the identifier, not the binary's hash, so

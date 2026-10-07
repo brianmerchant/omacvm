@@ -192,7 +192,7 @@ struct SetupView: View {
     }
 
     private func build() {
-        guard Mac.commandLineToolsInstalled else {
+        guard Mac.buildToolsReady else {
             locationProblem = "The build needs Xcode's Command Line Tools. macOS asks to install them now; build again when they are in."
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")

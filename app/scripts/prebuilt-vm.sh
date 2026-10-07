@@ -37,6 +37,9 @@ source "$OMACVM_SRC/prebuilt/lib.sh"
 PREBUILT_CACHE=$CACHE/prebuilt   # the downloads folder (vm-common.sh)
 
 if [[ ${1:-} == --lookup ]]; then
+  # No python3 that runs without asking: no image (never macOS's stub, which
+  # would ask to install Xcode's Command Line Tools as the app opens).
+  tools_python >/dev/null || exit 1
   cache_ready || exit 1
   prebuilt_lookup app 2>/dev/null || exit 1
   echo "$PB_TAG $PB_SIZE ${PB_OMARCHY%% *} $PB_VERSION"
@@ -48,8 +51,8 @@ vm_load "$VM_DIR"
 cache_ready || die "could not make $CACHE"
 IFS= read -r PASSWORD || true
 [[ -n $PASSWORD ]] || die "no password on stdin"
-# OmacVM's Mac helpers and the clock format are built with Apple's tools.
-clt_ok || die "Xcode's Command Line Tools are missing: run xcode-select --install, then build again"
+# python3 for the build (the app's own on a Mac without Xcode's Command Line Tools).
+tools_ok
 [[ ! -e $VM_DIR/disk.img && ! -L $VM_DIR/disk.img ]] || die "$VM_DIR already has a disk"
 [[ $DISK_GB =~ ^[0-9]{1,5}$ ]] || die "DISK_GB in vm.env is not a number"
 rm -f "$VM_DIR/ready"
