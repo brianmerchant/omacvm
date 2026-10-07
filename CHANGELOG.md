@@ -11,6 +11,24 @@ in more words.
   running QEMU. After the Bridge starts, or a VM does, the first request
   waits a few seconds for a fresh look at the VMs instead of minutes, and
   a VM the Mac cannot reach is told so instead of "not running".
+- Fast network after an app update: the service from an earlier app keeps
+  working when its protocol is the same (3.0.0 to 3.0.3 count as one), so
+  most updates need no new install and no password. When it does need an
+  update, the app asks before the VM starts ("The fast network needs an
+  update: Update…", one password), and its window, `omacvm check`, `omacvm
+  enable fast-network` and the control centre's Fast network switch offer
+  the same; from the control centre, macOS's password dialog shows on the
+  Mac. Saying no starts the VM on the normal network, and it says so. Other
+  switches (Touch ID too) and Update VM no longer stop on an outdated
+  service.
+- Turning the fast network on or off while the VM runs is for its next
+  start, and the app, the control centre and `omacvm` say so; the VM keeps
+  its network (and its address) until then, and the service stays while a
+  VM runs on it.
+- The control centre's "needs the Mac" says the real reason: "the Mac
+  cannot reach this VM: ..." with why (no address, the fast network down,
+  SSH refused), or that OmacVM did not set the VM up. Touch ID for an
+  OmacVM.app VM no longer needs the Mac to reach the VM over SSH.
 
 ## 3.0.3
 
