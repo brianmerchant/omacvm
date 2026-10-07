@@ -128,9 +128,27 @@ def test_the_hyprland_token_when_hyprland_does_not_answer(vm):
     assert printed(env)["border"] == ["#dcd7ba"]
 
 
+def test_hyprland_colour_forms(vm):
+    tmp, env = vm
+    env["OMACVM_HYPRCTL"] = str(tmp / "nothing-here")
+    shell = (tmp / "current" / "theme" / "shell.toml")
+    text = shell.read_text()
+    for value, want, angle in [('0xee33ccff 0xee00ff99 45deg', ["#33ccff", "#00ff99"], 45.0),
+                               ('rgba(51, 204, 255, 0.9) rgb(0,255,153) 90deg', ["#33ccff", "#00ff99"], 90.0),
+                               ('rgba(33ccffee) rgba(ff0000ee) rgba(00ff99ee) 30deg', ["#33ccff", "#00ff99"], 30.0)]:
+        shell.write_text(text.replace('border           = "hyprland.active-border"\nborder-error',
+                                      f'border           = "{value}"\nborder-error'))
+        t = printed(env)
+        assert (t["border"], t["border_angle"]) == (want, angle), value
+    shell.write_text(text.replace('border           = "hyprland.active-border"\nborder-error',
+                                  'border           = "$myborder"\nborder-error'))
+    assert printed(env)["border"] == ["#7aa2f7"], "a variable it cannot read: Hyprland's token"
+
+
 def test_a_switch_is_sent_once_its_files_settled(vm):
     tmp, env = vm
     env["OMACVM_TOUCHID_THEME_DELAY"] = "3"
+    env["OMACVM_TOUCHID_THEME_RECHECK"] = "0"
     old = time.time() - 60
     for p in (tmp / "current" / "theme").iterdir():
         os.utime(p, (old, old))
@@ -184,6 +202,25 @@ def test_sent_signed_once_per_change(mac):
     (tmp / "sent").unlink()   # touchid.sh on/off clears the record
     run(env)
     assert len([q for q in m.requests if q[1] == "/omacvm/theme"]) == 5, "Touch ID switched on again: sent again"
+
+
+def test_a_second_look_after_hyprland_reloads(mac):
+    m, env, tmp = mac
+    env["OMACVM_TOUCHID_THEME_DELAY"] = "1"
+    env["OMACVM_TOUCHID_THEME_RECHECK"] = "0.4"
+    # Hyprland answers with the old rounding first, the new one once it reloaded.
+    (tmp / "rounding").write_text('{"int": 0}')
+    hypr = tmp / "hyprctl"
+    hypr.write_text('#!/bin/sh\nd="$(dirname "$0")"\ncase "$3" in\n'
+                    '  decoration:rounding) n=$(cat "$d/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$d/n"\n'
+                    '    if [ "$n" -ge 1 ]; then echo \'{"int": 8}\'; else cat "$d/rounding"; fi ;;\n'
+                    '  general:col.active_border) cat "$d/border" ;;\nesac\n')
+    r = run(env)
+    assert r.returncode == 0, r.stderr
+    sent = [q[2] for q in m.requests if q[1] == "/omacvm/theme"]
+    assert [t["radius"] for t in sent] == [0, 8], "the reloaded rounding goes out on the second look"
+    run(env)
+    assert len([q for q in m.requests if q[1] == "/omacvm/theme"]) == 2, "nothing changed: nothing sent"
 
 
 def test_refused_is_tried_again_next_time(mac):

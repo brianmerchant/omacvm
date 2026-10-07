@@ -241,12 +241,9 @@ final class PanelView: NSView {
         ring.strokeColor = theme.border[0].cg
         ring.zPosition = 10
         if theme.border.count == 2 {
-            // Hyprland's angle: 0 deg runs left to right, more turns it anticlockwise.
-            let a = theme.borderAngle * .pi / 180, dx = cos(a) / 2, dy = sin(a) / 2
             gradient.frame = bounds
             gradient.colors = theme.border.map(\.cg)
-            gradient.startPoint = CGPoint(x: 0.5 - dx, y: 0.5 - dy)
-            gradient.endPoint = CGPoint(x: 0.5 + dx, y: 0.5 + dy)
+            (gradient.startPoint, gradient.endPoint) = panelGradientEnds(angle: theme.borderAngle)
             gradient.mask = ring
             gradient.zPosition = 10
             l.addSublayer(gradient)

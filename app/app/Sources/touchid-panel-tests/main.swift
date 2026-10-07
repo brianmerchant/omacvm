@@ -39,6 +39,9 @@ expect(g.border == [PanelRGB(hex: "#798186")!, PanelRGB(hex: "#cacccc")!] && g.b
 expect(PanelTheme(fl, border: ["#798186", "#cacccc", "#000000"]).border == [PanelRGB(hex: "#205ea6")!], "theme: three border colours -> the accent")
 expect(PanelTheme(fl, border: ["#798186"], borderAngle: 45).borderAngle == 0, "theme: one border colour has no angle")
 expect(PanelTheme(fl, radius: 40).radius == 12 && PanelTheme(fl, radius: -3).radius == 0, "theme: rounding 0...12")
+let (g0, g1) = panelGradientEnds(angle: 45), (h0, h1) = panelGradientEnds(angle: 0)
+expect(g0.x < 0.5 && g0.y > 0.5 && g1.x > 0.5 && g1.y < 0.5, "theme: a 45 deg gradient runs from the top left to the bottom right (Hyprland's y is down)")
+expect(h0.x < h1.x && abs(h0.y - h1.y) < 1e-9, "theme: 0 deg runs left to right")
 let ctl = PanelTheme.tokyoNight
 expect(ctl.controlFill == ctl.background.mix(ctl.foreground, 0.04) && ctl.controlBorder == ctl.background.mix(ctl.foreground, 0.4),
        "theme: Cancel is an Omarchy control (text colour at 4 % and 40 %)")

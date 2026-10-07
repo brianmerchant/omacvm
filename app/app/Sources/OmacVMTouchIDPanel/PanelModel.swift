@@ -79,6 +79,14 @@ public struct PanelTheme: Equatable {
     public var controlBorder: PanelRGB { background.mix(foreground, 0.4) }
 }
 
+/// Where a Hyprland gradient border starts and ends in a layer's unit square
+/// (y up). Hyprland measures the angle with y down: 0 deg runs left to
+/// right, 45 deg from the top left to the bottom right.
+public func panelGradientEnds(angle: Double) -> (CGPoint, CGPoint) {
+    let a = angle * .pi / 180, dx = cos(a) / 2, dy = -sin(a) / 2
+    return (CGPoint(x: 0.5 - dx, y: 0.5 - dy), CGPoint(x: 0.5 + dx, y: 0.5 + dy))
+}
+
 // MARK: The glyph (fingerprint.svg: five strokes, round caps)
 
 public enum PanelGlyph {

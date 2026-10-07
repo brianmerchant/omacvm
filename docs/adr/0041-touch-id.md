@@ -553,15 +553,19 @@ key; only with Touch ID on; at most 512 bytes, one a second): `background`,
 accent, text-error; else colors.toml), `success` (colors.toml `green`),
 `muted` (colors.toml `muted`, for the 3.0.2/3.0.3 panels), and the border
 (the prompt's own when the theme gives one, else Hyprland's
-`general:col.active_border`, one colour or a gradient with its angle) and
+`general:col.active_border`, one colour or a gradient with its angle,
+Hyprland's angle with y down; a longer gradient gives its first and last
+colour; a `$variable` falls back to Hyprland's own border) and
 `decoration:rounding`. The Bridge passes all of it to the panel in the 103
 (3.0.4; before, only the colours). Guest: `omacvm-touchid-theme` from a
 user path unit on `~/.local/state/omarchy/current`, once its files have
-been quiet for 0.8 s (at most 3 s); at each login; and at once when Touch
-ID is turned on (touchid.sh clears its record of the last send, which
+been quiet for 0.8 s (at most 3 s), and again 1.5 s later if Hyprland's
+border or rounding changed meanwhile (a switch reloads Hyprland last); at
+each login; and at once when Touch ID is turned on (touchid.sh clears its record of the last send, which
 also holds the boot). The Mac keeps the last good theme per VM, also while
 Touch ID is off, so the panel follows the VM's last known theme until a
-new one comes (3.0.2 and 3.0.3 deleted it on off and did not send it again
+new one comes (a VM rebuilt under the same name, `--reset-host-key`,
+starts without it) (3.0.2 and 3.0.3 deleted it on off and did not send it again
 on on: the user's light VM got a dark panel). Mac rules:
 `#rrggbb` only; text under 4.5:1 on its background refuses the whole theme
 (all 22 stock themes pass, lowest rose-pine 6.7:1); accent, error and

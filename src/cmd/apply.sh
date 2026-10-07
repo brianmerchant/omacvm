@@ -294,6 +294,10 @@ fi
 # root), and for Parallels/UTM/Fusion the Bridge token (they reach the Bridge
 # over the network). OmacVM.app's VMs ask through the app's port: no Bridge
 # token in them. Off: the Mac's copy goes (the VM's goes in guest/install.sh).
+# A rebuilt VM (--reset-host-key) starts without the old one's theme.
+if (( NEWKEY && NAMED )); then
+  rm -f "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+fi
 if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
