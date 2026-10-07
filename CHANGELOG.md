@@ -29,6 +29,12 @@ in more words.
 - Chromium video after a kernel update: when the decoder came late, its
   service stayed down until the next start and videos played on the CPU.
   The decoder now starts its service when it comes.
+- Ctrl-C during a step with a spinner in `omacvm build` (such as the
+  prebuilt image's unpack) always stops it; one that came just as the
+  spinner drew could be lost, and the step went on. A prebuilt image could
+  now and then fail to unpack with "could not unpack the image (free disk
+  space?)" although nothing was wrong. Closing the control centre while a
+  job ran could end with a Python error; it closes cleanly now.
 
 ## 3.0.3
 
