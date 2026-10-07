@@ -460,16 +460,18 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     var r = c.finished([vmA], now: t0 + 2)
     expect(r.changed == ["parallels/A"] && !r.again && c.list == [vmA], "run done: A is in, it changed")
     expect(!c.shouldRefresh(known: true, now: t0 + 30), "known and fresh: no run")
-    expect(c.shouldRefresh(known: false, now: t0 + 3) == false, "unknown: at most once a minute (one ran at t0)")
-    expect(!c.shouldRefresh(known: false, now: t0 + 59), "unknown: still within the minute")
-    expect(c.shouldRefresh(known: false, now: t0 + 61), "unknown: a minute later, a run")
-    _ = c.finished([vmA, vmB], now: t0 + 62)
-    // An address flood (unknown addresses) starts one run a minute, no more.
+    expect(c.shouldRefresh(known: false, now: t0 + 3) == false, "unknown address: at most every 10 s (one ran at t0)")
+    expect(!c.shouldRefresh(known: false, now: t0 + 9), "unknown address: still within the 10 s")
+    // Before 3.0.4 an unknown VM waited a minute for the next run: a Bridge
+    // that just started answered "unknown VM" for minutes.
+    expect(c.shouldRefresh(known: false, now: t0 + 12), "unknown address: 10 s later, a run")
+    _ = c.finished([vmA, vmB], now: t0 + 14)
+    // An address flood (unknown addresses) starts a run every 10 s, no more.
     var runs = 0
-    for s in stride(from: 63.0, to: 63.0 + 300, by: 0.5) where c.shouldRefresh(known: false, now: t0 + s) {
+    for s in stride(from: 15.0, to: 15.0 + 300, by: 0.5) where c.shouldRefresh(known: false, now: t0 + s) {
       runs += 1; _ = c.finished([vmA, vmB], now: t0 + s + 3)
     }
-    expect(runs <= 6, "flood of unknown addresses for 5 minutes: at most a run a minute (\(runs))")
+    expect(runs <= 31, "flood of unknown addresses for 5 minutes: at most a run every 10 s (\(runs))")
     var c2 = VMListCache()
     _ = c2.shouldRefresh(known: false, now: t0); _ = c2.finished([vmA], now: t0)
     expect(c2.shouldRefresh(known: true, now: t0 + 60), "known but a minute old: a run (the cache is served meanwhile)")
@@ -486,6 +488,57 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(!c2.shouldRefresh(known: false, now: t0 + 75) && !c2.shouldRefresh(known: true, now: t0 + 200 - 126),
            "a failed run: not again within 10 s")
     expect(c2.vm(at: "10.211.55.5") == "parallels/A" && c2.vm(at: "10.211.55.99") == nil, "VM by address")
+
+    // ---- a VM the list does not have: a fresh run first, and the request waits for it ----
+    let appVM = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "127.0.0.1:52500", omacvm: "3.0.3", setup: true)
+    var u = VMListCache()
+    // The Bridge just started (empty list): the first request starts a run and waits for run 1.
+    var w = u.unknown(now: t0, every: VMListCache.appEvery)
+    expect(w.start && w.waitFor == 1 && u.started == 1 && u.ended == 0, "fresh Bridge: run 1 starts, the request waits for it")
+    // Another request meanwhile: that run may have started before its VM; one more follows, it waits for run 2.
+    w = u.unknown(now: t0 + 1.5, every: VMListCache.appEvery)
+    expect(!w.start && w.waitFor == 2, "during a run: waits for the run after it")
+    w = u.unknown(now: t0 + 1.8, every: VMListCache.appEvery)
+    expect(!w.start && w.waitFor == 1, "during a run, within a second: waits for the run going")
+    r = u.finished([], now: t0 + 2)
+    expect(r.again && u.ended == 1 && u.started == 2 && u.running, "run 1 ended: run 2 starts at once")
+    r = u.finished([appVM], now: t0 + 3)
+    expect(!r.again && u.ended == 2 && !u.running, "run 2 ended")
+    if case .success = vmForApp("Omarchy", u.list) { expect(true, "found") } else { expect(false, "the VM is found after the wait") }
+    // A run ended less than a second ago: the list is fresh, no new run, no wait.
+    w = u.unknown(now: t0 + 3.5, every: VMListCache.appEvery)
+    expect(!w.start && w.waitFor == nil, "a run just ended: answered from it")
+    w = u.unknown(now: t0 + 4.2, every: VMListCache.appEvery)
+    expect(w.start && w.waitFor == 3, "a second later: a run again (OmacVM.app's VMs: at most once a second)")
+    _ = u.finished(nil, now: t0 + 5)
+    w = u.unknown(now: t0 + 9, every: VMListCache.appEvery)
+    expect(!w.start && w.waitFor == nil, "after a failed run: none for 10 s, nothing to wait for")
+    // Addresses (any guest can add them): at most every 10 s.
+    var ua = VMListCache()
+    expect(ua.unknown(now: t0, every: VMListCache.addressEvery).start, "address: a run")
+    _ = ua.finished([vmA], now: t0 + 1)
+    expect(!ua.unknown(now: t0 + 5, every: VMListCache.addressEvery).start, "address: not again within 10 s")
+    expect(ua.unknown(now: t0 + 11, every: VMListCache.addressEvery).start, "address: 10 s after the last list")
+    // jobEnded keeps whether the VM was reachable.
+    var uj = VMListCache()
+    _ = uj.unknown(now: t0, every: 1)
+    _ = uj.finished([VMEntry(name: "A", type: "app", state: "running", ip: "", omacvm: "3.0.2", setup: true, reachable: false)], now: t0 + 1)
+    _ = uj.jobEnded(vm: "app/A", version: "3.0.3")
+    expect(uj.list.first?.omacvm == "3.0.3" && uj.list.first?.reachable == false, "a job's new version keeps reachable")
+
+    // ---- a VM that runs but the Mac cannot reach: said so, not "not running" ----
+    let lost = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false)
+    if case .failure(let e) = vmForApp("Omarchy", [lost]) {
+      expect(e.code == "unknown-vm" && e.message == unreachableText, "running, set up, unreachable: says the Mac cannot reach it (\(e.message))")
+    } else { expect(false, "unreachable app VM") }
+    let lostPeer = VMEntry(name: "P", type: "parallels", state: "running", ip: "10.211.55.9", omacvm: "", setup: true, reachable: false)
+    if case .failure(let e) = vmForPeer("10.211.55.9", [lostPeer]) {
+      expect(e.message == unreachableText, "unreachable VM at that address: said so")
+    } else { expect(false, "unreachable peer") }
+    let offApp = VMEntry(name: "Off", type: "app", state: "stopped", ip: "", omacvm: "", setup: true, reachable: false)
+    if case .failure(let e) = vmForApp("Off", [offApp]) {
+      expect(e.message == "this VM is not running, or OmacVM did not set it up", "stopped stays 'not running'")
+    } else { expect(false, "stopped") }
 
     // ---- refusals in the log ----
     var ll = LogLimiter(every: 60, maxKeys: 4)

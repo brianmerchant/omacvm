@@ -272,7 +272,7 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
-      switch vmForApp(name, vmList(cli, fresh: fresh) { if case .success = vmForApp(name, $0) { return true }; return false }) {
+      switch vmForApp(name, vmList(cli, fresh: fresh, every: VMListCache.appEvery) { if case .success = vmForApp(name, $0) { return true }; return false }) {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
@@ -436,17 +436,39 @@ final class Control {
     return try? String(contentsOfFile: path, encoding: .utf8)
   }
 
-  /// `omacvm vms --json`, cached (VMListCache): the cache at once, never
-  /// waiting for a run; a run in the background when it is due. `known`:
-  /// whether the cache already has the VM that asks. `fresh` false: a VM
-  /// the cache has does not start a run however old the list is.
-  private func vmList(_ cli: String, fresh: Bool = true, known: ([VMEntry]) -> Bool) -> [VMEntry] {
-    let (list, start) = q.sync { () -> ([VMEntry], Bool) in
-      let k = known(vms.list)
-      return (vms.list, (fresh || !k) && vms.shouldRefresh(known: k, now: Date()))
+  /// `omacvm vms --json`, cached (VMListCache). `known`: whether the list
+  /// has the VM that asks; then the cache at once, and a run in the
+  /// background when it is due (`fresh` false: never for its age). A VM it
+  /// does not have: a fresh run first (at most once per `every` seconds),
+  /// waited for up to VMListCache.unknownWait (`fresh` false: not waited for,
+  /// graphics memory is asked every 2 s with a short timeout). A Bridge that
+  /// just started, or a VM that just started, is found by that run instead of
+  /// a minute later.
+  private func vmList(_ cli: String, fresh: Bool = true, every: Double = VMListCache.addressEvery,
+                      known: ([VMEntry]) -> Bool) -> [VMEntry] {
+    let (list, start, waitFor) = q.sync { () -> ([VMEntry], Bool, Int?) in
+      if known(vms.list) { return (vms.list, fresh && vms.shouldRefresh(known: true, now: Date()), nil) }
+      // Graphics memory (every 2 s while the control centre is open) asks no faster than an address.
+      let u = vms.unknown(now: Date(), every: fresh ? every : max(every, VMListCache.addressEvery))
+      return (vms.list, u.start, u.waitFor)
     }
     if start { refreshVMs(cli) }
-    return list
+    guard fresh, let n = waitFor else { return list }
+    waitForRun(n, until: Date().addingTimeInterval(VMListCache.unknownWait))
+    return q.sync { vms.list }
+  }
+
+  /// Signalled when a run of the VM list ends (refreshVMs).
+  private let runEnded = NSCondition()
+
+  /// Until run `n` of the VM list ended, no run is going any more, or `deadline`.
+  private func waitForRun(_ n: Int, until deadline: Date) {
+    runEnded.lock(); defer { runEnded.unlock() }
+    while true {
+      let (ended, running) = q.sync { (vms.ended, vms.running) }
+      if ended >= n || !running { return }
+      if !runEnded.wait(until: deadline) { return }
+    }
   }
 
   /// `omacvm vms --json ...`: the list, or nil.
@@ -457,9 +479,9 @@ final class Control {
     return list.map { v in
       VMEntry(name: v["name"] as? String ?? "", type: v["type"] as? String ?? "", state: v["state"] as? String ?? "",
               ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
-              // Set up by OmacVM, and its remembered SSH host key answered at that address just now.
-              setup: (strictBool(v["setup"]) ?? false) && (strictBool(v["reachable"]) ?? false),
-              dir: v["dir"] as? String ?? "")
+              // Set up by OmacVM (its SSH host key is remembered), and that key answered at that address just now.
+              setup: strictBool(v["setup"]) ?? false, dir: v["dir"] as? String ?? "",
+              reachable: strictBool(v["reachable"]) ?? false)
     }
   }
 
@@ -487,6 +509,7 @@ final class Control {
         for k in r.changed { status[k] = nil }   // asked again with the VM's new state
         return r.again
       }
+      runEnded.lock(); runEnded.broadcast(); runEnded.unlock()
       if again { refreshVMs(cli) }
     }
   }
@@ -542,7 +565,7 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"))
       }
-      found = vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false })
+      found = vmForApp(name, vmList(cli, every: VMListCache.appEvery) { if case .success = vmForApp(name, $0) { return true }; return false })
     } else {
       found = vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false })
     }
@@ -572,10 +595,10 @@ final class Control {
   }
 
   /// How many VMs this Mac has set up (the dialog names the VM when more than one).
-  func setUpVMCount() -> Int { q.sync { vms.list.filter { $0.setup }.count } }
+  func setUpVMCount() -> Int { q.sync { vms.list.filter { $0.setup && $0.reachable }.count } }
 
   /// An address the cache does not have was turned away for the limits: a
-  /// VM that just started may be one, so look again (at most once a minute).
+  /// VM that just started may be one, so look again (at most every 10 s).
   func unknownTurnedAway() {
     guard q.sync(execute: { vms.shouldRefresh(known: false, now: Date()) }) else { return }
     if case .success(let cli) = controlCLI() { refreshVMs(cli) } else { q.sync { _ = vms.finished(nil, now: Date()) } }

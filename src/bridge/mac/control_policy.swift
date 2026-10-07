@@ -193,8 +193,11 @@ func relaySocketPathOK(_ p: String) -> Bool {
 
 /// A VM as `omacvm vms --json` lists it. `dir`: an OmacVM.app VM's folder.
 struct VMEntry: Equatable {
+  /// setup: OmacVM set it up from this Mac (its SSH host key is remembered).
   let name: String, type: String, state: String, ip: String, omacvm: String, setup: Bool
   var dir: String = ""
+  /// OmacVM's SSH key got in at that address just now (`omacvm vms`).
+  var reachable: Bool = true
 }
 
 // ---- OmacVM.app's VMs: their CLI runs go through the app ----
@@ -294,10 +297,14 @@ func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError>
   if peer.hasPrefix("127.") {
     return .failure(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
   }
-  let hits = vms.filter { $0.state == "running" && $0.setup && $0.ip == peer }
+  let hits = vms.filter { $0.state == "running" && $0.setup && $0.reachable && $0.ip == peer }
   switch hits.count {
   case 1: return .success(hits[0])
-  case 0: return .failure(PolicyError(409, "unknown-vm", "no running VM that OmacVM set up has this address"))
+  case 0:
+    if vms.contains(where: { $0.state == "running" && $0.setup && $0.ip == peer }) {
+      return .failure(PolicyError(409, "unknown-vm", unreachableText))
+    }
+    return .failure(PolicyError(409, "unknown-vm", "no running VM that OmacVM set up has this address"))
   default: return .failure(PolicyError(409, "ambiguous-vm", "more than one VM has this address: nothing runs"))
   }
 }
@@ -310,8 +317,12 @@ func vmForApp(_ name: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError> 
   guard v.state == "running", v.setup else {
     return .failure(PolicyError(409, "unknown-vm", "this VM is not running, or OmacVM did not set it up"))
   }
+  guard v.reachable else { return .failure(PolicyError(409, "unknown-vm", unreachableText)) }
   return .success(v)
 }
+
+/// A VM that runs and that OmacVM set up, but OmacVM's SSH did not get in just now.
+let unreachableText = "the Mac cannot reach this VM just now (it runs, but SSH from the Mac did not answer)"
 
 /// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
 /// 32 hex digits of SHA-256("<type>/<name>").
@@ -883,50 +894,81 @@ struct ReleaseKeys {
   }
 }
 
-// ---- the VM list (`omacvm vms --json`): no request waits for it ----
+// ---- the VM list (`omacvm vms --json`) ----
 
-/// The cached VM list and when to read it again. A request always gets the
-/// cache at once; a run starts in the background, one at a time, when the
-/// list is a minute old, when a job ended (its VM changed), or for an
-/// address the list does not have (a VM that just started). That last one
-/// at most once a minute: any guest can add addresses, and each run asks
-/// every running VM over SSH. Only touched on Control's queue.
+/// The cached VM list and when to read it again. A known VM gets the cache at
+/// once; a run starts in the background, one at a time, when the list is a
+/// minute old or when a job ended (its VM changed). A VM the list does not
+/// have (or not as running, set up and reachable: it may have just started,
+/// or the Bridge just started) gets a fresh run first, and its request waits
+/// for it a few seconds (`unknownWait`) before the answer is "unknown VM".
+/// Such runs at most once a second for OmacVM.app's VMs (the app names the VM)
+/// and every 10 s for an address (any guest can add addresses, and each run
+/// asks every running VM over SSH). Only touched on Control's queue.
 struct VMListCache {
-  static let maxAge: Double = 60, unknownEvery: Double = 60, afterFailure: Double = 10
+  static let maxAge: Double = 60, appEvery: Double = 1, addressEvery: Double = 10, afterFailure: Double = 10
+  /// How long a request for a VM the list does not have waits for a run.
+  static let unknownWait: Double = 4
   private(set) var list: [VMEntry] = []
   private(set) var at = Date.distantPast
   private(set) var running = false
-  private var again = false                  // a job ended while a run was going
-  private var unknownAt = Date.distantPast   // the last run started for an unknown address
+  /// Runs started and runs ended (failed ones too): a request waits until
+  /// `ended` reaches the run it needs.
+  private(set) var started = 0, ended = 0
+  private var again = false                  // a job ended (or a VM was missed) while a run was going
+  private var unknownAt = Date.distantPast   // the last run asked for for an unknown VM
   private var failedAt = Date.distantPast
 
   static func key(_ v: VMEntry) -> String { "\(v.type)/\(v.name)" }
 
-  /// True when this request starts a run (the caller runs it, then calls finished).
-  mutating func shouldRefresh(known: Bool, now: Date) -> Bool {
+  private mutating func start() { running = true; started += 1 }
+
+  /// True when this request starts a run (the caller runs it, then calls
+  /// finished). `every`: how often an unknown VM may start one.
+  mutating func shouldRefresh(known: Bool, now: Date, every: Double = Self.addressEvery) -> Bool {
     guard !running, now.timeIntervalSince(failedAt) >= Self.afterFailure else { return false }
     let stale = now.timeIntervalSince(at) >= Self.maxAge
     if known {
       guard stale else { return false }
     } else {
-      guard stale || now.timeIntervalSince(unknownAt) >= Self.unknownEvery else { return false }
+      guard stale || now.timeIntervalSince(unknownAt) >= every else { return false }
       unknownAt = now
     }
-    running = true
+    start()
     return true
+  }
+
+  /// A request for a VM the list does not have. `start`: the caller starts a
+  /// run now. `waitFor`: the run whose end the request waits for (`ended`
+  /// reaching it), nil: answer from the list as it is (a run ended less than
+  /// `every` ago, or the last one failed). A run already going may have
+  /// started before the VM did: one more follows it, and the request waits for that.
+  mutating func unknown(now: Date, every: Double) -> (start: Bool, waitFor: Int?) {
+    guard now.timeIntervalSince(failedAt) >= Self.afterFailure else { return (false, nil) }
+    let due = now.timeIntervalSince(unknownAt) >= every
+    if running {
+      guard due else { return (false, started) }
+      unknownAt = now
+      again = true
+      return (false, started + 1)
+    }
+    guard due, now.timeIntervalSince(at) >= every else { return (false, nil) }
+    unknownAt = now
+    start()
+    return (true, started)
   }
 
   /// A request from a VM the list has at this address did not prove with
   /// that VM's key: the list may be old (that VM stopped, another took its
   /// address). True when the caller starts a run now: when the list is at
   /// least `mismatchAge` old, at most once a minute (any guest can send bad keys).
-  static let mismatchAge: Double = 5
+  static let mismatchAge: Double = 5, mismatchEvery: Double = 60
   private var mismatchAt = Date.distantPast
   mutating func keyMismatch(now: Date) -> Bool {
     guard !running, now.timeIntervalSince(failedAt) >= Self.afterFailure, now.timeIntervalSince(at) >= Self.mismatchAge,
-          now.timeIntervalSince(mismatchAt) >= Self.unknownEvery else { return false }
+          now.timeIntervalSince(mismatchAt) >= Self.mismatchEvery else { return false }
     mismatchAt = now
-    running = true
+    start()
     return true
   }
 
@@ -936,11 +978,12 @@ struct VMListCache {
   mutating func jobEnded(vm: String, version: String?) -> Bool {
     if let version {
       list = list.map { v in
-        Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup, dir: v.dir) : v
+        Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup, dir: v.dir,
+                                     reachable: v.reachable) : v
       }
     }
     if running { again = true; return false }
-    running = true
+    start()
     return true
   }
 
@@ -948,6 +991,7 @@ struct VMListCache {
   /// cached status goes) and whether the caller starts another run at once.
   mutating func finished(_ fresh: [VMEntry]?, now: Date) -> (changed: Set<String>, again: Bool) {
     running = false
+    ended = started
     var changed = Set<String>()
     if let fresh {
       let old = Dictionary(list.map { (Self.key($0), $0) }, uniquingKeysWith: { a, _ in a })
@@ -960,7 +1004,7 @@ struct VMListCache {
     }
     if again && fresh != nil {
       again = false
-      running = true
+      start()
       return (changed, true)
     }
     again = false

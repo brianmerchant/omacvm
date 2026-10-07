@@ -368,9 +368,13 @@ program a VMs folder on an external drive without asking (Removable
 Volumes): through the app, the run is the app's, with the access the person
 gave the app. The app runs only the Bridge's commands, only for OmacVM Bridge
 of its own identity and signer (app/app/Sources/OmacVM/ControlRun.swift). It is read again in the background, one run at a time, when the list
-is a minute old, after a job, and for an address the list does not have (a
-VM that just started) at most once a minute, since any guest can add
-addresses. Also when a request does not prove with the key of the VM the
+is a minute old and after a job. A VM the list does not have (or not as
+running, set up and reachable: it just started, or the Bridge did) gets a
+run first, and its request waits up to 4 s for it before the answer is
+409 unknown-vm: at most once a second for an OmacVM.app VM (the app names
+it), every 10 s for an address, since any guest can add addresses. A VM
+that runs but whose SSH did not answer the Mac is told so ("the Mac cannot
+reach this VM"), not "not running". Also when a request does not prove with the key of the VM the
 list has at its address (that VM stopped and another took the address): at
 most once a minute, when the list is 5 s old or more; the 403 then says
 "looking" (`"looking": true`) and the VM asks again instead of telling the
