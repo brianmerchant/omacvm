@@ -32,29 +32,56 @@ static inline void notch_rule_lua(char *out, size_t size, const char *output, in
 // at once. The same rule as last time goes at once too when NOTCH was seen
 // as that rule wants since it was sent: something else moved NOTCH after it
 // took (a config reload with notchbar.lua's older rule, another eval), and
-// waiting would leave the strip wrong for up to 30 s. Never seen so (Hyprland
-// keeps refusing or changing it): again only after 30 s, so Hyprland is not
-// asked every round.
+// waiting would leave the strip wrong. Not seen so yet (the move came before
+// the keeper's next look, or Hyprland keeps refusing or changing the rule):
+// again at the next look, then after waits doubling up to 30 s (1.5, 3, 6,
+// 12, 24, 30, 30 ... s; the keeper looks every 2 s). Never more than
+// NOTCH_RULE_BURST sends of one rule in 30 s, so something that keeps moving
+// NOTCH back is not chased every look (each send reconfigures the monitor).
 #define NOTCH_RULE_RETRY_MS 30000
+#define NOTCH_RULE_FIRST_MS 1500   // the keeper's next look (it looks every 2 s)
+#define NOTCH_RULE_BURST 4
 typedef struct {
-    char sent[256];  // the rule sent last
-    double sent_ms;  // when
-    int held;        // NOTCH was seen as `sent` wants since then
+    char sent[256];      // the rule sent last
+    double sent_ms;      // when
+    int held;            // NOTCH was seen as `sent` wants since then
+    int unseen;          // sends of `sent` in a row without that
+    double window_ms;    // the first send of `sent` in the current 30 s
+    int window_sends;    // sends of `sent` since window_ms
 } NotchRuleState;
 
 static inline int notch_rule_due(const NotchRuleState *st, const char *lua, double now_ms) {
-    return strcmp(lua, st->sent) || st->held || now_ms - st->sent_ms > NOTCH_RULE_RETRY_MS;
+    if (strcmp(lua, st->sent)) return 1;
+    if (st->window_sends >= NOTCH_RULE_BURST && now_ms - st->window_ms < NOTCH_RULE_RETRY_MS) return 0;
+    if (st->held) return 1;
+    double wait = NOTCH_RULE_FIRST_MS;
+    for (int i = 1; i < st->unseen && wait < NOTCH_RULE_RETRY_MS; i++) wait *= 2;
+    return now_ms - st->sent_ms >= (wait < NOTCH_RULE_RETRY_MS ? wait : NOTCH_RULE_RETRY_MS);
 }
 
 static inline void notch_rule_sent(NotchRuleState *st, const char *lua, double now_ms) {
-    snprintf(st->sent, sizeof st->sent, "%s", lua);
-    st->sent_ms = now_ms;
+    if (strcmp(lua, st->sent)) {
+        snprintf(st->sent, sizeof st->sent, "%s", lua);
+        st->unseen = 0;
+        st->window_sends = 0;
+        st->window_ms = now_ms;
+    }
+    if (now_ms - st->window_ms >= NOTCH_RULE_RETRY_MS) {
+        st->window_ms = now_ms;
+        st->window_sends = 0;
+    }
+    st->window_sends++;
+    st->unseen = st->held ? 1 : st->unseen + 1;
     st->held = 0;
+    st->sent_ms = now_ms;
 }
 
 // NOTCH is as `lua` wants (the keeper's look found nothing to change).
 static inline void notch_rule_seen(NotchRuleState *st, const char *lua) {
-    if (!strcmp(lua, st->sent)) st->held = 1;
+    if (!strcmp(lua, st->sent)) {
+        st->held = 1;
+        st->unseen = 0;
+    }
 }
 
 // The tallest layer surface of namespace `ns` on the output `output` in a

@@ -79,22 +79,41 @@ int main(void) {
     CHECK(!strcmp(buf, "646 825 0 0\n"), "geom line, strip and bar not known");
 
     // The keeper's rule: a new one at once; the same one at once after NOTCH
-    // took it and something moved NOTCH; one Hyprland never took, after 30 s.
-    NotchRuleState st = {.sent_ms = -1e9};
+    // took it and something moved NOTCH; one not seen taken: 2, 4, 8, 16, 30 s;
+    // at most 4 sends of one rule in 30 s.
+    NotchRuleState st = {.sent_ms = -1e9, .window_ms = -1e9};
     const char *a = "hl.monitor({ output = \"NOTCH\", position = \"0x-33\" })";
     const char *b = "hl.monitor({ output = \"NOTCH\", position = \"0x-40\" })";
     CHECK(notch_rule_due(&st, a, 0), "the first rule goes at once");
-    notch_rule_sent(&st, a, 1000);
-    CHECK(!notch_rule_due(&st, a, 3000), "the same rule, NOTCH not seen as it wants yet: wait");
-    CHECK(!notch_rule_due(&st, a, 30999), "... up to 30 s");
-    CHECK(notch_rule_due(&st, a, 31001), "... then again (Hyprland kept refusing it)");
-    CHECK(notch_rule_due(&st, b, 3000), "a changed rule goes at once");
-    notch_rule_seen(&st, a);   // the keeper's next look: NOTCH as the rule wants
-    CHECK(notch_rule_due(&st, a, 5000), "NOTCH took it, then was moved (a reload, another eval): again at once");
+    notch_rule_sent(&st, a, 0);
+    CHECK(!notch_rule_due(&st, a, 1000), "the same rule: not before the next look");
+    CHECK(notch_rule_due(&st, a, 2000), "not seen taken at the next look (moved back before it): again");
+    notch_rule_sent(&st, a, 2000);
+    CHECK(!notch_rule_due(&st, a, 4000) && notch_rule_due(&st, a, 5000), "... then after 3 s");
     notch_rule_sent(&st, a, 5000);
-    CHECK(!notch_rule_due(&st, a, 7000), "sent again and not taken this time: wait again");
-    notch_rule_seen(&st, b);   // NOTCH as another rule wants: not this one's
-    CHECK(!notch_rule_due(&st, a, 9000), "seen as another rule wants: still waiting for this one");
+    CHECK(!notch_rule_due(&st, a, 10000) && notch_rule_due(&st, a, 11000), "... then after 6 s");
+    notch_rule_sent(&st, a, 11000);   // the 4th in 30 s
+    CHECK(!notch_rule_due(&st, a, 29999), "never more than 4 sends of one rule in 30 s");
+    CHECK(notch_rule_due(&st, a, 30001), "... the next after the 30 s");
+    notch_rule_sent(&st, a, 30001);
+    CHECK(!notch_rule_due(&st, a, 50000) && notch_rule_due(&st, a, 54001), "never taken: the wait grows to 24 s");
+    notch_rule_sent(&st, a, 54001);
+    CHECK(!notch_rule_due(&st, a, 84000) && notch_rule_due(&st, a, 84002), "... and stays at 30 s");
+    CHECK(notch_rule_due(&st, b, 84000), "a changed rule goes at once");
+
+    NotchRuleState t = {.sent_ms = -1e9, .window_ms = -1e9};
+    notch_rule_sent(&t, a, 0);
+    notch_rule_seen(&t, a);   // the next look: NOTCH as the rule wants
+    CHECK(notch_rule_due(&t, a, 2000), "NOTCH took it, then was moved (a reload, another eval): again at once");
+    notch_rule_sent(&t, a, 4000);
+    CHECK(!notch_rule_due(&t, a, 5000) && notch_rule_due(&t, a, 6000), "sent again, not seen taken: the next look");
+    notch_rule_seen(&t, b);   // NOTCH as another rule wants: not this one's
+    CHECK(!t.held, "seen as another rule wants: not this one taken");
+    notch_rule_seen(&t, a); notch_rule_sent(&t, a, 6000);   // 3rd
+    notch_rule_seen(&t, a); notch_rule_sent(&t, a, 8000);   // 4th in 30 s
+    notch_rule_seen(&t, a);
+    CHECK(!notch_rule_due(&t, a, 10000), "something keeps moving it back: not chased every look (4 in 30 s)");
+    CHECK(notch_rule_due(&t, a, 30001), "... again once the 30 s are over");
 
     printf(failures ? "%d failed\n" : "all passed\n", failures);
     return failures != 0;

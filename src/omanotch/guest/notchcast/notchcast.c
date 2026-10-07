@@ -1767,8 +1767,9 @@ static void *keeper_thread(void *unused) {
                 notch_target(j, scr, sx, sy, sw, ss, &w, &h, &px, &py, &above);
                 notch_rule_lua(lua, sizeof lua, cfg_output, w, h, (int)px, (int)py, ss);
                 LOG("creating headless output %s: %s", cfg_output, lua);
-                const char *rule[] = {"hyprctl", "eval", lua, NULL};
-                run_quiet(rule);
+                const char *eval[] = {"hyprctl", "eval", lua, NULL};
+                run_quiet(eval);
+                notch_rule_sent(&rule, lua, now_ms());
                 const char *argv[] = {"hyprctl", "output", "create", "headless", cfg_output, NULL};
                 run_quiet(argv);
                 created_attempts++;
@@ -1826,7 +1827,7 @@ static void *keeper_thread(void *unused) {
                 notch_rule_lua(lua, sizeof lua, cfg_output, want_w, want_h, (int)px, (int)py, ss);
                 if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)px || (int)ny != (int)py ||
                     ns < ss - 0.01 || ns > ss + 0.01) {
-                    // At once, unless Hyprland never took this rule (notchrule.h).
+                    // At once after an outside move, else backing off (notchrule.h).
                     if (notch_rule_due(&rule, lua, now_ms())) {
                         LOG("resizing %s: %s", cfg_output, lua);
                         const char *argv[] = {"hyprctl", "eval", lua, NULL};

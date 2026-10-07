@@ -25,7 +25,8 @@ in more words.
   place (a Hyprland config reload with an older rule, another `hyprctl
   eval`), the strip beside the notch could stay wrong for up to 30 s.
   notchcast now puts it back on its next look (about 2 s). A rule Hyprland
-  never takes is still sent again only every 30 s.
+  does not take is sent again with growing waits, at most every 30 s once
+  it keeps failing, and never more than 4 times in 30 s.
 
 ## 3.0.3
 
