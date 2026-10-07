@@ -718,8 +718,9 @@ if [[ -n $PREV ]] && want update; then
     sleep 1
     # The app updates itself (as the window's "Update to X" does, without the window: --update-now).
     close_window
+    hide=(); (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1)   # the updated app starts again: no window either
     open -n -g --env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$F/key.pub")" \
-      "$APP" --args --update-now
+      ${hide[@]+"${hide[@]}"} "$APP" --args --update-now
     for ((i = 0; i < 300; i += 5)); do [[ $(plist "$APP" CFBundleShortVersionString) == "$CV" ]] && break; sleep 5; done
     sleep 10; close_window
     UPD=$(ls -dt "$HOME/Library/Application Support/OmacVM/Updates/$APPID"/*/ 2>/dev/null | head -1)
