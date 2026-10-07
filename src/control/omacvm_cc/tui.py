@@ -1020,6 +1020,9 @@ class ControlCentre(App):
             texts.append(f"{r.feature.title} {what}: {', '.join(others)}.")
         if not turn_on and self.brings_mac_version():
             texts.append(self.brings_mac_version())
+        later = S.next_start_note(r.feature.name, turn_on, self.c.local.vm_type)
+        if later:
+            texts.append(later)
         if not texts:
             self.run_job(ACTION_FOR[turn_on], list(plan))
             return
@@ -1295,7 +1298,9 @@ class ControlCentre(App):
             self.call_from_thread(self.refresh_all)
         elif job.state == "done":
             self.last_result = ""
-            self.call_from_thread(self.notify, f"{what}: done", timeout=6)
+            later = " (from the VM's next start)" if action in ("enable", "disable") and any(
+                S.next_start_note(f, action == "enable", self.c.local.vm_type) for f in features) else ""
+            self.call_from_thread(self.notify, f"{what}: done{later}", timeout=6)
         elif lost:
             self.last_result = (f"{what}: the Mac stopped answering about it (it may still finish there; "
                                 f"on the Mac, {self.on_the_mac('features')} shows how it went).")

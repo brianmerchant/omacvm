@@ -407,6 +407,21 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
     return rows
 
 
+def next_start_note(name: str, turn_on: bool, vm_type: str) -> str:
+    """What switching NAME means for the VM that runs now ("" when it changes
+    now). The fast network (OmacVM.app) is the network of the VM's next start:
+    the running VM keeps its own until then. On may need the Mac's service
+    installed or updated: macOS asks for the password on the Mac."""
+    if name != "fast-network" or vm_type != "app":
+        return ""
+    text = ("From the VM's next start (shut it down, then start it again): "
+            "it keeps the network it has until then.")
+    if turn_on:
+        text += (" If the fast network's service on the Mac needs installing or an update, "
+                 "macOS asks for your password on the Mac.")
+    return text
+
+
 def toggle_plan(features: list[Feature], on: dict[str, bool], name: str) -> dict[str, bool]:
     """Switching NAME: the changes it brings (as set_on in src/cmd/features.sh).
     On brings what it needs; off takes what needs it along."""
