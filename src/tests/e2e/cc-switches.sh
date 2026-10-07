@@ -270,7 +270,8 @@ bridge_start() {   # the test Bridge with its log here (as src/mac/install.sh st
 start_vm() {
   local i
   for ((i = 0; i < 60; i++)); do [[ -z $(qemu_pid) ]] && break; sleep 1; done
-  open -n -g "$APP" --args --start --vm "$VM"
+  # The VM's clipboard on a pasteboard of its own, never the Mac's (STANDARDS 25).
+  open -n -g --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e "$APP" --args --start --vm "$VM"
   for ((i = 0; i < 40; i++)); do [[ -n $(qemu_pid) ]] && break; sleep 1; done
   [[ -n $(qemu_pid) ]] || return 1
   for ((i = 0; i < 90; i++)); do gssh "test -d /run/user/\$(id -u \$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env))/hypr" 2>/dev/null && { sleep 5; return 0; }; sleep 2; done
