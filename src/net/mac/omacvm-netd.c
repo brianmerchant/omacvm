@@ -110,6 +110,14 @@
 #ifndef NETD_VERSION
 #define NETD_VERSION "dev"
 #endif
+// What the app and src/net/mac/install.sh rely on: the socket, QEMU's stream
+// framing, the arguments (--requirement, --user), the STATE_FILE and
+// NAT_FILE formats, the callers it takes. An installed daemon of the same
+// protocol serves a newer app as it is (no new install, no password after an
+// app update); one of another protocol is installed again. Raise it when a
+// change here breaks that, or when a fix must reach every Mac that has it.
+// Builds from before --protocol (3.0.0 to 3.0.3) are protocol 1 (install.sh).
+#define NETD_PROTOCOL 1
 #define MAX_CONNS 32
 #define MAX_PER_UID 16
 #define MAX_USERS 16
@@ -1259,6 +1267,7 @@ int main(int argc, char **argv) {
     const char *req = NULL, *path = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) { puts(NETD_VERSION); return 0; }
+        if (!strcmp(argv[i], "--protocol")) { printf("%d\n", NETD_PROTOCOL); return 0; }
         if (!strcmp(argv[i], "--requirement") && i + 1 < argc) req = argv[++i];
         else if (!strcmp(argv[i], "--user") && i + 1 < argc) {
             const char *arg = argv[++i];

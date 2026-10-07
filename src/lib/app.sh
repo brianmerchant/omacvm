@@ -12,7 +12,10 @@
 #   app_touchid_port DIR                 this start of the VM has Touch ID's port
 #   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address,
 #                       from the MAC the running QEMU has: app_vm_mac)
-#   app_any_fast_network  one of the VMs has the fast network on
+#   app_any_fast_network  one of the VMs has the fast network on (from its next start)
+#   app_any_on_vmnet    one of the VMs runs on the fast network now
+#   app_no_address DIR  why app_ip has no address for a VM that runs
+#   app_fast_network_wish DIR on|off  the fast network from the VM's next start
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
 #   app_bundle          the installed OmacVM.app (any name it was installed under;
@@ -202,12 +205,17 @@ app_dir() {
 # vmnet). On vmnet the VM has an address of its own (macOS's DHCP server
 # hands it out), and SSH goes there (port 22), its host key checked as always.
 app_net() { awk 'NR == 1 { print $1 }' "$1/logs/network" 2>/dev/null; }   # DIR -> vmnet|slirp
-app_vm_mac() {   # DIR [PID] -> the MAC address of the VM's vmnet NIC: the running
-  # QEMU's own (its virtio-net-pci on netdev "fast", app Runner.swift), else the fast-network file's
+app_vm_mac() {   # DIR [PID] -> the MAC address of the VM's vmnet NIC: with PID (it
+  # runs) only the running QEMU's own (its virtio-net-pci on netdev "fast", app
+  # Runner.swift), never the file, which may name the next start's; without, the
+  # fast-network file's (what the next start takes)
   local m=""
-  [[ -n ${2:-} ]] && m=$(ps -p "$2" -o args= 2>/dev/null | tr ' ' '\n' |
-    sed -n 's/^virtio-net-pci,\(.*,\)\{0,1\}netdev=fast,\(.*,\)\{0,1\}mac=\([0-9A-Fa-f:]\{17\}\).*/\3/p' | head -1)
-  [[ -n $m ]] || m=$(sed -n 's/^mac=//p' "$1/fast-network" 2>/dev/null | head -1)
+  if [[ -n ${2:-} ]]; then
+    m=$(ps -p "$2" -o args= 2>/dev/null | tr ' ' '\n' |
+      sed -n 's/^virtio-net-pci,\(.*,\)\{0,1\}netdev=fast,\(.*,\)\{0,1\}mac=\([0-9A-Fa-f:]\{17\}\).*/\3/p' | head -1)
+  else
+    m=$(sed -n 's/^mac=//p' "$1/fast-network" 2>/dev/null | head -1)
+  fi
   [[ -n $m ]] && echo "$m"
 }
 app_vmnet_ip() {   # DIR [PID] -> the VM's address on vmnet's network (lease_ip, src/lib/mac.sh)
@@ -219,6 +227,43 @@ app_any_fast_network() {   # one of this user's app VMs has the fast network on
   local d
   while IFS= read -r d; do [[ -s $d/fast-network ]] && return 0; done < <(app_vm_dirs)
   return 1
+}
+
+app_on_vmnet() {   # DIR: it runs, and this start of it took the fast network
+  [[ $(app_net "$1") == vmnet ]] && app_running_dir "$1"
+}
+
+app_any_on_vmnet() {   # one of this user's app VMs runs on the fast network now
+  local d
+  while IFS= read -r d; do app_on_vmnet "$d" && return 0; done < <(app_vm_dirs)
+  return 1
+}
+
+# app_fast_network_wish DIR on|off: the fast network for the VM's NEXT start
+# (its fast-network file, which the app reads at each start). A VM that runs
+# keeps the network it has until then; the address lookups follow the running
+# QEMU (app_vm_mac), never this file. On: the MAC the running VM has on vmnet,
+# if it runs there (its address stays), else a new one. Prints what it means
+# for the person, one line; returns 1 when nothing changed.
+app_fast_network_wish() {
+  local d=$1 pid m
+  pid=$(app_pid_dir "$d")
+  if [[ $2 == on ]]; then
+    [[ -s $d/fast-network ]] && return 1
+    m=""; [[ -n $pid ]] && m=$(app_vm_mac "$d" "$pid")
+    [[ $m =~ ^52:54:00(:[0-9a-f]{2}){3}$ ]] ||
+      m=$(printf '52:54:00:%02x:%02x:%02x' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)))
+    printf 'mac=%s\n' "$m" > "$d/fast-network.tmp" && mv -f "$d/fast-network.tmp" "$d/fast-network" || return 1
+    if [[ -n $pid && $(app_net "$d") == vmnet ]]; then echo "fast network: on (the VM runs on it now)"
+    elif [[ -n $pid ]]; then echo "fast network: on from the VM's next start (shut it down, then start it again); it keeps QEMU's own network until then"
+    else echo "fast network: on from the VM's next start"; fi
+  else
+    [[ -e $d/fast-network ]] || return 1
+    rm -f "$d/fast-network"
+    if [[ -n $pid && $(app_net "$d") == vmnet ]]; then echo "fast network: off from the VM's next start; it keeps the fast network until it shuts down"
+    else echo "fast network: off"; fi
+  fi
+  return 0
 }
 
 app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
@@ -238,6 +283,20 @@ app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
     sleep 2
   done
   return 1
+}
+
+app_no_address() {   # DIR: why app_ip finds no address for the VM, which runs (one line)
+  local n p pid m
+  n=$(head -1 "$1/logs/network" 2>/dev/null); p=$(app_env "$1" SSH_PORT); pid=$(app_pid_dir "$1")
+  [[ -n $pid ]] || { echo "its QEMU is not running"; return 0; }
+  case $n in
+    vmnet-down*) echo "its fast network is down: ${n#vmnet-down }" ;;
+    vmnet)
+      m=$(app_vm_mac "$1" "$pid")
+      if [[ -z $m ]]; then echo "it runs on the fast network, but its QEMU has no fast network card"
+      else echo "it runs on the fast network, but macOS's DHCP server has no address for its card ($m) yet, and QEMU does not answer on 127.0.0.1:$p"; fi ;;
+    *) echo "QEMU does not answer on its SSH port 127.0.0.1:$p (still starting?)" ;;
+  esac
 }
 
 app_other_running() {   # NAME -> another app VM that runs (the app runs one at a time)

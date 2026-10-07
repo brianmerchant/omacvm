@@ -198,6 +198,8 @@ struct VMEntry: Equatable {
   var dir: String = ""
   /// OmacVM's SSH key got in at that address just now (`omacvm vms`).
   var reachable: Bool = true
+  /// Why not (`omacvm vms`' "why", one line), when it runs and is not reachable.
+  var why: String = ""
 }
 
 // ---- OmacVM.app's VMs: their CLI runs go through the app ----
@@ -301,8 +303,8 @@ func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError>
   switch hits.count {
   case 1: return .success(hits[0])
   case 0:
-    if vms.contains(where: { $0.state == "running" && $0.setup && $0.ip == peer }) {
-      return .failure(PolicyError(409, "unknown-vm", unreachableText))
+    if let v = vms.first(where: { $0.state == "running" && $0.setup && $0.ip == peer }) {
+      return .failure(PolicyError(409, "unknown-vm", unreachableText(v.why)))
     }
     return .failure(PolicyError(409, "unknown-vm", "no running VM that OmacVM set up has this address"))
   default: return .failure(PolicyError(409, "ambiguous-vm", "more than one VM has this address: nothing runs"))
@@ -310,19 +312,52 @@ func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError>
 }
 
 /// An OmacVM.app VM, named by the app (which knows which VM's control port a
-/// request came through; the guest never names it): running and set up.
-func vmForApp(_ name: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError> {
+/// request came through; the guest never names it): running and set up, and
+/// reachable over SSH when the request needs that (`ssh`: the control
+/// centre's checks and jobs do; Touch ID only needs the VM's key, and the app
+/// vouches that the request came from that VM).
+func vmForApp(_ name: String, _ vms: [VMEntry], ssh: Bool = true) -> Result<VMEntry, PolicyError> {
   let hits = vms.filter { $0.type == "app" && $0.name == name }
   guard let v = hits.first, hits.count == 1 else { return .failure(PolicyError(409, "unknown-vm", "no such OmacVM.app VM")) }
-  guard v.state == "running", v.setup else {
-    return .failure(PolicyError(409, "unknown-vm", "this VM is not running, or OmacVM did not set it up"))
-  }
-  guard v.reachable else { return .failure(PolicyError(409, "unknown-vm", unreachableText)) }
+  guard v.state == "running" else { return .failure(PolicyError(409, "unknown-vm", notRunningText)) }
+  guard v.setup else { return .failure(PolicyError(409, "unknown-vm", notSetUpText(v.name))) }
+  guard v.reachable || !ssh else { return .failure(PolicyError(409, "unknown-vm", unreachableText(v.why))) }
   return .success(v)
 }
 
-/// A VM that runs and that OmacVM set up, but OmacVM's SSH did not get in just now.
-let unreachableText = "the Mac cannot reach this VM just now (it runs, but SSH from the Mac did not answer)"
+/// The list has this OmacVM.app VM (by name), or a VM at this address, as
+/// running: a refusal of it (not reachable, not set up) is answered from the
+/// list, not by a fresh look at every VM (Control.vmList).
+func appVMListed(_ name: String, _ vms: [VMEntry]) -> Bool {
+  vms.contains { $0.type == "app" && $0.name == name && $0.state == "running" }
+}
+func peerListed(_ peer: String, _ vms: [VMEntry]) -> Bool {
+  vms.contains { $0.state == "running" && !$0.ip.isEmpty && $0.ip == peer }
+}
+
+/// Requests about an OmacVM.app VM that the Bridge answers without SSH to
+/// it: a job's state, graphics memory (a file), the Mac's own settings, the
+/// Touch ID panel's colours. A VM the Mac cannot reach just now (busy, its
+/// network moving) still gets them; checks and new jobs need SSH.
+func routeNeedsSSH(_ r: ControlRoute) -> Bool {
+  switch r {
+  case .job, .gpuMemory, .mouseSwipe, .setMouseSwipe, .theme: return false
+  default: return true
+  }
+}
+
+let notRunningText = "the Mac's list of VMs has this VM as not running"
+func notSetUpText(_ name: String) -> String {
+  "OmacVM on the Mac did not set this VM up (on the Mac: omacvm apply --vm \"\(name)\" lets it in)"
+}
+
+/// A VM that runs and that OmacVM set up, but OmacVM's SSH did not get in
+/// just now: why (`omacvm vms`), at most one short line of it.
+func unreachableText(_ why: String) -> String {
+  let w = String(why.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7f }.prefix(240))
+    .trimmingCharacters(in: .whitespaces)
+  return "the Mac cannot reach this VM: " + (w.isEmpty ? "it runs, but SSH from the Mac did not answer" : w)
+}
 
 /// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
 /// 32 hex digits of SHA-256("<type>/<name>").
@@ -958,6 +993,44 @@ struct VMListCache {
     return (true, started)
   }
 
+  /// A request about a VM the list has as running, but refused (the Mac
+  /// cannot reach it, or OmacVM did not set it up; a VM that just started
+  /// again is one until a run sees it). `start`: the caller starts a run now,
+  /// at most every `refusedEvery` seconds however often a guest asks (each
+  /// run probes every VM over SSH). `waitFor`: the run the request waits for
+  /// (VMListCache.unknownWait at most): the one it started or the one going;
+  /// nil: answered from the list at once (no run due).
+  /// The first look for a VM refused this way comes after `refusedEvery`
+  /// (one that just started again is found by it); when that look still
+  /// could not reach it, the next ones wait 30, 60, then 120 s (`backOff`):
+  /// each look probes the VM over SSH, and while its sshd turns the Mac away
+  /// (PerSourcePenalties) more tries keep it that way. Per VM (`key`); a
+  /// request that finds it again (`reached`) starts over.
+  static let refusedEvery: Double = 5
+  static let backOff: [Double] = [30, 60, 120]
+  private var refusedAt: [String: Date] = [:]
+  private var refusedRuns: [String: Int] = [:]
+  mutating func refused(key: String, now: Date) -> (start: Bool, waitFor: Int?) {
+    guard now.timeIntervalSince(failedAt) >= Self.afterFailure else { return (false, nil) }
+    let n = refusedRuns[key] ?? 0
+    let every = n == 0 ? Self.refusedEvery : Self.backOff[min(n - 1, Self.backOff.count - 1)]
+    let last = refusedAt[key] ?? .distantPast
+    // Only a run this VM's refusal started (or its first one) is waited for.
+    if running { return (false, n == 0 || now.timeIntervalSince(last) < Self.unknownWait ? started : nil) }
+    guard now.timeIntervalSince(last) >= every, now.timeIntervalSince(at) >= Self.refusedEvery else { return (false, nil) }
+    if refusedAt.count > 64 { refusedAt.removeAll(); refusedRuns.removeAll() }   // a guest cannot grow these
+    refusedAt[key] = now
+    refusedRuns[key] = n + 1
+    start()
+    return (true, started)
+  }
+
+  /// A request found this VM in the list as it should be again: its back-off starts over.
+  mutating func reached(key: String) {
+    refusedAt[key] = nil
+    refusedRuns[key] = nil
+  }
+
   /// A request from a VM the list has at this address did not prove with
   /// that VM's key: the list may be old (that VM stopped, another took its
   /// address). True when the caller starts a run now: when the list is at
@@ -979,7 +1052,7 @@ struct VMListCache {
     if let version {
       list = list.map { v in
         Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup, dir: v.dir,
-                                     reachable: v.reachable) : v
+                                     reachable: v.reachable, why: v.why) : v
       }
     }
     if running { again = true; return false }

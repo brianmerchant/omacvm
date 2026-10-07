@@ -7,7 +7,10 @@
 #                                        Mac user; asks for an administrator's
 #                                        password (sudo)
 #   src/net/mac/install.sh --status [--app APP]
-#                                        ok | old (another build or another app) |
+#                                        ok (this app's daemon, or an older
+#                                        build of the same protocol: it serves
+#                                        this app as it is) | old (another
+#                                        protocol, or for another app) |
 #                                        down (installed, not loaded) | missing
 #                                        (also: only for other Mac users) |
 #                                        stopped (vmnet failed too often: it no
@@ -40,7 +43,13 @@
 # source, or a Developer ID no feed lists): exactly that app's QEMU (its
 # cdhash: install again after rebuilding the app).
 # OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
-# terminal (OmacVM.app's Fast Network button runs this script that way).
+# terminal (OmacVM.app's Fast Network button and its question before a start
+# run this script that way: the person at the Mac asked for it); no dialog
+# when sudo needs no password. OMACVM_ADMIN_PROMPT=none: never root, not even
+# with a sudo that needs no password (jobs a VM asked for through the Bridge):
+# exit 3 instead, the app asks on the Mac at the VM's next start.
+# OMACVM_NETD_TEST_ROOT (--status and --remove only, for tests): the
+# daemon's files under that folder instead of /.
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask
 # for), 4 the person cancelled the password dialog.
 set -euo pipefail
@@ -74,10 +83,14 @@ while (( $# )); do
     --status) MODE=status; shift ;;
     --remove) MODE=remove; shift ;;
     --trust) MODE=trust; shift ;;
-    -h|--help) sed -n '2,32s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,51s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "net/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
+if [[ $MODE == status || $MODE == remove ]] && [[ -n ${OMACVM_NETD_TEST_ROOT:-} ]]; then
+  BIN=$OMACVM_NETD_TEST_ROOT$BIN PLIST=$OMACVM_NETD_TEST_ROOT$PLIST SOCK=$OMACVM_NETD_TEST_ROOT$SOCK
+  STATE=$OMACVM_NETD_TEST_ROOT$STATE NAT=$OMACVM_NETD_TEST_ROOT$NAT
+fi
 
 source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app; app_version, APP_DOWNLOADS
 KEYS_PY=$HERE/../../release/keys.py
@@ -124,6 +137,24 @@ feed_lists() {
 
 # What this source builds: the source's hash, compiled into the binary.
 VERSION=$(shasum -a 256 "$HERE/omacvm-netd.c" | cut -c1-16)
+# Its protocol (omacvm-netd.c NETD_PROTOCOL): an installed daemon of the same
+# protocol serves this app as it is, so most app updates need no new install
+# (and no password).
+PROTOCOL=$(sed -n 's/^#define NETD_PROTOCOL  *\([0-9][0-9]*\).*/\1/p' "$HERE/omacvm-netd.c" | head -1)
+[[ -n $PROTOCOL ]] || { echo "no NETD_PROTOCOL in $HERE/omacvm-netd.c" >&2; exit 1; }
+# Builds from before --protocol (they answer it with their usage): their
+# source's hash and protocol. 3.0.1 to 3.0.3. Older ones are installed again:
+# 3.0.0's (its VPN NAT does not follow a route change) and 2.9's (no VPN NAT).
+KNOWN_BUILDS="f141e093f466a64a:1"
+daemon_protocol() {   # BIN -> its protocol, nothing for a build it cannot tell
+  local p v k
+  p=$("$1" --protocol 2>/dev/null) && [[ $p =~ ^[0-9]{1,4}$ ]] && { echo "$p"; return 0; }
+  v=$("$1" --version 2>/dev/null) || return 0
+  for k in $KNOWN_BUILDS; do [[ ${k%:*} == "$v" ]] && { echo "${k#*:}"; return 0; }; done
+  return 0
+}
+# The installed daemon is this source's build, or one of the same protocol.
+serves() { [[ $("$BIN" --version 2>/dev/null) == "$VERSION" || $(daemon_protocol "$BIN") == "$PROTOCOL" ]]; }
 # The daemon inside APP (build-app.sh builds and signs it), if it has one.
 bundled() { [[ -x $1/Contents/Library/LaunchServices/$LABEL ]] && echo "$1/Contents/Library/LaunchServices/$LABEL"; }
 # Its code's hash: the same daemon signed again (another app build of the
@@ -147,11 +178,12 @@ status() {
     # Installed for the team of the app's QEMU (vouched for then), or for exactly this QEMU.
     have=$(installed_req) && [[ -n $have ]] || { echo old; return 0; }
     [[ $have == "$(team_req "$APP" 2>/dev/null)" || $have == "$(hash_req "$APP" 2>/dev/null)" ]] || { echo old; return 0; }
-    # The app's own daemon (its code), or one built from this source (an app
-    # nobody vouches for, or one without a daemon).
+    # The app's own daemon (its code), one built from this source (an app
+    # nobody vouches for, or one without a daemon), or an older build of the
+    # same protocol (installed by an earlier version of the app).
     if ! { h=$(bundled "$APP") && [[ -n $(cdhash "$h") && $(cdhash "$h") == "$(cdhash "$BIN")" ]]; } &&
-       [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
-  elif [[ $("$BIN" --version 2>/dev/null) != "$VERSION" ]]; then echo old; return 0; fi
+       ! serves; then echo old; return 0; fi
+  elif ! serves; then echo old; return 0; fi
   launchctl print "system/$LABEL" >/dev/null 2>&1 && [[ -S $SOCK ]] || { echo down; return 0; }
   if stopped; then echo stopped; return 0; fi
   echo ok
@@ -173,7 +205,13 @@ shq() { local q="'\\''"; printf "'%s'" "${1//\'/$q}"; }
 # SCRIPT ARGS... as one /bin/sh command line: bash -c SCRIPT ARGS (test.sh runs it).
 root_cmd() { local cmd="/bin/bash -c" a; for a in "$@"; do cmd+=" $(shq "$a")"; done; printf '%s' "$cmd"; }
 as_root() {   # SCRIPT ARGS...: one sudo (or one password dialog) for all of it
+  if [[ ${OMACVM_ADMIN_PROMPT:-} == none ]]; then
+    echo "the fast network's service needs an administrator's password on the Mac to install or update: OmacVM asks for it on the Mac at the VM's next start (or Update… under Fast network in OmacVM, or omacvm enable fast-network in Terminal)" >&2
+    exit 3
+  fi
   if [[ ${OMACVM_ADMIN_PROMPT:-} == gui ]]; then
+    # sudo without a password (the person's own sudo setting): no dialog.
+    if sudo -n true 2>/dev/null; then sudo -n /bin/bash -c "$@"; return; fi
     local out rc=0
     # The command goes in as an argument, never into AppleScript's text.
     out=$(/usr/bin/osascript - "$(root_cmd "$@")" 2>&1 <<'AS'
@@ -190,7 +228,7 @@ AS
     return 0
   fi
   if ! sudo -n true 2>/dev/null; then
-    { : < /dev/tty; } 2>/dev/null || { echo "the fast network needs an administrator's password (sudo), and there is no terminal to ask in" >&2; exit 3; }
+    { : < /dev/tty; } 2>/dev/null || { echo "the fast network's service needs an administrator's password to install or update, and there is no terminal to ask in: run omacvm enable fast-network in Terminal, or use Update… under Fast network in OmacVM" >&2; exit 3; }
     echo "==> the fast network is a system service: macOS asks for your password (sudo)" >&2
   fi
   sudo /bin/bash -c "$@"
