@@ -673,6 +673,7 @@ private struct KeyStepsButton: View {
         }
         .buttonStyle(.borderless)
         .help("How to allow it")
+        .accessibilityLabel("How to allow it")
         .popover(isPresented: $shown, arrowEdge: .bottom) {
             Text(KeyAccess.missingText)
                 .fixedSize(horizontal: false, vertical: true)
