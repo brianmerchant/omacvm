@@ -15,4 +15,9 @@ check "build-hyprland.sh still reaches pkg-add relative to itself" "grep -q '\$h
 check "the hook calls the installed copy with --hook" "grep -q 'Exec = /usr/local/lib/omacvm/fusion/build-hyprland.sh --hook' $f"
 # The hook path never calls pkg-add.
 check "--hook skips pkg-add" "grep -q 'if (( ! HOOK )); then \"\$here/../../guest/pkg-add\"' src/fusion/guest/build-hyprland.sh"
+# Every guest script that uses "$here/" sets it (build-open-vm-tools.sh did not:
+# "here: unbound variable" right after the Hyprland build, 3.0.0-3.0.3).
+for g in src/fusion/guest/*.sh; do
+  if grep -q '"\$here/' "$g"; then check "$(basename "$g") sets \$here" "grep -qE '^here=' $g"; fi
+done
 (( fails == 0 )) && echo "all passed" || { echo "$fails failed"; exit 1; }
