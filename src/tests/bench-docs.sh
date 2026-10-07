@@ -10,6 +10,9 @@
 # - the power chart (docs/images/power.svg) is chart.py --panel power's output, its
 #   hours are the battery over the watts, and README.md's alt text gives every
 #   number in it
+# - the GPU progress chart (docs/images/gpu-progress.svg) is chart.py --panel
+#   progress's output, README.md's alt text gives every number in it, and the
+#   medians are the ones docs/benchmarks/README.md's table gives
 # - "not released yet" never names a release
 # - the CHANGELOG names what build-kosmickrisp.sh needs
 set -uo pipefail
@@ -100,6 +103,36 @@ expect(f"README.md: power chart alt text gives the SVG's {len(want)} numbers in 
 expect("README.md: the battery line links to the power chart",
        re.search(r"Optimized for battery\*\*<br>[^|]*\]\(#power-draw\)", read("README.md")) is not None
        and '<a name="power-draw"></a>' in read("README.md"))
+
+# 3c. The GPU progress chart: chart.py's output, every number in README's alt text, medians as the docs give them.
+gsvg = read("docs/images/gpu-progress.svg")
+sub = re.search(r'font-size="13" fill="#908caa" text-anchor="middle">([^<]*)</text>', gsvg)
+out = f"{tmp}/gpu-progress.svg"
+subprocess.run([sys.executable, f"{R}/src/bench/chart.py", "--panel", "progress", f"{R}/docs/benchmarks/chart.json", out,
+                sub.group(1) if sub else ""], check=True)
+expect("chart.py --panel progress gives the committed GPU progress SVG", open(out, encoding="utf-8").read() == gsvg,
+       "run src/bench/chart.py --panel progress docs/benchmarks/chart.json docs/images/gpu-progress.svg \"<subtitle>\"")
+gdesc = re.search(r'<desc id="d">(.*?)</desc>', gsvg, re.S).group(1)
+nums = re.compile(r"(\d+\.\d\dx) \(([\d,.]+(?: fps)?)\)|\b(\d[\d,.]*), the only version measured")
+want = nums.findall(gdesc)
+alt = re.search(r'<img src="[^"]*gpu-progress\.svg" alt="([^"]*)"', read("README.md"))
+alt = alt.group(1) if alt else ""
+got = nums.findall(alt.replace(" scores ", " "))
+expect(f"README.md: GPU progress alt text gives the SVG's {len(want)} numbers in order", got == want and len(want) > 0,
+       f"SVG {want}, alt {got}")
+gp = data["gpu_progress"]
+sys.path.insert(0, f"{R}/src/bench")
+sys.dont_write_bytecode = True
+import chart
+section = read("docs/benchmarks/README.md").split("### GPU progress (2026-10-07)", 1)[-1].split("\n## ", 1)[0]
+for t in gp["tests"]:
+    for v, m, lo, hi, r, why in chart.progress_summary(t, gp["versions"])[0]:
+        row = re.search(r"^\| " + re.escape(v) + r" \|.*$", section, re.M)
+        if m is not None:
+            runs = ", ".join(chart.progress_num(dict(t, unit=""), x) for x in t["runs"][v])
+            cell = chart.progress_num(dict(t, unit=""), m) + (f" ({runs})" if len(t["runs"][v]) > 1 else "")
+            expect(f"docs/benchmarks: GPU progress {t['key']} {v} reads {cell}", row is not None and f"| {cell} |" in row.group(0),
+                   row.group(0) if row else "no row")
 
 # 4. "Not released yet" with a version in brackets is a promise the release may not keep.
 for page in ("README.md", "docs/compare.md", "docs/benchmarks/README.md"):

@@ -227,6 +227,12 @@ cd ~/bench
   idle and reading left out (see the notes there). Under it: the 3.0.1 rounds
   of 2026-10-07 ([Power, OmacVM.app 3.0.1](#power-omacvmapp-301-2026-10-07)).
   `src/tests/bench-docs.sh` checks the SVG and the README's alt text.
+- The GPU progress chart in the README (`docs/images/gpu-progress.svg`)
+  comes from the `"gpu_progress"` part of `chart.json`:
+  `chart.py --panel progress docs/benchmarks/chart.json docs/images/gpu-progress.svg "<subtitle>"`.
+  Each test as a multiple of its oldest version measured, the runs' spread
+  as a thin line ([GPU progress](#gpu-progress-2026-10-07)).
+  `src/tests/bench-docs.sh` checks it the same way.
 - GPU compute in the chart: OmacVM.app with the vulkan feature (Venus on
   MoltenVK, OpenCL through rusticl; experimental in 3.0.0). Geekbench 7 GPU OpenCL,
   one locked batch on 2026-10-04: Mac 95,380
@@ -508,6 +514,66 @@ design capacity) over the draw.
 The Mac mini ran no power tests: it has no battery for `power.sh` to read,
 and its disk setup differs from the MacBooks', so its numbers would not
 compare.
+
+### GPU progress (2026-10-07)
+
+The README's GPU progress chart (`docs/images/gpu-progress.svg`). One Mac,
+one VM, five OmacVM.app releases: only the app changes.
+
+- Mac: MacBook Air M2, 8 GB, macOS 26.6.2, on the charger, VM disk on the
+  external SSD.
+- Apps: the published 2.7.0, 2.8.0, 2.9.1, 3.0.0 and 3.0.3 zips, re-signed
+  with the test app id so they run next to the user's own app. Only the
+  bundle ids and the signature changed; the QEMU runtime with the GPU code
+  is byte for byte the release's. Self-update off.
+- VM: one APFS clone of a VM made from the 3.0.0 prebuilt image, 4 CPUs,
+  4 GB, the same guest for every version: kernel 7.2.9, Mesa 26.2.4,
+  glmark2 2023.01, vkmark 2025.01, Google Chrome 155.0.8059.39. Graphics
+  OpenGL, which is what Automatic picks in all five versions; vkmark with
+  Graphics set to Vulkan (KosmicKrisp).
+- Screen: the VM alone in native full screen on the built-in display,
+  checked on every boot.
+- Order: three rounds, one boot per version in each: 2.7.0 to 3.0.3, then
+  3.0.3 to 2.7.0 (with Basemark), then 2.7.0 to 3.0.3. vkmark after that:
+  three runs in one boot.
+- The Mac: Safari, Shortcuts, Terminal and the status window quit, True
+  Tone off, brightness 50 %, read back before and after every test.
+  Auto-brightness could not be switched off without sudo: it stayed at 50 %
+  in every OpenGL test and moved to 59 % during the vkmark runs. Scores do
+  not depend on brightness.
+
+Median of the 3 runs, the runs in brackets in round order. QEMU CPU is the
+QEMU process's CPU time over the test's wall time (100 % = one core).
+
+| Version | glmark2, 3 s per scene | WebGL Aquarium, 30,000 fish (fps) | Basemark Web 3.0 (1 run) | vkmark (Vulkan) | QEMU CPU % idle / glmark2 / Aquarium |
+|---|---|---|---|---|---|
+| 2.7.0 | 764 (764, 735, 764) | 17.4 (17.9, 17.4, 13.1) | 1,469 | no Vulkan setting | 10 / 76 / 151 |
+| 2.8.0 | 764 (764, 877, 760) | 15.0 (15.2, 11.0, 15.0) | 1,359 | no Vulkan setting | 10 / 74 / 160 |
+| 2.9.1 | 1,472 (1,408, 1,501, 1,472) | 15.1 (15.1, 15.1, 15.1) | 1,286 | not tested | 10 / 97 / 163 |
+| 3.0.0 | 1,827 (1,822, 1,831, 1,827) | 11.0 (11.0, 15.1, 11.0) | 1,326 | skipped, see below | 9 / 115 / 152 |
+| 3.0.3 | 1,817 (1,817, 1,814, 1,829) | 18.7 (18.6, 19.1, 18.7) | 1,536 | 821 (820, 828, 821) | 9 / 115 / 178 |
+
+- glmark2: 2.9.1 scores 1.9x 2.7.0, 3.0.0 and 3.0.3 2.4x. QEMU's CPU
+  during glmark2 went up with it, from 76 to 115 %.
+- Aquarium: 3.0.3 is 7 % above 2.7.0 and the runs overlap, so no real gain
+  on this Mac. 3.0.0's low median is the Aquarium slowdown that #173 fixed
+  in 3.0.2.
+- Basemark: one run per version, so read it with care: 2.8.0 to 3.0.0
+  are 7 to 12 % below 2.7.0, 3.0.3 is 5 % above.
+- vkmark on 3.0.0: with Graphics set to Vulkan the VM showed no picture
+  90 seconds after the start and did not answer SSH for 10 minutes, so it
+  was stopped. That is the M1/M2 Vulkan start bug #161 fixed in 3.0.1.
+  2.7.0 and 2.8.0 have no Vulkan setting; 2.9.1 has only a hidden one,
+  not tried.
+- Screen size: 2.9.1 fills the whole panel in full screen (2940x1912), the
+  others leave the strip beside the notch free (2940x1840 to 1848), so
+  Aquarium's page is about 3 % taller in 2.9.1.
+- testufo was not run: its only script captures the Mac's screen over SSH,
+  which needs a macOS permission on the Air.
+
+The chart's data is the `"gpu_progress"` part of [`chart.json`](chart.json),
+every run as measured; `chart.py --panel progress` takes the medians and
+divides each by the oldest version measured.
 
 ## Fast network (OmacVM.app)
 
