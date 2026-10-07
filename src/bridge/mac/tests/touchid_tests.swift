@@ -99,6 +99,14 @@ func value(_ r: Result<TouchIDRequest, PolicyError>) -> TouchIDRequest? { if cas
     check(vmTypeOfExecutable("/Applications/UTM.app/Contents/MacOS/UTM") == "utm", "UTM")
     check(vmTypeOfExecutable("/Applications/VMware Fusion.app/Contents/MacOS/VMware Fusion") == "fusion", "Fusion")
     check(vmTypeOfExecutable("/Applications/Safari.app/Contents/MacOS/Safari") == nil, "another app")
+    // OmacVM.app's QEMU started through Contents/MacOS/OmacVM-VM (DockIdentity): LaunchServices names the
+    // app's own executable, the kernel the runtime: the kernel's path counts.
+    check(vmTypeOfFront(kernelPath: "/Applications/OmacVM.app/Contents/Resources/runtime/bin/OmacVM",
+                        launchServicesPath: "/Applications/OmacVM.app/Contents/MacOS/OmacVM") == "app", "OmacVM.app's QEMU as one Dock app")
+    check(vmTypeOfFront(kernelPath: nil, launchServicesPath: "/Applications/UTM.app/Contents/MacOS/UTM") == "utm", "no kernel path: LaunchServices")
+    check(vmTypeOfFront(kernelPath: "/Applications/OmacVM.app/Contents/MacOS/OmacVM",
+                        launchServicesPath: "/Applications/OmacVM.app/Contents/MacOS/OmacVM") == nil, "OmacVM.app's launcher has no VM")
+    check(vmTypeOfFront(kernelPath: nil, launchServicesPath: nil) == nil, "nothing in front")
 
     // ---- the order of the checks ----
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)

@@ -204,6 +204,21 @@ n=$(grep -c '^ping ' "$T/bridge/port-ops"); if (( n >= 3 )); then ok "app: pinge
 kill -9 "$CP"; wait "$CP" 2>/dev/null
 for _ in $(seq 40); do [[ -f $T/bridge/closed ]] && break; sleep 0.1; done
 expect "app: client killed: the Mac's dialog goes (pings stopped)" yes "$([[ -f $T/bridge/closed ]] && echo yes)"
+# Ctrl+C in sudo's terminal: pam_exec runs the client in a session of its own, so the terminal's SIGINT reaches only
+# sudo, which blocks it while PAM runs. The client sees it pending at its parent, cancels at once, the password follows.
+rm -f "$T/bridge/closed"; : > "$T/bridge/port-ops"
+printf 'Name:\tsudo\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000006\n' > "$T/proc/$$/status"
+python3 "$G/omacvm-touchid" > /dev/null 2>&1 & CP=$!
+sleep 1.5
+expect "app: nothing pending at sudo: still asking" yes "$(kill -0 "$CP" 2>/dev/null && echo yes)"
+printf 'Name:\tsudo\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000002\nSigBlk:\t0000000000000006\n' > "$T/proc/$$/status"
+s=$(ms); gone=no; for _ in $(seq 30); do kill -0 "$CP" 2>/dev/null || { gone=yes; break; }; sleep 0.1; done; took=$(( $(ms) - s ))
+wait "$CP"; crc=$?
+expect "app: Ctrl+C pending at sudo: the client stops with a no" "yes 1" "$gone $crc"
+if (( took < 1500 )); then ok "app: ... at once (${took} ms)"; else bad "app: Ctrl+C took ${took} ms"; fi
+for _ in $(seq 20); do [[ -f $T/bridge/closed ]] && break; sleep 0.1; done
+expect "app: ... with a cancel, and the Mac's dialog goes" "cancel yes" "$(tail -1 "$T/bridge/port-ops" | cut -d' ' -f1) $([[ -f $T/bridge/closed ]] && echo yes)"
+rm -f "$T/proc/$$/status"
 rm -f "$T/bridge/closed"; : > "$T/bridge/port-ops"
 s=$(ms); OMACVM_TOUCHID_DEADLINE=1 run hang; took=$(( $(ms) - s ))
 for _ in $(seq 20); do [[ -f $T/bridge/closed ]] && break; sleep 0.1; done

@@ -118,9 +118,8 @@ struct LiveMacState: TouchIDMacState {
   }
   var frontType: String? {
     DispatchQueue.main.sync {
-      guard let app = NSWorkspace.shared.frontmostApplication,
-            let exe = app.executableURL?.path ?? pidPath(app.processIdentifier) else { return nil }
-      return vmTypeOfExecutable(exe)
+      guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+      return vmTypeOfFront(kernelPath: pidPath(app.processIdentifier), launchServicesPath: app.executableURL?.path)
     }
   }
 }

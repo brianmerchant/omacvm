@@ -124,6 +124,15 @@ func touchIDReason(_ r: TouchIDRequest, vm: String?) -> String {
 }
 
 /// The VM app type (omacvm vms --json "type") of the app in front, from its executable.
+/// The app in front, from its kernel path first: OmacVM.app starts QEMU
+/// through Contents/MacOS/OmacVM-VM (DockIdentity, 3.0.1), and LaunchServices
+/// then names the app's own executable (Contents/MacOS/OmacVM) for it, while
+/// the kernel keeps runtime/bin/OmacVM. As VMApp.of in external-brightness.swift.
+func vmTypeOfFront(kernelPath: String?, launchServicesPath: String?) -> String? {
+  guard let exe = kernelPath ?? launchServicesPath else { return nil }
+  return vmTypeOfExecutable(exe)
+}
+
 func vmTypeOfExecutable(_ path: String) -> String? {
   let name = (path as NSString).lastPathComponent
   if path.hasSuffix("/runtime/bin/OmacVM") || name == "qemu-system-aarch64" { return "app" }
