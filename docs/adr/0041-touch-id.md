@@ -599,6 +599,19 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
 - `src/bridge/mac/tests/run.sh`: the theme's rules with the 22 stock themes
   (with green and muted), the app panel's answer lines (never a yes from
   junk), the decider passing the app's panel on.
+- 3.0.4, MacBook Air (macOS 26.6.2) screen, `--live` (5 runs each, ms
+  after the finger's end; 3.0.3's panel -> this one): a yes went out to
+  the app 0.2 -> 0.2, the input went back to the VM 1670 -> 0.4, the panel
+  left the screen 1836 -> 109 (Reduce Motion 1836 -> 13); not recognised
+  1052 -> 0.4 input, 1218 -> 636 screen; a cancel 176 -> 17 screen. The
+  real window in Tokyo Night, Flexoki Light and a rounded gradient theme
+  (`--show`). MacBook Pro, hidden test VM (2026-10-07; no Touch ID dialog
+  there): the theme reached the Bridge 1.2 s into `omarchy-theme-set`
+  (which takes 3.4 s; final colours each time, kanagawa with Hyprland's
+  border), at login, and again during `enable touch-id` after a
+  `disable` (the Mac's copy stayed); with a stand-in that says yes at
+  once, sudo ended 18-24 ms after the yes (55-63 ms in all), the same
+  with 3.0.3's app: that path never waited.
 - pytest: the guest sender with `success` and `muted`, Omarchy's prompt
   colours (`[polkit]` accent, the prompt's own gradient border, Hyprland's
   token), a light theme without shell.toml (Flexoki Light), sending once
