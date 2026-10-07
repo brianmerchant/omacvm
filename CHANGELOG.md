@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- CI now builds OmacVM.app with app/scripts/build-app.sh on every pull
+  request and push to main (on the Mac mini, QEMU runtime from its cache), so
+  a break in the app build shows on the pull request, not at release time.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
