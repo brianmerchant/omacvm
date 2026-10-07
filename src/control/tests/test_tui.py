@@ -125,6 +125,28 @@ def test_space_right_after_the_mac_was_away_asks_again_and_switches(world):
     asyncio.run(go())
 
 
+def test_a_switch_refused_mid_look_is_sent_once_more(world, monkeypatch):
+    """The Mac's list caught the VM mid-job (SSH busy right after the last
+    switch: e2e 2026-10-07, camera on right after camera off): 409 unknown-vm,
+    nothing started. The switch goes once more a moment later; a second
+    refusal says so."""
+    import omacvm_cc.tui as T
+    monkeypatch.setattr(T, "JOB_RETRY_AFTER", 0.1)
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            world.refuse_jobs_for = 1
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            t = a.screen.query_one(DataTable)
+            t.move_cursor(row=names.index("autologin"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests) and world.jobs)
+            assert world.refuse_jobs_for == 0 and len(world.jobs) == 1
+    asyncio.run(go())
+
+
 def test_space_while_the_mac_stays_away_says_so(world):
     """Still away on the second look: the press says it needs the Mac, no job."""
     async def go():

@@ -43,6 +43,10 @@ UNKNOWN_TRIES, UNKNOWN_WAIT = 20, 5.0
 # change from another window or the Mac) and asks the Mac again, also after
 # "no such OmacVM.app VM". Nothing runs while it is closed.
 LIVE_EVERY = 5.0
+# A switch the Mac refused with unknown-vm (its list caught the VM mid-job:
+# nothing started) is sent once more this much later (the Bridge looks again
+# at most every 5 s and waits for that look).
+JOB_RETRY_AFTER = 3.0
 # Said before Graphics -> Vulkan or its repair runs (src/cmd/graphics.sh).
 VULKAN_BUILD = ("The VM builds its Vulkan driver now, a few minutes (when its packages are too old for that, "
                 "after a whole system update with omarchy update, often 5-15 minutes); "
@@ -1276,7 +1280,17 @@ class ControlCentre(App):
     def run_job(self, action: str, features: list[str]) -> None:
         what = self.describe(action, features)
         try:
-            job = self.c.start(action, features)
+            try:
+                job = self.c.start(action, features)
+            except BridgeError as e:
+                # Refused because the Mac's list just had this VM as not
+                # reachable (a look during the last job's end): nothing started,
+                # and the Mac looks again within seconds. Ask once more.
+                if e.code != "unknown-vm":
+                    raise
+                time.sleep(JOB_RETRY_AFTER)
+                self.c.refresh_mac()
+                job = self.c.start(action, features)
         except BridgeError as e:
             msg = str(e)
             if e.code == "update-first":
