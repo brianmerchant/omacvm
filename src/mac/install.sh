@@ -94,6 +94,13 @@ install_app() {
       return 0
     fi
   fi
+  # No copy from OmacVM.app and no Xcode's Command Line Tools to build one: say
+  # so, and never run swiftc or clang (macOS's stubs would ask to install them).
+  if [[ -n $bundle && -z $pre ]] && ! { clt_has swiftc && clt_has clang; }; then
+    echo "$name: building it needs Xcode's Command Line Tools: xcode-select --install, then omacvm update (OmacVM.app of this version carries it ready made)" >&2
+    FAILED+=("$name")
+    return 0
+  fi
   printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m%s\n' "$name" "${pre:+ (signed, from OmacVM.app)}"
   [[ -n $bundle ]] && before=$(helpers_team "$HOME/Applications/$bundle")
   # Each app's install.sh builds before it replaces anything: one that fails
@@ -141,8 +148,9 @@ case $GESTURES in
   0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac OmacVMGestures.app --keys-only ;;
 esac
 (( CLIP )) && install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
-# Omanotch's own installer (it builds the app and starts it at login).
-(( NOTCH )) && install_app "Omanotch" ch.gillesgoetsch.omanotch omanotch/mac
+# Omanotch's own installer (it builds the app, or takes OmacVM.app's copy, and
+# starts it at login).
+(( NOTCH )) && install_app "Omanotch" ch.gillesgoetsch.omanotch omanotch/mac Omanotch.app
 # The permissions macOS asks for now, once per app (they stay with later updates).
 if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " == *" OmacVM Bridge "* ]]; then
   printf '\n  \033[1mmacOS asks for permissions now (once): please allow them.\033[0m\n'
