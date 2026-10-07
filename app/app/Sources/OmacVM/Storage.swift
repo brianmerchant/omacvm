@@ -43,6 +43,12 @@ enum Storage {
         return nil
     }
 
+    /// What the app says when the drive with a VM is not there (gone while
+    /// the VM ran, or not plugged in since).
+    static func driveGoneText(_ drive: String) -> String {
+        "The drive with your VMs (\(drive)) is gone. Reconnect it and start the VM again."
+    }
+
     /// Both folders are on one drive (a move is then a rename).
     static func sameVolume(_ a: URL, _ b: URL) -> Bool {
         guard let x = device(existingAncestor(a)), let y = device(existingAncestor(b)) else { return false }

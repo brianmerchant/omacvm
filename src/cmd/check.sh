@@ -369,8 +369,11 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   if [[ -s $gm && -n $(gmv in_use_mb) ]]; then
     use=$(gmv in_use_mb) peak=$(gmv peak_mb) refused=$(gmv refused) pressure=$(gmv pressure)
     what="$(gb "$use") now (peak $(gb "$peak")), from the Mac on top of the VM memory; macOS memory pressure $pressure"
+    # 3.0.5: the guard's last part is the desktop's (virgl-gpu-guard-desktop-reserve.patch).
+    reserve=$(gmv reserve_mb)
+    [[ ${reserve:-0} != 0 ]] && what="$what; apps up to $(gb "$(gmv apps_mb)"), the last $(gb "$reserve") kept for the desktop"
     if (( ${refused:-0} > 0 )); then
-      bad "graphics memory" "$what; $refused allocation(s) refused this run ($(grep -o -e 'budget of [0-9]* MB reached' -e 'macOS is short of memory' "$miclog" | sort -u | paste -sd, - | sed 's/,/, /g')): an app may have lost its GPU context"
+      bad "graphics memory" "$what; $refused allocation(s) refused this run ($(grep -o -e 'budget of [0-9]* MB reached' -e 'macOS is short of memory' -e "past the apps' share" "$miclog" | sort -u | paste -sd, - | sed 's/,/, /g')): an app may have lost its GPU context"
     else ok "graphics memory" "$what"; fi
   elif [[ -n $budget ]]; then
     peak=$(grep -o 'guest GPU memory in use: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')

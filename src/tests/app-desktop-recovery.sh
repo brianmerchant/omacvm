@@ -1,6 +1,6 @@
 #!/bin/bash
 # OmacVM.app: when the VM's desktop loses its GPU context on the Mac.
-# - The app's rules (DesktopRecovery.swift, compiled on its own): Hyprland
+# - The app's rules (OmacVMDesktop/DesktopRecovery.swift, compiled on its own): Hyprland
 #   lost -> the desktop restarts by itself, at most once in 10 minutes, then
 #   the app asks; off -> it always asks; the shell (Quickshell) lost -> only
 #   the shell restarts, at most once a minute; other apps -> nothing.
@@ -37,8 +37,8 @@ case "action":   // LOST(comma list) ENABLED LAST_DESKTOP_AGO|- LAST_SHELL_AGO|-
   case .ask(let again): print(again ? "ask-again" : "ask")
   case .restartShell: print("shell")
   }
-case "reason":   // PRESSURE REFUSED
-  print(DesktopRecovery.reason(pressure: a[2], refused: Int(a[3])!))
+case "reason":   // PRESSURE REFUSED [WHY]
+  print(DesktopRecovery.reason(why: a.count > 4 ? a[4] : nil, pressure: a[2], refused: Int(a[3])!))
 case "enabled":  // DOMAIN [set true|false]
   let d = UserDefaults(suiteName: a[2])!
   if a.count > 3 { d.set(a[3] == "true", forKey: DesktopRecovery.key) }
@@ -46,7 +46,7 @@ case "enabled":  // DOMAIN [set true|false]
 default: exit(2)
 }
 SWIFT
-if ! swiftc -O -o "$T/rules" "$R/app/app/Sources/OmacVM/DesktopRecovery.swift" "$T/main.swift" 2>"$T/swiftc.log"; then
+if ! swiftc -O -o "$T/rules" "$R/app/app/Sources/OmacVMDesktop/DesktopRecovery.swift" "$T/main.swift" 2>"$T/swiftc.log"; then
   cat "$T/swiftc.log"; echo "FAIL DesktopRecovery.swift does not compile on its own"; exit 1
 fi
 r() { "$T/rules" "$@"; }
@@ -64,6 +64,9 @@ expect "no names: nothing"                                  none      "$(r actio
 expect "normal pressure, nothing refused: graphics"         graphics  "$(r reason normal 0)"
 expect "refused: memory"                                    memory    "$(r reason normal 3)"
 expect "critical pressure: memory"                          memory    "$(r reason critical 0)"
+expect "QEMU says guard (the budget): guard"                guard     "$(r reason normal 3 guard)"
+expect "QEMU says pressure: memory"                         memory    "$(r reason normal 0 pressure)"
+expect "QEMU says error: graphics, whatever else"           graphics  "$(r reason critical 5 error)"
 D=org.omacvm.test.desktoprecovery.$$
 expect "on unless switched off"                             on        "$(r enabled "$D")"
 expect "defaults write ... desktopAutoRestart -bool false"  off       "$(r enabled "$D" false)"
@@ -152,6 +155,27 @@ touch "$NOTIFY_FAILS"
 "$G" notify > /dev/null
 grep -q "could not show the note" "$CALLS" && expect "notify without a daemon: logged" yes yes || expect "notify without a daemon: logged" yes no
 rm -f "$NOTIFY_FAILS"
+# The budget (guard): its own words.
+: > "$CALLS"
+"$G" desktop guard > /dev/null
+expect "desktop guard: the note says guard"      guard "$(sed -n 's/^why=//p' "$T/run/desktop/restarted")"
+"$G" notify
+grep -q "reached the most this Mac lets them use" "$CALLS" && expect "notify: says why (guard)" yes yes || expect "notify: says why (guard)" yes no
+# An app lost to the guard or to pressure: a note, nothing restarts.
+: > "$CALLS"
+"$G" app chromium guard > /dev/null
+expect "app guard: nothing restarts"             "" "$(grep -e '^systemctl' -e '^omarchy-restart-shell' "$CALLS")"
+grep -q "notify-send|-a|OmacVM|-u|normal|chromium stopped drawing|chromium used all the graphics memory apps may have" "$CALLS" \
+  && expect "app guard: a note names the app and the share" yes yes || { expect "app guard: a note names the app and the share" yes no; cat "$CALLS"; }
+: > "$CALLS"
+"$G" app 'fire;fox$(id)' pressure > /dev/null
+grep -q "firefoxid stopped drawing|macOS ran short of memory, so firefoxid" "$CALLS" \
+  && expect "app pressure: says macOS; the name keeps only letters, digits, . _ -" yes yes \
+  || { expect "app pressure: says macOS; the name keeps only letters, digits, . _ -" yes no; cat "$CALLS"; }
+touch "$NOTIFY_FAILS"; : > "$CALLS"
+"$G" app chromium guard > /dev/null
+grep -q "could not show the note" "$CALLS" && expect "app note without a daemon: logged" yes yes || expect "app note without a daemon: logged" yes no
+rm -f "$NOTIFY_FAILS"
 # The shell.
 : > "$CALLS"
 "$G" shell > /dev/null
@@ -163,6 +187,8 @@ printf 'OMACVM_VM_TYPE=app\n' > "$T/env"
 expect "shell without a user: refused"           1 "$rc"
 "$G" desktop graphics > /dev/null
 expect "desktop without a user: still restarts"  "systemctl restart sddm" "$(grep '^systemctl' "$CALLS")"
+"$G" app chromium guard > /dev/null; rc=$?
+expect "app note without a user: refused"        1 "$rc"
 "$G" bogus 2>/dev/null; rc=$?
 expect "unknown mode: usage"                     2 "$rc"
 
