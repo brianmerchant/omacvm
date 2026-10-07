@@ -27,12 +27,37 @@ func expect(_ ok: Bool, _ what: String, line: Int = #line) {
 let t = PanelTheme(["background": "#eff1f5", "foreground": "#4c4f69", "accent": "#1e66f5", "success": "#40a02b"])
 expect(t.background == PanelRGB(hex: "#eff1f5") && t.accent == PanelRGB(hex: "#1e66f5") && t.success == PanelRGB(hex: "#40a02b"), "theme: the colours sent")
 expect(t.error == t.foreground, "theme: no error colour -> the text colour")
-expect(t.muted == t.background.mix(t.foreground, 0.28), "theme: no muted colour -> a mix of background and text")
+expect(t.border == [t.accent] && t.radius == 0, "theme: no border -> the accent (Omarchy's prompt without Hyprland's), square")
 expect(!t.dark && PanelTheme.tokyoNight.dark, "theme: light or dark from the background")
 expect(PanelTheme(["foreground": "#ffffff", "accent": "#ff0000"]) == .tokyoNight, "theme: text without its background -> Tokyo Night")
 expect(PanelTheme(["background": "#000", "foreground": "#ffffff"]) == .tokyoNight, "theme: a bad colour -> Tokyo Night")
-let tn = PanelTheme.tokyoNight
-expect(abs(tn.faint.r - PanelRGB(hex: "#3b4261")!.r) < 0.03, "theme: faint ridges close to the design's #3b4261")
+let fl = ["background": "#fffcf0", "foreground": "#100f0f", "accent": "#205ea6", "error": "#d14d41", "success": "#879a39"]
+let g = PanelTheme(fl, border: ["#798186", "#cacccc"], borderAngle: 45, radius: 8)
+expect(g.border == [PanelRGB(hex: "#798186")!, PanelRGB(hex: "#cacccc")!] && g.borderAngle == 45 && g.radius == 8,
+       "theme: Hyprland's gradient border and rounding")
+expect(PanelTheme(fl, border: ["#798186", "#cacccc", "#000000"]).border == [PanelRGB(hex: "#205ea6")!], "theme: three border colours -> the accent")
+expect(PanelTheme(fl, border: ["#798186"], borderAngle: 45).borderAngle == 0, "theme: one border colour has no angle")
+expect(PanelTheme(fl, radius: 40).radius == 12 && PanelTheme(fl, radius: -3).radius == 0, "theme: rounding 0...12")
+let ctl = PanelTheme.tokyoNight
+expect(ctl.controlFill == ctl.background.mix(ctl.foreground, 0.04) && ctl.controlBorder == ctl.background.mix(ctl.foreground, 0.4),
+       "theme: Cancel is an Omarchy control (text colour at 4 % and 40 %)")
+
+// The Bridge's 103 -> the app -> the panel: the frame goes along whole or not at all.
+let wire: [String: Any] = ["title": "Touch ID in Omarchy", "line": "Unlock 1Password", "timeout": 30,
+                           "theme": ["background": "#fffcf0", "foreground": "#100f0f", "border": ["#798186", "#cacccc"],
+                                     "border_angle": 45, "radius": 6, "muted": "#b7b5ac"]]
+if let p = TouchIDPanelPrompt.parse(wire), let again = (try? JSONSerialization.jsonObject(with: p.showLine.dropLast()) as? [String: Any])?["prompt"],
+   let q = TouchIDPanelPrompt.parse(again as Any) {
+    expect(p.border == ["#798186", "#cacccc"] && p.borderAngle == 45 && p.radius == 6 && p.colors["muted"] == nil, "wire: border, angle, rounding")
+    expect(q == p, "wire: the app's show line carries the same prompt to the panel")
+} else { expect(false, "wire: parsed") }
+func wired(_ theme: [String: Any]) -> TouchIDPanelPrompt? {
+    TouchIDPanelPrompt.parse(["title": "T", "line": "L", "timeout": 30, "theme": theme] as [String: Any])
+}
+expect(wired(["border": ["#798186", "#CACCCC"]])?.border == [], "wire: a border with a bad colour is dropped whole")
+expect(wired(["border": ["#798186", "#cacccc"], "border_angle": 400])?.borderAngle == 0, "wire: an angle out of range -> 0")
+expect(wired(["radius": true])?.radius == 0 && wired(["radius": 99])?.radius == 12, "wire: rounding a number, at most 12")
+expect(wired([:]).map { $0.border.isEmpty && $0.radius == 0 } == true, "wire: an older Bridge (no frame) -> the defaults")
 
 // MARK: Glyph
 
@@ -106,8 +131,11 @@ expect((png?.count ?? 0) > 1000, "view: draws off screen")
 if CommandLine.arguments.count > 1, let png {
     let dir = CommandLine.arguments[1]
     try? png.write(to: URL(fileURLWithPath: dir + "/panel-idle.png"))
-    for (name, look) in [("done", PanelLook.done), ("refused", .refused)] {
-        let w = PanelView(prompt: prompt, theme: name == "done" ? t : .tokyoNight, authView: nil, reduceMotion: true)
+    let flexoki = PanelTheme(fl, border: ["#205ea6"])
+    for (name, theme, look) in [("idle-flexoki-light", flexoki, PanelLook.idle), ("done-flexoki-light", flexoki, .done),
+                                ("refused-flexoki-light", flexoki, .refused), ("done", PanelTheme.tokyoNight, .done),
+                                ("refused", .tokyoNight, .refused), ("idle-gradient-rounded", g, .idle)] {
+        let w = PanelView(prompt: prompt, theme: theme, authView: nil, reduceMotion: true)
         w.show(look)
         try? w.png()?.write(to: URL(fileURLWithPath: dir + "/panel-\(name).png"))
     }

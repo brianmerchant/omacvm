@@ -132,10 +132,13 @@ final class PanelGlyphView: NSView {
 }
 
 /// The panel's content: title, who asks, the command, the glyph over
-/// Apple's view, the state line, Cancel.
+/// Apple's view, the state line, Cancel; framed as Omarchy frames its own
+/// prompt (the theme's border and rounding; the error colour on a refusal).
 final class PanelView: NSView {
     let glyph: PanelGlyphView
     private let message = NSTextField(labelWithString: "")
+    private let ring = CAShapeLayer()            // the border's shape (and its colour when it has one)
+    private let gradient = CAGradientLayer()     // Hyprland's two colours, through `ring`
     private let theme: PanelTheme
     private let reduceMotion: Bool
     let cancel = NSButton(title: "Cancel", target: nil, action: nil)
@@ -157,9 +160,10 @@ final class PanelView: NSView {
         super.init(frame: CGRect(x: 0, y: 0, width: PanelMetrics.side, height: PanelMetrics.side))
         wantsLayer = true
         layer?.backgroundColor = theme.background.cg
-        layer?.borderColor = theme.muted.cg
-        layer?.borderWidth = 1
+        layer?.cornerRadius = theme.radius
+        layer?.masksToBounds = true
         appearance = NSAppearance(named: theme.dark ? .darkAqua : .aqua)
+        frameBorder()
 
         let inner = PanelMetrics.side - 2 * PanelMetrics.padding
         func label(_ s: String, _ font: NSFont, _ color: PanelRGB, lines: Int = 1) -> NSTextField {
@@ -172,7 +176,7 @@ final class PanelView: NSView {
             l.preferredMaxLayoutWidth = inner
             return l
         }
-        let title = label(prompt.title, .systemFont(ofSize: 15, weight: .semibold), theme.foreground)
+        let title = label(prompt.title, PanelFonts.mono(14, bold: true), theme.foreground)
         let line = label(prompt.line, PanelFonts.mono(12), theme.dim)
         var views: [NSView] = [title, line]
         if let box = prompt.box {
@@ -196,11 +200,13 @@ final class PanelView: NSView {
         message.alignment = .center
         views.append(message)
 
+        // An Omarchy control: a faint fill, the text colour's border.
         cancel.isBordered = false
         cancel.wantsLayer = true
-        cancel.layer?.backgroundColor = theme.background.cg
-        cancel.layer?.borderColor = theme.muted.cg
+        cancel.layer?.backgroundColor = theme.controlFill.cg
+        cancel.layer?.borderColor = theme.controlBorder.cg
         cancel.layer?.borderWidth = 1
+        cancel.layer?.cornerRadius = theme.radius / 2
         cancel.attributedTitle = NSAttributedString(string: "Cancel", attributes: [
             .font: PanelFonts.mono(13, bold: true), .foregroundColor: theme.foreground.ns])
         cancel.translatesAutoresizingMaskIntoConstraints = false
@@ -223,6 +229,32 @@ final class PanelView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    /// The border over everything, inside the card's rounded edge.
+    private func frameBorder() {
+        guard let l = layer else { return }
+        let w = PanelTheme.borderWidth, r = max(CGFloat(theme.radius) - w / 2, 0)
+        let shape = CGPath(roundedRect: bounds.insetBy(dx: w / 2, dy: w / 2), cornerWidth: r, cornerHeight: r, transform: nil)
+        ring.frame = bounds
+        ring.path = shape
+        ring.fillColor = nil
+        ring.lineWidth = w
+        ring.strokeColor = theme.border[0].cg
+        ring.zPosition = 10
+        if theme.border.count == 2 {
+            // Hyprland's angle: 0 deg runs left to right, more turns it anticlockwise.
+            let a = theme.borderAngle * .pi / 180, dx = cos(a) / 2, dy = sin(a) / 2
+            gradient.frame = bounds
+            gradient.colors = theme.border.map(\.cg)
+            gradient.startPoint = CGPoint(x: 0.5 - dx, y: 0.5 - dy)
+            gradient.endPoint = CGPoint(x: 0.5 + dx, y: 0.5 + dy)
+            gradient.mask = ring
+            gradient.zPosition = 10
+            l.addSublayer(gradient)
+        } else {
+            l.addSublayer(ring)
+        }
+    }
+
     func show(_ look: PanelLook, lockout: Bool = false) {
         glyph.show(look)
         switch look {
@@ -231,6 +263,12 @@ final class PanelView: NSView {
         case .refused:
             message.stringValue = lockout ? "Touch ID is locked" : "Not recognized"
             message.textColor = theme.error.ns
+            // Omarchy's prompt turns its border the error colour.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            if gradient.superlayer != nil { gradient.removeFromSuperlayer(); gradient.mask = nil; layer?.addSublayer(ring) }
+            ring.strokeColor = theme.error.cg
+            CATransaction.commit()
             if !reduceMotion, let l = layer {
                 let a = CAKeyframeAnimation(keyPath: "transform.translation.x")
                 a.values = [0, -8, 7, -5, 3, 0]
@@ -397,7 +435,7 @@ final class PanelController: NSObject {
         generation += 1
         self.reply = reply
         evaluator = c
-        let theme = PanelTheme(prompt.colors)
+        let theme = PanelTheme(prompt)
         reduce = reduceMotion()
         released = false
         let size = CGSize(width: PanelMetrics.side, height: PanelMetrics.side)

@@ -70,7 +70,7 @@ final class LATouchID: TouchIDAuthenticator {
 func touchIDAskAppPanel(fd: Int32, _ p: TouchIDPrompt, timeout: Double) -> TouchIDOutcome? {
   let text = touchIDPanelText(p.request, vm: p.vmLabel)
   let theme = p.theme.flatMap { touchIDThemes.load($0) } ?? .tokyoNight
-  var o: [String: Any] = ["title": text.title, "line": text.line, "timeout": Int(timeout), "theme": theme.panelColors]
+  var o: [String: Any] = ["title": text.title, "line": text.line, "timeout": Int(timeout), "theme": theme.panelTheme]
   if let box = text.box { o["box"] = box }
   let head = "HTTP/1.1 103 Touch ID Panel\r\nX-OmacVM-Panel: \(jsonData(o).base64EncodedString())\r\n\r\n"
   guard writeAll(fd, Data(head.utf8)) else { return .no(.cancelled) }
