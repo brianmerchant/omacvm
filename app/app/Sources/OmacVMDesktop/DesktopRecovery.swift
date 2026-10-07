@@ -15,15 +15,17 @@ import Foundation
 /// Hidden: defaults write org.omacvm.app desktopAutoRestart -bool false
 ///
 /// The rules on their own (Foundation only): src/tests/app-desktop-recovery.sh.
-enum DesktopRecovery {
-    static let key = "desktopAutoRestart"
-    static let window: TimeInterval = 600
-    static let shellWindow: TimeInterval = 60
-    /// The compositor draws the whole desktop.
-    static let compositors: Set<String> = ["Hyprland"]
-    static let shells: Set<String> = ["quickshell"]
+public enum DesktopRecovery {
+    public static let key = "desktopAutoRestart"
+    public static let window: TimeInterval = 600
+    public static let shellWindow: TimeInterval = 60
+    /// The compositor draws the whole desktop. QEMU keeps the last part of
+    /// the graphics memory for these and the shell (the same names as its
+    /// VIRGL_GPU_GUARD_DESKTOP_DEFAULT, virgl-gpu-guard-desktop-reserve.patch).
+    public static let compositors: Set<String> = ["Hyprland"]
+    public static let shells: Set<String> = ["quickshell"]
 
-    enum Action: Equatable {
+    public enum Action: Equatable {
         case none
         /// Restart the desktop session without asking.
         case restartDesktop
@@ -33,14 +35,14 @@ enum DesktopRecovery {
         case restartShell
     }
 
-    static func enabled(_ d: UserDefaults = .standard) -> Bool {
+    public static func enabled(_ d: UserDefaults = .standard) -> Bool {
         d.object(forKey: key) as? Bool ?? true
     }
 
     /// `lost`: the contexts lost since the last look. `lastDesktop`: when
     /// the desktop was last restarted (by itself or with the button);
     /// `lastShell`: when the shell was.
-    static func action(lost: [String], enabled: Bool, lastDesktop: Date?, lastShell: Date?, now: Date) -> Action {
+    public static func action(lost: [String], enabled: Bool, lastDesktop: Date?, lastShell: Date?, now: Date) -> Action {
         if lost.contains(where: compositors.contains) {
             guard enabled else { return .ask(again: false) }
             if let t = lastDesktop, now.timeIntervalSince(t) < window { return .ask(again: true) }
@@ -53,8 +55,16 @@ enum DesktopRecovery {
         return .none
     }
 
-    /// What omacvm-desktop-recover is told about the cause.
-    static func reason(pressure: String, refused: Int) -> String {
-        pressure == "normal" && refused == 0 ? "graphics" : "memory"
+    /// What omacvm-desktop-recover is told about the cause. `why`: what QEMU
+    /// said for the desktop's context (guard, pressure, error; nil from a
+    /// runtime before 3.0.4, then guessed from the pressure and refusals).
+    /// A VM from before 3.0.4 takes "guard" as "graphics".
+    public static func reason(why: String?, pressure: String, refused: Int) -> String {
+        switch why {
+        case "guard": return "guard"
+        case "pressure": return "memory"
+        case "error": return "graphics"
+        default: return pressure == "normal" && refused == 0 ? "graphics" : "memory"
+        }
     }
 }

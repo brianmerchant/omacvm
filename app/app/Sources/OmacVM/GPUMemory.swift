@@ -2,22 +2,8 @@ import AppKit
 import Foundation
 import OmacVMDesktop
 
-/// The VM's graphics memory on the Mac: textures and buffers its apps draw
-/// with. It comes from the Mac's memory as the VM needs it, on top of the VM's
-/// own memory. QEMU writes it to logs/gpu-memory (virgl-darwin-memory-pressure.patch):
-/// in use now, the peak since the VM started, macOS's memory pressure, how many
-/// allocations were refused and which GPU context was lost last.
-struct GPUMemory: Equatable {
-    var inUseMB = 0
-    var peakMB = 0
-    var budgetMB = 0
-    var pressure = "normal"
-    var refused = 0
-    var lost = 0
-    var lostLast = ""
-    /// The last eight lost contexts, oldest first.
-    var lostRecent: [String] = []
-
+/// Where QEMU writes the VM's graphics memory (GPUMemory, in OmacVMDesktop).
+extension GPUMemory {
     static func file(for config: VMConfig) -> URL {
         config.folder.appendingPathComponent("logs/gpu-memory")
     }
@@ -26,58 +12,6 @@ struct GPUMemory: Equatable {
         guard let text = try? String(contentsOf: file(for: config), encoding: .utf8) else { return nil }
         return parse(text)
     }
-
-    static func parse(_ text: String) -> GPUMemory? {
-        var m = GPUMemory()
-        var seen = false
-        for line in text.split(separator: "\n") {
-            let kv = line.split(separator: "=", maxSplits: 1).map(String.init)
-            guard kv.count == 2 else { continue }
-            let n = Int(kv[1]) ?? 0
-            switch kv[0] {
-            case "in_use_mb": m.inUseMB = n; seen = true
-            case "peak_mb": m.peakMB = n
-            case "budget_mb": m.budgetMB = n
-            case "pressure": m.pressure = kv[1]
-            case "refused": m.refused = n
-            case "lost": m.lost = n
-            case "lost_last": m.lostLast = kv[1]
-            case "lost_recent": m.lostRecent = kv[1].split(separator: ",").map(String.init)
-            default: break
-            }
-        }
-        return seen ? m : nil
-    }
-
-    static func gb(_ mb: Int) -> String {
-        mb < 1024 ? "\(mb) MB" : String(format: "%.1f GB", Double(mb) / 1024)
-    }
-
-    /// Why a context was lost, for the alert. A refusal with macOS's pressure
-    /// normal and the graphics in use at the budget came from the budget (all
-    /// graphics together at three quarters of the Mac), not from macOS running
-    /// short: on an 8 GB Mac a browser with big WebGL pages gets there while
-    /// macOS still says normal (Air M2, 2026-10-06). In use, not the peak: the
-    /// peak counts from the VM's start, so after one hit every later loss
-    /// would blame the budget.
-    var lostReason: String {
-        if refused == 0 && pressure == "normal" { return "Its graphics on the Mac failed." }
-        if pressure == "normal" && budgetMB > 0 && inUseMB + 512 >= budgetMB {
-            return "Its graphics reached the most one VM may use on this Mac (\(GPUMemory.gb(budgetMB)))."
-        }
-        return "macOS ran short of memory for its graphics."
-    }
-
-    /// "Graphics memory: 1.6 GB (peak 2.6 GB)"
-    var line: String { "Graphics memory: \(GPUMemory.gb(inUseMB)) (peak \(GPUMemory.gb(peakMB)))" }
-
-    static let explanation = """
-        VM memory is the Mac memory the VM gets as its RAM (set above). Graphics memory \
-        is extra: the textures and buffers the VM's desktop and apps draw with, taken \
-        from the Mac's memory as they need it (a 5K desktop with a browser: about 2 GB). \
-        New ones are refused when macOS itself runs short, or when all of them together \
-        reach three quarters of the Mac's memory.
-        """
 }
 
 /// While a VM runs: follows its graphics memory and macOS's memory pressure.
@@ -88,6 +22,10 @@ struct GPUMemory: Equatable {
 ///   desktop session starts again by itself, or a window says so and offers
 ///   to restart it (DesktopRecovery says which). After Later, QEMU's app menu
 ///   has "Restart the Desktop…", which shows the window again (DesktopRestart).
+/// - When an app in the VM lost its GPU context because the graphics memory
+///   was full (past the apps' share; the rest is kept for the desktop) or
+///   macOS was short of memory, the VM shows a note that says so
+///   (GPUMemoryNotice; omacvm-desktop-recover app).
 @MainActor
 final class GPUMemoryWatch {
     private let config: VMConfig
@@ -100,6 +38,7 @@ final class GPUMemoryWatch {
     private var alert: NSAlert?
     private var lastDesktopRestart: Date?
     private var lastShellRestart: Date?
+    private var appsTold: [String: Date] = [:]
     private let restart: DesktopRestart
     private var restartObserver: NSObjectProtocol?
     /// What the window said when the user picked Later: it says the same when
@@ -178,9 +117,27 @@ final class GPUMemoryWatch {
         if m.pressure != "normal" { macOSShort(critical: m.pressure == "critical") }
         if m.lost > lostSeen {
             // Several can be lost between two looks (the desktop, then a browser).
-            let new = m.lostRecent.suffix(min(m.lost - lostSeen, m.lostRecent.count))
+            let count = min(m.lost - lostSeen, m.lostRecent.count)
+            let new = Array(m.lostRecent.suffix(count))
+            let why = m.lostRecentWhy.count == m.lostRecent.count ? Array(m.lostRecentWhy.suffix(count)) : []
             lostSeen = m.lost
-            lost(Array(new), m)
+            tellApps(new, why, m)
+            lost(new, m)
+        }
+    }
+
+    /// Apps that lost their GPU context to the memory guard or to macOS's
+    /// pressure: logged, and a note in the VM (a VM from before 3.0.4 has no
+    /// such note: its agent refuses, nothing else happens).
+    private func tellApps(_ names: [String], _ why: [String], _ m: GPUMemory) {
+        let now = Date()
+        for app in GPUMemoryNotice.apps(lost: names, why: why, lastTold: appsTold, now: now) {
+            appsTold[app.name] = now
+            let cause = app.why == "guard"
+                ? "the apps' share of graphics memory was full (\(GPUMemory.gb(m.appsMB)) of \(GPUMemory.gb(m.budgetMB)); the rest is kept for the desktop)"
+                : "macOS was short of memory (pressure \(m.pressure))"
+            log("OmacVM: \(app.name) in the VM lost its GPU context: \(cause); the desktop keeps drawing")
+            guest("/usr/local/bin/omacvm-desktop-recover", ["app", app.name, app.why]) { _ in }
         }
     }
 
@@ -198,9 +155,9 @@ final class GPUMemoryWatch {
             guest("/usr/local/bin/omacvm-desktop-recover", ["shell"]) { _ in }
         case .restartDesktop:
             restart.clear()
-            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
+            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context (\(m.why(of: DesktopRecovery.compositors) ?? "why not known")); \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
             log("OmacVM: restarting the VM's desktop by itself: apps open in the VM close (once per 10 min, else the app asks)")
-            let why = DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)
+            let why = DesktopRecovery.reason(why: m.why(of: DesktopRecovery.compositors), pressure: m.pressure, refused: m.refused)
             restartDesktop(why) { [weak self] result in
                 guard let self, result != .started else { return }
                 self.log(result == .refused
@@ -209,7 +166,7 @@ final class GPUMemoryWatch {
                 self.desktopLost(m, again: false)
             }
         case .ask(let again):
-            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context; \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
+            log("OmacVM: the VM's desktop (Hyprland) lost its GPU context (\(m.why(of: DesktopRecovery.compositors) ?? "why not known")); \(m.line), budget \(GPUMemory.gb(m.budgetMB)), pressure \(m.pressure), \(m.refused) refused")
             desktopLost(m, again: again)
         }
     }
@@ -277,7 +234,8 @@ final class GPUMemoryWatch {
         // Counts as a restart: lost again soon after, the app asks again.
         // The login manager starts again and logs the user in again (SDDM's
         // autologin), or shows its login screen.
-        restartDesktop(DesktopRecovery.reason(pressure: m.pressure, refused: m.refused)) { [weak self] result in
+        restartDesktop(DesktopRecovery.reason(why: m.why(of: DesktopRecovery.compositors), pressure: m.pressure,
+                                              refused: m.refused)) { [weak self] result in
             guard let self, result == .refused else { return }
             self.log("OmacVM: the VM's agent refused to restart the desktop")
             // Nothing restarted: the menu item stays, to try again. Not on no
