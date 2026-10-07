@@ -447,6 +447,7 @@ final class Runner {
                 self?.noteEarlyExit(status: status, reason: reason)
                 if globe { self?.appendLog("OmacVM: macOS's globe shortcut given back (QEMU ended without)") }
                 self?.stopObserving()
+                self?.driveWatch?.stop()
                 self?.gpuMemory?.stop()
                 self?.clipboard?.stop()
                 self?.battery?.stop()
@@ -474,6 +475,9 @@ final class Runner {
         process = p
         if usbOn {
             usb = USBRun(config: c, qemuPID: p.processIdentifier) { [weak self] line in self?.appendLog(line) }
+        }
+        driveWatch = DriveWatch(folder: c.folder) { [weak self] name in
+            MainActor.assumeIsolated { self?.driveLost(name) }
         }
         route.start()
         featuresRoute = route
@@ -708,6 +712,38 @@ final class Runner {
             guard let self, self.isRun(pid) else { return }
             self.appendLog("OmacVM: QEMU did not stop in 5 s: killed")
             kill(pid, SIGKILL)
+        }
+    }
+
+    // MARK: The drive with the VM's folder goes away (DriveWatch)
+
+    private var driveWatch: DriveWatch?
+    /// The drive's name when it went away while the VM ran: QEMU is being
+    /// stopped for it, and main.swift then shows the VM as unavailable.
+    private(set) var driveGone: String?
+
+    /// The VM's disk went with the drive: the VM cannot go on, nor shut down
+    /// in the guest. QEMU is asked to pause the VM and quit (it closes its
+    /// window and hands macOS's shortcuts back itself); if it has not ended
+    /// within 5 s, forceStop (SIGTERM, then SIGKILL). Nothing is written to
+    /// the VM's folder: it is not there (appendLog finds no qemu.log).
+    private func driveLost(_ name: String) {
+        guard driveGone == nil, let pid = process?.processIdentifier, isRunning else { return }
+        driveGone = name
+        stopAsked = true
+        venusFallback = nil
+        FileHandle.standardError.write(Data("drive: \(name), the drive with \(config.name), is gone: stopping QEMU\n".utf8))
+        let qmpPath = config.qmpSocket.path
+        Task.detached {
+            guard let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-drive") else { return }
+            defer { qmp.close() }
+            _ = try? qmp.execute("stop")
+            _ = try? qmp.execute("quit")
+        }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard let self, self.isRun(pid) else { return }
+            self.forceStop(byApp: true)
         }
     }
 

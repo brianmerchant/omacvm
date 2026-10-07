@@ -500,3 +500,34 @@ struct DriveMissingView: View {
         }
     }
 }
+
+/// The drive with the shown VM went away (while it ran, or since): the VM
+/// stays shown, unavailable, until the drive is back (AppState.drivesChanged
+/// then shows it ready again).
+struct UnavailableView: View {
+    @ObservedObject var state: AppState
+
+    /// Another VM the app can show meanwhile (one on a drive that is here).
+    private var other: VMConfig? { VMConfig.existing() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(state.config.name).font(.title2.bold())
+            let gone = Storage.driveGoneText(state.goneDrive ?? Storage.missingDrive(for: state.config.folder) ?? "its drive")
+            Text(gone).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            Text("Its folder: \(state.config.folder.path)")
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            // A start asked for meanwhile (Dock, omacvm start) says the same: once.
+            if let m = state.message, m != gone { Text(m).foregroundStyle(.red) }
+            HStack {
+                if let other {
+                    Button("Show \(other.name)") { state.showOther(other) }
+                }
+                Spacer()
+                Button("Start") { state.startVM() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(true)
+            }
+        }
+    }
+}
