@@ -20,7 +20,8 @@ source "$R/src/lib/helpers.sh"
 APP=$T/Apps/OmacVM.app
 mkdir -p "$APP/Contents/Resources/omacvm" "$APP/Contents/Helpers"
 cp -R "$R/src" "$APP/Contents/Resources/omacvm/src"
-rm -rf "$APP/Contents/Resources/omacvm/src/bridge/mac/build" "$APP/Contents/Resources/omacvm/src/gestures/mac/build"
+rm -rf "$APP/Contents/Resources/omacvm/src/bridge/mac/build" "$APP/Contents/Resources/omacvm/src/gestures/mac/build" \
+  "$APP/Contents/Resources/omacvm/src/omanotch/mac/build"
 fake_helper() {   # NAME.app ID
   local b=$APP/Contents/Helpers/$1
   mkdir -p "$b/Contents/MacOS"
@@ -30,6 +31,7 @@ fake_helper() {   # NAME.app ID
 }
 fake_helper OmacVMBridge.app org.omacvm.bridge
 fake_helper OmacVMGestures.app org.omacvm.gestures
+fake_helper Omanotch.app ch.gillesgoetsch.omanotch
 IN=$APP/Contents/Resources/omacvm/src
 H=$(cd "$APP/Contents/Helpers" && pwd)
 
@@ -60,16 +62,19 @@ expect "the team of nothing" "" "$(helpers_team "$T/nothing.app")"
 # src/mac/install.sh with stand-ins: which installer call it makes.
 S=$T/run/src; mkdir -p "$T/run" "$T/home" "$T/bin"
 cp -R "$IN" "$S"
-for d in bridge/mac gestures/mac clipboard/mac; do
+for d in bridge/mac gestures/mac clipboard/mac omanotch/mac; do
   printf '#!/bin/bash\necho "%s $*" >> "%s/calls"\n' "$d" "$T" > "$S/$d/install.sh"; chmod +x "$S/$d/install.sh"
 done
 # The stand-ins are part of the helpers' sources: the app's copy gets the same.
-for d in bridge/mac gestures/mac; do cp "$S/$d/install.sh" "$IN/$d/install.sh"; done
+for d in bridge/mac gestures/mac omanotch/mac; do cp "$S/$d/install.sh" "$IN/$d/install.sh"; done
 printf '#!/bin/bash\nexit 1\n' > "$T/bin/launchctl"; chmod +x "$T/bin/launchctl"   # nothing installed, nothing running
 run() { rm -f "$T/calls"; HOME=$T/home PATH=$T/bin:$PATH OMACVM_HELPERS=$1 "$S/mac/install.sh" --skip-clip --quiet >/dev/null 2>&1; cat "$T/calls" 2>/dev/null; }
 calls=$(run "$H")
 expect "install.sh: the Bridge from the app" "bridge/mac --prebuilt $H/OmacVMBridge.app" "$(grep ^bridge <<<"$calls")"
 expect "install.sh: Gestures from the app" "gestures/mac --prebuilt $H/OmacVMGestures.app" "$(grep ^gestures <<<"$calls")"
+rm -f "$T/calls"
+HOME=$T/home PATH=$T/bin:$PATH OMACVM_HELPERS=$H "$S/mac/install.sh" --omanotch --skip-clip --quiet >/dev/null 2>&1
+expect "install.sh --omanotch: Omanotch from the app" "omanotch/mac --prebuilt $H/Omanotch.app" "$(grep ^omanotch "$T/calls")"
 calls=$(run "$T/none")
 expect "install.sh without the app: built here" "bridge/mac " "$(grep ^bridge <<<"$calls")"
 rm -f "$T/calls"

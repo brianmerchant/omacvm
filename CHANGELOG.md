@@ -5,6 +5,30 @@ in more words.
 
 ## 3.0.5 (unreleased)
 
+- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
+  Gestures took the other app's VMs as its own too: both captured the
+  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
+  VMs of its own app (told by the VM's code signature), as the Bridge
+  does since 3.0.1.
+- Touch ID is no longer marked experimental (control centre, `omacvm
+  features`, README): it is a regular feature, still off until you turn it on.
+- Omanotch: when something moved the hidden NOTCH output after it was in
+  place (a Hyprland config reload with an older rule, another `hyprctl
+  eval`), the strip beside the notch could stay wrong for up to 30 s.
+  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
+  does not take is sent again with growing waits, at most every 30 s once
+  it keeps failing, and never more than 4 times in 30 s.
+
+- A Mac without Xcode's Command Line Tools: OmacVM.app no longer makes macOS
+  ask to install them. Before, the setup screen's look for a prebuilt VM ran
+  python3 and opened macOS's "install the command line developer tools?"
+  window as the app opened, Build refused until they were installed, and
+  the control centre's jobs and `omacvm vms` asked again (a Swift script
+  for the notch). The app now carries a python3, Omanotch and those Swift
+  programs ready made, so its whole route runs without them (and without
+  Homebrew). UTM, VMware Fusion and Parallels still need them, and
+  `omacvm build` asks for them only there.
+
 - OmacVM.app: when the drive with a running VM drops off (unplugged, a
   loose cable, ejected by force), the app stops the VM at once and its
   window says "The drive with your VMs (NAME) is gone. Reconnect it and

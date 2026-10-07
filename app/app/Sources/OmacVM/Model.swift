@@ -355,7 +355,19 @@ enum Mac {
 
     static var timeZone: String { TimeZone.current.identifier }
 
-    /// Xcode's Command Line Tools: the build compiles OmacVM's Mac helpers.
+    /// What the build's scripts need on the Mac: a python3, and Swift for
+    /// Mac helpers built from source. The app carries both ready made
+    /// (build-app.sh: Resources/python, Helpers, Resources/tools), so only a
+    /// copy without them (a development run) needs Xcode's Command Line Tools.
+    /// Never runs /usr/bin/python3: on a Mac without the tools it asks to
+    /// install them.
+    static var buildToolsReady: Bool {
+        FileManager.default.isExecutableFile(atPath: Paths.resources.appendingPathComponent("python/bin/python3").path)
+            || commandLineToolsInstalled
+    }
+
+    /// Xcode's Command Line Tools (xcode-select -p first, which never asks
+    /// macOS to install them).
     static var commandLineToolsInstalled: Bool {
         func ok(_ tool: String, _ args: [String]) -> Bool {
             let p = Process()

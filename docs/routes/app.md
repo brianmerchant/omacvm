@@ -327,8 +327,11 @@ one VM at a time: the build stops at the start while another one runs.
   macOS may leave the other display on its desktop after you come back to
   OmacVM. Swipe to OmacVM's Space on that display (Control-arrow or
   Mission Control); the pointer goes to Omarchy again once its window shows.
-- The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
-  it checks for them before a build and offers to install them.
+- The app does not need Xcode's Command Line Tools or Homebrew: it carries
+  OmacVM's Mac helpers (Bridge, Gestures, Omanotch) ready made, a python3
+  for its scripts and the small Swift programs they ask (is there a notch,
+  the clock format, free space). macOS never asks to install the developer
+  tools for it, also not from "omacvm in Terminal".
 - Instant resume (save the VM when you quit, continue where you were at the
   next start): QEMU cannot save a VM that uses the Mac's GPU, so Quit still
   shuts Omarchy down and the next start boots it
