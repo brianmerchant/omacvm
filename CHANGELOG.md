@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.3 (unreleased)
+## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
   action whole. One that does not fit goes to macOS's own dialog, which
