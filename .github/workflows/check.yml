@@ -173,6 +173,9 @@ jobs:
           command -v zstd >/dev/null || brew install zstd
           src/tests/prebuilt-routes.sh
 
+      - name: Ctrl-C in omacvm build stops the running step (a terminal, no VM)
+        run: src/tests/build-ctrlc.sh
+
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
 

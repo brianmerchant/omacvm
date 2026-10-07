@@ -24,10 +24,12 @@ UB=$'\033[1m'; UD=$'\033[2m'; UR=$'\033[0m'; UACC=$'\033[36m'; UOK=$'\033[32m'; 
 
 ui_cols() { local c; c=$(tput cols 2>/dev/null < "$TTY"); echo "${c:-80}"; }
 
-# Restore the cursor whatever happens (Ctrl-C in a list included). A spinner
-# still drawing (Ctrl-C during ui_spin) goes first: a frame drawn after this
-# would land on the shell's prompt.
-ui_restore() { ui_spin_ticker_stop; (( UI_FANCY )) || return 0; { printf '\033[?25h' > "$TTY"; stty echo icanon < "$TTY"; } 2>/dev/null || true; }
+# Restore the cursor whatever happens (Ctrl-C in a list included). A step
+# still running with a spinner (Ctrl-C during ui_spin) goes first, and all it
+# started: it runs in the background, which ignores Ctrl-C, and would go on
+# after the script ended; its spinner too, whose frames would land on the
+# shell's prompt.
+ui_restore() { ui_spin_stop; (( UI_FANCY )) || return 0; { printf '\033[?25h' > "$TTY"; stty echo icanon < "$TTY"; } 2>/dev/null || true; }
 trap 'ui_restore' EXIT
 trap 'ui_restore; echo; exit 130' INT
 
@@ -178,8 +180,9 @@ ui_step() { printf '\n\033[1;36m[%s/%s]\033[0m \033[1m%s\033[0m\n' "$1" "$2" "$3
 # time, its output kept aside (and in the build log, if any); a ✓ when done,
 # or ✗ and the output's last lines when it fails. Returns the command's status.
 # ui_spin_val VAR "Message" command...: the same, the command's output into VAR.
-# ui_spin_stop: stops the command ui_spin is running, and all it started (for
-# an EXIT trap: a script's background jobs ignore Ctrl-C and would go on).
+# ui_spin_stop: stops the command ui_spin is running, and all it started
+# (ui_restore, so every exit: a script's background jobs ignore Ctrl-C and
+# would go on).
 UI_FRAMES='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 UI_SPIN_PID="" UI_SPIN_TICKER=""
 # ui_spin_ticker_stop: the spinner's drawing loop goes, and is gone before
@@ -228,18 +231,29 @@ ui_spin() {
   UI_SPIN_OUT=$(cat "$out"); rm -f "$out"
   return $rc
 }
-ui_tree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do ui_tree "$c"; done; echo "$1"; }
+# ui_tree PID: PID and every process below it, each one paused (STOP) before
+# its children are listed, so none starts another unseen or leaves one behind
+# when it ends. ui_spin_stop then sends TERM, and CONT so they get it.
+ui_tree() {
+  local c
+  kill -STOP "$1" 2>/dev/null || return 0
+  echo "$1"
+  for c in $(pgrep -P "$1" 2>/dev/null); do ui_tree "$c"; done
+}
 ui_spin_stop() {
   local pids p i
   ui_spin_ticker_stop
-  [[ -n $UI_SPIN_PID ]] || return 0
+  [[ -n ${UI_SPIN_PID:-} ]] || return 0
   pids=$(ui_tree "$UI_SPIN_PID"); UI_SPIN_PID=""
+  [[ -n $pids ]] || return 0
   kill -TERM $pids 2>/dev/null || true
+  kill -CONT $pids 2>/dev/null || true
   for i in $(seq 1 50); do   # gone before the caller deletes what they wrote (5 s at most)
     for p in $pids; do kill -0 "$p" 2>/dev/null && break; p=""; done
     [[ -z $p ]] && break
     sleep 0.1
   done
+  if [[ -n $p ]]; then kill -KILL $pids 2>/dev/null || true; fi   # one that ignores TERM
   return 0
 }
 ui_spin_val() {
@@ -255,10 +269,13 @@ ui_spin_val() {
 # never looks stuck. (The spinner is its own background loop: bash 3.2's read
 # cannot tell a timeout from the end of the input.)
 ui_follow() {
-  local msg=$1 line last="" n=0 ticker=""
+  local msg=$1 line last="" n=0 ticker="" me
   if (( UI_FANCY )); then
+    # The spinner stops with this shell (usually a pipeline's own, which
+    # Ctrl-C ends): a background loop ignores Ctrl-C and would draw on.
+    me=$(exec /bin/sh -c 'echo $PPID')
     ( t0=$SECONDS; i=0
-      while :; do
+      while kill -0 "$me" 2>/dev/null; do
         e=$(( SECONDS - t0 ))
         printf '\r\033[2K  %s%s%s %s %s%dm %02ds%s' "$UACC" "${UI_FRAMES:i % 10:1}" "$UR" "$msg" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR" > "$TTY"
         i=$(( i + 1 )); sleep 0.2
