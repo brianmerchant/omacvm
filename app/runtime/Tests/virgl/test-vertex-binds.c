@@ -27,7 +27,9 @@
  *    elements unbound: each next draw selects the shaders again.
  * 12 one program and one vertex elements object, the colour buffer switched between draws:
  *    another buffer at the same stride and offset, then another offset in that buffer
- *    (each draw reads its own buffer and offset).
+ *    (each draw reads its own buffer and offset);
+ * 13 vertex elements freed while bound and new ones made at once (they likely get the
+ *    freed memory, and the record keeps a pointer): the colour comes from another offset.
  * Sampler views whose key bits change are in test-view-key.c (a pixel case would need a
  * program that samples a texture buffer: linking one crashes Apple's software renderer).
  * Run as is, with OMACVM_VIRGL_SELECT_CACHE=0 and with OMACVM_VIRGL_VERTEX_CACHE=0.
@@ -708,6 +710,24 @@ static void case_buffer_switch(struct cmds *c, int ctx)
    check_stripes(ctx, 4, want, "vertex buffer switch");
 }
 
+/* VE_F drawn, freed while bound, a new object with the colour 48 bytes further on made and
+ * bound at once, drawn: the second draw must use the new object's offsets. */
+static void case_ve_reuse(struct cmds *c, int ctx)
+{
+   static const uint32_t want[2] = { RED, GREEN };
+   const uint32_t f = VIRGL_FORMAT_R32G32B32A32_FLOAT;
+   emit_stripe(c, 0);
+   emit_triangle(c, 0);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_DESTROY_OBJECT, VIRGL_OBJECT_VERTEX_ELEMENTS, 1));
+   emit(c, VE_F);
+   emit_ve(c, VE_F, 2, (const uint32_t[][3]){ { 0, 0, f }, { 48, 1, f } });
+   emit_bind_ve(c, VE_F);
+   emit_stripe(c, 1);
+   emit_triangle(c, 0);
+   check(submit(ctx, c) == 0, "vertex elements freed while bound, new ones made and drawn");
+   check_stripes(ctx, 2, want, "vertex elements freed and made again");
+}
+
 /* the counters the renderer logged when the case's context ended, less those before */
 static struct totals totals_before;
 
@@ -794,6 +814,7 @@ static void run_case(int n)
    case 10: case_counts(&c, ctx); break;
    case 11: case_unbinds(&c, ctx); break;
    case 12: case_buffer_switch(&c, ctx); break;
+   case 13: case_ve_reuse(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 10)
@@ -833,7 +854,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 12; n++)
+   for (int n = 1; n <= 13; n++)
       if (!only || only == n)
          run_case(n);
 
