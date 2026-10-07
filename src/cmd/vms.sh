@@ -33,6 +33,7 @@ done
 export OMA_KEY=~/.ssh/omacvm
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 first=1
+PERR=$(mktemp -t omacvm-vms); trap 'rm -f "$PERR"' EXIT
 (( JSON )) && printf '{"omacvm": %s, "vms": [' "$(json_str "$(cat "$R/src/VERSION")")"
 (( JSON )) || printf '  %-24s %-10s %-8s %-15s %s\n' VM APP STATE ADDRESS OMACVM
 while IFS=$'\t' read -r name type state note; do
@@ -46,10 +47,14 @@ while IFS=$'\t' read -r name type state note; do
     if [[ -z $ip ]]; then
       if [[ $type == app && -n $dir ]]; then why="no address: $(app_no_address "$dir")"
       else why="no address (its app gives none: still starting, or no network)"; fi
-    elif ! probe=$(vm_probe "$ip") || [[ -z $probe ]]; then
-      # Once per VM, and short: the Bridge waits a few seconds for the list.
-      if hostkey_changed "$ip" 2 2>/dev/null; then hk=1; why="$ip answers with another SSH host key (rebuilt? omacvm apply --vm \"$name\" --reset-host-key)"
-      else why="OmacVM's SSH key did not get in at $ip"; fi
+    else
+      : > "$PERR"
+      if ! probe=$(OMA_PROBE_ERR=$PERR vm_probe "$ip") || [[ -z $probe ]]; then
+        # Why, from ssh's own messages: never a second look (a key scan) at
+        # the VM, which sshd counts against the Mac (ssh_failure_why).
+        why=$(ssh_failure_why "$ip" "$PERR")
+        if [[ $why == "hostkey "* ]]; then hk=1; why="${why#hostkey } (rebuilt? omacvm apply --vm \"$name\" --reset-host-key)"; fi
+      fi
     fi
     if [[ -n $ip && -z $why ]]; then
       reach=true

@@ -136,5 +136,33 @@ SCAN=$'[127.0.0.1]:1 ssh-ed25519 AAAAother\n'
 check "another key of the remembered type: changed" changed "$(hostkey_changed 127.0.0.1:1 && echo changed || echo same)"
 SCAN=""
 check "no answer: not 'changed'" same "$(hostkey_changed 127.0.0.1:1 && echo changed || echo same)"
+unset -f ssh-keyscan
+
+# 8. Why SSH did not get in (omacvm vms' why, the Bridge's "the Mac cannot reach
+#    this VM: ..."): from ssh's own messages, never a second connection. Each
+#    unauthenticated one (ssh-keyscan opens several) counts against the Mac in
+#    sshd's PerSourcePenalties: the 2026-10-07 mini e2e lost SSH to its VM for
+#    minutes that way (vms --json scanned each unreachable VM, the Bridge asked
+#    every few seconds).
+E=$T/ssh-err
+why() { printf '%s\n' "$1" > "$E"; ssh_failure_why 127.0.0.1:52501 "$E"; }
+check "another host key" "hostkey 127.0.0.1:52501 answers with another SSH host key" \
+  "$(why $'@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.')"
+check "the key refused" "OmacVM's SSH key did not get in at 127.0.0.1:52501" "$(why 'root@127.0.0.1: Permission denied (publickey).')"
+check "nothing listens" "nothing takes SSH at 127.0.0.1:52501 (the VM is starting, or its SSH stopped)" \
+  "$(why 'ssh: connect to host 127.0.0.1 port 52501: Connection refused')"
+check "sshd turns the Mac away (PerSourcePenalties)" \
+  "SSH at 127.0.0.1:52501 closed the connection (the VM is busy or starting, or its SSH turns the Mac away for a while after many tries)" \
+  "$(why 'kex_exchange_identification: read: Connection reset by peer')"
+check "no answer" "SSH at 127.0.0.1:52501 did not answer (the VM is busy, or its network is down)" \
+  "$(why 'ssh: connect to host 127.0.0.1 port 52501: Operation timed out')"
+check "something else: its first line" "SSH to 127.0.0.1:52501 did not get in: Bad owner or permissions on /x/config" \
+  "$(why 'Bad owner or permissions on /x/config')"
+: > "$E"
+check "nothing said" "OmacVM's SSH key did not get in at 127.0.0.1:52501" "$(ssh_failure_why 127.0.0.1:52501 "$E")"
+# A real ssh to a port nobody takes.
+ssh -o BatchMode=yes -o ConnectTimeout=3 -o LogLevel=ERROR -p 1 root@127.0.0.1 true 2> "$E" < /dev/null
+check "a real refused connection" "nothing takes SSH at 127.0.0.1:1 (the VM is starting, or its SSH stopped)" "$(ssh_failure_why 127.0.0.1:1 "$E")"
+check "omacvm vms never scans a VM's host keys" 0 "$(grep -c 'ssh-keyscan\|hostkey_changed' "$R/src/cmd/vms.sh")"
 
 exit $fail
