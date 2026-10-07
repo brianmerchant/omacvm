@@ -147,7 +147,8 @@ func peerGone(_ fd: Int32) -> Bool {
 /// One request (server.swift, after the Bridge token checked out).
 func touchIDRequest(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data) {
   let c = control.touchIDCaller(fd: fd, peer: peer, method: method, path: path, headers: headers, body: body)
-  let name = c.vm?.name ?? "-"
+  // The VM found, else the one OmacVM.app named (not found: "-" was all the log said).
+  let name = c.vm?.name ?? c.asked ?? "-"
   func reply(_ code: Int, _ obj: [String: Any], _ note: String, quiet: Bool = false) {
     // Refusals and fast noes once a minute per kind: a looping VM must not fill the log.
     let line = "touchid: from \(peer) (\(logSafe(name))): \(code) \(logSafe(note))"
