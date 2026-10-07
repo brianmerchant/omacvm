@@ -29,6 +29,25 @@ in more words.
   Homebrew). UTM, VMware Fusion and Parallels still need them, and
   `omacvm build` asks for them only there.
 
+- OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
+  too much graphics memory (a browser with big WebGL pages) no longer turns
+  the whole VM black. The last part of the graphics memory guard (512 MB on
+  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland,
+  the bar and the lock screen): the app past its share, or the app that
+  wants more while macOS is short of memory, loses its own GPU context, and
+  the VM shows a note that says so. Before, whichever asked next lost it, often Hyprland,
+  and the app then restarted the desktop, closing every app. When the
+  desktop is still lost, the window and the note say why (the guard,
+  macOS short of memory, or a graphics failure).
+
+- OmacVM.app: when the drive with a running VM drops off (unplugged, a
+  loose cable, ejected by force), the app stops the VM at once and its
+  window says "The drive with your VMs (NAME) is gone. Reconnect it and
+  start the VM again." The VM shows as unavailable until the drive is back,
+  then as ready again. Before, QEMU kept running on files that were gone.
+  A VMs folder whose drive was not plugged in at launch shows up by itself
+  once it is.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
