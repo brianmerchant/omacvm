@@ -150,6 +150,7 @@ reset_vm 3.0.3
 run update --vm Test --yes
 untouched "update --vm on a newer VM"
 has "update: what it says" "$OUT" "omacvm update: 'Test' has OmacVM 3.0.3"
+has "update: not itself as the way out (it has pulled already)" "$OUT" "use an omacvm with OmacVM 3.0.3 or newer"
 
 # All running VMs: only those OmacVM set up from this Mac (a remembered host key).
 PIN="$H/Library/Application Support/omacvm-test/known_hosts/app-Test-$(printf %s Test | cksum | cut -d' ' -f1)"

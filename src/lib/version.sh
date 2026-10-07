@@ -80,6 +80,9 @@ omacvm_downgrade() {   # CMD VM HAD NOW
     how="update OmacVM.app first (Check Now in OmacVM on the Mac), or use an omacvm with OmacVM $had or newer"
   else
     how="run \`omacvm update\` first (it brings this omacvm up to date)"
+    # update has pulled already: this checkout is as far as it goes (a branch,
+    # a tag, local changes, or a main behind the VM's release).
+    [[ $cmd != update ]] || how="use an omacvm with OmacVM $had or newer (this checkout did not move past $now)"
     if declare -F app_bundle >/dev/null && a=$(app_bundle) && av=$(app_version "$a") && ! version_lt "$av" "$had"; then
       how="use the omacvm of OmacVM.app ($a/Contents/Resources/omacvm/omacvm) or $how"
     fi
