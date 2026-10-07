@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- OmacVM.app's keyboard note stayed red with OmacVM on under Accessibility.
+  macOS keeps "control the computer" (what the VM's key tap needs) as an
+  entry of its own, tied to the build that made it. One left by an older
+  build no longer matches, and macOS refuses the tap whatever the
+  Accessibility switch shows; Allow… could not replace it. The app now
+  clears its own old entry (once, when the note would be red) and Allow…
+  clears both of its entries before it asks again, so with OmacVM on under
+  Accessibility the note goes away by itself. The (i) and `omacvm check`
+  name the Terminal way too: `tccutil reset PostEvent org.omacvm.app`.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
