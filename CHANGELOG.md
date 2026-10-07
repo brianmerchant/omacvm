@@ -22,7 +22,7 @@ in more words.
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
 - OmacVM.app's VM window is compact and fits a 13-inch MacBook without
-  scrolling (it was about 890 points tall); on a smaller screen it stops at
+  scrolling (it was up to about 900 points tall); on a smaller screen it stops at
   the screen and scrolls. Settings sit in two columns, on/off settings are
   switches, and the long explanations moved behind an (i). Disk is one row
   with **Change…**. USB devices now have their own switch, off by default
