@@ -156,6 +156,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Updater.shared.runScripted(quitWhenDone: true) }
             return
         }
+        // Test builds (the disk size check on a test Mac): Apply in Disk ›
+        // Change… for this size, before --start.
+        if let v = TestHooks.value("OMACVM_TEST_DISK_GB", bundleID: Bundle.main.bundleIdentifier), let gb = Int(v) {
+            do {
+                VMDisk.log(state.config, "test: disk to \(gb) GB: \(try VMDisk.change(state.config, to: gb))")
+            } catch {
+                VMDisk.log(state.config, "test: disk to \(gb) GB refused: \(error.localizedDescription)")
+            }
+            reloadConfig()
+        }
         if let again {
             startAgain(again)
         } else if starting {
@@ -321,6 +331,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // A smaller disk: the guest shrank btrfs at the last start; cut
+        // disk.img before QEMU opens it (VMDisk, DiskImage.cut).
+        if VMDisk.resize(state.config)?.step == .cut {
+            VMDisk.cutIfDue(state.config)
+            reloadConfig()
+        }
         let r = Runner(config: state.config)
         r.openGLOnce = openGLOnce
         r.onExit = { [weak self, weak r] status in
@@ -353,6 +369,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     return
                 }
+            }
+            // The guest shrank btrfs and shut down for the cut: start again
+            // (startVM cuts first, then the guest checks the disk).
+            if !self.quitting, VMDisk.resize(self.state.config)?.step == .cut {
+                self.startVM()
+                return
             }
             if self.quitting {
                 self.quitting = false
