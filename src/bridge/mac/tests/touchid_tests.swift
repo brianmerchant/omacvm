@@ -226,6 +226,28 @@ func value(_ r: Result<TouchIDRequest, PolicyError>) -> TouchIDRequest? { if cas
     check(good == .success(nonce), "Touch ID label taken")
     check(touchIDKeyName(type: "parallels", name: "A") == vmKeyName(type: "parallels", name: "A") + ".touchid", "key file name")
 
+    // ---- the test identity's stand-in (touchid-test file) ----
+    check(touchIDTestAnswer("yes\n") == .yes, "stand-in: yes")
+    check(touchIDTestAnswer("no") == .no(.cancelled), "stand-in: no")
+    check(touchIDTestAnswer(nil) == nil && touchIDTestAnswer("") == nil && touchIDTestAnswer("YES") == nil
+          && touchIDTestAnswer("yes please") == nil, "stand-in: no file or another word = the real dialog")
+    var standIn: TouchIDOutcome? = .yes
+    let realAuth = MockAuth(); realAuth.notThere = .noTouchID
+    let lockedMac = MockMac(locked: true, frontType: nil)
+    let ds = TouchIDDecider(auth: TouchIDTestAuth(real: realAuth, answer: { standIn }),
+                            mac: TouchIDTestMac(real: lockedMac, answer: { standIn }, frontWhenTesting: "app"))
+    check(ds.decide(vm: "s1", type: "app", on: true, request: sudo!, vmLabel: nil, passwordFallback: false) == .yes,
+          "stand-in yes: no Touch ID, locked, nothing in front: yes all the same")
+    check(realAuth.asked.isEmpty, "stand-in: the real dialog is never shown")
+    standIn = .no(.cancelled)
+    check(ds.decide(vm: "s2", type: "app", on: true, request: sudo!, vmLabel: nil, passwordFallback: false) == .no(.cancelled),
+          "stand-in no: cancelled")
+    check(ds.decide(vm: "s3", type: "app", on: false, request: sudo!, vmLabel: nil, passwordFallback: false) == .no(.off),
+          "stand-in: a VM with Touch ID off is still refused")
+    standIn = nil
+    check(ds.decide(vm: "s4", type: "app", on: true, request: sudo!, vmLabel: nil, passwordFallback: false) == .no(.locked),
+          "no stand-in: the Mac's real state counts again")
+
     print("touchid: \(tPassed) passed, \(tFailures) failed")
     exit(tFailures == 0 ? 0 : 1)
   }
