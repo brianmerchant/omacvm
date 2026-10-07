@@ -181,6 +181,16 @@ final class PanelView: NSView {
     private let reduceMotion: Bool
     let cancel = NSButton(title: "Cancel", target: nil, action: nil)
 
+    static var boxFont: NSFont { PanelFonts.mono(13) }
+
+    /// The command or action fits the box's two lines whole.
+    static func boxFits(_ s: String) -> Bool {
+        let font = boxFont
+        let r = (s as NSString).boundingRect(with: CGSize(width: PanelMetrics.side - 2 * PanelMetrics.padding, height: 1000),
+                                             options: [.usesLineFragmentOrigin], attributes: [.font: font])
+        return r.height <= font.boundingRectForFont.height * 2 + 2
+    }
+
     init(prompt: TouchIDPanelPrompt, theme: PanelTheme, authView: NSView?, reduceMotion: Bool) {
         self.theme = theme
         self.reduceMotion = reduceMotion
@@ -207,13 +217,8 @@ final class PanelView: NSView {
         let line = label(prompt.line, PanelFonts.mono(12), theme.dim)
         var views: [NSView] = [title, line]
         if let box = prompt.box {
-            let font = PanelFonts.mono(13)
-            let fitted = panelFit(box) { s in
-                let r = (s as NSString).boundingRect(with: CGSize(width: inner, height: 1000),
-                                                     options: [.usesLineFragmentOrigin], attributes: [.font: font])
-                return r.height <= font.boundingRectForFont.height * 2 + 2
-            }
-            views.append(label(fitted, font, theme.accent, lines: 2))
+            // Whole (PanelController.show sends a longer one to macOS's dialog).
+            views.append(label(panelFit(box, fits: PanelView.boxFits), PanelView.boxFont, theme.accent, lines: 2))
         }
         // Apple's view under the glyph: it drives the LAContext; the glyph is what shows.
         let well = NSView(frame: CGRect(origin: .zero, size: PanelMetrics.glyph))
@@ -363,6 +368,8 @@ final class PanelController: NSObject {
             close()
         }
         guard NSApp.isActive else { return reply(.no("not-front")) }
+        // A command the box would show only cut: macOS's dialog shows it whole.
+        guard panelShowsWhole(prompt.box, fits: PanelView.boxFits) else { return reply(.error) }
         guard let vm = vmWindow(), let screen = vm.screen ?? NSScreen.main else { return reply(.error) }
         let c = LAContext()
         var e: NSError?

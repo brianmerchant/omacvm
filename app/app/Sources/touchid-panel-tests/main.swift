@@ -56,6 +56,11 @@ let long = "rm -rf /home/vincent/.cache/something-long; reboot"
 let cut = panelFit(long, fits: fits)
 expect(cut.count <= 20 && cut.contains("…") && cut.hasPrefix("rm -rf") && cut.hasSuffix("reboot"), "words: a long one keeps its start and its end (\(cut))")
 
+expect(panelShowsWhole(nil, fits: fits) && panelShowsWhole("pacman -Syu", fits: fits), "words: no box, or one that fits -> the panel")
+expect(!panelShowsWhole(long, fits: fits), "words: a box that would be cut -> no panel (macOS's dialog shows it whole)")
+let longest = "pacman -Syu --needed --noconfirm --hookdir /home/vincent/.cache/x --overwrite '*' linux linux-headers base-devel"
+expect(PanelView.boxFits("pacman -Syu") && !PanelView.boxFits(longest), "words: the real box takes a short command, not \(longest.count) characters")
+
 // MARK: Keys
 
 expect(panelKey(keyCode: 53, command: false, marker: 0) == .cancel, "keys: Esc cancels")
