@@ -372,10 +372,16 @@ esac
 # Room to build on the drives the build writes to: the VM's folder, and the
 # downloads folder when it is on another drive (not this Mac's disk when the
 # VM goes to an external one).
+SPACE_APP_CACHE=""
+if [[ $TYPE == app && -n ${APP:-} ]] && ! grep -q downloads_dir "$APP/Contents/Resources/scripts/vm-common.sh" 2>/dev/null; then
+  SPACE_APP_CACHE=mac   # OmacVM.app before 3.0.2: its downloads stay in the Mac's caches
+fi
 if ! space_problem "$TYPE" "${VM_DIR:-}" "$SOURCE"; then
   case $TYPE in
     parallels|fusion) [[ -n $VM_DIR_GIVEN ]] || SPACE_WHY+=" (or put the VM on another drive with --vm-dir)" ;;
-    app) SPACE_WHY+=" (or pick a VMs folder on another drive in OmacVM.app)" ;;
+    app) if [[ $SPACE_APP_CACHE == mac && $SPACE_WHY == *"the download"* ]]; then
+           SPACE_WHY+=" (omacvm update updates OmacVM.app, which then keeps its downloads on the VMs folder's drive)"
+         else SPACE_WHY+=" (or pick a VMs folder on another drive in OmacVM.app)"; fi ;;
   esac
   needs_person "$SPACE_WHY"
 fi

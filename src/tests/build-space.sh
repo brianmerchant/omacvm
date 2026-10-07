@@ -67,6 +67,15 @@ has() { [[ $2 == *"$1"* ]] && echo yes || echo "$2"; }
   SD_GB=45 HOME_GB=5
   expect "app on the SD with 45 GB: keep some room on the SD" yes "$(has "ok / 45 GB free on SD4TB:" "$(try app "$SD" prebuilt)")"
 
+  # An OmacVM.app before 3.0.2 keeps its downloads in the Mac's caches.
+  SPACE_APP_CACHE=mac HOME_GB=10 SD_GB=100
+  expect "app before 3.0.2, VMs folder on the SD, 10 GB on the Mac: the download does not fit" yes \
+    "$(has "about 15 GB free on this Mac's disk to build (the download and the temporary installer" "$(try app "$SD" build)")"
+  HOME_GB=20
+  expect "app before 3.0.2, VMs folder on the SD, 20 GB on the Mac: builds" ok "$(try app "$SD" build)"
+  expect "app before 3.0.2, VMs folder on the Mac: one check" 1 "$(space_targets app "$HOME/OmacVM" build | wc -l | tr -d ' ')"
+  SPACE_APP_CACHE=""
+
   # UTM: --vm-dir makes the installer and the VM in that folder; else UTM's library.
   HOME_GB=5 SD_GB=100
   expect "utm --vm-dir on the SD, 5 GB on the Mac: builds" ok "$(try utm "$SD" build)"

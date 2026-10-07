@@ -49,7 +49,9 @@ space_targets() {
   case $type in
     # The app's create script keeps the downloads beside the VMs on another
     # drive, else in the Mac's caches (vm-common.sh downloads_dir): one drive.
-    app) printf '%s\t%s\t%s\n' "$dir" "$SPACE_VM_GB" "$label"; return ;;
+    # An OmacVM.app before 3.0.2 keeps them in the Mac's caches
+    # (SPACE_APP_CACHE=mac): as for Parallels below.
+    app) [[ ${SPACE_APP_CACHE:-} == mac ]] || { printf '%s\t%s\t%s\n' "$dir" "$SPACE_VM_GB" "$label"; return; } ;;
     # --vm-dir: the installer is made in that folder too. Else UTM's library,
     # in its container in the home folder (measured there: the container
     # itself is UTM's, macOS asks before others look into it).
