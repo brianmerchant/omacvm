@@ -727,7 +727,8 @@ static void permissionTimer(CFRunLoopTimerRef t, void *info) {
   (void)t; (void)info;
   static int ticks;
   checkPermissions();
-  if (++ticks % 10 == 0) refreshSlowPerms();
+  // Every 10 s; every second while only one of those two keeps the tap away.
+  if (++ticks % 10 == 0 || (inputPaused && (permFn() & PERM_AX))) refreshSlowPerms();
 }
 // macOS's Accessibility list changed: look now, and once more when it has settled.
 static void accessibilityChanged(CFNotificationCenterRef c, void *o, CFNotificationName n, const void *obj, CFDictionaryRef info) {
