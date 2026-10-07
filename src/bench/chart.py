@@ -10,10 +10,11 @@ tagged ("not released" without a name). An optional "note" (a string, or a
 list for several lines) replaces the line under the chart. Tests without a Mac
 value are left out.
 
---panel gpu [--aquarium] draws the GPU panel instead (tests/bench/final-round,
+--panel gpu [--aquarium] [--only KEY,...] draws the GPU panel instead (tests/bench/final-round,
 summarize.py's JSON): GPU throughput first (with the timing method from
 "methods"), GPU compute (vkpeak, Geekbench OpenCL and Vulkan), glmark2 and
-vkmark (VMs only, scores), Basemark, and Aquarium with --aquarium; macOS =
+vkmark (VMs only, scores), Basemark, and Aquarium with --aquarium (--only: just
+these rows, e.g. gpu-throughput,vkpeak-fp32,geekbench-gpu-opencl,webgpu); macOS =
 100 %. A route without a number gets an empty hatched bar with the reason from
 "missing". "placeholder": true in the JSON marks the whole chart as made-up
 data (for drafts), "preliminary": true (summarize.py) as not from the agreed
@@ -163,6 +164,7 @@ GPU_TESTS = [  # key, label, benchmark, headline, the Mac's key ("" = no macOS v
     ("vkpeak-fp32", "GPU compute", "vkpeak fp32, Vulkan (macOS: MoltenVK 1.4.1)", False, "vkpeak-fp32"),
     ("geekbench-gpu-opencl", "GPU compute", "Geekbench 7 GPU, OpenCL", False, "geekbench-gpu-opencl"),
     ("geekbench-gpu-vulkan", "GPU compute", "Geekbench 7 GPU, Vulkan (macOS: Metal)", False, "geekbench-gpu-metal"),
+    ("webgpu", "GPU compute", "WebGPU matmul f32 2048, Google Chrome", False, "webgpu"),
     ("glmark2", "OpenGL in the VM", "glmark2, no macOS version: score", False, ""),
     ("vkmark", "Vulkan in the VM", "vkmark, no macOS version: score", False, ""),
     ("basemark", "Browser graphics", "Basemark Web 3.0", False, "basemark"),
@@ -188,6 +190,11 @@ def gpu_panel(*args):
     scaled to the best VM. Aquarium only with --aquarium (optional row)."""
     aquarium = "--aquarium" in args
     args = [x for x in args if x != "--aquarium"]
+    only = None
+    if "--only" in args:
+        i = args.index("--only")
+        only = set(args[i + 1].split(","))
+        del args[i:i + 2]
     src, out, subtitle = args[0], args[1], args[2] if len(args) > 2 else ""
     data = json.load(open(src))
     med, missing = data["medians"], data.get("missing", {})
@@ -202,7 +209,9 @@ def gpu_panel(*args):
               if n in med or n in missing]
     tests = []
     for key, label, bench, headline, base in GPU_TESTS:
-        if key == "aquarium" and not aquarium:
+        if key == "aquarium" and not aquarium and not (only and key in only):
+            continue
+        if only and key not in only:
             continue
         if base and not mac.get(base):
             continue
