@@ -176,6 +176,8 @@ prereq_screen() {
               "Parallels Desktop|have_parallels" "UTM 5|have_utm5" "VMware Fusion|have_fusion" \
               "OmacVM.app|have_omacvm_app"; do
     if ${mark#*|}; then printf '  %s✓%s %s\n' "$UOK" "$UR" "${mark%%|*}" > "$TTY"
+    elif [[ $mark == Xcode* ]] && _tools_own_resources >/dev/null; then
+      printf '  %s·%s %s %s(not installed; OmacVM.app does not need them)%s\n' "$UD" "$UR" "${mark%%|*}" "$UD" "$UR" > "$TTY"
     else printf '  %s·%s %s %s(not installed)%s\n' "$UD" "$UR" "${mark%%|*}" "$UD" "$UR" > "$TTY"; fi
   done
 }

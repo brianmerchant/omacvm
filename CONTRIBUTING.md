@@ -58,6 +58,7 @@ src/gestures/mac/build.sh && src/bridge/mac/build.sh
 src/omanotch/mac/test.sh
 src/bridge/mac/test.sh && src/tests/external-brightness.sh
 src/tests/install-defaults.sh
+src/tests/no-clt.sh
 src/tests/vm-names.sh
 src/tests/proxy.sh
 src/tests/mac-install.sh
