@@ -230,6 +230,9 @@ jobs:
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
+      - name: An app VM's address comes from its running QEMU (fast network turned off while it runs)
+        run: src/tests/app-vm-address.sh
+
       - name: The Bridge runs omacvm for the app's VMs through the app (only the Bridge, only the app's omacvm)
         run: src/tests/app-control-run.sh
 
