@@ -507,7 +507,11 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   long as macOS has memory to give; new big buffers are refused only when
   macOS says its memory is critical, or would be nearly used up while it
   warns (`app/runtime/patches/virgl-darwin-memory-pressure.patch`). The one
-  fixed guard, three quarters of the Mac's memory, only stops a runaway VM.
+  fixed guard, three quarters of the Mac's memory, only stops a runaway VM,
+  and its last part is kept for the desktop: on an 8 GB Mac a browser could
+  fill the guard while macOS still said normal, and the next buffer refused
+  was Hyprland's. Now the app past its share loses its own GPU context and
+  the VM says so (3.0.4, `app/runtime/patches/virgl-gpu-guard-desktop-reserve.patch`).
   If the desktop still loses its GPU context, the app says so and offers to
   restart the desktop session instead of leaving the VM black.
   `omacvm check` shows the graphics memory now and its peak ("graphics
