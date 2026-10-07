@@ -100,6 +100,8 @@ int main(void) {
     notch_rule_sent(&st, a, 54001);
     CHECK(!notch_rule_due(&st, a, 84000) && notch_rule_due(&st, a, 84002), "... and stays at 30 s");
     CHECK(notch_rule_due(&st, b, 84000), "a changed rule goes at once");
+    notch_rule_seen(&st, a);   // it took at last (the wait was 30 s)
+    CHECK(notch_rule_due(&st, a, 56001), "taken after many refusals, then moved: again at the next look, not after 30 s");
 
     NotchRuleState t = {.sent_ms = -1e9, .window_ms = -1e9};
     notch_rule_sent(&t, a, 0);
