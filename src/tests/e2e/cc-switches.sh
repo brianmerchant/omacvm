@@ -146,8 +146,6 @@ qemu_pid() { pgrep -f "$QPAT $VM( |$)" | head -1; }
 launcher_pid() { pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" | head -1; }
 SERVER=""
 cleanup() {
-  # While working on the test: the VM stays up this long first, to look at it (ssh, the cc's tmux).
-  [[ ${OMACVM_E2E_HOLD:-} =~ ^[0-9]+$ ]] && { log "holding ${OMACVM_E2E_HOLD} s (OMACVM_E2E_HOLD), VM at ${IP:-?}"; sleep "$OMACVM_E2E_HOLD"; }
   log "cleanup"
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then gssh "systemctl poweroff" >/dev/null 2>&1; for _ in $(seq 60); do kill -0 "$p" 2>/dev/null || break; sleep 1; done; kill "$p" 2>/dev/null; fi
@@ -659,6 +657,8 @@ steps() {   # every step on the running VM of this pass
   want graphics && step_graphics
   want updates && step_updates
   want window && step_window
+  # While working on the test: the VM stays up this long first, to look at it (ssh, the cc's tmux).
+  [[ ${OMACVM_E2E_HOLD:-} =~ ^[0-9]+$ ]] && { log "holding ${OMACVM_E2E_HOLD} s (OMACVM_E2E_HOLD), VM at ${IP:-?}"; sleep "$OMACVM_E2E_HOLD"; }
   stop_vm || res stop FAIL "the VM did not shut down"
   return 0
 }
