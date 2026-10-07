@@ -45,7 +45,36 @@ Homebrew, `zstd` and `e2fsprogs` (see the README's
 omacvm build --vm-type utm
 ```
 
-The VM goes into UTM's own library; UTM has no `--vm-dir`.
+The VM goes into UTM's own library, which is inside UTM's data folder on the
+Mac's internal disk. To put it somewhere else, an external drive for example
+(APFS or Mac OS Extended), answer the build's "Where should the VM go?" with
+another folder, or pass `--vm-dir PATH`:
+
+```bash
+omacvm build --vm-type utm --vm-dir /Volumes/MyDrive/VMs
+```
+
+### UTM on an external drive
+
+UTM is sandboxed: it cannot keep its whole library elsewhere (with its
+`Documents` folder replaced by a link to another drive, UTM does not start:
+"Documents is not a directory"). But UTM runs any VM you open from another
+place (File > Open, or `open -a UTM Name.utm`) and keeps it in its list, by a
+bookmark. That is what `--vm-dir` uses:
+
+1. The installer image is written into that folder (not into
+   `~/Library/Caches`).
+2. UTM makes the VM in its own folder with only an empty system disk (a few
+   hundred KB), exports it into that folder, deletes its own copy and opens
+   the exported one.
+3. The installer image is added to that VM (UTM copies it into the VM, on
+   the drive), and the build goes on as usual.
+
+The Mac's disk then needs only a little room; the drive needs about 30 GB.
+Connect the drive before you open UTM. If UTM shows the VM as missing, the
+drive is not connected: connect it and start the VM again. On a removable
+drive (an SD card, a USB stick) macOS also asks once whether Terminal may
+access files on it: allow it.
 
 Run the build in Terminal on the Mac, not over SSH: OmacVM drives UTM
 through AppleScript, and macOS asks once whether Terminal may control UTM.

@@ -13,7 +13,8 @@
 # password then comes from OMACVM_PASSWORD):
 #   --vm-type parallels|utm|fusion|app   --vm-name NAME   --hostname NAME
 #   --resources low|balanced|high|best   --cpus N   --memory-gb N   --disk-gb N
-#   --vm-dir PATH   where the VM goes (Parallels, Fusion; default: the app's own folder)
+#   --vm-dir PATH   where the VM goes, an external drive for example (Parallels, UTM, Fusion;
+#                   default: the app's own folder or library)
 #   --graphics-gb N   VMware Fusion: graphics memory, part of the VM's memory (1-8)
 #   --user NAME   --full-name "NAME"
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
@@ -153,9 +154,15 @@ else
   ensure_swift_works
 fi
 # A build peaks at about 25 GB (download, temporary installer, new disk); a
-# finished VM takes 10-12 GB and grows as it is used.
-(( free_gb >= 30 )) || needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free)"
-(( free_gb >= 50 )) || info "$free_gb GB free: enough to build; the VM grows as you use it, so keep some room."
+# finished VM takes 10-12 GB and grows as it is used. With --vm-dir all of
+# that goes to the VM's folder (vm_dir_problem checks its drive); a VM on this
+# Mac's disk can still be chosen below, so the check waits for that answer.
+if [[ -z ${VM_DIR:-} ]]; then
+  if (( free_gb < 30 )) && { (( YES )) || [[ $TYPE == app ]]; }; then
+    needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free; or put the VM on another drive with --vm-dir)"
+  fi
+  (( free_gb >= 50 || free_gb < 30 )) || info "$free_gb GB free: enough to build; the VM grows as you use it, so keep some room."
+fi
 
 
 # ---------- 1. Parallels, UTM, VMware Fusion or OmacVM.app ----------
@@ -343,9 +350,8 @@ vm_dir_problem() {   # DIR -> a reason it does not work, or nothing
   case $fs in apfs|hfs) ;; *) echo "its drive is ${fs:-unknown}: a VM disk needs APFS or Mac OS Extended (Disk Utility can erase it as APFS)"; return ;; esac
   (( $(free_gb_at "$1") >= 30 )) || echo "only $(free_gb_at "$1") GB free on that drive (the VM needs about 30)"
 }
-if [[ -n ${VM_DIR:-} && $TYPE == utm ]]; then usage "--vm-dir: UTM keeps its VMs in its own library"; fi
 if [[ -n ${VM_DIR:-} && $TYPE == app ]]; then usage "--vm-dir: OmacVM.app keeps its VMs in the folder set in the app"; fi
-if [[ -z ${VM_DIR:-} && $TYPE != utm && $TYPE != app ]] && (( ! YES )); then
+if [[ -z ${VM_DIR:-} && $TYPE != app ]] && (( ! YES )); then
   ui_select loc "Where should the VM go?" 0 "Default|$(default_dir | sed "s|^$HOME|~|")" \
     "Another folder…|an external drive, for example (a Finder window opens)"
   while (( loc == 1 )); do
@@ -369,11 +375,14 @@ if [[ -n ${VM_DIR:-} ]]; then
     (( PLAN && JSON )) || info "On an external drive: connect it before you start the VM, and never unplug it while the VM runs."
   fi
   [[ $TYPE == fusion ]] && FUSION_DIR=$VM_DIR
+elif [[ $TYPE != app ]] && (( free_gb < 30 )); then
+  needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free; or put the VM on another drive with --vm-dir)"
 fi
 [[ -n ${VM_DIR:-} || $TYPE == utm ]] || VM_DIR=$(default_dir)
 case $TYPE in
   parallels) [[ ! -e $VM_DIR/$VM.pvm ]] || usage "$VM_DIR/$VM.pvm already exists (choose another --vm-name)" ;;
   fusion) [[ ! -e $(fusion_bundle "$VM") ]] || usage "$(fusion_bundle "$VM") already exists (choose another --vm-name)" ;;
+  utm) [[ -z ${VM_DIR:-} || ! -e $VM_DIR/$VM.utm ]] || usage "$VM_DIR/$VM.utm already exists (choose another --vm-name)" ;;
   app) if d=$(app_missing_drive "$VM_DIR"); then
          needs_person "$d is not connected, and OmacVM.app's VMs folder is on it ($VM_DIR): connect it, or pick another folder in the app"
        fi
@@ -557,6 +566,7 @@ if [[ $TYPE == parallels ]]; then
   APP_LINE+=" ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM.pvm"))"
 elif [[ $TYPE == utm ]]; then
   APP_LINE="UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
+  [[ -n ${VM_DIR:-} ]] && APP_LINE+=" ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM.utm"))"
 elif [[ $TYPE == app ]]; then
   APP_LINE="OmacVM.app $( [[ -n $APP ]] && app_version "$APP" || echo "$(cat "$R/src/VERSION"), downloaded first") ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM"))"
 else
@@ -708,12 +718,27 @@ elif [[ $TYPE == fusion ]]; then
   fusion_start "$VM"
   ui_spin_val IP "The live installer gets its address" fusion_ip "$VM" 300 || die "the live installer got no IP address"
 else
-  LIVE="$HOME/Library/Caches/omacvm/build-live/$VM-live.img"
-  "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
+  # --vm-dir: the installer image and the VM go to that folder; UTM makes the
+  # VM in its own folder (empty disk only), then moves it there.
+  if [[ -n ${VM_DIR:-} ]]; then
+    LIVE="$VM_DIR/.$VM-live.img"
+    "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub" --workdir "$VM_DIR/.omacvm-build-live"
+  else
+    LIVE="$HOME/Library/Caches/omacvm/build-live/$VM-live.img"
+    "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
+  fi
   utm_tune_app
   log "UTM VM with a ${DISK_GB} GB NVMe disk"
   pgrep -xq UTM || { open -a UTM; sleep 3; }
-  utm_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" $((DISK_GB * 1024)) >/dev/null
+  if [[ -n ${VM_DIR:-} ]]; then
+    utm_create "$VM" "$CPUS" $((MEM_GB * 1024)) "" $((DISK_GB * 1024)) >/dev/null
+    utm_move "$VM" "$VM_DIR"
+    UTM_BUNDLE="$VM_DIR/$VM.utm"
+    log "UTM VM in $UTM_BUNDLE"
+    utm_add_live "$VM" "$LIVE"
+  else
+    utm_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" $((DISK_GB * 1024)) >/dev/null
+  fi
   rm -f "$LIVE"
   utm_start "$VM"
   ui_spin_val IP "The live installer gets its address" utm_ip "$VM" 300 || die "the live installer got no IP address"
@@ -757,8 +782,8 @@ step "Booting from the new disk"
 if [[ $TYPE == utm ]]; then
   ui_spin "The live installer shuts down" utm_wait_stopped "$VM"
   utm_drop_live "$VM"
-  utm_set_icon "$VM"
-  utm_add_sound "$VM"
+  utm_set_icon "$VM" ${UTM_BUNDLE:+"$UTM_BUNDLE"}
+  utm_add_sound "$VM" ${UTM_BUNDLE:+"$UTM_BUNDLE"}
   utm_start "$VM"
   sleep 20
   ui_spin_val IP "The new system starts and gets its address" utm_ip "$VM" 300 || die "the new system got no IP address"
