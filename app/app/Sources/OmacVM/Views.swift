@@ -391,7 +391,6 @@ struct ReadyView: View {
     @State private var customResources = false
     /// What the window says about the keyboard (KeyNote).
     @State private var keyNote = KeyNote.none
-    private let keyCheck = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
     /// The window pictures (--render-vm-window): this keyboard note and this
     /// "omacvm in Terminal" state instead of the Mac's.
     var preview: RenderVMWindow.Preview? = nil
@@ -493,7 +492,16 @@ struct ReadyView: View {
             macFolder = MacFolder.path(c); macFolderNote = nil
             refreshKeyNote()
         }
-        .onReceive(keyCheck) { _ in refreshKeyNote() }
+        // Every 3 s while the window shows. A task, not a Timer publisher
+        // kept in this struct: each redraw of the window (a storage change,
+        // a move's progress) makes a new publisher and starts its 3 s again,
+        // so it would never fire.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                refreshKeyNote()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshKeyNote()
         }
