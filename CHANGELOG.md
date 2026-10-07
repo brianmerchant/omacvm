@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- Graphics memory guard: when an app in the VM is stopped for taking too
+  much graphics memory, Hyprland can still show the app's last buffer (an
+  empty window now) and keeps drawing. Before, Hyprland lost its GPU context
+  there too and the VM went black, as in 3.0.3. The log now says "apps'
+  share reached" when an app stops at its share, not "budget reached".
+
 ## 3.0.5 (unreleased)
 
 - OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
