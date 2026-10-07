@@ -120,7 +120,9 @@ lock() {   # DIR: ours, or taken now (same owner counts: the caller may hold it)
     die "$1 is held: $o"
   fi
 }
-for l in ${OMACVM_E2E_LOCKS:-$HOME/.omacvm-mini-vm.lock $HOME/.omacvm-test-identity.lock}; do lock "$l"; done
+# A colon-separated list (a home folder may have a space in its path: the mini's has).
+IFS=: read -ra LOCKLIST <<< "${OMACVM_E2E_LOCKS:-$HOME/.omacvm-mini-vm.lock:$HOME/.omacvm-test-identity.lock}"
+for l in "${LOCKLIST[@]}"; do lock "$l"; done
 
 # The person's own helpers, app and VM: the same at the end.
 fingerprint() {
@@ -298,6 +300,8 @@ start_vm() {
   # The VM's clipboard on a pasteboard of its own, never the Mac's (STANDARDS 25).
   local hide=()
   (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1 --env OMACVM_BACKGROUND=1)
+  # A build that asks before a start (the fast network's service not ready, #215) takes its answer from a test hook.
+  [[ -n ${OMACVM_E2E_FASTNET_ANSWER:-} ]] && hide+=(--env "OMACVM_TEST_FAST_NETWORK_ANSWER=$OMACVM_E2E_FASTNET_ANSWER")
   open -n -g --env OMACVM_TEST_PASTEBOARD=org.omacvm.test.e2e ${hide[@]+"${hide[@]}"} "$APP" --args --start --vm "$VM"
   for ((i = 0; i < 40; i++)); do [[ -n $(qemu_pid) ]] && break; sleep 1; done
   [[ -n $(qemu_pid) ]] || return 1
@@ -374,7 +378,7 @@ use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept o
 update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the VM has this app's OmacVM
   local p t0 i v want
   want=$(appver); t0=$(date +%s)
-  rm -f "$VMD/logs/update.log"
+  rm -f "$VMD/logs/update.log" "$VMD/update.log"
   if (( HIDDEN )); then   # the script the button runs, without the window
     mkdir -p "$VMD/logs"
     OMACVM_PROGRESS=1 tmo 1500 /bin/bash "$APP/Contents/Resources/scripts/update-vm.sh" "$VMD" > "$VMD/logs/update.log" 2>&1
@@ -392,12 +396,13 @@ update_vm_window() {   # Update VM in the app's window (VM stopped): 0 when the 
     echo "no Update VM button ($(cat "$OUT/ax-update-vm.txt")); the VM has ${v:-nothing}, the app $want"; return 1
   fi
   for ((i = 0; i < 1500; i += 5)); do
-    grep -q "^UPDATED " "$VMD/logs/update.log" 2>/dev/null && [[ -z $(qemu_pid) ]] && break
+    # 3.0.3 and older write update.log into the VM folder itself.
+    { grep -q "^UPDATED " "$VMD/logs/update.log" 2>/dev/null || grep -q "^UPDATED " "$VMD/update.log" 2>/dev/null; } && [[ -z $(qemu_pid) ]] && break
     sleep 5
   done
   close_window
   v=$(cat "$VMD/omacvm-version" 2>/dev/null)
-  echo "Update VM: $(tail -1 "$VMD/logs/update.log" 2>/dev/null | cut -c1-100); omacvm-version $v; $(( $(date +%s) - t0 )) s"
+  echo "Update VM: $(tail -1 "$VMD/logs/update.log" 2>/dev/null || tail -1 "$VMD/update.log" 2>/dev/null | cut -c1-100); omacvm-version $v; $(( $(date +%s) - t0 )) s"
   [[ $v == "$want" ]]
 }
 
@@ -564,12 +569,15 @@ step_fastnet() {   # the fast network: while the VM runs, and after a restart
   if [[ $(feat available fast-network) != true ]]; then res fastnet BLOCKED "not available here: $(feat reason fast-network)"; return; fi
   st=$(netd); blk=$(netd_blocked)
   if [[ -n $blk ]]; then res fastnet BLOCKED "$blk"; return; fi
+  local q0
   for to in on off; do
-    bmark
+    bmark; q0=$(qemu_pid)
     cc toggle "Fast network" "$to" 600; s=$CCS
     sleep 10
     why=""
     ccok || why+="cc: $s; "
+    [[ $(qemu_pid) == "$q0" ]] || why+="QEMU changed ($q0 -> $(qemu_pid)): the switch restarted the VM; "
+    [[ $(mac_feature fast-network) == "$to" ]] || why+="the VM folder's features says $(mac_feature fast-network); "
     reachable 60 || why+="not reachable: $(vminfo); "
     [[ $(netcheck) == 200 ]] || why+="no internet in the VM; "
     b=$(bproblems); [[ -n $b ]] && why+="Bridge: $b; "
@@ -765,6 +773,8 @@ if [[ -n $PREV ]] && want update; then
     sleep 1
     # The app updates itself (as the window's "Update to X" does, without the window: --update-now).
     close_window
+    # The test Bridge runs from inside the app (a person's lives outside it): the updater would wait for it.
+    pkill -f "OmacVM Test Bridge.app/Contents/MacOS/" 2>/dev/null; sleep 2
     hide=(); (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1)   # the updated app starts again: no window either
     open -n -g --env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$F/key.pub")" \
       ${hide[@]+"${hide[@]}"} "$APP" --args --update-now
