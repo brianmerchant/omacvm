@@ -51,6 +51,8 @@ class FakeMac:
         self.clock_skew = 0               # the fake Mac's clock minus the real one
         self.hello_delay = 0.0
         self.unknown_for = 0              # this many status requests get 409 unknown-vm (a VM just started)
+        self.down_for = 0                 # this many hello requests get no answer (the Bridge restarting)
+        self.refuse_jobs_for = 0          # this many job starts get 409 unknown-vm (the list caught the VM mid-job)
         self.stale_for = 0                # this many status requests get 403 vm-key, looking (an old VM list)
         self.stale_looking = True         # False: the Mac is not looking (a key that is really wrong)
         self.nonces: set = set()
@@ -128,6 +130,10 @@ class FakeMac:
                 fake.requests.append(("GET", p, {}))
                 if fake.old and p.startswith("/omacvm/"):
                     return self.send(404, {"error": "not found"})
+                if p == "/omacvm/hello" and fake.down_for > 0:
+                    fake.down_for -= 1
+                    self.close_connection = True   # no answer at all: the client sees the Mac away
+                    return
                 if p == "/omacvm/hello":
                     time.sleep(fake.hello_delay)
                     names = [l.split("\t")[0] for l in open(os.path.join(SRC, "features.tsv"), encoding="utf-8")
@@ -186,6 +192,9 @@ class FakeMac:
                     return
                 b = json.loads(raw or b"{}")
                 fake.requests.append(("POST", self.path, b))
+                if self.path == "/omacvm/jobs" and fake.refuse_jobs_for > 0:
+                    fake.refuse_jobs_for -= 1
+                    return self.send(409, {"code": "unknown-vm", "error": "the Mac cannot reach this VM: SSH closed the connection"})
                 if self.path == "/omacvm/jobs" and fake.refuse_jobs:
                     st, code, err = fake.refuse_jobs
                     return self.send(st, {"error": err, "code": code})
