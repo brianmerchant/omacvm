@@ -136,7 +136,7 @@ final class GPUMemoryWatch {
             let cause = app.why == "guard"
                 ? "the apps' share of graphics memory was full (\(GPUMemory.gb(m.appsMB)) of \(GPUMemory.gb(m.budgetMB)); the rest is kept for the desktop)"
                 : "macOS was short of memory (pressure \(m.pressure))"
-            log("OmacVM: \(app.name) in the VM lost its GPU context: \(cause); the desktop keeps drawing")
+            log("OmacVM: \(app.name) in the VM lost its GPU context: \(cause)")
             guest("/usr/local/bin/omacvm-desktop-recover", ["app", app.name, app.why]) { _ in }
         }
     }
