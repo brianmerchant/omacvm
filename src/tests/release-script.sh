@@ -78,6 +78,9 @@ expect 1 "e2e: a run of some steps only is refused" rel e2e
 gate true 1111111111111111111111111111111111111111 all
 expect 0 "e2e: a passing result for M is taken" rel e2e
 [[ $(sed -n 's/^E2E=//p' "$G/release/state" | tail -1) == pass ]] && ok "e2e: the state says pass" || bad "e2e: state"
+echo "M=3333333333333333333333333333333333333333" >> "$G/release/state"
+[[ $(rel publish 2>&1) == *"e2e gate has not passed"* ]] && ok "publish: a pass for an earlier M does not count" || bad "publish: took a pass for an earlier M"
+echo "M=1111111111111111111111111111111111111111" >> "$G/release/state"
 rm "$G/release/e2e/result.json"; echo "E2E=" >> "$G/release/state"
 OMACVM_RELEASE_E2E_OVERRIDE=short expect 1 "e2e: an override without a reason is refused" rel e2e
 OMACVM_RELEASE_E2E_OVERRIDE="the test Mac is away; checked by hand on the Air" expect 0 "e2e: an override with a reason" rel e2e

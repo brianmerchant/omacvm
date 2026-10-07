@@ -356,7 +356,7 @@ e2e_override() {
   local why=$OMACVM_RELEASE_E2E_OVERRIDE
   [[ ${#why} -ge 10 ]] || die "OMACVM_RELEASE_E2E_OVERRIDE: say why in a sentence (it is logged)"
   printf '%s\t%s\tM=%s\tby %s\t%s\n' "$(date '+%F %T')" "$VERSION" "$(get M)" "$(id -un)" "$why" >> "$OUT/e2e-override.log"
-  put E2E "override"
+  put E2E "override"; put E2E_M "$(get M)"
   printf '\n    !!! E2E GATE OVERRIDDEN for %s: %s\n    !!! (logged in %s)\n\n' "$VERSION" "$why" "$OUT/e2e-override.log"
 }
 
@@ -381,7 +381,7 @@ assert o.get("commit") == sys.argv[2], f"tested {o.get('commit')}, not M {sys.ar
 assert o.get("only") == "all", "not every step ran"
 assert o.get("pass") is True, "not passed"
 PY
-  put E2E pass
+  put E2E pass; put E2E_M "$m"
   note "e2e gate passed for M"
 }
 
@@ -396,7 +396,9 @@ notes_file() {   # the release text, without the unnotarized lines once notarize
 
 step_publish() {
   local m; m=$(get M); [[ -n $m ]] || die "no M"
-  case $(get E2E) in
+  local gate; gate=$(get E2E)
+  [[ $(get E2E_M) == "$m" ]] || gate=""   # a pass (or override) for an earlier M does not count
+  case $gate in
     pass) note "e2e gate: passed for M" ;;
     override) note "e2e gate: OVERRIDDEN ($(tail -1 "$OUT/e2e-override.log" | cut -f5))" ;;
     *) if (( DRY )); then note "dry run: the e2e gate has not passed (a real publish stops here)"

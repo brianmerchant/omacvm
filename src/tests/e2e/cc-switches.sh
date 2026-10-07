@@ -22,7 +22,8 @@
 #     --app APP          the build to test, a signed test-identity app: copied over
 #                        ~/Applications/"OmacVM Test.app" first (default: the one there)
 #     --previous ZIP     the release before (OmacVM-X.Y.Z.zip as published) for the update
-#                        path; "latest" downloads releases/latest (gh); default: no update path
+#                        path; "latest" downloads releases/latest (gh); default: none (the run
+#                        then does not count for the gate)
 #     --only LIST        steps (comma list): prepare,baseline,switches,fastnet,touchid,graphics,
 #                        updates,window,update (default: all; update needs --previous)
 #     --slow             also the slow switches (thp-kernel, x86-apps: builds in the VM)
@@ -65,13 +66,15 @@ while (( $# )); do
     --keep-vm) KEEP=1; shift ;;
     --root) ROOTARG=$2; shift 2 ;;
     --hidden) HIDDEN=1; shift ;;
-    *) sed -n '19,43s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    *) sed -n '19,44s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
-[[ -n $VM ]] || { sed -n '19,43s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[[ -n $VM ]] || { sed -n '19,44s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 ONLY_ARG=${ONLY:-all}
 [[ -n $FEATS ]] && ONLY_ARG="$ONLY_ARG features$FEATS"
 (( HIDDEN )) && ONLY_ARG="$ONLY_ARG hidden"
+# The gate covers the update from the release before too.
+[[ -z $PREV ]] && ONLY_ARG="$ONLY_ARG no-update-path"
 want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
 
 APP="$HOME/Applications/OmacVM Test.app"
@@ -99,7 +102,8 @@ res() {   # STEP ok|FAIL|BLOCKED|skip DETAIL
 log() { echo "== $(date +%H:%M:%S) $*"; }
 CLONES=()   # VMs this run cloned: deleted at the end unless --keep-vm
 remove_clones() { local c; for c in ${CLONES[@]+"${CLONES[@]}"}; do (( KEEP )) || rm -rf "$c"; done; CLONES=(); }
-die() { echo "cc-switches: $*" >&2; exit 3; }
+DIED=""; FINISHED=0   # a run that stops before its end is never a gate result
+die() { DIED=$*; echo "cc-switches: $*" >&2; exit 3; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null; }
 
 # ---- guards: a test Mac nobody uses right now ----
@@ -134,6 +138,7 @@ fingerprint() {
   launchctl list 2>/dev/null | awk '$3 ~ /^org\.omacvm\./ && $3 !~ /test/ {print $3}' | sort
   defaults read org.omacvm.app vmsRoot 2>/dev/null
   for f in cli settings.json; do echo "omacvm/$f $(shasum "$HOME/Library/Application Support/omacvm/$f" 2>/dev/null | cut -c1-16)"; done
+  for f in token relay-key; do echo "omacvm-bridge/$f $(shasum "$HOME/Library/Application Support/omacvm-bridge/$f" 2>/dev/null | cut -c1-16)"; done
   ls -ld "$HOME/OmacVM/Omarchy" 2>/dev/null | awk '{print $1, $NF}'
 }
 fingerprint > "$OUT/fp-before.txt"
@@ -148,7 +153,9 @@ qemu_pid() { pgrep -f "$QPAT $VM( |$)" | head -1; }
 launcher_pid() { pgrep -f "OmacVM Test.app/Contents/MacOS/OmacVM( |$)" | head -1; }
 SERVER=""
 cleanup() {
+  local rc=$?
   log "cleanup"
+  (( FINISHED )) || res aborted FAIL "the run stopped before its end (exit $rc${DIED:+: $DIED})"
   local p; p=$(qemu_pid)
   if [[ -n $p ]]; then gssh "systemctl poweroff" >/dev/null 2>&1; for _ in $(seq 60); do kill -0 "$p" 2>/dev/null || break; sleep 1; done; kill "$p" 2>/dev/null; fi
   p=$(launcher_pid); [[ -n $p ]] && kill "$p" 2>/dev/null
@@ -175,7 +182,8 @@ cleanup() {
   echo; echo "$n_ok ok, $n_fail FAIL, $n_blocked BLOCKED, $n_skip skip in $(( ($(date +%s) - T0) / 60 )) min: $OUT/summary.tsv"
 }
 write_result() {
-  /usr/bin/python3 - "$OUT" "$(plist "$APP" OmacVMCommit)" "$(plist "$APP" CFBundleShortVersionString)" \
+  # The build these steps ran on (the app here at the end may be the one from before --app).
+  /usr/bin/python3 - "$OUT" "${TESTED_COMMIT:-}" "${TESTED_VERSION:-}" \
     "$n_ok" "$n_fail" "$n_blocked" "$n_skip" "$(( $(date +%s) - T0 ))" "$ONLY_ARG" <<'PY'
 import json, sys, time
 out, commit, version, ok, fail, blocked, skip, secs, only = sys.argv[1:]
@@ -214,6 +222,7 @@ fi
 [[ -x $CLI ]] || die "$CLI missing"
 codesign --verify --deep --strict "$APP" 2>/dev/null && res app ok "$(plist "$APP" CFBundleShortVersionString) $(plist "$APP" OmacVMCommit | cut -c1-12) team $(codesign -dv "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')" \
   || res app FAIL "$APP does not verify"
+TESTED_COMMIT=$(plist "$APP" OmacVMCommit); TESTED_VERSION=$(plist "$APP" CFBundleShortVersionString)
 OLDROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null)
 if [[ -n $ROOTARG ]]; then mkdir -p "$ROOTARG"; ROOTARG=$(cd "$ROOTARG" && pwd); defaults write "$APPID" vmsRoot "$ROOTARG"; fi
 ROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null || echo "$HOME/OmacVM")
@@ -489,6 +498,8 @@ baseline() {   # TAG: the control centre comes up linked; no row fails; the Mac 
     bad=$(/usr/bin/python3 -c '
 import json, re, sys
 o = json.load(open(sys.argv[1]))
+if "\uf00c" not in o["screen"] and "\uf10c" not in o["screen"]:
+    print("no status marks on the screen (ASCII?): failing rows cannot be read"); sys.exit(0)
 print(" | ".join(l.strip(" │")[:90] for l in o["screen"].splitlines() if re.search("|", l))[:600])' "$CCJ")
     [[ -z $bad ]] && res "baseline-$1" ok "$s" || res "baseline-$1" FAIL "rows failing or needing a person: $bad"
   else
@@ -793,4 +804,5 @@ if [[ -n $PREV ]] && want update; then
   fi
   remove_clones
 fi
+FINISHED=1
 (( n_fail == 0 && n_blocked == 0 ))
