@@ -111,6 +111,13 @@ no_calls "omacvm vms --json"
 expect "omacvm features --json" 0 "$("$REALPY" -c 'import json,sys; json.load(open(sys.argv[1])); print(0)' "$T/features.json" 2>&1)"
 no_calls "omacvm features --json"
 
+# omacvm build's plan for OmacVM.app, from the app: the Command Line Tools are
+# not asked for (exit 3 "needs a person" before).
+"${NOCLT[@]}" OMACVM_PREBUILT_SOURCE="$T/images" "$RES/omacvm/omacvm" build --plan --json --vm-type app > "$T/plan.json" 2>"$T/plan.err"
+expect "omacvm build --plan --vm-type app: a plan" 0 "$("$REALPY" -c 'import json,sys; json.load(open(sys.argv[1])); print(0)' "$T/plan.json" 2>&1 || cat "$T/plan.err")"
+expect "... nothing about the Command Line Tools" "" "$(grep -i "command line tools" "$T/plan.json" "$T/plan.err")"
+no_calls "omacvm build --plan --vm-type app"
+
 # apply's VM-side parts (src/lib/features.sh, python3).
 got=$("${NOCLT[@]}" bash -c 'source "$1/lib/mac.sh"; source "$1/lib/features.sh"
   feature_switch_parts "{\"parts\": {\"core\": {\"digest\": \"a\"}, \"camera\": {\"digest\": \"b\"}}}" \
