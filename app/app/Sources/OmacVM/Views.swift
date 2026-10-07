@@ -370,6 +370,8 @@ struct ReadyView: View {
     @State private var fastNetBusy = false
     @State private var fastNetNote: String?
     @State private var fastNetStatus = ""
+    /// The service needs the person (FastNetwork.serviceNeeds): its button.
+    @State private var fastNetFix: String?
     @State private var graphics = GraphicsChoice.auto
     @State private var graphicsNote: String?
     @State private var macFolder: String?
@@ -570,14 +572,11 @@ struct ReadyView: View {
             case .allowedNextStart:
                 Text(KeyNote.allowedText).font(.caption).foregroundStyle(.secondary)
             case .needsUser:
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Keyboard: OmacVM is not allowed to read it").foregroundStyle(.red)
-                        Spacer()
-                        Button("Allow…") { KeyAccess.request() }
-                    }
-                    Text(KeyAccess.missingText).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text("Keyboard: \(KeyAccess.shortText)").foregroundStyle(.red)
+                    KeyStepsButton()
+                    Spacer()
+                    Button("Allow…") { KeyAccess.request() }
                 }
             }
         }
@@ -610,6 +609,9 @@ struct ReadyView: View {
                 Text("Fast network (experimental)")
                 Spacer()
                 if fastNetBusy { ProgressView().controlSize(.small) }
+                if let fix = fastNetFix, fastNetOn {
+                    Button(fix) { updateFastNetwork() }.disabled(fastNetBusy)
+                }
                 Button(fastNetOn ? "Turn Off…" : "Turn On…") { toggleFastNetwork() }
                     .disabled(fastNetBusy)
             }
@@ -620,38 +622,68 @@ struct ReadyView: View {
 
     /// What the switch says, worked out off the main thread (the service
     /// check verifies QEMU's code signature, which reads the whole binary).
-    nonisolated private static func fastNetworkStatus(_ c: VMConfig) -> (Bool, String) {
+    /// The service is checked as the installer checks it (an older build of
+    /// the same protocol is fine; another protocol after an app update needs
+    /// an update): its button then, Update… or Install…
+    nonisolated private static func fastNetworkStatus(_ c: VMConfig) -> (on: Bool, text: String, fix: String?) {
         guard FastNetwork.isOn(c) else {
-            return (false, "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once.")
+            return (false, "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once.", nil)
         }
-        if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): Turn Off, then On again.") }
-        return (true, FastNetwork.lastRecord(c) == "vmnet" ? "On." : "On from the VM's next start.")
+        let status = FastNetwork.serviceStatus()
+        if status == "stopped" { return (true, "On, but \(FastNetwork.stoppedText); until then the VM starts on the normal network.", nil) }
+        if let need = FastNetwork.serviceNeeds(status) {
+            return (true, "On. \(need.why) \(need.button) fixes it (macOS asks for your password once); until then the VM starts on the normal network.", need.button)
+        }
+        if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): Turn Off, then On again.", nil) }
+        return (true, FastNetwork.lastRecord(c) == "vmnet" ? "On." : "On from the VM's next start.", nil)
     }
 
     private func refreshFastNetwork() {
         let c = state.config
         fastNetOn = FastNetwork.isOn(c)
         Task.detached {
-            let (on, text) = Self.fastNetworkStatus(c)
+            let st = Self.fastNetworkStatus(c)
             await MainActor.run {
-                fastNetOn = on
-                fastNetStatus = text
+                fastNetOn = st.on
+                fastNetStatus = st.text
+                fastNetFix = st.fix
             }
         }
     }
 
     private func toggleFastNetwork() {
         let c = state.config, on = !fastNetOn
+        // A VM of this app that runs on the fast network keeps it until it shuts down.
+        let inUse = state.vmRunning() && FastNetwork.lastRecord(c) == "vmnet"
         fastNetBusy = true
         fastNetNote = nil
         Task.detached {
-            let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c)
-            let (now, text) = Self.fastNetworkStatus(c)
+            let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c, vmnetInUse: inUse)
+            let st = Self.fastNetworkStatus(c)
             await MainActor.run {
                 fastNetBusy = false
                 fastNetNote = err
-                fastNetOn = now
-                fastNetStatus = text
+                fastNetOn = st.on
+                fastNetStatus = st.text
+                fastNetFix = st.fix
+            }
+        }
+    }
+
+    /// Update… / Install…: the service for this app (macOS's password dialog).
+    private func updateFastNetwork() {
+        let c = state.config
+        fastNetBusy = true
+        fastNetNote = nil
+        Task.detached {
+            let err = FastNetwork.updateService()
+            let st = Self.fastNetworkStatus(c)
+            await MainActor.run {
+                fastNetBusy = false
+                fastNetNote = err
+                fastNetOn = st.on
+                fastNetStatus = st.text
+                fastNetFix = st.fix
             }
         }
     }
@@ -663,7 +695,27 @@ extension KeyAccess {
     /// before OmacVM was allowed. (Here, not in KeyAccess.swift, which
     /// src/tests/app-key-access.sh compiles on its own.)
     static func note(folder: URL) -> KeyNote {
-        KeyNote.decide(allowedNow: listen || post, lastLog: lastLog(folder: folder))
+        KeyNote.decide(allowedNow: allowed, lastLog: lastLog(folder: folder))
+    }
+}
+
+/// The keyboard note's (i): the steps in System Settings (KeyAccess).
+private struct KeyStepsButton: View {
+    @State private var shown = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "info.circle").foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .help("How to allow it")
+        .accessibilityLabel("How to allow it")
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            Text(KeyAccess.missingText)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 320, alignment: .leading)
+                .padding(12)
+        }
     }
 }
 

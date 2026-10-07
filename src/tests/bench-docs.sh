@@ -7,6 +7,13 @@
 #   never longer than a released bar of another app in its group
 # - the chart's alt texts in README.md and docs/compare.md give the app's
 #   numbers the SVG gives
+# - the power chart (docs/images/power.svg) is chart.py --panel power's output, its
+#   hours are the battery over the watts, and README.md's alt text gives every
+#   number in it
+# - the GPU progress chart (docs/images/gpu-progress.svg) is chart.py --panel
+#   progress's output, docs/benchmarks/README.md's alt text gives every number
+#   in it, its medians are the ones that page's table gives, and README.md
+#   does not show it (the README shows only the current release)
 # - "not released yet" never names a release
 # - the CHANGELOG names what build-kosmickrisp.sh needs
 set -uo pipefail
@@ -70,6 +77,65 @@ for page in ("README.md", "docs/compare.md"):
     diff = {b: (want[b], got.get(b)) for b in want if got.get(b) != want[b]}
     expect(f"{page}: chart alt text matches the SVG for OmacVM.app", not diff,
            ", ".join(f"{b}: SVG {w}, alt {g}" for b, (w, g) in diff.items()))
+
+# 3b. The power chart: chart.py's output, hours that follow from the watts, every number in README's alt text.
+psvg = read("docs/images/power.svg")
+sub = re.search(r'font-size="13" fill="#908caa" text-anchor="middle">([^<]*)</text>', psvg)
+out = f"{tmp}/power.svg"
+subprocess.run([sys.executable, f"{R}/src/bench/chart.py", "--panel", "power", f"{R}/docs/benchmarks/chart.json", out,
+                sub.group(1) if sub else ""], check=True)
+expect("chart.py --panel power gives the committed power SVG", open(out, encoding="utf-8").read() == psvg,
+       "run src/bench/chart.py --panel power docs/benchmarks/chart.json docs/images/power.svg \"<subtitle>\"")
+pw = data["power"]
+gone = [f"{route} {load} {v} W" for route, loads in pw["watts"].items() for load, v in loads.items()
+        if f"{v:.1f} W · {pw['battery_wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
+for r in pw["round"]["rows"]:
+    gone += [f"{r['mac']} {r['load']} {v} W" for v in (r["app"], r.get("macos"))
+             if v is not None and f"{v:.2f} W · {r['wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
+expect("power SVG shows every watt figure with its hours (battery over the draw)", not gone, ", ".join(gone))
+expect("power: UTM idle is left out or marked", "idle" not in pw["watts"].get("utm", {}) or "#32" in psvg)
+pdesc = re.search(r'<desc id="d">(.*?)</desc>', psvg, re.S).group(1)
+pairs = re.compile(r"(\d+\.\d+) W \((\d+\.\d+) h\)")
+want = pairs.findall(pdesc)
+alt = re.search(r'<img src="[^"]*power\.svg" alt="([^"]*)"', read("README.md"))
+got = pairs.findall(alt.group(1) if alt else "")
+expect(f"README.md: power chart alt text gives the SVG's {len(want)} numbers in order", got == want and len(want) > 0,
+       f"SVG {['/'.join(p) for p in want]}, alt {['/'.join(p) for p in got]}")
+expect("README.md: the battery line links to the power chart",
+       re.search(r"Optimized for battery\*\*<br>[^|]*\]\(#power-draw\)", read("README.md")) is not None
+       and '<a name="power-draw"></a>' in read("README.md"))
+
+# 3c. The GPU progress chart: chart.py's output, every number in its alt text, medians as the docs give them, not in README.md.
+gsvg = read("docs/images/gpu-progress.svg")
+sub = re.search(r'font-size="13" fill="#908caa" text-anchor="middle">([^<]*)</text>', gsvg)
+out = f"{tmp}/gpu-progress.svg"
+subprocess.run([sys.executable, f"{R}/src/bench/chart.py", "--panel", "progress", f"{R}/docs/benchmarks/chart.json", out,
+                sub.group(1) if sub else ""], check=True)
+expect("chart.py --panel progress gives the committed GPU progress SVG", open(out, encoding="utf-8").read() == gsvg,
+       "run src/bench/chart.py --panel progress docs/benchmarks/chart.json docs/images/gpu-progress.svg \"<subtitle>\"")
+gdesc = re.search(r'<desc id="d">(.*?)</desc>', gsvg, re.S).group(1)
+nums = re.compile(r"(\d+\.\d\dx) \(([\d,.]+(?: fps)?)\)|\b(\d[\d,.]*), the only version measured")
+want = nums.findall(gdesc)
+alt = re.search(r'<img src="[^"]*gpu-progress\.svg" alt="([^"]*)"', read("docs/benchmarks/README.md"))
+alt = alt.group(1) if alt else ""
+got = nums.findall(alt.replace(" scores ", " "))
+expect(f"docs/benchmarks/README.md: GPU progress alt text gives the SVG's {len(want)} numbers in order", got == want and len(want) > 0,
+       f"SVG {want}, alt {got}")
+expect("README.md: no comparison between OmacVM.app releases (gpu-progress.svg stays in docs/benchmarks)",
+       "gpu-progress" not in read("README.md"))
+gp = data["gpu_progress"]
+sys.path.insert(0, f"{R}/src/bench")
+sys.dont_write_bytecode = True
+import chart
+section = read("docs/benchmarks/README.md").split("### GPU progress (2026-10-07)", 1)[-1].split("\n## ", 1)[0]
+for t in gp["tests"]:
+    for v, m, lo, hi, r, why in chart.progress_summary(t, gp["versions"])[0]:
+        row = re.search(r"^\| " + re.escape(v) + r" \|.*$", section, re.M)
+        if m is not None:
+            runs = ", ".join(chart.progress_num(dict(t, unit=""), x) for x in t["runs"][v])
+            cell = chart.progress_num(dict(t, unit=""), m) + (f" ({runs})" if len(t["runs"][v]) > 1 else "")
+            expect(f"docs/benchmarks: GPU progress {t['key']} {v} reads {cell}", row is not None and f"| {cell} |" in row.group(0),
+                   row.group(0) if row else "no row")
 
 # 4. "Not released yet" with a version in brackets is a promise the release may not keep.
 for page in ("README.md", "docs/compare.md", "docs/benchmarks/README.md"):
