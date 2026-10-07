@@ -307,7 +307,9 @@ final class PanelWindow: NSPanel {
         collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace, .ignoresCycle, .transient]
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
-        hasShadow = true
+        // Flat like Omarchy's prompt; on macOS 26 a borderless window's shadow
+        // also draws a light rim inside its edge (omacvm-cocoa-borderless-no-rim.patch).
+        hasShadow = false
         backgroundColor = .clear
         animationBehavior = .none   // up and gone at once: no fade to wait for
     }
