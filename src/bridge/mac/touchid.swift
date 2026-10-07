@@ -70,7 +70,7 @@ final class LATouchID: TouchIDAuthenticator {
 func touchIDAskAppPanel(fd: Int32, _ p: TouchIDPrompt, timeout: Double) -> TouchIDOutcome? {
   let text = touchIDPanelText(p.request, vm: p.vmLabel)
   let theme = p.theme.flatMap { touchIDThemes.load($0) } ?? .tokyoNight
-  var o: [String: Any] = ["title": text.title, "line": text.line, "timeout": Int(timeout), "theme": theme.panelColors]
+  var o: [String: Any] = ["title": text.title, "line": text.line, "timeout": Int(timeout), "theme": theme.panelTheme]
   if let box = text.box { o["box"] = box }
   let head = "HTTP/1.1 103 Touch ID Panel\r\nX-OmacVM-Panel: \(jsonData(o).base64EncodedString())\r\n\r\n"
   guard writeAll(fd, Data(head.utf8)) else { return .no(.cancelled) }
@@ -147,7 +147,8 @@ func peerGone(_ fd: Int32) -> Bool {
 /// One request (server.swift, after the Bridge token checked out).
 func touchIDRequest(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data) {
   let c = control.touchIDCaller(fd: fd, peer: peer, method: method, path: path, headers: headers, body: body)
-  let name = c.vm?.name ?? "-"
+  // The VM found, else the one OmacVM.app named (not found: "-" was all the log said).
+  let name = c.vm?.name ?? c.asked ?? "-"
   func reply(_ code: Int, _ obj: [String: Any], _ note: String, quiet: Bool = false) {
     // Refusals and fast noes once a minute per kind: a looping VM must not fill the log.
     let line = "touchid: from \(peer) (\(logSafe(name))): \(code) \(logSafe(note))"

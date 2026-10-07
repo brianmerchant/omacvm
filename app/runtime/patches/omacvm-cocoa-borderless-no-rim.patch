@@ -1,0 +1,77 @@
+From: OmacVM
+Subject: [PATCH] ui/cocoa: no light line around a borderless window
+
+What: a window switched to borderless (the tests' full screen over a
+display, OMACVM_TEST_SKIP_DISPLAYS, for the main window and the other
+displays' windows) has no shadow; leaving that full screen gives the main
+window its shadow back. One helper, omacvm_set_borderless, makes a window
+borderless and drops the shadow.
+
+Why: macOS 26 draws a light 1 pt rim (white at about 20 %, a fainter third
+pixel) with a window's shadow, just inside the window's edges. QEMU's
+window is made titled and later switched to borderless with setStyleMask,
+which keeps its shadow, so a borderless window over the whole display had
+a light line on all four edges, over the strip beside the notch too
+(MacBook Air, macOS 26.6.2, 2026-10-07: 2.9.1's notch full screen during a
+benchmark round; the same code is 3.0.x's test-mode full screen). The
+line is gone from a capture of the window without its shadow, so it is
+WindowServer's, not QEMU's or the guest's. macOS's own full screen (real
+use since 3.0.0) has no shadow and no rim; a titled window keeps both.
+
+Upstream: not applicable (OmacVM's borderless full screen).
+Test: Tests/display/test-borderless-rim.sh (build time, on the patched
+ui/cocoa.m: no borderless switch outside the helper, the shadow given back;
+--self-test catches 3.0.3's code) and test-borderless-rim-live.sh (pixels,
+on a Mac with macOS 26 or newer: a borderless window's edge with and
+without the helper). Applies after omacvm-cocoa-tap-permission.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -2911,6 +2911,20 @@
+     [cocoaView omacvmFullScreenTake];
+ }
+ static NSWindowStyleMask notchSavedMask;
++static BOOL notchSavedShadow;
++
++/*
++ * A window without a frame has no shadow. macOS 26 draws a light 1 pt rim
++ * (white at about 20 %) with a window's shadow, just inside its edges; on a
++ * borderless window over a whole display that rim is a line around the
++ * screen. A window made titled and then borderless keeps its shadow, so
++ * every borderless switch drops it here.
++ */
++static void omacvm_set_borderless(NSWindow *w, NSWindowStyleMask extra)
++{
++    [w setStyleMask:NSWindowStyleMaskBorderless | extra];
++    [w setHasShadow:NO];
++}
+ 
+ /*
+  * OmacVM tests only (OMACVM_TEST_SKIP_DISPLAYS): the borderless full screen,
+@@ -2925,7 +2939,8 @@
+         notchFull = YES;
+         notchSavedFrame = [w frame];
+         notchSavedMask = [w styleMask];
+-        [w setStyleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable];
++        notchSavedShadow = [w hasShadow];
++        omacvm_set_borderless(w, NSWindowStyleMaskResizable);
+         [w setFrame:[target frame] display:YES];
+         [w orderFront:nil];
+         [fullScreenMenuItem setTitle:@"Exit Full Screen"];
+@@ -2936,6 +2951,7 @@
+     } else {
+         notchFull = NO;
+         [w setStyleMask:notchSavedMask];
++        [w setHasShadow:notchSavedShadow];
+         [w setFrame:notchSavedFrame display:YES];
+         [fullScreenMenuItem setTitle:@"Enter Full Screen"];
+         [cocoaView updateScale];
+@@ -7794,7 +7810,7 @@
+         NSRect r = NSMakeRect(frame.origin.x + in.left, frame.origin.y + in.bottom,
+                               frame.size.width - in.left - in.right,
+                               frame.size.height - in.top - in.bottom);
+-        [hd->window setStyleMask:NSWindowStyleMaskBorderless];
++        omacvm_set_borderless(hd->window, 0);
+         [hd->window setFrame:r display:YES];
+         [hd->window orderFront:nil];
+         hd->want_full = false;
