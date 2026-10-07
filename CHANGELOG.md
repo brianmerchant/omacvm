@@ -64,6 +64,16 @@ in more words.
   that check passes; if a step fails, Go Back brings it back. Compact is
   gone: the space Omarchy frees already goes back to the Mac by itself.
 
+- USB devices (OmacVM.app, experimental) no longer go to the VM by
+  themselves. With **USB devices** on, plugging a device in while the VM
+  runs asks "Connect “ST-Link V2” to Omarchy or keep it on the Mac?". The
+  answer is for that plug-in only, unless you check **Always do this for
+  this device**. **Devices…** lists the remembered devices (Ask Each Time,
+  Connect to Omarchy, Keep on Mac, Forget). Two identical devices are told
+  apart by where they are plugged in and their serial numbers. Devices
+  switched on under 3.0.1 to 3.0.4 keep connecting by themselves and now
+  show in the list.
+
 - A VM built behind a proxy on the Mac's 127.0.0.1 (Clash, V2Ray, Surge)
   no longer keeps `10.0.2.2:<port>` as its proxy on the fast network, where
   that address leads nowhere and apps failed (Helium could not install
