@@ -519,6 +519,44 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     _ = ua.finished([vmA], now: t0 + 1)
     expect(!ua.unknown(now: t0 + 5, every: VMListCache.addressEvery).start, "address: not again within 10 s")
     expect(ua.unknown(now: t0 + 11, every: VMListCache.addressEvery).start, "address: 10 s after the last list")
+    // A VM the list has as running, but refused (not reachable): answered at
+    // once; a background run at most every 10 s, however often it asks.
+    var ur = VMListCache()
+    _ = ur.unknown(now: t0, every: 1)
+    let unreach = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false, why: "no address")
+    _ = ur.finished([unreach], now: t0 + 1)
+    expect(appVMListed("Omarchy", ur.list) && !appVMListed("Other", ur.list), "listed: by name, running")
+    let k = "app/Omarchy"
+    var rr = ur.refused(key: k, now: t0 + 2)
+    expect(!rr.start && rr.waitFor == nil, "refused: no run within 5 s of the last list, answered at once")
+    rr = ur.refused(key: k, now: t0 + 7)
+    expect(rr.start && rr.waitFor == ur.started && ur.running, "refused: a run 5 s after the last list, waited for (a VM that just started again)")
+    rr = ur.refused(key: k, now: t0 + 7.5)
+    expect(!rr.start && rr.waitFor == ur.started, "refused: while its run goes, no second one; that one waited for")
+    _ = ur.finished([unreach], now: t0 + 8)
+    // Still unreachable: back off 30, 60, 120 s, answered at once in between.
+    rr = ur.refused(key: k, now: t0 + 20)
+    expect(!rr.start && rr.waitFor == nil, "back-off: no run 12 s later")
+    rr = ur.refused(key: k, now: t0 + 38)
+    expect(rr.start, "back-off: a run 30 s after the last")
+    _ = ur.finished([unreach], now: t0 + 39)
+    expect(!ur.refused(key: k, now: t0 + 80).start && ur.refused(key: k, now: t0 + 99).start, "back-off: then 60 s")
+    _ = ur.finished([unreach], now: t0 + 100)
+    expect(!ur.refused(key: k, now: t0 + 200).start && ur.refused(key: k, now: t0 + 220).start, "back-off: then 120 s")
+    _ = ur.finished([unreach], now: t0 + 221)
+    expect(!ur.refused(key: k, now: t0 + 300).start && ur.refused(key: k, now: t0 + 342).start, "back-off: stays at 120 s")
+    _ = ur.finished([unreach], now: t0 + 343)
+    var refusedRuns = 0
+    for i in 0..<600 where ur.refused(key: k, now: t0 + 344 + Double(i)).start { refusedRuns += 1; _ = ur.finished([unreach], now: t0 + 344 + Double(i) + 0.5) }
+    expect(refusedRuns <= 5, "a VM asking every second for 10 minutes starts at most 5 runs (got \(refusedRuns))")
+    // Another VM is not held back by this one's back-off; found again: starts over.
+    expect(ur.refused(key: "app/Other", now: t0 + 1000).start, "back-off is per VM")
+    _ = ur.finished([unreach], now: t0 + 1001)
+    ur.reached(key: k)
+    expect(ur.refused(key: k, now: t0 + 1010).start, "found again: the next refusal looks after 5 s again")
+    _ = ur.finished([unreach], now: t0 + 1011)
+    expect(peerListed("10.211.55.5", [vmA]) && !peerListed("10.211.55.9", [vmA]) && !peerListed("", [VMEntry(name: "x", type: "app", state: "running", ip: "", omacvm: "", setup: true)]),
+           "listed: by address, never an empty one")
     // jobEnded keeps whether the VM was reachable.
     var uj = VMListCache()
     _ = uj.unknown(now: t0, every: 1)
@@ -526,19 +564,48 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     _ = uj.jobEnded(vm: "app/A", version: "3.0.3")
     expect(uj.list.first?.omacvm == "3.0.3" && uj.list.first?.reachable == false, "a job's new version keeps reachable")
 
-    // ---- a VM that runs but the Mac cannot reach: said so, not "not running" ----
-    let lost = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false)
+    // ---- a VM that runs but the Mac cannot reach: said so, with why, not "not running" ----
+    let lost = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false,
+                       why: "no address: its fast network is down: omacvm-netd refused")
     if case .failure(let e) = vmForApp("Omarchy", [lost]) {
-      expect(e.code == "unknown-vm" && e.message == unreachableText, "running, set up, unreachable: says the Mac cannot reach it (\(e.message))")
+      expect(e.code == "unknown-vm" && e.message == "the Mac cannot reach this VM: no address: its fast network is down: omacvm-netd refused",
+             "running, set up, unreachable: says the Mac cannot reach it and why (\(e.message))")
     } else { expect(false, "unreachable app VM") }
-    let lostPeer = VMEntry(name: "P", type: "parallels", state: "running", ip: "10.211.55.9", omacvm: "", setup: true, reachable: false)
+    // Touch ID needs no SSH: the app vouches for the VM, its key signs the request.
+    if case .success(let v) = vmForApp("Omarchy", [lost], ssh: false) { expect(v == lost, "Touch ID: an unreachable app VM still found") }
+    else { expect(false, "Touch ID without SSH") }
+    let noWhy = VMEntry(name: "N", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false)
+    if case .failure(let e) = vmForApp("N", [noWhy]) {
+      expect(e.message == "the Mac cannot reach this VM: it runs, but SSH from the Mac did not answer", "no why (an older omacvm): the general reason")
+    } else { expect(false, "no why") }
+    let ugly = VMEntry(name: "U", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false,
+                       why: "a\u{1b}[31mb\n" + String(repeating: "x", count: 500))
+    if case .failure(let e) = vmForApp("U", [ugly]) {
+      expect(!e.message.contains("\u{1b}") && !e.message.contains("\n") && e.message.count <= 30 + 240, "why: no control characters, short")
+    } else { expect(false, "ugly why") }
+    expect(!routeNeedsSSH(.job("0123456789abcdef")) && !routeNeedsSSH(.gpuMemory), "a job's state and graphics memory: no SSH needed")
+    expect(routeNeedsSSH(.status) && routeNeedsSSH(.startJob(JobRequest(action: .enable, features: ["touch-id"]))),
+           "checks and new jobs need SSH")
+    let lostPeer = VMEntry(name: "P", type: "parallels", state: "running", ip: "10.211.55.9", omacvm: "", setup: true, reachable: false,
+                           why: "OmacVM's SSH key did not get in at 10.211.55.9")
     if case .failure(let e) = vmForPeer("10.211.55.9", [lostPeer]) {
-      expect(e.message == unreachableText, "unreachable VM at that address: said so")
+      expect(e.message == "the Mac cannot reach this VM: OmacVM's SSH key did not get in at 10.211.55.9", "unreachable VM at that address: said so, and why")
     } else { expect(false, "unreachable peer") }
     let offApp = VMEntry(name: "Off", type: "app", state: "stopped", ip: "", omacvm: "", setup: true, reachable: false)
     if case .failure(let e) = vmForApp("Off", [offApp]) {
-      expect(e.message == "this VM is not running, or OmacVM did not set it up", "stopped stays 'not running'")
+      expect(e.message == notRunningText, "stopped: 'not running', nothing about set up")
     } else { expect(false, "stopped") }
+    if case .failure = vmForApp("Off", [offApp], ssh: false) { expect(true, "Touch ID: a stopped VM is still refused") }
+    else { expect(false, "Touch ID stopped") }
+    let notMine = VMEntry(name: "Other", type: "app", state: "running", ip: "192.168.77.4", omacvm: "", setup: false, reachable: false)
+    if case .failure(let e) = vmForApp("Other", [notMine], ssh: false) {
+      expect(e.message.hasPrefix("OmacVM on the Mac did not set this VM up") && e.message.contains("--vm \"Other\""), "not set up: said so, with the command")
+    } else { expect(false, "not set up") }
+    var uw = VMListCache()
+    _ = uw.unknown(now: t0, every: 1)
+    _ = uw.finished([lost], now: t0 + 1)
+    _ = uw.jobEnded(vm: "app/Omarchy", version: "3.0.4")
+    expect(uw.list.first?.why == lost.why, "a job's new version keeps why")
 
     // ---- refusals in the log ----
     var ll = LogLimiter(every: 60, maxKeys: 4)

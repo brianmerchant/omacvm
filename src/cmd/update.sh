@@ -169,10 +169,14 @@ while IFS=$'\t' read -r name type state _; do
   vm_pin "$name" "$type"
   # Not reachable with OmacVM's key (another OS, no OmacVM, or another host
   # key): say why for the last one, then go on with the other VMs.
-  if ! v=$(vm_probe "$ip" | sed -n 's/^OMACVM_VERSION=//p'); then
-    hostkey_changed "$ip" 2>/dev/null && info "VM '$name': another SSH host key, not updated (rebuilt? omacvm apply --vm $(printf %q "$name") --reset-host-key)"
+  perr=$(mktemp -t omacvm-update)
+  if ! v=$(OMA_PROBE_ERR=$perr vm_probe "$ip" | sed -n 's/^OMACVM_VERSION=//p'); then
+    [[ $(ssh_failure_why "$ip" "$perr") == "hostkey "* ]] &&
+      info "VM '$name': another SSH host key, not updated (rebuilt? omacvm apply --vm $(printf %q "$name") --reset-host-key)"
+    rm -f "$perr"
     continue
   fi
+  rm -f "$perr"
   [[ -n $v ]] || continue
   if [[ ! -s $OMA_PIN ]] && ! vm_marked "$name" "$type"; then
     info "VM '$name' says it has OmacVM $v, but OmacVM has not set it up from this Mac yet: omacvm update --vm $(printf %q "$name")"

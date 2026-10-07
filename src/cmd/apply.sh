@@ -240,10 +240,35 @@ if (( MAC )); then
     die "the Mac side did not install (see above); the VM was not changed"
   fi
   rm -f "$MAC_FAILED"
-  # OmacVM.app's fast network: a system service (macOS asks for the password once).
+  # OmacVM.app's fast network: a system service (macOS asks for the password
+  # once). Installed (or updated) when this run turns the fast network on or
+  # repairs it. Any other run (another feature, an update) leaves it as it is:
+  # a service that needs an update after an app update never stops it, the VM
+  # then starts on QEMU's own network until the person updates the service.
   if [[ $TYPE == app ]] && on fast-network; then
-    rc=0; "$R/src/net/mac/install.sh" || rc=$?
-    (( rc == 0 )) || { echo "omacvm apply: the fast network did not install (omacvm disable fast-network keeps QEMU's own network)" >&2; exit "$rc"; }
+    fni=$(feature_index fast-network)
+    if [[ ${PREV[$fni]} != on || " ${SETN[*]:-} " == *" fast-network "* || " ${REINSTALL[*]:-} " == *" fast-network "* ]]; then
+      rc=0; "$R/src/net/mac/install.sh" || rc=$?
+      if (( rc == 3 )); then
+        # Nobody to ask for the password here (a job a VM asked for through
+        # the Bridge never becomes root, or no terminal): the switch is set
+        # for the VM's next start, and OmacVM.app asks on the Mac then.
+        info "fast network: its service on this Mac needs an administrator's password to install or update: OmacVM asks for it on the Mac at the VM's next start (or Update… under Fast network in OmacVM, or omacvm enable fast-network in Terminal); until then the VM starts on QEMU's own network"
+      elif (( rc )); then
+        if (( rc == 4 )); then why="the password dialog was cancelled: the fast network was not changed, the VM keeps its network"
+        else why="its service did not install: the fast network was not changed, the VM keeps its network"; fi
+        failed_part fast-network "$why" mac
+        echo "omacvm apply: $why" >&2
+        exit "$rc"
+      fi
+    else
+      case $("$R/src/net/mac/install.sh" --status 2>/dev/null | head -1) in
+        ok) ;;
+        stopped) info "fast network: its service stopped trying after vmnet failed too often; the VM starts on QEMU's own network until the Mac restarts or: omacvm enable fast-network --vm \"$VM\"" ;;
+        old) info "fast network: its service on this Mac needs an update for this OmacVM.app (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Update… in OmacVM. Until then the VM starts on QEMU's own network" ;;
+        *) info "fast network: its service is not installed (or not running) on this Mac (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Install… in OmacVM. Until then the VM starts on QEMU's own network" ;;
+      esac
+    fi
   fi
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
@@ -501,25 +526,21 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
     [[ -z $l ]] || info "OmacVM.app: $l off in the VM now; the Mac stops serving it at the VM's next start"
   fi
   # The fast network from the VM's next start: its own MAC address (the VMs
-  # share vmnet's network), kept in fast-network, which the app reads.
+  # share vmnet's network), kept in fast-network, which the app reads. A VM
+  # that runs keeps its network until then (app_fast_network_wish).
   if on fast-network; then
-    [[ -s $d/fast-network ]] ||
-      printf 'mac=52:54:00:%02x:%02x:%02x\n' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)) > "$d/fast-network"
-    [[ $(app_net "$d") == vmnet ]] || info "fast network: from the VM's next start (shut it down, then start it again)"
-  elif [[ -e $d/fast-network ]]; then
-    rm -f "$d/fast-network"
+    l=$(app_fast_network_wish "$d" on) && info "$l"
+  elif l=$(app_fast_network_wish "$d" off); then
+    info "$l"
     # The root service only while one of this user's app VMs has the fast
-    # network; without it a VM still running on it switches to the user
-    # network within seconds, else at its next start.
+    # network or runs on it (it would take the network from under a VM
+    # that runs on it, which keeps it until it shuts down).
     if (( MAC )) && ! app_any_fast_network; then
-      if "$R/src/net/mac/install.sh" --remove; then
-        [[ $(app_net "$d") == vmnet ]] && info "fast network: off (the running VM switches to QEMU's own network now)"
-      else
+      if app_any_on_vmnet; then
+        info "the fast network's service stays installed while a VM runs on it (omacvm uninstall, or src/net/mac/install.sh --remove, takes it off)"
+      elif ! "$R/src/net/mac/install.sh" --remove; then
         info "the fast network's service stays installed (omacvm uninstall, or src/net/mac/install.sh --remove, takes it off)"
-        [[ $(app_net "$d") == vmnet ]] && info "fast network: off from the VM's next start"
       fi
-    elif [[ $(app_net "$d") == vmnet ]]; then
-      info "fast network: off from the VM's next start"
     fi
   fi
   # Vulkan (Venus) from the VM's next start: the app reads the vulkan file

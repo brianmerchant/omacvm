@@ -120,7 +120,32 @@ gssh() {
     "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -p "$port" "root@$ip" "$@"
 }
 
-# hostkey_changed IP: the VM answers, with other host keys than the one
+# ssh_failure_why IP FILE: why SSH did not get in, from ssh's own messages in
+# FILE (vm_probe with OMA_PROBE_ERR), one line; "hostkey" first when the VM
+# answered with another host key than the one remembered. No second
+# connection: every unauthenticated one (ssh-keyscan opens several) counts
+# against the Mac in sshd's PerSourcePenalties (OpenSSH 9.8+), and enough of
+# them turn the Mac away for up to 10 minutes; all of the Mac's connections
+# come from one address (QEMU's user network: 10.0.2.2).
+ssh_failure_why() {
+  local ip=$1 e
+  e=$(tr -d '\r' < "$2" 2>/dev/null | grep -v '^ *$' | grep -viE '^(@|It is also possible|Someone could be|Please contact|Add correct|Offending|Host key for|[A-Z]+ host key for)' | head -3 | tr '\n' ' ' | sed 's/ *$//')
+  if grep -qE 'Host key verification failed|IDENTIFICATION HAS CHANGED' "$2" 2>/dev/null; then
+    echo "hostkey $ip answers with another SSH host key"
+  elif grep -q 'Permission denied' "$2" 2>/dev/null; then echo "OmacVM's SSH key did not get in at $ip"
+  elif grep -q 'Connection refused' "$2" 2>/dev/null; then echo "nothing takes SSH at $ip (the VM is starting, or its SSH stopped)"
+  elif grep -qiE 'timed out|Operation timed out' "$2" 2>/dev/null; then echo "SSH at $ip did not answer (the VM is busy, or its network is down)"
+  elif grep -qE 'Connection (reset|closed)|kex_exchange_identification|Broken pipe' "$2" 2>/dev/null; then
+    echo "SSH at $ip closed the connection (the VM is busy or starting, or its SSH turns the Mac away for a while after many tries)"
+  elif [[ -n $e ]]; then echo "SSH to $ip did not get in: $(printf '%s' "$e" | tr -d '\000-\037' | cut -c1-160)"
+  else
+    # Nothing said: the VM's sshd closed the connection before a word (as it
+    # does while PerSourcePenalties turns the Mac away; seen 2026-10-07).
+    echo "SSH at $ip closed the connection (the VM is busy or starting, or its SSH turns the Mac away for a while after many tries)"
+  fi
+}
+
+# hostkey_changed IP [SECONDS]: the VM answers, with other host keys than the one
 # remembered for it.
 hostkey_changed() {
   [[ -n ${OMA_PIN:-} && -s ${OMA_PIN:-} ]] || return 1
@@ -128,9 +153,12 @@ hostkey_changed() {
   [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }   # OmacVM.app: 127.0.0.1:PORT
   while read -r _h t k; do
     [[ -n $k ]] || continue
+    # Only a key of a type remembered tells: a scan cut short by a busy VM
+    # may bring only the others.
+    grep -qF " $t " "$OMA_PIN" || continue
     seen=1
     grep -qF " $t $k" "$OMA_PIN" && return 1
-  done < <(ssh-keyscan -T 5 -p "$port" "$ip" 2>/dev/null)
+  done < <(ssh-keyscan -T "${2:-5}" -p "$port" "$ip" 2>/dev/null)
   (( seen ))
 }
 
@@ -193,14 +221,19 @@ omanotch_serves_fast_network() {
 }
 
 wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
-  # By the clock: each try can take seconds of its own (connect and key scan).
-  local end=$((SECONDS + ${2:-600}))
+  # By the clock: each try can take seconds of its own. Another host key is
+  # told by ssh itself (ssh_failure_why), never by a key scan per try: a VM
+  # still booting would otherwise count a scan every 5 s against the Mac and
+  # turn it away for minutes once it is up (PerSourcePenalties).
+  local end=$((SECONDS + ${2:-600})) err
+  err=$(mktemp -t omacvm-ssh)
   while :; do
-    gssh "$1" true 2>/dev/null && return 0
-    hostkey_changed "$1" && { hostkey_error; return 3; }
+    gssh "$1" true 2>"$err" && { rm -f "$err"; return 0; }
+    [[ $(ssh_failure_why "$1" "$err") == "hostkey "* ]] && { rm -f "$err"; hostkey_error; return 3; }
     (( SECONDS < end )) || break
     sleep 5
   done
+  rm -f "$err"
   die "no SSH on $1 after ${2:-600} s"
 }
 

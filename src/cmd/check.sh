@@ -220,18 +220,22 @@ netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, 
   return 0
 }
 if [[ $TYPE == app ]]; then
+  d=$(app_dir "$VM" 2>/dev/null); net=$(head -1 "$d/logs/network" 2>/dev/null)
+  # The switch (fast-network) says how the NEXT start goes; this start keeps
+  # the network it took (logs/network).
   if [[ $FAST_NET == on ]]; then
     st=$("$R/src/net/mac/install.sh" --status 2>/dev/null)
+    upd="omacvm enable fast-network --vm \"$VM\", or Update… under Fast network in OmacVM (macOS asks for your password once); until then the VM starts on QEMU's own network"
     case $(head -1 <<<"$st") in
       ok) ok "fast network service" "omacvm-netd, for this OmacVM.app" ;;
-      old) bad "fast network service" "for another build of the app, or older: omacvm enable fast-network --vm \"$VM\"" ;;
-      down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" ;;
-      stopped) bad "fast network service" "vmnet failed too often in a row, so omacvm-netd stopped trying (each failure costs macOS's vmnet service for good): restart the Mac, or omacvm enable fast-network --vm \"$VM\" again" ;;
-      *) bad "fast network service" "not installed: omacvm enable fast-network --vm \"$VM\"" ;;
+      old) bad "fast network service" "needs an update for this OmacVM.app (it is from another version of the app): $upd" human ;;
+      down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" human ;;
+      stopped) bad "fast network service" "vmnet failed too often in a row, so omacvm-netd stopped trying (each failure costs macOS's vmnet service for good): restart the Mac, or omacvm enable fast-network --vm \"$VM\" again" human ;;
+      *) bad "fast network service" "not installed: $upd" human ;;
     esac
-    d=$(app_dir "$VM" 2>/dev/null); net=$(head -1 "$d/logs/network" 2>/dev/null)
     case $net in
       vmnet) ok "fast network" "on (vmnet), the VM is $IP" ;;
+      "slirp off") warn "fast network" "on from the VM's next start; this start runs on QEMU's own network (shut the VM down, then start it again)" ;;
       slirp\ fallback*) bad "fast network" "${net#slirp fallback: }$(netd_said)" ;;
       slirp*) bad "fast network" "this start took QEMU's user network: ${net#slirp }" ;;
       vmnet-down*) bad "fast network" "${net#vmnet-down }$(netd_said)" ;;
@@ -246,6 +250,7 @@ if [[ $TYPE == app ]]; then
       bad "VPN NAT" "$(cut -d' ' -f3- <<<"$natlog") (a VPN connected while the VM runs may not work for it)"
     elif [[ -n $nat ]]; then ok "VPN NAT" "omacvm-netd translates the VM's addresses on $nat (came up after macOS's sharing started, e.g. a VPN)"
     elif [[ $net == vmnet ]]; then ok "VPN NAT" "not needed: macOS's sharing covers every network that is up"; fi
+  elif [[ $net == vmnet ]]; then ok "fast network" "off from the VM's next start; this start runs on it (vmnet), the VM is $IP"
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
 fi
 
