@@ -419,8 +419,9 @@ prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install i
   log "the VM's packages are older than the mirrors: omarchy update -y, then omacvm apply (limit 45 min)"
   local t0 rc
   t0=$(date +%s)
-  # As the desktop user, as the control centre's "o" runs it; sudo without a password only meanwhile.
-  gssh 'U=$(sed -n "s/^OMACVM_USER=//p" /etc/omacvm/env); echo "$U ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/99-omacvm-e2e; chmod 440 /etc/sudoers.d/99-omacvm-e2e
+  # As the desktop user, as the control centre's "o" runs it; sudo without a password only meanwhile
+  # (verifypw=any: its sudo -v too, as src/vm/omarchy-install.sh does).
+  gssh 'U=$(sed -n "s/^OMACVM_USER=//p" /etc/omacvm/env); printf "Defaults:%s verifypw=any\n%s ALL=(ALL) NOPASSWD: ALL\n" "$U" "$U" > /etc/sudoers.d/99-omacvm-e2e; chmod 440 /etc/sudoers.d/99-omacvm-e2e
     runuser -u "$U" -- env HOME="/home/$U" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c "source /usr/share/omarchy/default/bash/env-bootstrap; omarchy-update -y" > /var/tmp/omacvm-e2e-update.log 2>&1
     rc=$?; rm -f /etc/sudoers.d/99-omacvm-e2e; tail -3 /var/tmp/omacvm-e2e-update.log; exit $rc' > "$OUT/${PFX}omarchy-update.txt" 2>&1
   rc=$?
@@ -475,8 +476,10 @@ start_pass() {   # start the VM, the control centre's driver into it, the featur
 
 baseline() {   # TAG: the control centre comes up linked; no row fails; the Mac reaches the VM
   local s bad
+  CC_UP=0
   cc start 120; s=$CCS
   if ccok; then
+    CC_UP=1
     bad=$(/usr/bin/python3 -c '
 import json, re, sys
 o = json.load(open(sys.argv[1]))
@@ -687,12 +690,13 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
 }
 
 steps() {   # every step on the running VM of this pass
-  want baseline && { log "baseline"; baseline start; }
-  want switches && step_switches
-  want fastnet && step_fastnet
-  want touchid && step_touchid
-  want graphics && step_graphics
-  want updates && step_updates
+  local st
+  log "baseline"; baseline start   # every step below works through the control centre it starts
+  for st in switches fastnet touchid graphics updates; do
+    want "$st" || continue
+    if [[ $CC_UP == 1 ]]; then "step_$st"
+    else res "$st" FAIL "not run: the control centre did not come up (baseline-start)"; fi
+  done
   want window && step_window
   # While working on the test: the VM stays up this long first, to look at it (ssh, the cc's tmux).
   [[ ${OMACVM_E2E_HOLD:-} =~ ^[0-9]+$ ]] && { log "holding ${OMACVM_E2E_HOLD} s (OMACVM_E2E_HOLD), VM at ${IP:-?}"; sleep "$OMACVM_E2E_HOLD"; }

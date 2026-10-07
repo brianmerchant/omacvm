@@ -187,6 +187,11 @@ def state_of(title: str, text: str) -> dict:
     return {"on": m.group(1) if m else None, "status": m.group(2) if m else None, "note": note, "below": hint}
 
 
+def full_tui(text: str) -> bool:
+    """The Textual control centre (its table and key line), not the plain table it shows without Textual."""
+    return "FEATURE" in text and ("on/off" in text or "y go" in text)
+
+
 def asked(text: str) -> bool:
     return bool(re.search(r"\by\b\s+go\b", text)) and bool(re.search(r"\bn\b\s+cancel", text))
 
@@ -229,8 +234,12 @@ def cmd_start(a: list[str]) -> None:
                         "/usr/local/bin/omacvm", "--here"], capture_output=True, text=True)
     if r.returncode != 0:
         out(False, error="systemd-run tmux failed", detail=(r.stdout + r.stderr)[-800:])
-    ok, text, seen = watch(lambda s: "FEATURE" in s and ("Mac linked" in s or "needs the Mac" in s), secs)
+    ok, text, seen = watch(lambda s: full_tui(s) and ("Mac linked" in s or "needs the Mac" in s)
+                           or "[Y/n]" in s, secs)
     first = round(time.monotonic() - t0, 1)
+    if "[Y/n]" in text or (text.strip() and not full_tui(text)):
+        out(False, error="the control centre shows its plain table, not the full one (Textual missing?)",
+            seconds=first, screen=text)
     # The Mac's checks fill the rows a little later: wait until no row says "asking the Mac".
     watch(lambda s: "asking the Mac" not in s and "checking" not in s, 30)
     text = screen()
@@ -262,6 +271,9 @@ def cmd_toggle(a: list[str]) -> None:
         keys("y")
     # It starts (working), then ends: the row says want and no longer working.
     started, _, seen1 = watch(lambda s: state_of(title, s)["status"] == "working" or state_of(title, s)["on"] == want, 30)
+    if not started:
+        out(False, error="nothing happened after Space (no job, no change in 30 s)", before=before, asked=question,
+            trouble=seen1, screen=screen())
     done, text, seen2 = watch(lambda s: state_of(title, s)["on"] == want and state_of(title, s)["status"] not in ("working", None), secs)
     after = state_of(title, text)
     out(done and after["status"] in ("works", "off"), before=before, after=after, asked=question, started=started,
@@ -364,6 +376,8 @@ def main(argv: list[str]) -> None:
         return
     if argv[0] != "start" and argv[0] != "stop" and not alive():
         out(False, error="the control centre does not run in tmux (start first, or it quit)")
+    if argv[0] in ("row", "toggle", "graphics", "updates") and not full_tui(screen()):
+        out(False, error="the control centre's full screen is not up (plain table, or it quit)", screen=screen())
     cmds[argv[0]](argv[1:])
 
 
