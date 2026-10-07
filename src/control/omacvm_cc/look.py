@@ -16,17 +16,20 @@ GLYPH = {
     Status.WORKS: ("\uf00c", "ok"),         # nf-fa-check
     Status.NEEDS_PERSON: ("\uf071", "!"),   # nf-fa-warning
     Status.FAILING: ("\uf00d", "x"),        # nf-fa-times
+    Status.NEXT_START: ("\uf021", ">"),     # nf-fa-refresh
     Status.OFF: ("\uf10c", "off"),          # nf-fa-circle_o
     Status.UNAVAILABLE: ("\u2013", "-"),
     Status.UNKNOWN: ("?", "?"),
     Status.BUSY: ("\u280b", "~"),
 }
 COLOR = {
-    Status.WORKS: "green", Status.NEEDS_PERSON: "yellow", Status.FAILING: "red", Status.OFF: "bright_black",
+    Status.WORKS: "green", Status.NEEDS_PERSON: "yellow", Status.FAILING: "red", Status.NEXT_START: "blue",
+    Status.OFF: "bright_black",
     Status.UNAVAILABLE: "bright_black", Status.UNKNOWN: "bright_black", Status.BUSY: "cyan",
 }
 WORD = {
-    Status.WORKS: "works", Status.NEEDS_PERSON: "needs you", Status.FAILING: "failing", Status.OFF: "off",
+    Status.WORKS: "works", Status.NEEDS_PERSON: "needs you", Status.FAILING: "failing",
+    Status.NEXT_START: "from the next start", Status.OFF: "off",
     Status.UNAVAILABLE: "unavailable", Status.UNKNOWN: "not checked", Status.BUSY: "working",
 }
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
