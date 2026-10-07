@@ -12,7 +12,6 @@ in more words.
   does since 3.0.1.
 - Touch ID is no longer marked experimental (control centre, `omacvm
   features`, README): it is a regular feature, still off until you turn it on.
-
 - Omanotch: when something moved the hidden NOTCH output after it was in
   place (a Hyprland config reload with an older rule, another `hyprctl
   eval`), the strip beside the notch could stay wrong for up to 30 s.
