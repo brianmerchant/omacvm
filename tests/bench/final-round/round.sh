@@ -126,7 +126,8 @@ wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 a
 # rule of the rounds: idle power is a laptop's number), and its one display
 # instead of a built-in one. FINAL_ROUND_IDLE_DESKTOP=1 keeps the idle rows
 # (macOS still reports SystemPowerIn on an M4 Mac mini).
-desktop_mac() { ioreg -rw0 -c AppleSmartBattery 2>/dev/null | grep -q '"BatteryInstalled" = No'; }
+# grep -c, not -q: under pipefail an early grep exit can fail the pipe (SIGPIPE).
+desktop_mac() { [ "$(ioreg -rw0 -c AppleSmartBattery 2>/dev/null | grep -c '"BatteryInstalled" = No')" -gt 0 ]; }
 NO_IDLE=""
 if desktop_mac && [ "${FINAL_ROUND_IDLE_DESKTOP:-0}" != 1 ]; then
   NO_IDLE=$(echo "$STEPS" | awk '$3 == "idle" { print $1 }' | paste -sd, -)
@@ -177,7 +178,7 @@ displays() { system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Resolutio
 # One display: the built-in one on a laptop; on a desktop Mac, its one display.
 builtin_only() {
   [ "$(displays)" = 1 ] || return 1
-  system_profiler SPDisplaysDataType 2>/dev/null | grep -q 'Built-in' || desktop_mac
+  [ "$(system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Built-in')" -gt 0 ] || desktop_mac
 }
 picture() {   # the Mac's desktop picture (the round's wallpaper everywhere)
   [ -n "${WALLPAPER:-}" ] && { echo "$WALLPAPER"; return; }
