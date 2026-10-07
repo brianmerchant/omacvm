@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.3
+
+- Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
+  action whole. One that does not fit goes to macOS's own dialog, which
+  shows all of it; before, the panel cut it in the middle, which could hide
+  what runs. Prebuilt images never carry Touch ID keys.
+
 ## 3.0.2
 
 - Touch ID in the VM (experimental, off by default; turn it on in the
