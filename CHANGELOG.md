@@ -35,6 +35,15 @@ in more words.
   switches, and the long explanations moved behind an (i). Disk is one row
   with **Change…**. USB devices now have their own switch, off by default
   (a VM that already had devices keeps them).
+- USB devices (OmacVM.app, experimental) no longer go to the VM by
+  themselves. With **USB devices** on, plugging a device in while the VM
+  runs asks "Connect “ST-Link V2” to Omarchy or keep it on the Mac?". The
+  answer is for that plug-in only, unless you check **Always do this for
+  this device**. **Devices…** lists the remembered devices (Ask Each Time,
+  Connect to Omarchy, Keep on Mac, Forget). Two identical devices are told
+  apart by where they are plugged in and their serial numbers. Devices
+  switched on under 3.0.1 to 3.0.3 keep connecting by themselves and now
+  show in the list.
 
 ## 3.0.3
 
