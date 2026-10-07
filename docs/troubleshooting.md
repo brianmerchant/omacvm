@@ -699,3 +699,27 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   `app/app/Sources/OmacVM/AudioLatencyWatch.swift`,
   `src/app/guest/omacvm-audio-latency`, the measurement tools in
   `app/runtime/Tests/av-sync/`.
+
+## 29. app: the drive with the VMs drops off while a VM runs
+
+- **Symptom:** the VMs folder is on an external drive (an SD card, a USB
+  SSD) and the drive goes away while a VM runs: unplugged, a loose cable,
+  a USB link that resets ("I/O error ... terminateDevice" in the Mac's
+  log), or ejected by force. Up to 3.0.3 the VM froze or showed disk
+  errors in Omarchy and the app said nothing.
+- **Cause:** the VM's disk is a file on that drive. Once the drive is gone,
+  QEMU's open files fail and nothing it writes lands anywhere; QEMU itself
+  kept running. If the app itself was on that drive too, macOS ends it at
+  once ("quit unexpectedly"): it can no longer read its own code.
+- **Fix (3.0.4):** the app watches the drive of a running VM (the VM
+  folder's file system is unmounted, macOS's unmount notice, or a check
+  every 2 s). When it goes, QEMU stops the VM and quits (forced after 5 s),
+  and the window shows the VM as unavailable: "The drive with your VMs
+  (NAME) is gone. Reconnect it and start the VM again." Plug the drive in
+  and the VM is ready again; start it. What the VM had not written to its
+  disk is lost, as at a power cut (btrfs starts from its last consistent state).
+  Keep OmacVM.app itself on the Mac's own disk.
+- **Where:** `app/app/Sources/OmacVM/DriveWatch.swift`, `Runner.driveLost`,
+  `AppState.drivesChanged` and `UnavailableView`; test
+  `src/tests/app-drive-drop.sh`.
+

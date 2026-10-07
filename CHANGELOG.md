@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.4
+
+- OmacVM.app: when the drive with a running VM drops off (unplugged, a
+  loose cable, ejected by force), the app stops the VM at once and its
+  window says "The drive with your VMs (NAME) is gone. Reconnect it and
+  start the VM again." The VM shows as unavailable until the drive is back,
+  then as ready again. Before, QEMU kept running on files that were gone.
+  A VMs folder whose drive was not plugged in at launch shows up by itself
+  once it is.
+
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit

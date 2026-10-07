@@ -243,8 +243,15 @@ VM runs, and goes back by itself when a new version does not start
   next time the app opens.
 - **A drive that is not connected**: the app says so ("SD4TB is not
   connected") instead of offering a new VM, and builds nothing there (a
-  leftover empty /Volumes/NAME folder counts as not connected). A VM whose
-  files went missing says which, and does not start.
+  leftover empty /Volumes/NAME folder counts as not connected). Plug it in
+  and the window shows its VMs again by itself. A VM whose files went
+  missing says which, and does not start.
+- **A drive that drops off while its VM runs** (unplugged, a loose cable,
+  ejected by force): the VM's disk goes with it, so the VM cannot go on or
+  shut down. The app stops it at once (what the VM had not saved is lost,
+  as at a power cut) and the window shows the VM as unavailable: "The
+  drive with your VMs (SD4TB) is gone. Reconnect it and start the VM
+  again." Start comes back when the drive does.
 - **2.9 and older** kept the VMs hidden in
   `~/Library/Application Support/OmacVM/VMs`. They keep working there; the
   app offers once to move them to ~/OmacVM (Storage › Move later too).
