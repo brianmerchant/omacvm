@@ -25,6 +25,9 @@
  *    OMACVM_VIRGL_VERTEX_CACHE=0: nothing skipped);
  * 11 a sampler view with shader key bits unbound, the rasterizer unbound, the vertex
  *    elements unbound: each next draw selects the shaders again.
+ * 12 one program and one vertex elements object, the colour buffer switched between draws:
+ *    another buffer at the same stride and offset, then another offset in that buffer
+ *    (each draw reads its own buffer and offset).
  * Sampler views whose key bits change are in test-view-key.c (a pixel case would need a
  * program that samples a texture buffer: linking one crashes Apple's software renderer).
  * Run as is, with OMACVM_VIRGL_SELECT_CACHE=0 and with OMACVM_VIRGL_VERTEX_CACHE=0.
@@ -678,6 +681,33 @@ static void case_points(struct cmds *c, int ctx)
    check_stripes(ctx, 4, want, "triangles/points");
 }
 
+/* Only the vertex buffer behind an attribute changes (program, elements, stride stay):
+ * the recorded setup must not hide another buffer or another offset. */
+static void case_buffer_switch(struct cmds *c, int ctx)
+{
+   static const uint32_t want[4] = { RED, BLUE, GREEN, RED };
+   const float blue[4] = { 0, 0, 1, 1 }, green[4] = { 0, 1, 0, 1 };
+   float tmp[6][4];
+   for (int v = 0; v < 6; v++)
+      memcpy(tmp[v], v < 3 ? blue : green, sizeof(tmp[v]));
+   make_buffer(ctx, R_TMP, VIRGL_BIND_VERTEX_BUFFER, sizeof(tmp));
+   emit_write(c, res_id(ctx, R_TMP), 0, tmp, sizeof(tmp));
+   static const struct { int r; uint32_t offset; } col[4] = {
+      { R_COL, 0 },    /* red */
+      { R_TMP, 0 },    /* another buffer, same stride and offset: blue */
+      { R_TMP, 48 },   /* the same buffer at another offset: green */
+      { R_COL, 0 },    /* back to the first: red */
+   };
+   for (int s = 0; s < 4; s++) {
+      emit_vbs(c, 2, (const uint32_t[][3]){ { 16, 0, res_id(ctx, R_POS) },
+                                            { 16, col[s].offset, res_id(ctx, col[s].r) } });
+      emit_stripe(c, s);
+      emit_triangle(c, 0);
+   }
+   check(submit(ctx, c) == 0, "the colour buffer and its offset switched between draws");
+   check_stripes(ctx, 4, want, "vertex buffer switch");
+}
+
 /* the counters the renderer logged when the case's context ended, less those before */
 static struct totals totals_before;
 
@@ -763,6 +793,7 @@ static void run_case(int n)
    case 9: case_points(&c, ctx); break;
    case 10: case_counts(&c, ctx); break;
    case 11: case_unbinds(&c, ctx); break;
+   case 12: case_buffer_switch(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 10)
@@ -802,7 +833,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 11; n++)
+   for (int n = 1; n <= 12; n++)
       if (!only || only == n)
          run_case(n);
 
