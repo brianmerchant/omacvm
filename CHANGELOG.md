@@ -8,7 +8,8 @@ in more words.
 - No sound after a kernel update: in OmacVM.app VMs with Chromium video on,
   the first start after a new kernel could leave every app silent until
   WirePlumber was restarted. WirePlumber hung on Chromium's video decoder
-  when it came late; it now leaves the decoder alone.
+  when it came late; it now leaves the decoder alone. `omacvm apply`
+  restarts WirePlumber once for this, never during a call.
 
 ## 3.0.3
 

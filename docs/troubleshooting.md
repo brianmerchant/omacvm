@@ -717,6 +717,8 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Fix (3.0.4):** a WirePlumber rule leaves the decoder alone
   (`/etc/wireplumber/wireplumber.conf.d/50-omacvm-vdec.conf`; the journal
   says "V4L2 device v4l2_device.platform-omacvm-vdec disabled"). Chromium
-  opens the decoder itself, not through PipeWire. Older VMs: `omacvm apply`.
+  opens the decoder itself, not through PipeWire. Older VMs: `omacvm apply`
+  (it restarts WirePlumber once, not while a call or a recording runs:
+  then the rule counts from the next login).
 - **Where:** `src/vdec/guest/50-omacvm-vdec.conf`, `src/vdec/guest/install.sh`,
   `src/tests/vdec-wireplumber.sh` (`--vm NAME` checks a running VM).

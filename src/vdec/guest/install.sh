@@ -29,10 +29,31 @@ BIN=/usr/local/bin/omacvm-vdecd
 WP=/etc/wireplumber/wireplumber.conf.d/50-omacvm-vdec.conf
 say() { echo "  Chromium video: $*"; }
 as_user() { runuser -u "$U" -- env -i PATH=/usr/bin:/bin "$@"; }
+# A call (or any recording) is going: a microphone stream runs in the user's
+# PipeWire.
+in_call() {
+  local uid
+  uid=$(id -u "$U" 2>/dev/null) || return 1
+  as_user env XDG_RUNTIME_DIR="/run/user/$uid" timeout 5 pw-dump 2>/dev/null | python3 -c '
+import json, sys
+nodes = [o.get("info") or {} for o in json.load(sys.stdin) if o.get("type") == "PipeWire:Interface:Node"]
+sys.exit(0 if any(i.get("state") == "running" and (i.get("props") or {}).get("media.class") == "Stream/Input/Audio"
+                  for i in nodes) else 1)' 2>/dev/null
+}
+# WirePlumber reads its rules when it starts: a running one is started again
+# once when the rule is new (wp_new), which also frees one that already hangs
+# on the decoder. 1 = not now, a call is going (the restart would cut it).
+wp_restart() {
+  (( wp_new )) || return 0
+  systemctl --user -M "$U@" is-active -q wireplumber.service 2>/dev/null || { wp_new=0; return 0; }
+  in_call && return 1
+  systemctl --user -M "$U@" try-restart wireplumber.service 2>/dev/null || true
+  wp_new=0
+}
 source ../../guest/dkms.sh
 
 if [[ $ON == off ]]; then
-  [[ -f /etc/systemd/system/omacvm-vdecd.service || -d $SRC ]] || exit 0
+  [[ -f /etc/systemd/system/omacvm-vdecd.service || -d $SRC || -f $WP ]] || exit 0
   [[ -x $LIB/chromium-flags.py ]] && as_user "$LIB/chromium-flags.py" off || true
   systemctl disable --now omacvm-vdecd.service >/dev/null 2>&1 || true
   modprobe -r omacvm_vdec 2>/dev/null || true
@@ -73,11 +94,11 @@ install -m644 omacvm-vdecd.service /etc/systemd/system/
 install -Dm644 95-omacvm-vdecd.hook /etc/pacman.d/hooks/95-omacvm-vdecd.hook
 echo omacvm_vdec | install -Dm644 /dev/stdin /etc/modules-load.d/omacvm-vdec.conf
 # WirePlumber leaves the decoder alone (50-omacvm-vdec.conf says why); a
-# running one reads the rule when it starts again, before the module loads
-# below (that also frees one that already hangs on it).
+# running one reads the rule before the module loads below (wp_restart).
+wp_new=0
 if ! cmp -s 50-omacvm-vdec.conf "$WP"; then
   install -Dm644 50-omacvm-vdec.conf "$WP"
-  systemctl --user -M "$U@" try-restart wireplumber.service 2>/dev/null || true
+  wp_new=1
 fi
 udevadm control --reload 2>/dev/null || true
 systemctl daemon-reload
@@ -92,6 +113,12 @@ as_user "$LIB/chromium-flags.py" on || say "Chromium's flags file not changed (s
 built=$(modinfo -k "$(uname -r)" -F srcversion omacvm_vdec 2>/dev/null || true)
 if [[ -z $built ]]; then
   say "on after a reboot (no module for the running kernel $(uname -r) yet)"
+  exit 0
+fi
+# The decoder must not come while a WirePlumber without the rule runs; during
+# a call it waits for the next VM start instead.
+if [[ $(cat /sys/module/omacvm_vdec/srcversion 2>/dev/null) != "$built" ]] && ! wp_restart; then
+  say "on at the next VM start (a call is going: the sound is left alone)"
   exit 0
 fi
 restart=$(( daemon_new || unit_new ))
@@ -123,3 +150,4 @@ if (( restart )) || ! systemctl is-active -q omacvm-vdecd; then
 else
   say "on"
 fi
+wp_restart || say "the sound takes its new rule at the next login (a call is going)"

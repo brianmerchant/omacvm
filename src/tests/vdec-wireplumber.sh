@@ -7,7 +7,9 @@
 #   src/tests/vdec-wireplumber.sh                  offline: the rule matches the
 #                                                  module's device, install.sh
 #                                                  puts it in place before it
-#                                                  loads the module, off removes it
+#                                                  loads the module, restarts
+#                                                  WirePlumber once and not during
+#                                                  a call, off removes it
 #   src/tests/vdec-wireplumber.sh --vm NAME [--vm-type TYPE]
 #                                                  in a running OmacVM.app VM with
 #                                                  chromium-video on and the user
@@ -68,7 +70,7 @@ print(sinks[0] if sinks else "")'
 }
 
 offline() {
-  local G=$R/src/vdec/guest conf drv inst on_line mod_line
+  local G=$R/src/vdec/guest conf drv inst on_line wp_line mod_line
   conf=$G/50-omacvm-vdec.conf; inst=$G/install.sh
   drv=$(sed -n 's/^#define DRV "\(.*\)"$/\1/p' "$G/module/omacvm-vdec.c")
   # udev's ID_PATH of a platform device registered with id -1 = platform-<name>.
@@ -81,12 +83,19 @@ offline() {
   grep -q '^WP=/etc/wireplumber/wireplumber.conf.d/50-omacvm-vdec.conf$' "$inst" &&
     ok "installed into WirePlumber's system folder" || bad "install.sh: WP= is not /etc/wireplumber/wireplumber.conf.d/50-omacvm-vdec.conf"
   on_line=$(grep -n 'install -Dm644 50-omacvm-vdec.conf "\$WP"' "$inst" | head -1 | cut -d: -f1)
+  wp_line=$(grep -n '&& ! wp_restart; then$' "$inst" | head -1 | cut -d: -f1)
   mod_line=$(grep -n '^ *modprobe omacvm_vdec' "$inst" | head -1 | cut -d: -f1)
-  if [[ -n $on_line && -n $mod_line ]] && (( on_line < mod_line )); then
-    ok "install.sh puts the rule in place before it loads the module"
-  else bad "install.sh must install the rule before 'modprobe omacvm_vdec' (lines ${on_line:-none}, ${mod_line:-none})"; fi
+  if [[ -n $on_line && -n $wp_line && -n $mod_line ]] && (( on_line < wp_line && wp_line < mod_line )); then
+    ok "install.sh puts the rule in place and restarts WirePlumber before it loads the module"
+  else bad "install.sh must install the rule and run wp_restart before 'modprobe omacvm_vdec' (lines ${on_line:-none}, ${wp_line:-none}, ${mod_line:-none})"; fi
   grep -q 'try-restart wireplumber.service' "$inst" &&
     ok "a running WirePlumber is started again with the rule" || bad "install.sh does not restart a running WirePlumber"
+  # Once: only when the rule is new; never during a call (in_call before it).
+  if grep -q '^if ! cmp -s 50-omacvm-vdec.conf "\$WP"; then$' "$inst" &&
+     sed -n '/^wp_restart() {$/,/^}$/p' "$inst" | grep -q '(( wp_new )) || return 0' &&
+     sed -n '/^wp_restart() {$/,/^}$/p' "$inst" | grep -q 'in_call && return 1'; then
+    ok "WirePlumber restarts only for a new rule, not during a call"
+  else bad "install.sh: wp_restart must restart only for a new rule (wp_new) and not during a call (in_call)"; fi
   # off removes it: the rm list of the off branch names $WP.
   if sed -n '/^if \[\[ \$ON == off \]\]/,/^fi$/p' "$inst" | grep -q '"\$WP"'; then ok "off removes the rule"
   else bad "off does not remove the rule"; fi
@@ -100,12 +109,12 @@ case ${1:-} in
     VM=${2:-}
     # shellcheck disable=SC2034
     if [[ ${3:-} == --vm-type ]]; then TYPE=${4:-}; else TYPE=""; fi
-    [[ -n $VM ]] || { sed -n '7,18s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+    [[ -n $VM ]] || { sed -n '7,20s/^# \{0,1\}//p' "$0" >&2; exit 2; }
     source "$R/src/lib/mac.sh"
     source "$R/src/lib/vm.sh"
     resolve_vm
     [[ -n $IP ]] || { echo "vdec-wireplumber: '$VM' is not running" >&2; exit 1; }
     gssh "$IP" "bash -s -- --in-vm" < "$0"; exit $? ;;
-  *) sed -n '7,18s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+  *) sed -n '7,20s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac
 exit $fail
