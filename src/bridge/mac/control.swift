@@ -458,7 +458,8 @@ final class Control {
   /// a short timeout). A Bridge that just started, or a VM that just started,
   /// is found by that run instead of a minute later.
   private func vmList(_ cli: String, fresh: Bool = true, every: Double = VMListCache.addressEvery,
-                      listed: ([VMEntry]) -> Bool, known: ([VMEntry]) -> Bool) -> [VMEntry] {
+                      wait: Double = VMListCache.unknownWait, listed: ([VMEntry]) -> Bool,
+                      known: ([VMEntry]) -> Bool) -> [VMEntry] {
     let (list, start, waitFor) = q.sync { () -> ([VMEntry], Bool, Int?) in
       if known(vms.list) { return (vms.list, fresh && vms.shouldRefresh(known: true, now: Date()), nil) }
       if listed(vms.list) { let r = vms.refused(now: Date()); return (vms.list, r.start, r.waitFor) }
@@ -468,7 +469,7 @@ final class Control {
     }
     if start { refreshVMs(cli) }
     guard fresh, let n = waitFor else { return list }
-    waitForRun(n, until: Date().addingTimeInterval(VMListCache.unknownWait))
+    waitForRun(n, until: Date().addingTimeInterval(wait))
     return q.sync { vms.list }
   }
 
@@ -567,26 +568,37 @@ final class Control {
   /// centre's requests, and its Touch ID key and checked nonce. `key` nil:
   /// the feature is off for that VM (no key on the Mac). The nonce is also
   /// given back with an error once the signature checked out, so the
-  /// refusal can be signed.
+  /// refusal can be signed. `asked`: the VM the app named (for the log,
+  /// also when it is not found).
   func touchIDCaller(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data)
-      -> (vm: VMEntry?, key: String?, nonce: String?, error: PolicyError?) {
-    let cli: String
-    switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e) }
+      -> (vm: VMEntry?, key: String?, nonce: String?, error: PolicyError?, asked: String?) {
     let vm: VMEntry
     let found: Result<VMEntry, PolicyError>
+    var asked: String?
     if peer == relayPeer || fromThisMac(fd, peer: peer) {
       guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
-        return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"))
+        return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"), nil)
       }
-      // Touch ID needs no SSH to the VM: one the Mac cannot reach just now still gets it.
-      found = vmForApp(name, vmList(cli, every: VMListCache.appEvery, listed: { appVMListed(name, $0) }) {
-                         if case .success = vmForApp(name, $0, ssh: false) { return true }; return false }, ssh: false)
+      asked = name
+      // The app named it and it has a Touch ID key here: no need to wait for the VM list.
+      if let v = touchIDRelayVM(name, list: q.sync(execute: { vms.list }), hasKey: { touchIDKey($0) != nil }) {
+        found = .success(v)
+      } else {
+        let cli: String
+        switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e, asked) }
+        // Touch ID needs no SSH to the VM: one the Mac cannot reach just now still gets it.
+        found = vmForApp(name, vmList(cli, every: VMListCache.appEvery, wait: touchIDListWait, listed: { appVMListed(name, $0) }) {
+          if case .success = vmForApp(name, $0, ssh: false) { return true }; return false }, ssh: false)
+      }
     } else {
-      found = vmForPeer(peer, vmList(cli, listed: { peerListed(peer, $0) }) { if case .success = vmForPeer(peer, $0) { return true }; return false })
+      let cli: String
+      switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e, nil) }
+      found = vmForPeer(peer, vmList(cli, wait: touchIDListWait, listed: { peerListed(peer, $0) }) {
+        if case .success = vmForPeer(peer, $0) { return true }; return false })
     }
-    switch found { case .success(let v): vm = v; case .failure(let e): return (nil, nil, nil, lookingAgain(e)) }
-    guard let key = touchIDKey(vm) else { return (vm, nil, nil, nil) }
+    switch found { case .success(let v): vm = v; case .failure(let e): return (nil, nil, nil, lookingAgain(e), asked) }
+    guard let key = touchIDKey(vm) else { return (vm, nil, nil, nil, asked) }
     let checked = q.sync { () -> Result<String, AuthFailure> in
       let r = verifyControlAuth(header: headers["x-omacvm-auth"], key: key, vm: vmKeyName(type: vm.type, name: vm.name),
                                 method: method, path: path, proto: headers["x-omacvm-proto"] ?? "", body: body,
@@ -595,8 +607,8 @@ final class Control {
       return r
     }
     switch checked {
-    case .success(let n): return (vm, key, n, nil)
-    case .failure(let f): return (vm, key, f.nonce, f.error)
+    case .success(let n): return (vm, key, n, nil, asked)
+    case .failure(let f): return (vm, key, f.nonce, f.error, asked)
     }
   }
 

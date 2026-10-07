@@ -9,6 +9,7 @@
 #   app_dir NAME        the VM's folder
 #   app_features_write DIR FEATURES  the VM's features, for the app's Mac links
 #   app_links_stale DIR FEATURES on|off  links that differ from this start of the VM
+#   app_touchid_port DIR                 this start of the VM has Touch ID's port
 #   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address,
 #                       from the MAC the running QEMU has: app_vm_mac)
 #   app_any_fast_network  one of the VMs has the fast network on (from its next start)
@@ -163,22 +164,30 @@ app_features_write() {
 # the features. "on": the features that are on but closed to the VM until its
 # next start; "off": the ones that are off but still served. As "Bridge,
 # camera"; nothing for an app from before the line. A feature not named is on.
+# Touch ID is apart: app_touchid_port.
 app_links_stale() {
   local l x k n v out=""
   l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
   [[ -n $l ]] || return 0
-  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera touch-id:Touch\ ID; do
+  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
     k=${x%%:*} n=${x#*:} v=on
     [[ " $2 " == *" $k=off "* ]] && v=off
-    # Touch ID is off unless named on (its port is there only then); an app
-    # whose line does not name it never serves it.
-    if [[ $k == touch-id ]]; then
-      [[ " $2 " == *" $k=on "* ]] || v=off
-      [[ ", $l, " == *", Touch ID "* ]] || l+=", Touch ID off"
-    fi
     [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
   done
   echo "$out"
+}
+
+# app_touchid_port DIR: whether this start of the VM has Touch ID's port
+# (org.omacvm.auth). From 3.0.4 every start has it ("Touch ID port on" in
+# the Mac links line), so turning Touch ID on needs no restart; 3.0.2 and
+# 3.0.3 added it only with touch-id on at the start ("Touch ID on"). Off is
+# never stale: without the Mac's key the Bridge says "off" to the port.
+# Status 0 yes, 1 no (a restart adds it), 2 not known (no VM log).
+app_touchid_port() {
+  local l
+  l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
+  [[ -n $l ]] || return 2
+  [[ ", $l, " == *", Touch ID port on, "* || ", $l, " == *", Touch ID on, "* ]]
 }
 
 app_dir() {

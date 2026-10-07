@@ -81,6 +81,9 @@ jobs:
       - name: Touch ID's PAM client against a fake Bridge, and its PAM lines in and out
         run: src/tests/touchid-client.sh
 
+      - name: Touch ID turned on says ready (apply), what is missing (check on the Mac and in the VM)
+        run: src/tests/touchid-ready.sh
+
       - name: Update parts cover src/
         run: python3 src/release/manifest.py parts > /dev/null
 

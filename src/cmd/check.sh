@@ -621,6 +621,31 @@ if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
     (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old for the fast network: it does not listen on 192.168.77.1, so this VM's strip stays empty (omacvm update)"
   fi
 fi
+# Touch ID (ADR 0041), the Mac's side: what a prompt needs here, one line
+# that says what is missing (the VM's side: its own check).
+FEATURE=touch-id
+if [[ $(feat touch_id off) == on ]]; then
+  tk=""; [[ -n ${VM:-} ]] && tk="$(vm_key_file "$TYPE" "$VM").touchid"
+  tm=""
+  if [[ -z $tk ]]; then tm="no VM name (--ip): the Mac keeps Touch ID keys by VM name (omacvm apply --vm NAME)"
+  elif [[ ! -s $tk ]]; then tm="no Touch ID key for this VM on the Mac: omacvm apply --vm NAME makes it, or omacvm enable touch-id"
+  elif ! running org.omacvm.bridge; then tm="OmacVM Bridge is not running, and it asks the Mac's Touch ID: omacvm update"
+  elif [[ $TYPE == app && ! -S $OMA_BRIDGE_SUPPORT/relay.sock ]]; then tm="OmacVM Bridge has no socket for OmacVM.app's requests: omacvm update"
+  fi
+  # The last request the Bridge logged for this VM (never what it was for).
+  tl=$(grep -F "touchid: from " "$BRIDGE_LOG" 2>/dev/null | grep -F "(${VM:-?}): " | tail -1)
+  [[ -z $tl ]] || tl="; last request ${tl:11:5}: ${tl##*): }"
+  tn=$(bioutil -c 2>/dev/null | sed -n 's/.*:[[:space:]]*\([0-9][0-9]*\) biometric.*/\1/p' | head -1)
+  tp=0; [[ $TYPE == app ]] && td=$(app_dir "$VM" 2>/dev/null) && { app_touchid_port "$td" || tp=$?; }
+  if [[ -n $tm ]]; then bad "Touch ID (Mac)" "$tm"
+  elif (( tp == 1 )); then
+    # Started by OmacVM.app 3.0.3 or older, which added the port only with touch-id on at the start.
+    skip "Touch ID (Mac)" "on from the VM's next start: shut it down, then start it again (OmacVM.app adds its Touch ID port at the start)" human
+  elif [[ $tn == 0 ]]; then
+    bad "Touch ID (Mac)" "no fingerprint in this Mac's Touch ID (or no sensor): System Settings › Touch ID & Password; until then the VM asks for the password" human
+  else ok "Touch ID (Mac)" "the VM's key, OmacVM Bridge$( [[ -n $tn ]] && echo " and $tn fingerprint(s)") ready$tl"; fi
+fi
+FEATURE=omanotch   # the Mac links row below, as before
 # OmacVM.app: what of the Mac this start of the VM may use (the app reads
 # the VM's features at start and says so in qemu.log). A feature that is off
 # must get nothing; one switched on while the VM runs waits for its next start.
@@ -630,13 +655,16 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
   else
     fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
-    fs+="touch-id=$(feat touch_id off)"   # Touch ID's port (off by default)
     open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
     m=""
     [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
     [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
+    # Touch ID is not one of these (its own "Touch ID (Mac)" row): the line's
+    # "Touch ID off" is only how it was at the start, and it may be on now.
+    lv=", $l, "; lv=${lv//, Touch ID port on, /, }; lv=${lv//, Touch ID on, /, }; lv=${lv//, Touch ID off, /, }
+    lv=${lv#, }; lv=${lv%, }
     if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
-    else ok "Mac links (app)" "$l"; fi
+    else ok "Mac links (app)" "$lv"; fi
   fi
 fi
 # OmacVM.app's USB devices (off by default, docs/usb.md): which ones this

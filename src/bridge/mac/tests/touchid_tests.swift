@@ -226,6 +226,24 @@ func value(_ r: Result<TouchIDRequest, PolicyError>) -> TouchIDRequest? { if cas
     check(good == .success(nonce), "Touch ID label taken")
     check(touchIDKeyName(type: "parallels", name: "A") == vmKeyName(type: "parallels", name: "A") + ".touchid", "key file name")
 
+    // OmacVM.app's relay names the VM: with its Touch ID key on the Mac, no
+    // wait for the VM list (a Bridge or a VM that just started).
+    let keyed: (VMEntry) -> Bool = { $0.type == "app" && $0.name == "Omarchy" }
+    let cold = touchIDRelayVM("Omarchy", list: [], hasKey: keyed)
+    check(cold == VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true),
+          "an empty list (the Bridge just started): the VM from the app's name")
+    let listed = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "192.168.77.5", omacvm: "3.0.4", setup: true, dir: "/v")
+    check(touchIDRelayVM("Omarchy", list: [listed], hasKey: keyed) == listed, "the list's entry when it has one")
+    let stale = VMEntry(name: "Omarchy", type: "app", state: "stopped", ip: "", omacvm: "3.0.4", setup: true)
+    check(touchIDRelayVM("Omarchy", list: [stale], hasKey: keyed)?.name == "Omarchy",
+          "a list from before the VM started: still the VM (it asks through its running app)")
+    let parallels = VMEntry(name: "Omarchy", type: "parallels", state: "running", ip: "10.211.55.3", omacvm: "3.0.4", setup: true)
+    check(touchIDRelayVM("Omarchy", list: [parallels], hasKey: keyed)?.type == "app", "a Parallels VM of that name is not it")
+    check(touchIDRelayVM("Other", list: [], hasKey: keyed) == nil, "no Touch ID key for that name: the list decides")
+    check(touchIDRelayVM("", list: [], hasKey: { _ in true }) == nil, "no name: nothing")
+    check(touchIDListWait > VMListCache.unknownWait && touchIDListWait < 35,
+          "an address waits longer for the list than the control centre, and less than the client's 35 s")
+
     print("touchid: \(tPassed) passed, \(tFailures) failed")
     exit(tFailures == 0 ? 0 : 1)
   }

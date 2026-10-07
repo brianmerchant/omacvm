@@ -406,6 +406,9 @@ if want touch-id; then
     log "Touch ID (sudo, polkit, 1Password)"; "$R/bridge/guest/touchid.sh" on "$U" || not_set_up touch-id "Touch ID"
   elif [[ -e /usr/lib/omacvm/omacvm-touchid || -e /etc/omacvm/touchid-key ]]; then
     log "Touch ID: off"; "$R/bridge/guest/touchid.sh" off "$U"
+  elif [[ $TYPE == app && ! -e /etc/udev/rules.d/70-omacvm-auth.rules ]]; then
+    # OmacVM.app gives every VM Touch ID's port (3.0.4): root's alone also while off.
+    "$R/bridge/guest/touchid.sh" off "$U"
   fi
 fi
 # The control centre (omacvm in Omarchy): on, or gone again.

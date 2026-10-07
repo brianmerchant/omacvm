@@ -163,7 +163,9 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
 
 ### OmacVM.app's port
 
-- The port is there only for a VM whose features say `touch-id=on` when
+- (3.0.2-3.0.3; from 3.0.4 every VM has the port from its start, whatever
+  the setting: see the addendum "On at once".) The port is there only for
+  a VM whose features say `touch-id=on` when
   it starts (`MacLinks.touchID`; no features file, or not named: no port).
   Every other VM keeps its device list. A port on `vser0` moves no PCI
   device, and the VM finds it by its name. So turning Touch ID on for an
@@ -272,6 +274,9 @@ off".
   request every 2 s, 10 a minute; after 3 misses in a row (`cancelled`,
   `failed` or `timeout`) a pause of `rate`: 60 s, then 5 min, then 30 min,
   until a yes. So a VM that keeps dialogs up for nobody stops after three.
+  The VM's client asks once more 2.2 s after a `rate` (3.0.4): `sudo -v`
+  and then `pkexec` or 1Password at once both get Touch ID, and the Mac's
+  spacing stays; a second `rate` (a real pause) means the password.
   A dialog not answered in 30 s is invalidated (`timeout`); a client that
   disconnects invalidates it too.
 - The Mac's state (screen locked, app in front) is read on the main thread.
@@ -348,8 +353,9 @@ sensor) and the last result.
   `pkexec true`, a polkit action standing in for 1Password; remote session
   refused; Bridge down falls to the password in under 2 s). One manual
   check with a real finger, by the person, on a Mac with Touch ID.
-- OmacVM.app: turning Touch ID on or off takes one restart of the VM (its
-  port is added or removed at the start).
+- OmacVM.app: turning Touch ID on or off took one restart of the VM (its
+  port was added or removed at the start). From 3.0.4 it takes none: every
+  start has the port (addendum "On at once").
 
 ## Built
 
@@ -738,3 +744,121 @@ port anyway.
 - `src/tests/touchid-client.sh`: `touchid.sh` installs the script and its
   two user units and takes them out again.
 
+## Addendum (3.0.4): on at once
+
+Status: built (`touchid-onboarding`, 2026-10-07). Touch ID stays opt-in and
+off by default; this is about the moment a person turns it on.
+
+### What went wrong (3.0.3, the user's MacBook Pro, 2026-10-07 06:02-06:55)
+
+1. OmacVM.app added `org.omacvm.auth` only at a start with `touch-id=on`.
+   Turned on while the VM ran, Touch ID waited for a shut down and start;
+   the control centre showed a red x meanwhile, and the person turned it
+   off again.
+2. `omacvm enable touch-id` restarted OmacVM Bridge (06:41:47, 06:43:11,
+   06:51:39). `src/mac/install.sh` keys each helper's stamp on a sum of its
+   files listed with `sort -z`, in the caller's locale: the control
+   centre's jobs run with `LANG=en_US.UTF-8` (`ControlRun`), a terminal
+   often without. Two orders, two sums: each switch between the two built
+   and restarted Bridge, Gestures and Omanotch.
+3. The first request after that restart got `409 unknown-vm` (the Bridge's
+   VM list was still empty). The log said `from relay (-)`: that was only
+   the log line using the found VM's name; the app had sent it. The 409 is
+   unsigned (no VM, no key), so the client fell to the password without a
+   word, and 1Password asked for its password.
+
+### Decision
+
+- Every start of an OmacVM.app VM has the port, its relay (`AuthRelay`) and
+  the panel (`OMACVM_TOUCHID_PANEL`), whatever the setting. qemu.log's Mac
+  links line says `Touch ID port on`; `app_touchid_port` reads it (and
+  3.0.2/3.0.3's `Touch ID on`). The one restart this needs is the 3.0.4
+  update's own.
+- Off stays off: no PAM line and no client in the VM, so nothing opens the
+  port; the udev rule keeps it root's alone also while off (`touchid.sh
+  off` writes it on app VMs; without it the kernel's default is 0600 root
+  too). The app reads the VM's features per request (`AuthRelay`'s
+  `enabled`): off, it answers `403 off` itself, as the Bridge would
+  (unsigned: neither has a key then), and nothing reaches the Bridge. On,
+  it relays at once, no restart. Behind it the Bridge still has no key
+  for a VM with Touch ID off and answers `off` (no dialog, no panel: the
+  panel shows only a prompt the Bridge sends after it verified the request
+  with the VM's key). A process with root in the VM can send requests
+  while off and gets `off`; the relay's 0.2 s limit holds. The panel's socket is in the app's private run folder
+  (0600), as before.
+- The Bridge takes an OmacVM.app VM's Touch ID request by the name the app
+  sends when this Mac has that VM's Touch ID key (`touchIDRelayVM`), without
+  waiting for `omacvm vms`. The name comes from the app over the relay
+  socket with the relay key (the guest cannot name a VM); the request came
+  through that VM's port in the running app, so the VM runs; the key file
+  says OmacVM set it up and the feature is on. Nothing a program of this
+  Mac user could not do before: it can read the VM's key and the relay key.
+  Parallels, UTM and Fusion still need the list for the address: a request
+  from an address it does not have waits up to 10 s for a fresh one (the
+  control centre's requests 4 s; the client allows 35 s).
+- The helper stamps are summed in the C locale: the same sources are up to
+  date whoever runs `omacvm`, and a feature switch never restarts the Bridge.
+- The client never falls to the password silently where the person expected
+  Touch ID. One line says why ("Touch ID not available (the Mac is still
+  starting: try again in a moment), use your password"; the Bridge down;
+  OmacVM.app does not answer; no key or token in the VM; an answer that
+  does not check out). The Bridge's refusals it cannot sign (`off`,
+  `unknown-vm`, `vm-key`) are read unsigned only for that line; any other
+  unsigned answer is "did not check out", never its own reason. Silent as
+  before: the person's own answer on the Mac (cancelled, no match, timeout)
+  and the cases that never ask (SSH, a job without a terminal, another
+  session), so a job's output stays clean. Every outcome goes to the journal
+  (`journalctl -t omacvm-touchid`), never the command.
+- Turning it on ends with what to do next: `omacvm enable touch-id` (and so
+  the control centre's job) says "Touch ID is ready: try sudo -v in an
+  Omarchy terminal" once the VM has its key and PAM line, or "on - restart
+  the VM once to finish" for a VM an older OmacVM.app started; then each app
+  that needs its own switch (`omacvm-touchid-apps`, the 3.0.4 addendum
+  above). The control centre's banner says the same from the VM's side.
+- `omacvm check`: "Touch ID (Mac)" says what the Mac lacks (the VM's key,
+  OmacVM Bridge, its socket for OmacVM.app, a fingerprint: `bioutil -c`),
+  the next start for an older app's VM (for the person, not a failure), and
+  the last request the Bridge logged for the VM; in the VM, "Touch ID last
+  request" from the client's journal line. Touch ID left the Mac links row,
+  which the control centre shows under Omanotch.
+
+Not done: a "Restart VM" button in OmacVM.app's window for a VM without the
+port. Such a VM was started by OmacVM.app 3.0.3 or older, so that older app
+runs it and no 3.0.4 code is there to show a button; the update to 3.0.4
+restarts it. The control centre (touchid-hint) and `omacvm check` say "from
+the VM's next start".
+
+### Routes
+
+| Route | Turning Touch ID on while the VM runs |
+|---|---|
+| OmacVM.app | the port is there from the start: the key on the Mac, the PAM lines in the VM, and the next sudo asks |
+| Parallels, UTM, Fusion | as before over the network: the key and the token in the VM, the polkit helper's drop-in (`daemon-reload`), the next sudo asks; the Bridge no longer restarts, and an address it has not listed yet waits for the list instead of `409` |
+
+### Tests
+
+- `swift run auth-tests`: Touch ID off in the VM's features: the app answers
+  `403 off`, the Bridge is never asked; turned on while the relay runs: the
+  next request is relayed.
+- `src/tests/mac-install.sh`: the stamp and `helpers_src_sum` are the same
+  with `LANG=en_US.UTF-8` and without (both differed before).
+- `src/bridge/mac/tests/run.sh` (touchid): `touchIDRelayVM` with an empty
+  list, the list's entry, a stale list, a Parallels VM of the same name, no
+  key, no name; `touchIDListWait` between the control centre's wait and the
+  client's 35 s.
+- `src/tests/features-off.sh`: the record (`Touch ID off, Touch ID port on`
+  for every VM), `app_touchid_port` for 3.0.4, 3.0.3 with and without
+  touch-id at the start, an app from before, no log; Touch ID out of the
+  Mac links row.
+- `src/tests/touchid-client.sh`: every fallback's line and journal line
+  (`unknown-vm` over TCP and the port, `vm-key`, unsigned other codes, the
+  Bridge down, no proof, no key, no token, status 0, the app hanging up),
+  silence and a journal line for SSH and no terminal; `touchid.sh off`
+  keeps the port rule on app VMs.
+- `src/tests/touchid-ready.sh`: apply's last word (ready, restart once for
+  3.0.3's VMs, not running, 1Password's switch, not set up, nothing when it
+  was on before), check's "Touch ID (Mac)" for each missing piece and the
+  last request, the VM's "Touch ID last request".
+- pytest `test_touchid_ready.py`: the control centre's banner after "Touch ID
+  on" (ready with 1Password's switch; restart once without the port; ready
+  with it) in Textual's headless driver.

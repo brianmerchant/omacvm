@@ -5,6 +5,22 @@ in more words.
 
 ## 3.0.4 (unreleased)
 
+- Touch ID works as soon as you turn it on, on every route. OmacVM.app
+  gives every VM its Touch ID port from the start (it stays closed while
+  Touch ID is off), so turning it on in the control centre or with
+  `omacvm enable touch-id` needs no restart of the VM. The update to 3.0.4
+  restarts the VM once, which is the last time. Turning it on no longer
+  restarts OmacVM Bridge (any switch did when it came once from the control
+  centre and once from a terminal), and the first Touch ID request after
+  the Bridge or the VM started no longer falls to the password: the Bridge
+  takes an OmacVM.app VM's request by name, and waits for its VM list for
+  Parallels, UTM and Fusion. A polkit prompt (pkexec, 1Password) right
+  after `sudo` uses Touch ID too instead of saying "too many tries". Turning it on ends with "Touch ID is ready:
+  try sudo -v" (and 1Password's own switch, if it is off). When it still
+  uses the password, the prompt says why ("the Mac is still starting",
+  "OmacVM Bridge on the Mac does not answer", ...), the VM's journal keeps
+  each request (`journalctl -t omacvm-touchid`), and `omacvm check` says
+  what is missing on the Mac and how the last request went.
 - The control centre and Touch ID no longer say "needs the Mac" for an
   OmacVM.app VM whose fast network was turned off while it ran (it keeps
   vmnet until its next start): the Mac finds the VM's address from its
