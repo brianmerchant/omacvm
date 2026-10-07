@@ -154,5 +154,6 @@ Developer ID is announced in a feed that is signed with our key:
 3. Say this in the release notes: macOS ties the permissions of the Mac
    helpers (Input Monitoring, Accessibility, Location for the Bridge and
    Gestures) to the signature, so it asks for them again once. The fast
-   network service shows "old" and asks for the password once. Apps that are
+   network service shows "old" (it was installed for the old team) and the app
+   asks for the password once (Update…). Apps that are
    already installed keep working.

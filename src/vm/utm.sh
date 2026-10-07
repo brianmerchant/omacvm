@@ -7,7 +7,9 @@ utm_osa() { osascript "$@" 2>&1; }
 # utm_scripting: may OmacVM drive UTM from here? Prints why not. macOS asks
 # once per terminal app whether it may control UTM; over SSH it cannot ask
 # (-1743) and utmctl refuses to work. Checked before the long download.
-utm_scripting() {
+# A subshell, for its own Ctrl-C trap: osascript waits in the background,
+# which ignores Ctrl-C, and would go on waiting for an answer for 10 minutes.
+utm_scripting() (
   local out pid i t
   if [[ -n ${SSH_CONNECTION:-} ]]; then
     echo "UTM takes no orders over SSH: run omacvm in Terminal on the Mac itself"
@@ -16,6 +18,7 @@ utm_scripting() {
   t=$(mktemp)
   osascript -e 'with timeout of 600 seconds' -e 'tell application "UTM" to count virtual machines' -e 'end timeout' > "$t" 2>&1 &
   pid=$!
+  trap 'kill "$pid" 2>/dev/null; rm -f "$t"; exit 130' INT TERM
   for ((i = 0; i < 6; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
   kill -0 "$pid" 2>/dev/null && info "macOS asks whether this terminal may control UTM: click Allow" >&2
   wait "$pid" && { rm -f "$t"; return 0; }
@@ -26,7 +29,7 @@ utm_scripting() {
     *) echo "UTM did not answer (${out:-no reply}): quit and reopen UTM, then run omacvm again" ;;
   esac
   return 1
-}
+)
 
 # utm_create NAME CPUS MEMORY_MB LIVE_IMAGE DISK_MB
 # A QEMU VM like the one ggalancs/omarchy-arm-utm and OmacVM were tested with:

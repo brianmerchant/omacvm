@@ -9,9 +9,11 @@
 //                                                                  macOS's scroll for them dropped
 //   MouseSwipeFingers 3 (set while running)                     -> three from the next swipe; anything else: four
 //   not captured, or a VM without gestures                      -> nothing, scrolling passes
-// The setting is read from a throwaway domain (test.sh deletes it), never the
-// installed Gestures' own.
+// The setting is read from a throwaway domain (test.sh names it per run and
+// deletes it), never the installed Gestures' own.
+#ifndef GESTURES_DOMAIN
 #define GESTURES_DOMAIN CFSTR("org.omacvm.test.mouse-fingers")
+#endif
 #define main helper_main
 #include "omacvm-gestures.c"
 #undef main

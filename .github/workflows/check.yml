@@ -1,12 +1,21 @@
 # Quick checks on every pull request and on main: syntax, ShellCheck errors,
 # the app's and the Mac helpers' builds and offline tests (the guest agents'
 # also on Linux) and the control centre's tests. No signing beyond ad hoc, no VMs.
+#
+# Where the macOS job runs: pushes to main and pull requests from branches of
+# this repository run on the maintainer's Mac mini (self-hosted, label
+# omacvm-mini; macOS 27, Xcode 27). Pull requests from forks, and a manual
+# "Run workflow", run on GitHub's macos-15, so outside code never runs on the
+# mini and macOS 15 / Xcode 16 can still be checked before a release. Never add
+# pull_request_target here. The mini runs other work too: the steps below keep
+# their files in the job's own folders and clean up after themselves.
 name: check
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,10 +26,23 @@ concurrency:
 
 jobs:
   check:
-    runs-on: macos-15
+    # A fork's pull request has another head repository (or none, once the fork
+    # is deleted): false, so macos-15. fromJSON gives the runner's label list.
+    runs-on: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","macOS","ARM64","omacvm-mini"]') || 'macos-15' }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          # No token left in .git/config on a machine that stays.
+          persist-credentials: false
+
+      - name: Where this runs; a temp folder of the job's own
+        run: |
+          echo "runner: ${RUNNER_NAME:-?} (${{ runner.environment }}), $(sw_vers -productVersion), $(xcrun swift --version 2>/dev/null | head -1)"
+          # Short path on purpose (Unix sockets in tests); removed at the end.
+          tmp=${TMPDIR:-/tmp}; job_tmp=$(mktemp -d "${tmp%/}/j.XXXXXX")
+          echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
+          echo "JOB_TMP=$job_tmp" >> "$GITHUB_ENV"
 
       - name: List shell scripts
         run: |
@@ -58,6 +80,9 @@ jobs:
 
       - name: Touch ID's PAM client against a fake Bridge, and its PAM lines in and out
         run: src/tests/touchid-client.sh
+
+      - name: Touch ID turned on says ready (apply), what is missing (check on the Mac and in the VM)
+        run: src/tests/touchid-ready.sh
 
       - name: Update parts cover src/
         run: python3 src/release/manifest.py parts > /dev/null
@@ -113,6 +138,9 @@ jobs:
 
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
+
+      - name: Fusion guest install (first Hyprland build from the source tree)
+        run: src/tests/fusion-install.sh
 
       - name: OmacVM.app update checks
         working-directory: app/app
@@ -173,6 +201,9 @@ jobs:
           command -v zstd >/dev/null || brew install zstd
           src/tests/prebuilt-routes.sh
 
+      - name: Ctrl-C in omacvm build stops the running step (a terminal, no VM)
+        run: src/tests/build-ctrlc.sh
+
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
 
@@ -232,6 +263,9 @@ jobs:
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
+
+      - name: An app VM's address comes from its running QEMU (fast network turned off while it runs)
+        run: src/tests/app-vm-address.sh
 
       - name: The Bridge runs omacvm for the app's VMs through the app (only the Bridge, only the app's omacvm)
         run: src/tests/app-control-run.sh
@@ -309,6 +343,14 @@ jobs:
 
       - name: Sound does not hang on Chromium's video decoder (WirePlumber rule, install order, off); its device starts the daemon
         run: src/tests/vdec-wireplumber.sh
+
+      - name: Clean up (build folders, the job's temp folder)
+        if: always()
+        run: |
+          [ -z "${JOB_TMP:-}" ] || rm -rf "$JOB_TMP"
+          # SwiftPM's .build, the helpers' builds, __pycache__: nothing of this
+          # job stays on a self-hosted runner's disk until the next checkout.
+          git clean -ffdxq 2>/dev/null || true
 
   # The guest agents are Linux programs: their inotify and pidfd waits only
   # run here (on the Mac those tests skip). Arm, like the guest.

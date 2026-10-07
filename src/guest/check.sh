@@ -169,6 +169,14 @@ if [[ $BRIDGE == on ]]; then
     # Turned on while the VM runs: OmacVM.app adds the port at the start. Not a fault.
     skip "Touch ID" "on from the VM's next start: shut it down, then start it again (OmacVM.app adds its Touch ID port at the start)" human
   else ok "Touch ID" "sudo and polkit ask the Mac first; the password keeps working"; fi
+  # How the last request went (the PAM client's journal line; never the command).
+  if [[ $TOUCH_ID == on ]]; then
+    tj=$(journalctl -t omacvm-touchid -n 1 -o short-iso --no-pager -q 2>/dev/null | tail -1)
+    tw=$(sed -n 's/^[^ ]* [^ ]* omacvm-touchid[^:]*: //p' <<<"$tj"); tt=${tj:11:5}
+    if [[ -z $tw ]]; then skip "Touch ID last request" "none yet: try sudo -v in a terminal"
+    elif [[ $tw == *": Touch ID yes" ]]; then ok "Touch ID last request" "$tt: ${tw%%:*}, Touch ID yes"
+    else skip "Touch ID last request" "$tt: ${tw}"; fi
+  fi
   # The Mac's Touch ID panel draws in the Omarchy theme this VM sends (omacvm-touchid-theme).
   if [[ $TOUCH_ID == on ]]; then
     if ! user_active omacvm-touchid-theme.path; then bad "Touch ID panel theme" "the watcher (omacvm-touchid-theme.path) stopped: omacvm apply starts it again"
