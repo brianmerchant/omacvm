@@ -3,7 +3,7 @@
 # Mac, in Parallels or UTM. Run as root inside the VM from a copy of this
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
-#                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
+#                    [--display WxH@Hz] [--display-scale N] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME] [--only F,...] [--strict F,...|all]
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
@@ -13,6 +13,7 @@
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
 # --display (UTM: the fixed mode, from display/mac-display.swift) is required on UTM.
+# --display-scale (Fusion, a new VM): the Mac display's scale (mac-display --scale).
 # --vm-name-b64: the VM's name in its app, base64 (kept in /etc/omacvm/env): the
 # gestures daemon says it, so the Mac tells two VMs of one app apart.
 # Idempotent: run it again after an update of this repository.
@@ -26,7 +27,7 @@
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=(); GRAPHICS=""
+U=""; KB="us"; TYPE=""; MODE=""; DSCALE=""; CLOCK_FMT=""; NAME64=""; ONLY=""; STRICT=""; SOFT=(); GRAPHICS=""
 FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
@@ -39,6 +40,8 @@ while (( $# )); do
     --keyboard) KB=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
+    --display-scale) [[ $2 =~ ^[1-4](\.[0-9]+)?$ ]] || { echo "guest/install.sh: --display-scale 1 to 4" >&2; exit 2; }
+                     DSCALE=$2; shift 2 ;;
     --host) HOST_GIVEN=$2; shift 2 ;;
     --clock-format-b64) CLOCK_FMT=$(base64 -d <<<"$2"); shift 2 ;;
     --vm-name-b64) NAME64=$2; shift 2 ;;
@@ -342,7 +345,7 @@ system && case $TYPE in
   app)
     log "OmacVM.app"; "$R/app/guest/install.sh" "$U" ;;
   fusion)
-    log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
+    log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ${DSCALE:+"$DSCALE"} ;;
 esac
 # Chromium's video through V4L2: OmacVM.app VMs only (off on the other routes
 # above). Its own step, so the control centre can repair it alone.

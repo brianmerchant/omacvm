@@ -117,7 +117,9 @@ features_read_env "$probe"
 PREV=("${FV[@]}")   # what the VM has now: --transaction goes back to it
 # New to OmacVM (or a prebuilt VM before its first apply): the defaults,
 # Omanotch with a notch.
+FRESH=0
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
+  FRESH=1
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
 # OmacVM.app: the VM's record (its features file) over the VM's copy.
@@ -355,6 +357,12 @@ COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycac
 # FN), and GI_ARGS. KNOWN: the feature names the VM's copy knows (a copy of an
 # older OmacVM, when going back), all when empty.
 GI_ARGS=""; KNOWN=""
+# Fusion, new VM: its display scale is the Mac display's (2 on Retina; a
+# prebuilt image has the scale of the Mac it was made on). Later applies keep
+# the scale in the VM: the one Omarchy's scaling menu chose stays.
+if [[ $TYPE == fusion ]] && (( FRESH )) && ds=$(mac_tool mac-display --scale 2>/dev/null) && [[ $ds =~ ^[1-4](\.[0-9]+)?$ ]]; then
+  GI_ARGS+=" --display-scale $ds"
+fi
 guest_install() {
   local fargs="" i fmt v=("$@")
   for ((i = 0; i < ${#FN[@]}; i++)); do

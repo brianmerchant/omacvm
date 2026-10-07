@@ -86,6 +86,13 @@ in more words.
   next login); `omacvm-proxy-env` in the VM and `omacvm check` say what a
   login gets.
 
+- VMware Fusion: a new VM on a MacBook Air (or another Retina display under
+  3000 pixels wide) came up at scale 1, with tiny text, also in full screen.
+  The scale came from the display's width; it is now the Mac display's own
+  (2 on Retina, 1 on a plain display), as on the other routes. A scale you
+  pick later in Omarchy (Super + /, or the top bar's Display panel) still
+  stays over updates. A Fusion VM that is at 1 now: pick 2 there once.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
