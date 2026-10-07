@@ -4,20 +4,26 @@ import CoreGraphics
 /// The VM's keyboard tap. QEMU (a child of this app, so macOS asks about
 /// OmacVM) puts an event tap in front of macOS's own key handling, so ⌘ Tab,
 /// ⌘ Space and macOS's screenshot keys reach Omarchy while the VM has the
-/// keyboard. macOS makes that tap only when OmacVM may read the keyboard
-/// (Input Monitoring) or control the computer (Accessibility). Without it
-/// QEMU writes "Could not create event tap" into its log and those keys go to
-/// macOS instead, and nobody saw that line. Seen on a MacBook (2026-10-06):
-/// OmacVM was listed under Accessibility, but for an older signature of the
-/// app, which macOS does not count ("Failed to match existing code
-/// requirement" in tccd's log), and not listed under Input Monitoring.
+/// keyboard. It is an active tap at the HID level (ui/cocoa.m:
+/// kCGHIDEventTap, kCGEventTapOptionDefault: it swallows the keys), and macOS
+/// makes that only for an app allowed to control the computer
+/// (CGPreflightPostEventAccess, listed under Accessibility). Input Monitoring
+/// covers listen-only taps and does not count; AXIsProcessTrusted is a
+/// separate answer too (#211). Without it QEMU writes "Could not create event
+/// tap" into its log and those keys go to macOS instead. Seen on a MacBook
+/// (2026-10-07): Input Monitoring on, "control the computer" off, tap refused;
+/// the window's Allow… opened Input Monitoring, and the note stayed red.
 enum KeyAccess {
     /// The answers QEMU gets too: both ask for org.omacvm.app (QEMU's
     /// requests count for the app that started it). No prompt.
     static var listen: Bool { CGPreflightListenEventAccess() }
     static var post: Bool { CGPreflightPostEventAccess() }
 
-    /// One line for qemu.log (omacvm check reads it).
+    /// What QEMU's tap needs, and all the window checks.
+    static var allowed: Bool { post }
+
+    /// One line for qemu.log (KeyNote and omacvm check read it). Input
+    /// Monitoring only for the record.
     static var record: String {
         "keys: Input Monitoring \(listen ? "allowed" : "NOT allowed"), Accessibility (keys) \(post ? "allowed" : "NOT allowed") for OmacVM"
     }
@@ -37,14 +43,21 @@ enum KeyAccess {
         lastLog(folder: folder)?.contains("Could not create event tap") == true
     }
 
-    static let missingText = "macOS does not let OmacVM read the keyboard, so ⌘ Tab, ⌘ Space and ⌘ ⇧ 4 can go to macOS instead of Omarchy (mostly with the VM in a window). In System Settings › Privacy & Security, turn OmacVM on under Input Monitoring and under Accessibility, then quit the VM and start it again. If OmacVM is already on there, select it, remove it with −, and press Allow… again: macOS still has an older build of the app."
+    /// The window's line: the one setting.
+    static let shortText = "Allow OmacVM under Accessibility"
 
-    /// macOS's prompts (each once per app; after that they do nothing) and
-    /// the Input Monitoring pane, where OmacVM is then listed.
+    /// Behind the (i): the steps.
+    static var missingText: String {
+        let app = (Bundle.main.bundlePath as NSString).abbreviatingWithTildeInPath
+        return "Without it, ⌘ Tab, ⌘ Space and ⌘ ⇧ 4 go to macOS instead of Omarchy. Input Monitoring is not enough.\n\n1. Allow… opens System Settings › Privacy & Security › Accessibility.\n2. An OmacVM there already (an older build that macOS no longer counts): select it and remove it with −.\n3. Add \(app) with + and turn it on.\n4. Quit the VM and start it again."
+    }
+
+    /// macOS's prompt for "control the computer" (once per app; after that
+    /// it does nothing; it also lists OmacVM under Accessibility) and the
+    /// Accessibility pane.
     static func request() {
-        _ = CGRequestListenEventAccess()
         _ = CGRequestPostEventAccess()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
     }

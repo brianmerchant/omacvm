@@ -149,13 +149,15 @@ step_check() {
   if ! gh pr checks "$PR" -R "$GH_REPO" >/dev/null 2>&1; then
     (( DRY )) && note "PR #$PR: CI not green (or still running)" || fail "PR #$PR: CI not green (gh pr checks $PR)"
   fi
-  w=$(gitr show "origin/$head:CHANGELOG.md" | awk -v h="## $VERSION (unreleased)" '$0 == h { f = 1; next } f && /^## / { exit } f')
+  # awk reads to the end: an early exit would end git show with SIGPIPE, and
+  # pipefail would stop the check (the CHANGELOG is larger than a pipe).
+  w=$(gitr show "origin/$head:CHANGELOG.md" | awk -v h="## $VERSION (unreleased)" '$0 == h { f = 1; next } f && /^## / { f = 0 } f')
   [[ -n $w ]] || fail "CHANGELOG on $head has no \"## $VERSION (unreleased)\""
   if grep -qi 'pending' <<<"$w"; then
     (( DRY )) && note "CHANGELOG $VERSION still marks items as pending" || fail "CHANGELOG $VERSION still marks items as pending"
   fi
   # README items marked "(pending #N)" (or "(pending, no PR yet ...)") until their PR is in.
-  if gitr show "origin/$head:README.md" | grep -qi '(pending'; then
+  if gitr show "origin/$head:README.md" | grep -i '(pending' >/dev/null; then   # not -q: see SIGPIPE above
     (( DRY )) && note "README still marks items as pending" || fail "README still marks items as pending"
   fi
   if [[ -f $NOTES ]]; then

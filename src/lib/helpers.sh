@@ -13,8 +13,8 @@
 #   helpers_prebuilt SRC DIR APP  the prebuilt APP (OmacVMBridge.app ...) for
 #                                SRC's DIR, or nothing
 
-helpers_src_sum() {   # SRC DIR
-  ( cd "$1" && find "$2" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
+helpers_src_sum() {   # SRC DIR (names in the C locale's order, whoever runs it)
+  ( export LC_ALL=C; cd "$1" && find "$2" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
       sort -z | xargs -0 shasum ) | shasum | cut -c1-16
 }
 

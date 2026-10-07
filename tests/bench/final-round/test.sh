@@ -7,12 +7,13 @@
 # - chart.py --panel gpu: the method in the headline row, glmark2 as scores,
 #   Aquarium only when asked
 # - common.sh: the preflight (charger, charging, Low Power Mode, thermal
-#   state, energy mode, hypervisor services, the bench lock), the
+#   state, energy mode, other VMs, the bench lock), the
 #   benchmark-VM names, which VM runs
 # - round.sh: the plan within the budget, the order, RC2 only with its app,
 #   resuming (dry runs: nothing starts)
 # - summarize.py and chart.py: a second app build (app-rc2) and its name
-# - bench.sh: Geekbench GPU only on a GPU device, never PoCL or llvmpipe
+# - bench.sh: Geekbench GPU only on a GPU device, never PoCL or llvmpipe;
+#   the run decides, not --gpu-list
 # - the throughput page's script parses (node, where there is one)
 set -uo pipefail
 FR=$(cd "$(dirname "$0")" && pwd)
@@ -207,12 +208,17 @@ mkdir -p "$T/round"
 PRL=$'/Applications/Parallels Desktop.app/Contents/MacOS/Parallels Service.app/Contents/MacOS/prl_disp_service\n/Applications/Parallels Desktop.app/Contents/MacOS/prl_naptd'
 OMQ=$'/Users/x/Applications/OmacVM.app/Contents/Resources/qemu/bin/qemu-system-aarch64'
 
-check "busy: Parallels' service counts while testing UTM" \
-  '[[ $(STUB_PS="$PRL" C "busy_check \"UTM\\.app/\"") == *"\"busy\":true"* ]]'
+PRLVM='/Applications/Parallels Desktop.app/Contents/MacOS/Parallels VM.app/Contents/MacOS/prl_vm_app'
+check "busy: Parallels' idle service is recorded, not busy, while testing Fusion" \
+  '[[ $(STUB_PS="$PRL" C "busy_check \"VMware Fusion\\.app/\"") == *"\"other_hypervisor_processes\":2,"*"\"busy\":false"* ]]'
+check "busy: a running Parallels VM counts while testing Fusion" \
+  '[[ $(STUB_PS="$PRL"$'"'"'\n'"'"'"$PRLVM" C "busy_check \"VMware Fusion\\.app/\"") == *"\"other_vm_processes\":1,"*"\"busy\":true"* ]]'
 check "busy: Parallels' service is Parallels' own when testing it" \
-  '[[ $(STUB_PS="$PRL" C "busy_check \"Parallels Desktop\\.app/|/prl_\"") == *"\"busy\":false"* ]]'
-check "busy: Fusion's vmnet daemon counts for the Mac baseline" \
-  '[[ $(STUB_PS="/Library/Application Support/VMware/vmnet-natd" C "busy_check") == *"\"busy\":true"* ]]'
+  '[[ $(STUB_PS="$PRL" C "busy_check \"Parallels Desktop\\.app/|/prl_\"") == *"\"other_hypervisor_processes\":0,"*"\"busy\":false"* ]]'
+check "busy: Fusion's idle vmnet daemon is not busy for the Mac baseline" \
+  '[[ $(STUB_PS="/Library/Application Support/VMware/vmnet-natd" C "busy_check") == *"\"busy\":false"* ]]'
+check "busy: an app VM counts for the Mac baseline" \
+  '[[ $(STUB_PS="$OMQ" C "busy_check") == *"\"busy\":true"* ]]'
 check "busy: a second VM of the app under test counts" \
   '[[ $(STUB_PS="$OMQ"$'"'"'\n'"'"'"$OMQ" C "busy_check \"OmacVM[^/]*\\.app/\"") == *"\"target_vms\":2"* ]]'
 check "busy: one VM of the app under test is quiet" \
@@ -251,9 +257,10 @@ rm -rf "$T/home/.omacvm-bench.lock"
 
 # ---------- round.sh: plan, budget, order, resume (dry runs, nothing started) ----------
 RD=$T/rd; W=$T/wall.png; : > "$W"
-RS() { WALLPAPER=$W HOME=$T/home bash "$FR/round.sh" "$@" 2>&1; }
-check "round: 180 min leaves 5-minute idle windows" '[[ $(RS --plan) == *"idle windows 300s"* ]]'
-check "round: 240 min gives 10-minute idle windows" '[[ $(RS --plan --budget 240) == *"idle windows 600s"* ]]'
+# The rows of a laptop on any Mac: a desktop Mac (the CI's Mac mini) would drop the idle rows.
+RS() { WALLPAPER=$W HOME=$T/home FINAL_ROUND_IDLE_DESKTOP=1 bash "$FR/round.sh" "$@" 2>&1; }
+check "round: idle windows 3 minutes at any budget" '[[ $(RS --plan) == *"idle windows 180s"* ]] && [[ $(RS --plan --budget 240) == *"idle windows 180s"* ]]'
+check "round: FINAL_ROUND_IDLE_MAX lets a long budget give longer windows" '[[ $(FINAL_ROUND_IDLE_MAX=600 RS --plan --budget 240) == *"idle windows 600s"* ]]'
 check "round: RC2 steps only with RC2_APP" '[[ $(RS --plan) == *"rc2-vulkan      app-rc2    gpu    10 min  not run"* ]] && [[ $(RC2_APP=/x RS --plan) == *"rc2-vulkan      app-rc2    gpu    10 min  run"* ]]'
 check "round: --skip leaves a system out" '[[ $(RS --plan --skip fusion) == *"fusion-gpu      fusion     gpu    27 min  not run"* ]]'
 RS --dir "$RD" --dry-run --budget 400 >/dev/null
@@ -285,6 +292,24 @@ G() { PATH="$S:$PATH" N1=$1 T1=$2 N2=${3:-} T2=${4:-} bash -c "$fn"'; gpu_device
 check "OpenCL on a GPU (rusticl) is used" 'G "zink Vulkan (Virtio-GPU Venus)" GPU >/dev/null'
 check "PoCL alone is not a GPU" '[[ $(G "cpu-pocl-apple" CPU) == "CPU OpenCL only"* ]]'
 check "PoCL next to the GPU: refused, it could be picked" '! G "zink (Venus)" GPU "cpu-pocl" CPU >/dev/null'
+
+# Geekbench's --gpu-list is not trusted (it listed no OpenCL device in the
+# VMs while --gpu OpenCL ran): the run itself decides.
+cat > "$S/gb7" <<'GB'
+#!/bin/bash
+case $* in
+  *--gpu-list*) echo "no devices" ;;
+  *"--gpu OpenCL"*) if [ -n "${GB_URL:-}" ]; then echo "https://browser.geekbench.com/v7/gpu/123"; else echo "OpenCL: no device found"; fi ;;
+  *) echo "Vulkan: no device found" ;;
+esac
+GB
+printf '#!/bin/bash\n' > "$S/vulkaninfo"; chmod +x "$S/gb7" "$S/vulkaninfo"
+gbfn=$(sed -n -e '/^want()/p' -e '/^say()/p' -e '/^rec() {/,/^}/p' -e '/^GB_LOG=/,/^}/p' -e '/^CPU_DEV=/,/^}/p' -e '/^if want gpu; then/,/^fi/p' "$R/src/bench/bench.sh")
+GBT() { PATH="$S:$PATH" GB_URL=$1 N1="zink Vulkan (Venus)" T1=GPU bash -c "OS=Linux RUNS=2 ONLY=gpu OUT=/dev/null GB='$S/gb7'; $gbfn" 2>/dev/null; }
+check "Geekbench OpenCL runs although --gpu-list lists nothing" \
+  '[[ $(GBT 1 | grep -c "\"test\":\"geekbench-gpu-OpenCL\",\"run\":[12],.*gpu/123") == 2 ]]'
+check "Geekbench with no result: one 'not available' line with its reason" \
+  '[[ $(GBT "" | grep geekbench-gpu-OpenCL) == *"not available: Geekbench ran no OpenCL workload (OpenCL: no device found)"* && $(GBT "" | grep -c geekbench-gpu-OpenCL) == 1 ]]'
 
 # ---------- the page's script parses ----------
 if command -v node >/dev/null; then

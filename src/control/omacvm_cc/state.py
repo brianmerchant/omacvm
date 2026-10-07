@@ -3,9 +3,10 @@ updates in, one status per feature out. Pure: no files, no network, so every
 rule is unit-tested (tests/test_state.py).
 
 Status order (the first that applies wins):
-  busy (a job runs) > unavailable (this Mac or VM can't) > off > unknown
-  (no check result yet) > needs a person (a failed check only a person can
-  fix: a macOS permission, a setting) > failing > works
+  busy (a job runs) > unavailable (this Mac or VM can't) > off > needs a
+  person (a failed check only a person can fix: a macOS permission, a
+  setting) > failing > next start (on, but in use only from the VM's next
+  start: Touch ID on OmacVM.app) > unknown (no check result yet) > works
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ class Status(str, Enum):
     UNKNOWN = "unknown"
     NEEDS_PERSON = "needs-person"
     FAILING = "failing"
+    NEXT_START = "next-start"
     WORKS = "works"
 
 
@@ -176,9 +178,23 @@ def fixed_note(on: bool) -> str:
     return f"OmacVM's record said {'off' if on else 'on'}: fixed"
 
 
+# Touch ID answers sudo and polkit. Apps that unlock through polkit ask it only
+# with their own switch on (docs/features.md, ADR 0041): the checks below say
+# how 1Password is set here (omacvm-touchid-apps).
+TOUCH_ID_ABOUT = (
+    "On OmacVM.app: from the VM's next start (shut it down, then start it again; a restart inside the VM "
+    "is not enough).\n"
+    "Apps with their own switch for it (each still wants its own password once after it starts):\n"
+    "  1Password: Settings › Security › Unlock using system authentication\n"
+    "  Bitwarden: Settings › Security › Unlock with system authentication\n"
+    "  KeePassXC 2.8 (beta): Settings › Security › Enable database quick unlock (on by default)")
+
+
 def feature_about(f: Feature, macos: str = "") -> str:
     """More than the summary, for the details screen ("" nothing more).
     macos: the Mac's macOS version as the Bridge says it ("" not known)."""
+    if f.name == "touch-id":
+        return TOUCH_ID_ABOUT
     if f.name != "vulkan":
         return ""
     major = version_tuple(macos)
@@ -235,10 +251,16 @@ def local_avail(f: Feature, vm_type: str) -> Avail | None:
     return None
 
 
+# On, but in use only from the VM's next start (a reboot inside the VM keeps
+# the same start: OmacVM.app adds Touch ID's port when it starts the VM).
+NEXT_START_NOTE = "on from the VM's next start: shut it down, then start it again"
+
+
 def status_of(f: Feature, on: bool, avail: Avail | None, checks: list[Check] | None,
-              job: Job | None) -> tuple[Status, str]:
+              job: Job | None, next_start: bool = False) -> tuple[Status, str]:
     """One feature's status and the short note shown next to it.
-    checks None: no check result yet; [] : checked, nothing about it."""
+    checks None: no check result yet; [] : checked, nothing about it.
+    next_start: on, but this start of the VM does not have it yet."""
     if job is not None and job.active:
         step = f" ({job.step}/{job.of})" if job.of else ""
         return Status.BUSY, (job.text or job.action) + step
@@ -246,9 +268,11 @@ def status_of(f: Feature, on: bool, avail: Avail | None, checks: list[Check] | N
         return Status.UNAVAILABLE, avail.reason
     if not on:
         return Status.OFF, ""
+    failed = [c for c in checks or [] if c.status == "fail"]
+    if next_start and not failed:
+        return Status.NEXT_START, NEXT_START_NOTE
     if checks is None:
         return Status.UNKNOWN, "not checked yet"
-    failed = [c for c in checks if c.status == "fail"]
     human = [c for c in failed if c.human]
     if human:
         c = human[0]
@@ -382,13 +406,15 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
                avail: dict[str, Avail] | None = None, checks: list[Check] | None = None,
                jobs: list[Job] | None = None, installed: dict | None = None,
                offer: dict | None = None, mac_features: set[str] | None = None,
-               show_updates: bool = True, fixed: dict[str, str] | None = None) -> list[Row]:
+               show_updates: bool = True, fixed: dict[str, str] | None = None,
+               next_start: set[str] | None = None) -> list[Row]:
     """The features screen. mac_features: what the Mac's OmacVM knows (None:
     not known); a feature it lacks is unavailable until the Mac is updated.
     show_updates False (update checks off): no update marks, but an update
     that runs still shows on the features it changes. fixed: the features
     whose record the Mac fixed to their real state (omacvm features --json
-    "fixed"); on must already say that state."""
+    "fixed"); on must already say that state. next_start: the features that
+    are on but in use only from the VM's next start."""
     active = [j for j in (jobs or []) if j.active]
     rows = []
     for f in features:
@@ -399,12 +425,28 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
         # An update job is about the features it changes.
         job = next((j for j in active if f.name in j.features or (j.action == "update" and update)), None)
         mine = None if checks is None else [c for c in checks if c.feature == f.name]
-        st, note = status_of(f, on.get(f.name, False), a, mine, job)
+        st, note = status_of(f, on.get(f.name, False), a, mine, job, f.name in (next_start or ()))
         if (fixed or {}).get(f.name) and st in (Status.WORKS, Status.OFF, Status.UNKNOWN):
             note = fixed_note(on.get(f.name, False))
         rows.append(Row(feature=f, on=on.get(f.name, False), status=st, note=note,
                         update=update and show_updates, checks=tuple(mine or ())))
     return rows
+
+
+def next_start_note(name: str, turn_on: bool, vm_type: str) -> str:
+    """What switching NAME means for the VM that runs now ("" when it changes
+    now). The fast network (OmacVM.app) is the network of the VM's next start:
+    the running VM keeps its own until then. On may need the Mac's service
+    installed or updated: OmacVM asks for the password on the Mac at that
+    start (a VM's job never asks for it)."""
+    if name != "fast-network" or vm_type != "app":
+        return ""
+    text = ("From the VM's next start (shut it down, then start it again): "
+            "it keeps the network it has until then.")
+    if turn_on:
+        text += (" If the fast network's service on the Mac needs installing or an update, "
+                 "OmacVM asks for your password on the Mac at that start.")
+    return text
 
 
 def toggle_plan(features: list[Feature], on: dict[str, bool], name: str) -> dict[str, bool]:

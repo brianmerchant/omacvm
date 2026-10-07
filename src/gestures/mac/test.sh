@@ -11,7 +11,10 @@
 #    Gestures, the Bridge client and the guest check.
 # 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
 #    own tap sits ahead of ours) comes to the front, and when macOS invalidated
-#    it; a failed re-creation keeps the old tap and is logged once (test-tap.c).
+#    it; a failed re-creation keeps the old tap and is logged once. Accessibility
+#    (or Input Monitoring) taken away: the tap and its run-loop source go and
+#    the trackpads are let go at once, nothing enables or creates a tap again
+#    until it is back (issue #192) (test-tap.c).
 # 5. Ctrl+Option+Esc (and the old Ctrl+Option+Cmd+Esc, exact modifiers only): in the VM the display under the pointer moves out
 #    with macOS's own Space shortcut as the user set it (or every display
 #    with "all"), toward the Space it came from; in macOS back in; not moved
@@ -37,7 +40,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
 # A process and what it started (the guest runs python3 in a subshell).
 killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done; }
-trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete org.omacvm.test.mouse-fingers >/dev/null 2>&1 || true' EXIT
+# Its own settings domain per run: two runs at once on one Mac (CI) keep apart.
+MOUSE_DOMAIN=org.omacvm.test.mouse-fingers.$$
+trap 'killtree ${PIDS:-}; rm -rf "$T"; defaults delete "$MOUSE_DOMAIN" >/dev/null 2>&1 || true' EXIT
 trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
@@ -224,7 +229,7 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "
 "$T/test-scroll" > "$T/scroll" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/scroll"
 # 7. The Magic Mouse's gestures (its setting in a throwaway domain, deleted after).
-clang -O1 -Wall -Wno-unused-function -o "$T/test-mouse" "$HERE/test-mouse.c" "$HERE/scroll_ns.m" \
+clang -O1 -Wall -Wno-unused-function "-DGESTURES_DOMAIN=CFSTR(\"$MOUSE_DOMAIN\")" -o "$T/test-mouse" "$HERE/test-mouse.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-mouse" > "$T/mouse" 2>&1 || fail=1

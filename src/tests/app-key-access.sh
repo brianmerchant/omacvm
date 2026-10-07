@@ -3,8 +3,8 @@
 # when QEMU's log from the last start says macOS refused the tap ("Could not
 # create event tap"), and not for a log without it, an empty or missing log,
 # or a line far past the log's start. The permission check itself asks macOS
-# (no prompt) and is only printed. Compiles KeyAccess.swift on its own; no
-# window, no VM, no prompt.
+# (no prompt) and is only printed; Allow… asks for what QEMU's tap needs.
+# Compiles KeyAccess.swift on its own; no window, no VM, no prompt.
 #   src/tests/app-key-access.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -39,4 +39,16 @@ case $r in
   "keys: Input Monitoring "*" for OmacVM") echo "ok   qemu.log line: $r" ;;
   *) echo "FAIL qemu.log line: '$r'"; fail=1 ;;
 esac
+# What the window asks for: what QEMU's active tap needs ("control the
+# computer", the Accessibility pane), not Input Monitoring.
+src=$R/app/app/Sources/OmacVM/KeyAccess.swift
+has() { if grep -qF "$2" "$src"; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+hasnt() { if grep -qF "$2" "$src"; then echo "FAIL $1"; fail=1; else echo "ok   $1"; fi; }
+has "Allow… asks for control the computer" '_ = CGRequestPostEventAccess()'
+has "... and opens Accessibility" 'Privacy_Accessibility'
+hasnt "... not Input Monitoring" 'CGRequestListenEventAccess'
+hasnt "... nor its pane" 'Privacy_ListenEvent'
+has "the window checks control the computer" 'static var allowed: Bool { post }'
+src=$R/app/app/Sources/OmacVM/Views.swift
+has "... and only that (not Input Monitoring)" 'KeyNote.decide(allowedNow: allowed,'
 exit $fail
