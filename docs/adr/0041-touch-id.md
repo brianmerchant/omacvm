@@ -61,7 +61,7 @@ Key:
 
 pam_exec + client (option 2), a separate root-only key (option 2), one new
 signed request on the Bridge, behind a new feature `touch-id`
-(experimental, off by default, `mac,vm`, all routes the Bridge serves:
+(experimental at first in 3.0.2, a regular feature since 3.0.5; off by default, `mac,vm`, all routes the Bridge serves:
 OmacVM.app, Parallels, UTM, VMware Fusion).
 
 ### Guest
