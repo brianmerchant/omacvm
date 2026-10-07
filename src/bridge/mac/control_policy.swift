@@ -325,6 +325,17 @@ func vmForApp(_ name: String, _ vms: [VMEntry], ssh: Bool = true) -> Result<VMEn
   return .success(v)
 }
 
+/// Requests about an OmacVM.app VM that the Bridge answers without SSH to
+/// it: a job's state, graphics memory (a file), the Mac's own settings, the
+/// Touch ID panel's colours. A VM the Mac cannot reach just now (busy, its
+/// network moving) still gets them; checks and new jobs need SSH.
+func routeNeedsSSH(_ r: ControlRoute) -> Bool {
+  switch r {
+  case .job, .gpuMemory, .mouseSwipe, .setMouseSwipe, .theme: return false
+  default: return true
+  }
+}
+
 let notRunningText = "the Mac's list of VMs has this VM as not running"
 func notSetUpText(_ name: String) -> String {
   "OmacVM on the Mac did not set this VM up (on the Mac: omacvm apply --vm \"\(name)\" lets it in)"

@@ -545,6 +545,9 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     if case .failure(let e) = vmForApp("U", [ugly]) {
       expect(!e.message.contains("\u{1b}") && !e.message.contains("\n") && e.message.count <= 30 + 240, "why: no control characters, short")
     } else { expect(false, "ugly why") }
+    expect(!routeNeedsSSH(.job("0123456789abcdef")) && !routeNeedsSSH(.gpuMemory), "a job's state and graphics memory: no SSH needed")
+    expect(routeNeedsSSH(.status) && routeNeedsSSH(.startJob(JobRequest(action: .enable, features: ["touch-id"]))),
+           "checks and new jobs need SSH")
     let lostPeer = VMEntry(name: "P", type: "parallels", state: "running", ip: "10.211.55.9", omacvm: "", setup: true, reachable: false,
                            why: "OmacVM's SSH key did not get in at 10.211.55.9")
     if case .failure(let e) = vmForPeer("10.211.55.9", [lostPeer]) {

@@ -272,7 +272,9 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
-      switch vmForApp(name, vmList(cli, fresh: fresh, every: VMListCache.appEvery) { if case .success = vmForApp(name, $0) { return true }; return false }) {
+      let ssh = routeNeedsSSH(route)
+      switch vmForApp(name, vmList(cli, fresh: fresh, every: VMListCache.appEvery) { if case .success = vmForApp(name, $0, ssh: ssh) { return true }; return false },
+                      ssh: ssh) {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }

@@ -109,7 +109,7 @@ enum FastNetwork {
     /// The record of a start on the user network because the service was not
     /// updated (logs/network; omacvm check shows it).
     static func notUpdated(_ why: String) -> String {
-        "the fast network's service was not updated (\(why)): Update… under Fast network in OmacVM, or omacvm enable fast-network"
+        "the fast network's service is not ready for this app (\(why)): Update… or Install… under Fast network in OmacVM, or omacvm enable fast-network"
     }
 
     /// Installs or updates the service for this app (macOS asks for an

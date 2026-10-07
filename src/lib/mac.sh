@@ -122,6 +122,9 @@ hostkey_changed() {
   [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }   # OmacVM.app: 127.0.0.1:PORT
   while read -r _h t k; do
     [[ -n $k ]] || continue
+    # Only a key of a type remembered tells: a scan cut short by a busy VM
+    # may bring only the others.
+    grep -qF " $t " "$OMA_PIN" || continue
     seen=1
     grep -qF " $t $k" "$OMA_PIN" && return 1
   done < <(ssh-keyscan -T 5 -p "$port" "$ip" 2>/dev/null)

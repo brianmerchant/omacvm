@@ -123,4 +123,18 @@ check "stopped: why there is no address" "its QEMU is not running" "$(app_no_add
 check "stopped: off is just off" "fast network: off" "$(app_fast_network_wish "$D" off)"
 check "stopped: on from the next start" "fast network: on from the VM's next start" "$(app_fast_network_wish "$D" on)"
 
+# 7. "Another SSH host key" (omacvm vms' why) only from a key of the type
+#    remembered: a scan cut short by a busy VM (only its RSA key) tells nothing.
+OMA_PIN=$T/pin; echo "omacvm-vm ssh-ed25519 AAAAgood" > "$OMA_PIN"
+SCAN=""
+ssh-keyscan() { printf '%s' "$SCAN"; }
+SCAN=$'[127.0.0.1]:1 ssh-rsa AAAArsa\n'
+check "scan with only another key type: not 'changed'" same "$(hostkey_changed 127.0.0.1:1 && echo changed || echo same)"
+SCAN=$'[127.0.0.1]:1 ssh-rsa AAAArsa\n[127.0.0.1]:1 ssh-ed25519 AAAAgood\n'
+check "the remembered key: same" same "$(hostkey_changed 127.0.0.1:1 && echo changed || echo same)"
+SCAN=$'[127.0.0.1]:1 ssh-ed25519 AAAAother\n'
+check "another key of the remembered type: changed" changed "$(hostkey_changed 127.0.0.1:1 && echo changed || echo same)"
+SCAN=""
+check "no answer: not 'changed'" same "$(hostkey_changed 127.0.0.1:1 && echo changed || echo same)"
+
 exit $fail

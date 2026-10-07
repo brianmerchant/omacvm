@@ -248,7 +248,8 @@ if (( MAC )); then
       case $("$R/src/net/mac/install.sh" --status 2>/dev/null | head -1) in
         ok) ;;
         stopped) info "fast network: its service stopped trying after vmnet failed too often; the VM starts on QEMU's own network until the Mac restarts or: omacvm enable fast-network --vm \"$VM\"" ;;
-        *) info "fast network: its service on this Mac needs an update for this OmacVM.app (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Update… in OmacVM. Until then the VM starts on QEMU's own network" ;;
+        old) info "fast network: its service on this Mac needs an update for this OmacVM.app (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Update… in OmacVM. Until then the VM starts on QEMU's own network" ;;
+        *) info "fast network: its service is not installed (or not running) on this Mac (macOS asks for your password once): omacvm enable fast-network --vm \"$VM\", or Install… in OmacVM. Until then the VM starts on QEMU's own network" ;;
       esac
     fi
   fi
