@@ -60,11 +60,23 @@ final class AppState: ObservableObject {
     }
 
     /// The VM's drive went away while it ran (main.swift, Runner.driveLost).
+    /// The drive may be back already (a USB link that reset): its mount came
+    /// while QEMU was still being stopped, when drivesChanged leaves the
+    /// running VM alone, so look again now, in the same folder. Back: ready,
+    /// and it says why the VM stopped.
     func driveGone(_ drive: String) {
+        storage.refresh()
+        if Storage.missingDrive(for: config.folder) == nil, let c = VMConfig.load(from: config.folder) {
+            goneDrive = nil
+            config = c
+            screen = c.isReady ? .ready : .setup
+            message = "\(c.name) was stopped: its drive (\(drive)) went away while it ran. The drive is back: start the VM again."
+            FileHandle.standardError.write(Data("drive: \(c.name) ready again: \(drive) went away and is back\n".utf8))
+            return
+        }
         message = nil
         goneDrive = drive
         screen = .unavailable
-        storage.refresh()
         FileHandle.standardError.write(Data("drive: \(config.name) unavailable: \(drive) is gone\n".utf8))
     }
 

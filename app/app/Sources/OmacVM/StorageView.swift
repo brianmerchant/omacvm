@@ -519,11 +519,12 @@ struct UnavailableView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(state.config.name).font(.title2.bold())
-            Text(Storage.driveGoneText(state.goneDrive ?? Storage.missingDrive(for: state.config.folder) ?? "its drive"))
-                .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            let gone = Storage.driveGoneText(state.goneDrive ?? Storage.missingDrive(for: state.config.folder) ?? "its drive")
+            Text(gone).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             Text("Its folder: \(state.config.folder.path)")
                 .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            if let m = state.message { Text(m).foregroundStyle(.red) }
+            // A start asked for meanwhile (Dock, omacvm start) says the same: once.
+            if let m = state.message, m != gone { Text(m).foregroundStyle(.red) }
             HStack {
                 if let other {
                     Button("Show \(other.name)") { state.showOther(other) }

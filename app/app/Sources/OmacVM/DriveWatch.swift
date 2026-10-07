@@ -6,10 +6,10 @@ import Foundation
 /// with it: QEMU's open files then fail and nothing it writes lands
 /// anywhere. Three signals, whichever comes first: the folder's vnode is
 /// revoked (kqueue NOTE_REVOKE: its file system was unmounted), macOS says
-/// the volume unmounted, or a poll every 2 s finds the volume's mount point
-/// gone or on another device (DriveWatch.mountGone). The folder only moving
-/// on its drive (Finder) is no signal. `gone` runs once, on the main queue,
-/// with the drive's name.
+/// the volume unmounted, or a poll every 2 s finds its file system no longer
+/// mounted (DriveWatch.mounted). The folder only moving on its drive (Finder)
+/// or the drive being renamed (its mount point moves) is no signal. `gone`
+/// runs once, on the main queue, with the drive's name.
 /// Foundation, AppKit and Storage only: src/tests/app-drive-drop.sh compiles
 /// it alone and drops a real disk image under it.
 final class DriveWatch: @unchecked Sendable {
@@ -17,7 +17,7 @@ final class DriveWatch: @unchecked Sendable {
     let mount: URL
     private let device: dev_t
     private let queue = DispatchQueue(label: "org.omacvm.drive-watch")
-    /// Its own queue: a stat on a failing drive may hang a while.
+    /// The 2 s poll's own queue.
     private let pollQueue = DispatchQueue(label: "org.omacvm.drive-watch.poll")
     private let lock = NSLock()
     // Under `lock`: signals and the watch can end on any thread.
@@ -47,7 +47,7 @@ final class DriveWatch: @unchecked Sendable {
         let t = DispatchSource.makeTimerSource(queue: pollQueue)
         t.schedule(deadline: .now() + 2, repeating: 2)
         t.setEventHandler { [weak self] in
-            guard let self, Self.mountGone(self.mount, device: self.device) else { return }
+            guard let self, !Self.mounted(self.device) else { return }
             self.fire()
         }
         timer = t
@@ -84,11 +84,21 @@ final class DriveWatch: @unchecked Sendable {
         DispatchQueue.main.async { g(n) }
     }
 
-    /// The volume mounted at MOUNT when the watch began (DEVICE) is gone:
-    /// nothing there now, or something else (the empty folder an unmount
-    /// can leave in /Volumes, another drive under the same name).
-    static func mountGone(_ mount: URL, device: dev_t) -> Bool {
-        guard let now = Storage.device(mount) else { return true }
-        return now != device
+    /// A file system with this device is mounted. Read from the mount table
+    /// (MNT_NOWAIT: no I/O on a drive that may hang), by device and not by
+    /// path: a renamed drive moves its mount point (/Volumes/NEW) but stays;
+    /// a drive gone leaves no entry, and another drive mounted under the old
+    /// name has another device. The device is st_dev, which macOS gives as
+    /// the file system's f_fsid.val[0].
+    static func mounted(_ device: dev_t) -> Bool {
+        let n = getfsstat(nil, 0, MNT_NOWAIT)
+        // Unreadable now: say mounted (the revoke and unmount signals stay).
+        guard n > 0 else { return true }
+        var list: [statfs] = Array(repeating: statfs(), count: Int(n) + 8)
+        let got = list.withUnsafeMutableBufferPointer {
+            getfsstat($0.baseAddress, Int32($0.count * MemoryLayout<statfs>.stride), MNT_NOWAIT)
+        }
+        guard got > 0 else { return true }
+        return list.prefix(Int(got)).contains { $0.f_fsid.val.0 == device }
     }
 }
