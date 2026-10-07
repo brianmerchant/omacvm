@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
+  too much graphics memory (a browser with big WebGL pages) no longer turns
+  the whole VM black. The last part of the graphics memory guard (512 MB on
+  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland
+  and the bar): the app past its share, or the app that wants more while
+  macOS is short of memory, loses its own GPU context, and the VM shows a
+  note that says so. Before, whichever asked next lost it, often Hyprland,
+  and the app then restarted the desktop, closing every app. When the
+  desktop is still lost, the window and the note say why (the guard,
+  macOS short of memory, or a graphics failure).
+
 ## 3.0.4 (unreleased)
 
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
@@ -29,16 +42,6 @@ in more words.
 - Chromium video after a kernel update: when the decoder came late, its
   service stayed down until the next start and videos played on the CPU.
   The decoder now starts its service when it comes.
-- OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
-  too much graphics memory (a browser with big WebGL pages) no longer turns
-  the whole VM black. The last part of the graphics memory guard (512 MB on
-  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland
-  and the bar): the app past its share, or the app that wants more while
-  macOS is short of memory, loses its own GPU context, and the VM shows a
-  note that says so. Before, whichever asked next lost it, often Hyprland,
-  and the app then restarted the desktop, closing every app. When the
-  desktop is still lost, the window and the note say why (the guard,
-  macOS short of memory, or a graphics failure).
 
 ## 3.0.3
 
