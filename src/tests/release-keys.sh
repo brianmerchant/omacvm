@@ -284,12 +284,12 @@ tree() {   # DIR: src/ under DIR
   cp "$KEYS" "$1/src/release/"
   sed "s|^APP_DOWNLOADS=.*|APP_DOWNLOADS=$APP_DOWNLOADS|" "$R/src/lib/app.sh" > "$1/src/lib/app.sh"
 }
-fakeapp() {   # APP SIGN-ID: an org.omacvm.app 9.9.9 whose QEMU and daemon are signed with SIGN-ID ("-": ad hoc)
+fakeapp() {   # APP SIGN-ID [QEMU-ID]: an org.omacvm.app 9.9.9 whose QEMU and daemon are signed with SIGN-ID ("-": ad hoc)
   mkdir -p "$1/Contents/Resources/runtime/bin" "$1/Contents/Library/LaunchServices"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string org.omacvm.app" -c "Add :CFBundleShortVersionString string 9.9.9" "$1/Contents/Info.plist" >/dev/null
   echo 'int main(void) { return 0; }' | xcrun clang -x c -o "$1/Contents/Resources/runtime/bin/OmacVM" -
   cp "$1/Contents/Resources/runtime/bin/OmacVM" "$1/Contents/Library/LaunchServices/org.omacvm.netd"
-  codesign --force --timestamp=none --sign "$2" --identifier org.omacvm.app.qemu "$1/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null
+  codesign --force --timestamp=none --sign "$2" --identifier "${3:-org.omacvm.app.qemu}" "$1/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null
   codesign --force --timestamp=none --sign "$2" --identifier org.omacvm.netd "$1/Contents/Library/LaunchServices/org.omacvm.netd" 2>/dev/null
 }
 # APP: whose QEMU an install would trust; then where its root daemon would come from.
@@ -318,6 +318,8 @@ out=$(PATH=$T/noclt:$PATH "$T/cli/src/net/mac/install.sh" --app "$T/adhoc-net/Om
 expect "... an install says why and stops before asking for root" "3 yes no" \
   "$rc $([[ $out == *"is not run as root"*"Fast Network button"* ]] && echo yes || echo no) $([[ -e $T/sudo-asked ]] && echo yes || echo no)"
 tree "$T/adhoc-net/OmacVM.app/Contents/Resources/omacvm"
+fakeapp "$T/adhoc-test/OmacVM.app" - org.omacvm.app.test.qemu
+expect "fast network, an ad hoc test build (feed lists the team): its exact build only" "exact build" "$(trust "$T/adhoc-test/OmacVM.app")"
 expect "fast network, an ad hoc app's own copy of the script (its button): the app's daemon, its exact build" "exact build daemon: app" \
   "$("$T/adhoc-net/OmacVM.app/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$T/adhoc-net/OmacVM.app" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
 if [[ -n ${OMACVM_TEST_DEVID_SIGN:-} ]]; then
@@ -340,6 +342,25 @@ if [[ -n ${OMACVM_TEST_DEVID_SIGN:-} ]]; then
     "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$N" 2>/dev/null | head -1)"
   expect "fast network, another app's copy of the script: no feed, exact build only, daemon from source" "exact build daemon: source" \
     "$("$N/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$T/adhoc-net/OmacVM.app" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+  # A test build (OmacVM Test.app: its QEMU is org.omacvm.app.test.qemu) of
+  # that team: the same rules as a release app; another identifier: never the team.
+  TB=$T/devid-test/OmacVM.app
+  fakeapp "$TB" "$OMACVM_TEST_DEVID_SIGN" org.omacvm.app.test.qemu
+  tree "$TB/Contents/Resources/omacvm"
+  expect "fast network, a test build's own copy of the script: the team, its daemon" "team $NT daemon: app" \
+    "$("$TB/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$TB" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+  expect "fast network, a test build, no feed (the command line): its exact build only" "exact build" "$(trust "$TB")"
+  feed99 "\"0000000000\", \"ABCDE12345\""
+  expect "fast network, a test build, a feed of other teams: its exact build only" "exact build" "$(trust "$TB")"
+  feed99 "\"$NT\""
+  expect "fast network, a test build, its team in the signed feed: the team" "team $NT" "$(trust "$TB")"
+  O=$T/devid-other/OmacVM.app
+  fakeapp "$O" "$OMACVM_TEST_DEVID_SIGN" org.omacvm.app.other.qemu
+  expect "fast network, another QEMU identifier of the team, its team in the signed feed: its exact build only" "exact build" "$(trust "$O")"
+  tree "$O/Contents/Resources/omacvm"
+  expect "... also from its own copy of the script" "exact build" \
+    "$("$O/Contents/Resources/omacvm/src/net/mac/install.sh" --trust --app "$O" 2>/dev/null | head -1)"
+  rm -rf "$T/www/v9.9.9"
 else
   echo "skip the fast network's Developer ID checks (set OMACVM_TEST_DEVID_SIGN to a Developer ID Application identity)"
 fi

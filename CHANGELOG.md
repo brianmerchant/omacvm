@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- Fast network: installed for the test app OmacVM Test.app (Developer ID),
+  the service now trusts the test app's QEMU by its team, as for OmacVM.app,
+  not only that exact build. A test Mac gives the admin password once, not
+  after every new test build. Same rules as before: only OmacVM's QEMU
+  identifiers of a team that OmacVM's release key vouches for; ad hoc builds
+  and other teams still get their exact build only. Installs for OmacVM.app
+  are unchanged and stay valid.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
