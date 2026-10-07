@@ -76,9 +76,50 @@ enum FastNetwork {
     /// stopped; nil when the script could not say. Runs a script that checks
     /// code signatures: never on the main thread.
     static func serviceStatus() -> String? {
-        guard let r = runScript(["--status", "--app", Bundle.main.bundlePath], gui: false), r.status == 0 else { return nil }
-        let first = r.out.split(separator: "\n").first.map(String.init) ?? ""
-        return ["ok", "old", "missing", "down", "stopped"].contains(first) ? first : nil
+        if let r = runScript(["--status", "--app", Bundle.main.bundlePath], gui: false), r.status == 0 {
+            let first = r.out.split(separator: "\n").first.map(String.init) ?? ""
+            if ["ok", "old", "missing", "down", "stopped"].contains(first) {
+                if first == "ok" { rememberOK() }
+                return first
+            }
+        }
+        // The script could not say (missing, failed to run): the app's own
+        // check of the service, never "fine" just because nothing answered.
+        switch serviceProblem() {
+        case nil: return nil
+        case "omacvm-netd was installed for another build of the app": return "old"
+        default: return "missing"
+        }
+    }
+
+    /// Before a VM start: serviceStatus, but without running the script (it
+    /// checks code signatures, seconds on a busy Mac) when nothing changed
+    /// since it last said ok: the same app (version, build, path), the same
+    /// daemon and launchd job (their files' dates and sizes), and the app's own
+    /// check (serviceProblem) finds nothing.
+    static func statusBeforeStart() -> String? {
+        if serviceProblem() == nil, let k = okKey(), UserDefaults.standard.string(forKey: okDefaultsKey) == k { return "ok" }
+        return serviceStatus()
+    }
+
+    private static let okDefaultsKey = "FastNetworkServiceOK"
+    private static let daemonBinary = "/Library/PrivilegedHelperTools/org.omacvm.netd"
+
+    /// What the last "ok" was for: this app, the daemon's and its plist's files.
+    private static func okKey() -> String? {
+        func stamp(_ path: String) -> String? {
+            var st = stat()
+            guard stat(path, &st) == 0 else { return nil }
+            return "\(st.st_size)-\(st.st_mtimespec.tv_sec)-\(st.st_ino)"
+        }
+        let info = Bundle.main.infoDictionary ?? [:]
+        guard let bin = stamp(daemonBinary), let plist = stamp(daemonPlist) else { return nil }
+        return [Bundle.main.bundlePath, info["CFBundleShortVersionString"] as? String ?? "", info["CFBundleVersion"] as? String ?? "",
+                bin, plist, String(getuid())].joined(separator: "|")
+    }
+
+    private static func rememberOK() {
+        if let k = okKey() { UserDefaults.standard.set(k, forKey: okDefaultsKey) }
     }
 
     /// What the app says about a service that is not ok (serviceStatus), or
@@ -97,14 +138,17 @@ enum FastNetwork {
         case "down":
             return ("The fast network's service is not running",
                     "The fast network's service is installed, but macOS does not run it.", "Repair…", "Repair it now")
-        case "stopped":
-            return ("The fast network stopped",
-                    "macOS's VM network failed too often in a row, so the fast network stopped trying until the Mac restarts.",
-                    "Try Again…", "Try again now")
         default:
+            // ok, or "stopped": macOS's VM network failed too often in a row,
+            // and each failure costs macOS's vmnet service for good: the
+            // service waits for the Mac's restart (stoppedText), no question,
+            // no password.
             return nil
         }
     }
+
+    /// The service stopped trying vmnet (status "stopped"): what the app says.
+    static let stoppedText = "macOS's VM network failed too often in a row, so the fast network stopped trying until the Mac restarts (each failure costs macOS's VM network for good)"
 
     /// The record of a start on the user network because the service was not
     /// updated (logs/network; omacvm check shows it).
@@ -135,9 +179,12 @@ enum FastNetwork {
     /// person presses the button. Blocks until done; nil when it worked, else
     /// what went wrong (nothing changed then).
     static func turnOn(_ c: VMConfig) -> String? {
-        // The installer does nothing (and asks nothing) when the service
-        // serves this app already; else it installs or updates it.
-        if let err = runInstaller([]) { return err }
+        // Installed or updated only when it does not serve this app yet: no
+        // password for a service that is fine, and a service that stopped
+        // after vmnet failures waits for the Mac's restart (installing again
+        // would end that back-off).
+        let st = serviceStatus()
+        if st != "ok" && st != "stopped", let err = runInstaller([]) { return err }
         let file = c.folder.appendingPathComponent("fast-network")
         if isOn(c) { record(c, on: true); return nil }
         let b = (0..<3).map { _ in String(format: "%02x", Int.random(in: 0...255)) }

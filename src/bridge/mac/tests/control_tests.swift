@@ -519,6 +519,22 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     _ = ua.finished([vmA], now: t0 + 1)
     expect(!ua.unknown(now: t0 + 5, every: VMListCache.addressEvery).start, "address: not again within 10 s")
     expect(ua.unknown(now: t0 + 11, every: VMListCache.addressEvery).start, "address: 10 s after the last list")
+    // A VM the list has as running, but refused (not reachable): answered at
+    // once; a background run at most every 10 s, however often it asks.
+    var ur = VMListCache()
+    _ = ur.unknown(now: t0, every: 1)
+    let unreach = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "", omacvm: "", setup: true, reachable: false, why: "no address")
+    _ = ur.finished([unreach], now: t0 + 1)
+    expect(appVMListed("Omarchy", ur.list) && !appVMListed("Other", ur.list), "listed: by name, running")
+    expect(!ur.refused(now: t0 + 2), "refused: no run within 10 s of the last list")
+    expect(ur.refused(now: t0 + 12) && ur.running, "refused: a background run 10 s after the last list")
+    expect(!ur.refused(now: t0 + 12.5), "refused: not while a run goes")
+    _ = ur.finished([unreach], now: t0 + 13)
+    var refusedRuns = 0
+    for i in 0..<60 where ur.refused(now: t0 + 14 + Double(i)) { refusedRuns += 1; _ = ur.finished([unreach], now: t0 + 14 + Double(i) + 0.5) }
+    expect(refusedRuns <= 6 && refusedRuns >= 4, "refused: a VM asking every second for a minute starts 4-6 runs (got \(refusedRuns))")
+    expect(peerListed("10.211.55.5", [vmA]) && !peerListed("10.211.55.9", [vmA]) && !peerListed("", [VMEntry(name: "x", type: "app", state: "running", ip: "", omacvm: "", setup: true)]),
+           "listed: by address, never an empty one")
     // jobEnded keeps whether the VM was reachable.
     var uj = VMListCache()
     _ = uj.unknown(now: t0, every: 1)

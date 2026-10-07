@@ -12,15 +12,17 @@ in more words.
   waits a few seconds for a fresh look at the VMs instead of minutes, and
   a VM the Mac cannot reach is told so instead of "not running".
 - Fast network after an app update: the service from an earlier app keeps
-  working when its protocol is the same (3.0.0 to 3.0.3 count as one), so
+  working when its protocol is the same (3.0.1 to 3.0.3 count as one), so
   most updates need no new install and no password. When it does need an
-  update, the app asks before the VM starts ("The fast network needs an
-  update: Update…", one password), and its window, `omacvm check`, `omacvm
-  enable fast-network` and the control centre's Fast network switch offer
-  the same; from the control centre, macOS's password dialog shows on the
-  Mac. Saying no starts the VM on the normal network, and it says so. Other
+  update (3.0.0's and 2.9's services do), the app asks before the VM starts
+  ("The fast network needs an update: Update…", one password), and its
+  window, `omacvm check` and `omacvm enable fast-network` offer the same.
+  Saying no starts the VM on the normal network, and it says so. Other
   switches (Touch ID too) and Update VM no longer stop on an outdated
-  service.
+  service. Nothing the VM asks for (the control centre) puts up macOS's
+  password dialog or uses sudo: the app asks on the Mac at the next start.
+  A service that stopped after macOS's VM network failed too often is left
+  alone until the Mac restarts (no question at each start).
 - Turning the fast network on or off while the VM runs is for its next
   start, and the app, the control centre and `omacvm` say so; the VM keeps
   its network (and its address) until then, and the service stays while a

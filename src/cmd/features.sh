@@ -221,6 +221,7 @@ if (( ${#changes[@]} == 0 )); then
     rc=0; "$R/src/net/mac/install.sh" || rc=$?
     case $rc in
       0) echo "  '$VM': the fast network's service is up to date; the VM takes the fast network from its next start if it is not on it now." ;;
+      3) echo "omacvm enable: the fast network's service was not updated (see above): the VM starts on QEMU's own network until then" >&2 ;;
       4) echo "omacvm enable: the password dialog was cancelled: the fast network's service was not updated, the VM starts on QEMU's own network" >&2 ;;
       *) echo "omacvm enable: the fast network's service did not install (see above): the VM starts on QEMU's own network" >&2 ;;
     esac

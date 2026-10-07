@@ -413,7 +413,7 @@ def test_fast_network_from_the_next_start():
     # The fast network is the network of the VM's next start: the running VM keeps its own.
     on = S.next_start_note("fast-network", True, "app")
     assert on.startswith("From the VM's next start") and "keeps the network it has" in on
-    assert "password on the Mac" in on
+    assert "password on the Mac at that start" in on
     off = S.next_start_note("fast-network", False, "app")
     assert off.startswith("From the VM's next start") and "password" not in off
     assert S.next_start_note("fast-network", True, "parallels") == ""

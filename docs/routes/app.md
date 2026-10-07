@@ -523,15 +523,18 @@ longer goes through one QEMU thread. Measured: see
   `omacvm uninstall` removes it for your Mac user, and from the Mac when no
   other user has it.
 - After an app update: the service has a protocol number (`omacvm-netd
-  --protocol`; builds from 3.0.0 to 3.0.3, which have none, count as 1). An
+  --protocol`; builds from 3.0.1 to 3.0.3, which have none, count as 1;
+  3.0.0's and 2.9's are installed again). An
   installed service of the same protocol serves the new app as it is, so most
   updates need no new install and no password. When the protocol changed (or
   the service was installed for another app), `src/net/mac/install.sh
   --status` says `old`: the app asks before the VM's next start (**The fast
   network needs an update: Update…**, one password), its window has
   **Update…** beside the switch, and `omacvm check` and `omacvm enable
-  fast-network` say and do the same; from the control centre, repairing Fast
-  network (`r`) or turning it on shows macOS's password dialog on the Mac. If
+  fast-network` say and do the same. The control centre (anything a VM
+  asks for) never puts up macOS's password dialog nor uses sudo: turning
+  the fast network on there sets it for the next start, and the app asks on
+  the Mac then. If
   you say no, the VM starts on QEMU's user network and says so
   (`logs/network`, `omacvm check`); nothing else stops on it (other
   switches, Update VM).

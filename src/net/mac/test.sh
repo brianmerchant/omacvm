@@ -80,7 +80,7 @@ status_is() {   # WANT WHAT
 plist "$QREQ" "$(id -u)"
 daemon "$NOW" "$PROTO";                 status_is ok "this source's build"
 daemon 0123456789abcdef "$PROTO";       status_is ok "another build of the same protocol (no new install after an app update)"
-daemon 47acb85b894557f3;                status_is ok "3.0.0's build, from before --protocol (protocol 1)"
+daemon 47acb85b894557f3;                status_is old "3.0.0's build (its VPN NAT does not follow a route change): installed again"
 daemon f141e093f466a64a;                status_is ok "3.0.1-3.0.3's build, from before --protocol (protocol 1)"
 daemon 35049a2bfcceb419;                status_is old "2.9's build (no VPN NAT): installed again"
 daemon 0123456789abcdef "$((PROTO + 1))"; status_is old "another protocol"
@@ -90,3 +90,12 @@ plist 'cdhash H"0000000000000000000000000000000000000000"' "$(id -u)"; status_is
 plist "$QREQ" 4242;                     status_is missing "installed for another Mac user only"
 plist "$QREQ" "$(id -u)"
 printf '#!/bin/bash\nexit 1\n' > "$S/bin/launchctl"; status_is down "installed, launchd does not run it"
+
+# A job a VM asked for (OMACVM_ADMIN_PROMPT=none) never becomes root, not even
+# with a sudo that needs no password: exit 3, sudo never asked.
+printf '#!/bin/bash\necho "$*" >> %q\nexit 0\n' "$S/sudo-called" > "$S/bin/sudo"; chmod +x "$S/bin/sudo"
+printf '#!/bin/bash\n[[ $1 == print ]]\n' > "$S/bin/launchctl"
+rc=0; PATH="$S/bin:$PATH" OMACVM_ADMIN_PROMPT=none OMACVM_NETD_TEST_ROOT=$S/root "$HERE/install.sh" --remove 2>"$S/err" || rc=$?
+if [[ $rc == 3 && ! -e $S/sudo-called && -e $S/root/Library/LaunchDaemons/org.omacvm.netd.plist ]] && grep -q "on the Mac" "$S/err"; then
+  echo "ok   a VM's job (OMACVM_ADMIN_PROMPT=none): exit 3, no sudo, nothing removed"
+else echo "FAIL a VM's job became root or did not stop: rc=$rc sudo: $(cat "$S/sudo-called" 2>/dev/null) err: $(cat "$S/err")"; exit 1; fi

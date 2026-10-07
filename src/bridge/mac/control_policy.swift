@@ -325,6 +325,16 @@ func vmForApp(_ name: String, _ vms: [VMEntry], ssh: Bool = true) -> Result<VMEn
   return .success(v)
 }
 
+/// The list has this OmacVM.app VM (by name), or a VM at this address, as
+/// running: a refusal of it (not reachable, not set up) is answered from the
+/// list, not by a fresh look at every VM (Control.vmList).
+func appVMListed(_ name: String, _ vms: [VMEntry]) -> Bool {
+  vms.contains { $0.type == "app" && $0.name == name && $0.state == "running" }
+}
+func peerListed(_ peer: String, _ vms: [VMEntry]) -> Bool {
+  vms.contains { $0.state == "running" && !$0.ip.isEmpty && $0.ip == peer }
+}
+
 /// Requests about an OmacVM.app VM that the Bridge answers without SSH to
 /// it: a job's state, graphics memory (a file), the Mac's own settings, the
 /// Touch ID panel's colours. A VM the Mac cannot reach just now (busy, its
@@ -981,6 +991,21 @@ struct VMListCache {
     unknownAt = now
     start()
     return (true, started)
+  }
+
+  /// A request about a VM the list has as running, but refused (the Mac
+  /// cannot reach it, or OmacVM did not set it up): answered from the list at
+  /// once, never waited for (a guest may ask again and again). True when the
+  /// caller starts a run in the background now: at most every `refusedEvery`
+  /// seconds, so a VM that just became reachable is found soon.
+  static let refusedEvery: Double = 10
+  private var refusedAt = Date.distantPast
+  mutating func refused(now: Date) -> Bool {
+    guard !running, now.timeIntervalSince(failedAt) >= Self.afterFailure,
+          now.timeIntervalSince(refusedAt) >= Self.refusedEvery, now.timeIntervalSince(at) >= Self.refusedEvery else { return false }
+    refusedAt = now
+    start()
+    return true
   }
 
   /// A request from a VM the list has at this address did not prove with

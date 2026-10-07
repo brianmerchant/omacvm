@@ -98,11 +98,12 @@ out=$(PATH=$T/evil:$PATH HOME=$T/evil "$T/bridge" "$EXE" --control-run "$T/Link.
 expect "PATH and HOME are set here, not taken; runs by its real path" "path=$FIXED home=$MYHOME status= self=$REAL_CLI" "$(sed -n 3p <<<"$out")"
 out=$(OMACVM_JOB_STATUS=$JOBS OMACVM_PROGRESS=other "$T/bridge" "$EXE" --control-run "$CLI" update --vm A 2>&1)
 expect "a job status file of the Bridge's shape: kept; OMACVM_PROGRESS only json" "progress= foo= test=|path=$FIXED home=$MYHOME status=$JOBS self=$REAL_CLI" "$(sed -n '2,3p' <<<"$out" | paste -sd'|' -)"
-# A job's password dialog (src/net/mac/install.sh as_root): only "gui" passes.
+# A run the Bridge asks for (for a VM) never becomes root nor raises macOS's
+# password dialog (src/net/mac/install.sh as_root): always "none".
 out=$(OMACVM_ADMIN_PROMPT=gui "$T/bridge" "$EXE" --control-run "$CLI" enable fast-network --vm A 2>&1)
-expect "OMACVM_ADMIN_PROMPT=gui kept (macOS's password dialog for the fast network's service)" "admin=gui" "$(sed -n 4p <<<"$out")"
-out=$(OMACVM_ADMIN_PROMPT='$(id)' "$T/bridge" "$EXE" --control-run "$CLI" enable fast-network --vm A 2>&1)
-expect "OMACVM_ADMIN_PROMPT other than gui: dropped" "admin=" "$(sed -n 4p <<<"$out")"
+expect "OMACVM_ADMIN_PROMPT=gui from the Bridge: none (no password dialog for a VM's job)" "admin=none" "$(sed -n 4p <<<"$out")"
+out=$("$T/bridge" "$EXE" --control-run "$CLI" enable fast-network --vm A 2>&1)
+expect "OMACVM_ADMIN_PROMPT not set: none" "admin=none" "$(sed -n 4p <<<"$out")"
 out=$(PATH=$T/evil:/usr/bin:/bin "$T/swap" "$T/bridge" "$EXE" "$CLI" 2>&1)
 expect "the Bridge exec'd in place of the caller: still the fixed PATH" "path=$FIXED" "$(grep -o '^path=[^ ]*' <<<"$out")"
 

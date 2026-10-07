@@ -631,7 +631,9 @@ struct ReadyView: View {
         guard FastNetwork.isOn(c) else {
             return (false, "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once.", nil)
         }
-        if let need = FastNetwork.serviceNeeds(FastNetwork.serviceStatus()) {
+        let status = FastNetwork.serviceStatus()
+        if status == "stopped" { return (true, "On, but \(FastNetwork.stoppedText); until then the VM starts on the normal network.", nil) }
+        if let need = FastNetwork.serviceNeeds(status) {
             return (true, "On. \(need.why) \(need.button) fixes it (macOS asks for your password once); until then the VM starts on the normal network.", need.button)
         }
         if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): Turn Off, then On again.", nil) }

@@ -237,10 +237,15 @@ if (( MAC )); then
     fni=$(feature_index fast-network)
     if [[ ${PREV[$fni]} != on || " ${SETN[*]:-} " == *" fast-network "* || " ${REINSTALL[*]:-} " == *" fast-network "* ]]; then
       rc=0; "$R/src/net/mac/install.sh" || rc=$?
-      if (( rc )); then
+      if (( rc == 3 )); then
+        # Nobody to ask for the password here (a job a VM asked for through
+        # the Bridge never becomes root, or no terminal): the switch is set
+        # for the VM's next start, and OmacVM.app asks on the Mac then.
+        info "fast network: its service on this Mac needs an administrator's password to install or update: OmacVM asks for it on the Mac at the VM's next start (or Update… under Fast network in OmacVM, or omacvm enable fast-network in Terminal); until then the VM starts on QEMU's own network"
+      elif (( rc )); then
         if (( rc == 4 )); then why="the password dialog was cancelled: the fast network was not changed, the VM keeps its network"
         else why="its service did not install: the fast network was not changed, the VM keeps its network"; fi
-        failed_part fast-network "$why"
+        failed_part fast-network "$why" mac
         echo "omacvm apply: $why" >&2
         exit "$rc"
       fi

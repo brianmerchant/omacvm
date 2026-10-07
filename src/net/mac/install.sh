@@ -43,10 +43,13 @@
 # source, or a Developer ID no feed lists): exactly that app's QEMU (its
 # cdhash: install again after rebuilding the app).
 # OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
-# terminal (OmacVM.app's Fast Network button and the control centre's jobs
-# run this script that way); no dialog when sudo needs no password.
-# OMACVM_NETD_TEST_ROOT (--status only, for tests): the daemon's files under
-# that folder instead of /.
+# terminal (OmacVM.app's Fast Network button and its question before a start
+# run this script that way: the person at the Mac asked for it); no dialog
+# when sudo needs no password. OMACVM_ADMIN_PROMPT=none: never root, not even
+# with a sudo that needs no password (jobs a VM asked for through the Bridge):
+# exit 3 instead, the app asks on the Mac at the VM's next start.
+# OMACVM_NETD_TEST_ROOT (--status and --remove only, for tests): the
+# daemon's files under that folder instead of /.
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask
 # for), 4 the person cancelled the password dialog.
 set -euo pipefail
@@ -84,7 +87,7 @@ while (( $# )); do
     *) echo "net/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
-if [[ $MODE == status && -n ${OMACVM_NETD_TEST_ROOT:-} ]]; then
+if [[ $MODE == status || $MODE == remove ]] && [[ -n ${OMACVM_NETD_TEST_ROOT:-} ]]; then
   BIN=$OMACVM_NETD_TEST_ROOT$BIN PLIST=$OMACVM_NETD_TEST_ROOT$PLIST SOCK=$OMACVM_NETD_TEST_ROOT$SOCK
   STATE=$OMACVM_NETD_TEST_ROOT$STATE NAT=$OMACVM_NETD_TEST_ROOT$NAT
 fi
@@ -140,9 +143,9 @@ VERSION=$(shasum -a 256 "$HERE/omacvm-netd.c" | cut -c1-16)
 PROTOCOL=$(sed -n 's/^#define NETD_PROTOCOL  *\([0-9][0-9]*\).*/\1/p' "$HERE/omacvm-netd.c" | head -1)
 [[ -n $PROTOCOL ]] || { echo "no NETD_PROTOCOL in $HERE/omacvm-netd.c" >&2; exit 1; }
 # Builds from before --protocol (they answer it with their usage): their
-# source's hash and protocol. 3.0.0, and 3.0.1 to 3.0.3. Older ones (2.9,
-# without the VPN NAT) are installed again.
-KNOWN_BUILDS="47acb85b894557f3:1 f141e093f466a64a:1"
+# source's hash and protocol. 3.0.1 to 3.0.3. Older ones are installed again:
+# 3.0.0's (its VPN NAT does not follow a route change) and 2.9's (no VPN NAT).
+KNOWN_BUILDS="f141e093f466a64a:1"
 daemon_protocol() {   # BIN -> its protocol, nothing for a build it cannot tell
   local p v k
   p=$("$1" --protocol 2>/dev/null) && [[ $p =~ ^[0-9]{1,4}$ ]] && { echo "$p"; return 0; }
@@ -202,6 +205,10 @@ shq() { local q="'\\''"; printf "'%s'" "${1//\'/$q}"; }
 # SCRIPT ARGS... as one /bin/sh command line: bash -c SCRIPT ARGS (test.sh runs it).
 root_cmd() { local cmd="/bin/bash -c" a; for a in "$@"; do cmd+=" $(shq "$a")"; done; printf '%s' "$cmd"; }
 as_root() {   # SCRIPT ARGS...: one sudo (or one password dialog) for all of it
+  if [[ ${OMACVM_ADMIN_PROMPT:-} == none ]]; then
+    echo "the fast network's service needs an administrator's password on the Mac to install or update: OmacVM asks for it on the Mac at the VM's next start (or Update… under Fast network in OmacVM, or omacvm enable fast-network in Terminal)" >&2
+    exit 3
+  fi
   if [[ ${OMACVM_ADMIN_PROMPT:-} == gui ]]; then
     # sudo without a password (the person's own sudo setting): no dialog.
     if sudo -n true 2>/dev/null; then sudo -n /bin/bash -c "$@"; return; fi

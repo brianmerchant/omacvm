@@ -437,14 +437,15 @@ def next_start_note(name: str, turn_on: bool, vm_type: str) -> str:
     """What switching NAME means for the VM that runs now ("" when it changes
     now). The fast network (OmacVM.app) is the network of the VM's next start:
     the running VM keeps its own until then. On may need the Mac's service
-    installed or updated: macOS asks for the password on the Mac."""
+    installed or updated: OmacVM asks for the password on the Mac at that
+    start (a VM's job never asks for it)."""
     if name != "fast-network" or vm_type != "app":
         return ""
     text = ("From the VM's next start (shut it down, then start it again): "
             "it keeps the network it has until then.")
     if turn_on:
         text += (" If the fast network's service on the Mac needs installing or an update, "
-                 "macOS asks for your password on the Mac.")
+                 "OmacVM asks for your password on the Mac at that start.")
     return text
 
 

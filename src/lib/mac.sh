@@ -114,7 +114,7 @@ gssh() {
     "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -p "$port" "root@$ip" "$@"
 }
 
-# hostkey_changed IP: the VM answers, with other host keys than the one
+# hostkey_changed IP [SECONDS]: the VM answers, with other host keys than the one
 # remembered for it.
 hostkey_changed() {
   [[ -n ${OMA_PIN:-} && -s ${OMA_PIN:-} ]] || return 1
@@ -127,7 +127,7 @@ hostkey_changed() {
     grep -qF " $t " "$OMA_PIN" || continue
     seen=1
     grep -qF " $t $k" "$OMA_PIN" && return 1
-  done < <(ssh-keyscan -T 5 -p "$port" "$ip" 2>/dev/null)
+  done < <(ssh-keyscan -T "${2:-5}" -p "$port" "$ip" 2>/dev/null)
   (( seen ))
 }
 

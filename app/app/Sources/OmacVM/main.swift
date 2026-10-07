@@ -421,8 +421,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             done(why)
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            let status = FastNetwork.serviceStatus()
+            let status = FastNetwork.statusBeforeStart()
             DispatchQueue.main.async {
+                // Stopped after vmnet failures: the normal network until the Mac restarts, no question.
+                if status == "stopped" { finish(FastNetwork.stoppedText); return }
                 guard let need = FastNetwork.serviceNeeds(status) else { finish(nil); return }
                 // Test builds answer without the question (OMACVM_TEST_FAST_NETWORK_ANSWER=update|normal);
                 // a run without a window has nobody to ask.
