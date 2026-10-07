@@ -296,8 +296,11 @@ if (( MAC )) && needs_bridge; then
   fi
 fi
 # The gestures daemon says it too (OmacVM.app's VMs show it on 127.0.0.1 even
-# without the Bridge).
-if (( TOKEN )) && on gestures; then bridge_token_ensure; fi
+# without the Bridge). The Bridge's features need it in the VM before the Mac
+# side is there: OmacVM.app's first apply is --no-mac, and on a Mac that never
+# had the Bridge (Gestures off at setup) there was no token yet: the build
+# stopped at "Adding OmacVM to the VM". The Bridge installed later keeps it.
+if (( TOKEN )) && { on gestures || needs_bridge; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :
 elif [[ -f $T ]]; then
@@ -319,15 +322,20 @@ fi
 # root), and for Parallels/UTM/Fusion the Bridge token (they reach the Bridge
 # over the network). OmacVM.app's VMs ask through the app's port: no Bridge
 # token in them. Off: the Mac's copy goes (the VM's goes in guest/install.sh).
+# A rebuilt VM (--reset-host-key) starts without the old one's theme.
+if (( NEWKEY && NAMED )); then
+  rm -f "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+fi
 if (( TOKEN && NAMED )) && on touch-id; then
   tk=$(touchid_key_ensure "$TYPE" "$VM" "$( (( NEWKEY )) && echo new)")
   gssh "$IP" "set -e; install -d -m755 /etc/omacvm; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-key" < "$tk"
   if [[ $TYPE == app ]]; then gssh "$IP" "rm -f /etc/omacvm/touchid-token" < /dev/null
   else gssh "$IP" "set -e; install -m600 -o root -g root /dev/stdin /etc/omacvm/touchid-token" < "$T"; fi
 else
-  # The key, and the theme the VM sent for the Bridge's Touch ID panel.
+  # The key. The theme the VM sent for the Touch ID panel stays (colours
+  # only): with Touch ID back on, the panel looks like the VM at once.
   if (( NAMED )); then
-    rm -f "$(vm_key_file "$TYPE" "$VM").touchid" "$OMA_BRIDGE_SUPPORT/touchid-theme/$(basename "$(vm_key_file "$TYPE" "$VM")").json"
+    rm -f "$(vm_key_file "$TYPE" "$VM").touchid"
   fi
   # On without a key: the VM's PAM line gets 403 and the password comes.
   if on touch-id; then log "Touch ID: not set up (it needs the VM by name and the Bridge token: not --ip, not --no-token)"; fi

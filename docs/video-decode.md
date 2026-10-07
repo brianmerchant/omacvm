@@ -231,6 +231,11 @@ Limits:
   update waits. `omacvm apply` restarts the daemon only when it changed.
 - **A new kernel** without its headers in Arch Linux ARM's repository yet:
   Chromium decodes on the CPU until `omacvm apply` finds them.
+- **A module that comes late** (DKMS builds it at the first start of a new
+  kernel, after the services started): its device starts the daemon
+  (`70-omacvm-vdec.rules`); a Chromium already open decodes on the CPU until
+  it starts again. WirePlumber leaves the decoder alone
+  (`50-omacvm-vdec.conf`, [troubleshooting 29](troubleshooting.md#29-app-no-sound-at-all-after-a-kernel-update)).
 
 ## Limits
 

@@ -226,7 +226,7 @@ stage_repack() {
   local base=omacvm-prebuilt-$VERSION-$ROUTE stage
   ls "$OUT/$base".tar.zst.part-* >/dev/null || die "nothing to repack in $OUT"
   rm -rf "$WORK"; mkdir -p "$WORK"
-  cat "$OUT/$base".tar.zst.part-* | zstd -dc --long=27 -q | tar -xSf - -C "$WORK"
+  cat "$OUT/$base".tar.zst.part-* | zstd -dc --long=27 -q | { tar -xSf - -C "$WORK" && cat > /dev/null; }   # as prebuilt_unpack
   stage=$(ls -d "$WORK"/"$PREBUILT_NAME"*)
   case $ROUTE in
     app) ;;   # a disk only: nothing to generalize again
