@@ -72,6 +72,13 @@ commit 82927e9. Changes here:
   guest at 70 s; a guest that is up gets one press and 60 s, as before
   (Omarchy's power menu opens on the key). qemu.log gets a line for each.
   `Tests/display/test-quit-clean.sh` checks it at build time.
+- `patches/omacvm-cocoa-borderless-no-rim.patch`: a window switched to
+  borderless (the tests' full screen over a display) has no shadow. macOS 26
+  draws a light 1 pt rim with a window's shadow, and QEMU's window, titled
+  first, kept its shadow, so a line ran around the whole display. Leaving
+  that full screen gives the window its shadow back. macOS's own full screen
+  never had it. `Tests/display/test-borderless-rim.sh` checks it at build
+  time; `test-borderless-rim-live.sh` measures the pixels on macOS 26 or newer.
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's
