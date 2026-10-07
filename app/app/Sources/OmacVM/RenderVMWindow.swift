@@ -81,6 +81,11 @@ enum RenderVMWindow {
         lines.append("vm-window-5-scrolls: content \(Int(h.rounded())) pt for a limit of \(Int(limit))" + (scrolls ? ", scrolls" : ", DOES NOT STOP"))
         if !scrolls { failed = true }
 
+        // Disk › Change…: the size slider for a 128 GB disk with 9 GB used (on a Mac with 300 GB free).
+        let info = VMDisk.Info(maxBytes: 128 * DiskSize.gib, usedBytes: 11 * DiskSize.gib, freeBytes: 300 * DiskSize.gib)
+        let need = DiskSize.Need(allocated: 13 * DiskSize.gib, used: 9 * DiskSize.gib, rootStart: 2 * DiskSize.gib)
+        draw("vm-window-6-disk-size", into: dir) { DiskSizeSheet(state: state, info: info, done: {}, preview: need) }
+        draw("vm-window-7-disk-smaller", into: dir) { DiskSizeSheet(state: state, info: info, done: {}, preview: need, previewGB: 96) }
         // USB devices: the list before a start and while the VM runs, and the question.
         usbPictures(folder: folder, into: dir, lines: &lines)
 

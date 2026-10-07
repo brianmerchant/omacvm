@@ -55,6 +55,15 @@ in more words.
   with **Change…**. USB devices now have their own switch, off by default
   (a VM that already had devices keeps them).
 
+- OmacVM.app: Disk › Change… is one slider for the disk's size, with a
+  number field. It goes down to what Omarchy needs (what btrfs holds,
+  plus 10 % or 5 GB spare, never under 64 GB) and up to what the Mac has
+  free. Smaller is new: the VM starts, Omarchy moves its files below the
+  new size, the VM restarts once while disk.img is cut, and the file
+  system is checked. A copy of the disk (an APFS clone) is kept until
+  that check passes; if a step fails, Go Back brings it back. Compact is
+  gone: the space Omarchy frees already goes back to the Mac by itself.
+
 - USB devices (OmacVM.app, experimental) no longer go to the VM by
   themselves. With **USB devices** on, plugging a device in while the VM
   runs asks "Connect “ST-Link V2” to Omarchy or keep it on the Mac?". The
