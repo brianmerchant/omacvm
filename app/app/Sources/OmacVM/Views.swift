@@ -5,6 +5,7 @@ import OmacVMFeatures
 import OmacVMWindow
 import SwiftUI
 import OmacVMBuildProgress
+import OmacVMDesktop
 
 /// What the launcher window shows.
 enum Screen: Equatable {

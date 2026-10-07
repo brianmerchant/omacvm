@@ -3,8 +3,10 @@
 # names it in logs/gpu-memory; the app sees it there and runs this through
 # the guest agent, as root. Nothing in the VM knows otherwise: its Mesa does
 # not report the loss, and Hyprland 0.56 would only stop if it did.
-#   omacvm-desktop-recover desktop graphics|memory
-#       Hyprland lost its context: it draws black from then on. The login
+#   omacvm-desktop-recover desktop graphics|memory|guard
+#       Hyprland lost its context: it draws black from then on (memory: macOS
+#       ran short; guard: the VM's graphics reached the most this Mac lets
+#       them have, desktop reserve included). The login
 #       manager starts again, which ends the session: every app open in it
 #       closes and what was not saved in them is lost. A note for the new
 #       session names those apps. With autologin off, the login screen comes.
@@ -15,6 +17,10 @@
 #       only the shell starts again, no app closes.
 #   omacvm-desktop-recover notify
 #       In the new session (Hyprland's autostart, as the user): shows the note.
+#   omacvm-desktop-recover app NAME guard|pressure
+#       An app (not the desktop) lost its context on the Mac: the graphics
+#       memory apps may use was full (the rest is kept for the desktop), or
+#       macOS was short of memory. A note says so; nothing restarts.
 # Logs to the journal (journalctl -t omacvm-desktop-recover).
 set -uo pipefail
 ENV=${OMACVM_RECOVER_ENV:-/etc/omacvm/env}
@@ -50,7 +56,7 @@ print(", ".join(seen))' 2>/dev/null
 case ${1:-} in
 desktop)
   why=${2:-graphics}
-  [[ $why == memory ]] || why=graphics
+  [[ $why == memory || $why == guard ]] || why=graphics
   apps=""; locked=0
   [[ -n $U ]] && apps=$(open_apps)
   [[ -n $U ]] && in_session timeout 3 omarchy-hyprland-session-locked >/dev/null 2>&1 && locked=1
@@ -84,6 +90,7 @@ notify)
     omarchy-hyprland-session-locked >/dev/null 2>&1 || say "could not lock the new session again"
   fi
   if [[ $why == memory ]]; then cause="macOS ran short of memory for the VM's graphics"
+  elif [[ $why == guard ]]; then cause="the VM's graphics reached the most this Mac lets them use"
   else cause="the VM's graphics on the Mac failed"; fi
   if [[ -n $apps ]]; then closed="These apps were closed: $apps. Anything not saved in them is lost."
   else closed="Apps that were open were closed; anything not saved in them is lost."; fi
@@ -96,8 +103,20 @@ notify)
   done
   say "could not show the note: $text"
   ;;
+app)
+  [[ -n $U ]] || { say "no desktop user in $ENV"; exit 1; }
+  # The name is the app's process name as QEMU kept it (letters, digits, . _ -).
+  name=$(printf '%s' "${2:-}" | tr -cd 'A-Za-z0-9._-' | cut -c1-40); name=${name:-An app}
+  if [[ ${3:-} == pressure ]]; then
+    body="macOS ran short of memory, so $name could not get more graphics memory and stopped drawing. The desktop keeps running. Close something on the Mac or in the VM, then reload or restart $name."
+  else
+    body="$name used all the graphics memory apps may have on this Mac (the rest is kept for the desktop), so it stopped drawing. The desktop keeps running. Close some of its tabs or windows, then reload or restart $name."
+  fi
+  say "$name lost its GPU context on the Mac (${3:-guard}); the desktop keeps drawing"
+  in_session notify-send -a OmacVM -u normal "$name stopped drawing" "$body" 2>/dev/null || say "could not show the note: $body"
+  ;;
 *)
-  echo "usage: omacvm-desktop-recover desktop graphics|memory | shell | notify" >&2
+  echo "usage: omacvm-desktop-recover desktop graphics|memory|guard | shell | notify | app NAME guard|pressure" >&2
   exit 2
   ;;
 esac

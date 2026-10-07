@@ -935,7 +935,20 @@ memory or after refused allocations.
 
 Only a runaway VM meets the one fixed guard: all graphics memory together
 at most three quarters of the Mac's memory (`OMACVM_GPU_MEMORY_MB` in
-QEMU's environment sets another, 0 turns it off; for tests).
+QEMU's environment sets another, 0 turns it off; for tests). Its last part
+is kept for the VM's desktop, Hyprland, the bar (quickshell) and the lock
+screen (hyprlock): a
+sixteenth of the Mac's memory, 512 MB to 2 GB (8 GB Mac: apps up to 5.5 GB
+of 6 GB; 16 GB: 11 of 12 GB; 64 GB: 46 of 48 GB). An app past that share,
+or an app that wants a big new buffer while macOS is short of memory, loses
+its own GPU context; the desktop goes on into its part (macOS's pressure
+does not hold the desktop back, only the guard) and keeps drawing. The VM
+shows a note: "chromium stopped drawing", and why. On a MacBook Air with
+8 GB a browser with big WebGL pages reached the guard while macOS still
+said normal, and before this the next buffer refused was often Hyprland's
+(a black VM). `OMACVM_GPU_MEMORY_RESERVE_MB` sets the desktop's part (0:
+none) and `OMACVM_GPU_MEMORY_DESKTOP` its contexts (comma-separated
+process names; for tests).
 
 **When a buffer is refused**, the app that wanted it loses its GPU context
 (the VM's graphics driver cannot hand back an "out of memory" for it). A
