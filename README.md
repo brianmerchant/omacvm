@@ -20,17 +20,18 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 
 | What you get in Omarchy | How you run it |
 |---|---|
-| 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. On by default on a Mac with a notch. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. |
+| 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. On by default on a Mac with a notch. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. OmacVM.app is one icon in the Dock and adds `omacvm` to Terminal. |
 | 🖥️ **Every display, full screen**<br>Your macOS arrangement, external monitors included, each in a Space of its own. **⌃⌥ Esc** goes one Space over to macOS; twice opens Mission Control. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
-| 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. Omarchy's Chromium too. | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
-| 🎮 **Real GPU performance**<br>Keeps up with your display's refresh, up to 120 Hz. Graphics: OpenGL, Vulkan (KosmicKrisp on macOS 26+) or Automatic. WebGPU and OpenCL experimental. Graphics memory grows with what the Mac can spare. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
+| 🎬 **Hardware video decoding**<br>In OmacVM.app, YouTube 4K on the Mac's media engine, not the CPU, Omarchy's Chromium too. The sound stays in step with the picture. | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. OmacVM.app's window also takes custom CPU and memory counts and grows or compacts the disk. |
+| 🎮 **Real GPU performance**<br>Keeps up with your display's refresh, up to 120 Hz. Graphics: OpenGL, Vulkan (KosmicKrisp on macOS 26+) or Automatic, which is OpenGL. Vulkan adds WebGPU in Chromium. Graphics memory grows with what the Mac can spare. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
 | 👆 **Mac trackpad and Magic Mouse gestures**<br>2, 3 and 4 finger swipes and pinch zoom, optional macOS-like momentum scrolling. Magic Mouse swipes count as 3 or 4 fingers, your pick. | 💾 **Your VMs where you want them**<br>OmacVM.app's Storage moves them to another folder or drive and shows their sizes. |
-| ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, ⌘ F10–F12 take Omarchy's screenshots, macOS shortcuts stay out of the way. | 🎨 **Theme, wallpaper and boot splash**<br>Your Omarchy theme and wallpaper carry over to macOS; OmacVM.app shows Omarchy's logo from the first frame. |
-| 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. Sound holds on a busy Mac. Optional fast network, VPN included. | 🔋 **Optimized for battery**<br>Measured power draw on every route; an idle OmacVM.app VM wakes the Mac half as often. |
-| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups, in finer steps (32, Option: 64), for external displays too. | 🎛️ **Control centre in Omarchy**<br>`omacvm` in the VM opens a floating window: features on or off, updates, report a problem. |
+| ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, ⌘ F10–F12 take Omarchy's screenshots, macOS shortcuts stay out of the way. In OmacVM.app the globe (fn) key opens Omarchy's emoji picker. | 🎨 **Theme, wallpaper and boot splash**<br>Your Omarchy theme and wallpaper carry over to macOS; OmacVM.app shows Omarchy's logo from the first frame. |
+| 🔑 **Touch ID for sudo and 1Password**<br>Experimental, off by default: sudo, polkit and 1Password in Omarchy ask the Mac's Touch ID, in an Omarchy-styled panel in OmacVM.app, in macOS's own dialog on the other apps. Your password keeps working; only for the VM in front. | 🧪 **Experiments, off until you turn them on**<br>x86 Linux apps through box64 on every route. In OmacVM.app: USB devices, a fast network (VPN included) and GPU compute (OpenCL, WebGPU in Firefox). |
+| 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. Sound holds on a busy Mac. | 🔋 **Optimized for battery**<br>Measured power draw on every route; an idle OmacVM.app VM wakes the Mac half as often. |
+| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups, in finer steps (32, Option: 64), for external displays too. | 🎛️ **Control centre in Omarchy**<br>`omacvm` in the VM opens a floating window: features on or off, updates, report a problem. From the Mac too: *Features…* in OmacVM.app. |
 | 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
-| 📷 **Camera and microphone**<br>Video calls in the VM. | 🔄 **Updates itself**<br>OmacVM.app checks once a week, signed with OmacVM's release key and with a way back; `omacvm update` does the rest. |
-| 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
+| 📷 **Camera and microphone**<br>Video calls in the VM. | 🔄 **Updates in one step**<br>`u` in the control centre or Check Now in OmacVM.app updates the Mac and the VM. Checked once a week, signed with OmacVM's release key, with a way back. |
+| 📋 **Copy and paste, both ways**<br>Plus a Mac folder at `~/Mac` (OmacVM.app, off by default), Night Shift, True Tone and the Mac's clock format. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
 
 **[See the full compatibility list per app below](#which-app), or [every feature in detail](docs/features.md).**
 
@@ -43,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with its live status, on or off with space, plus updates and "report a problem".
 
 <p align="center">
-  <img src="docs/images/control-centre.svg" alt="The OmacVM control centre, a floating terminal window in Omarchy's Tokyo Night colours, titled OmacVM 3.0.0. A list of features with green ticks: OmacVM Bridge, wallpaper, trackpad gestures, scroll momentum, Omanotch, the Mac's clock, camera and battery, external display brightness, Chromium video, screensaver and lock disabled, the control centre and the fast network. Autologin, the memory-optimized kernel and WebGPU are off. Graphics says Automatic: OpenGL; Graphics memory says 1.1 GB, peak 1.6 GB. At the bottom: OmacVM.app, Mac linked, and the keys space on/off, r repair, u update, enter details, U updates, ! report, esc quit." width="80%">
+  <img src="docs/images/control-centre.svg" alt="The OmacVM control centre, a floating terminal window in Omarchy's Tokyo Night colours, titled OmacVM and its version. A list of features with green ticks: OmacVM Bridge, wallpaper, trackpad gestures, scroll momentum, Omanotch, the Mac's clock, camera and battery, external display brightness, Chromium video, screensaver and lock disabled, the control centre and the fast network. Autologin, the memory-optimized kernel and WebGPU are off. Graphics says Automatic: OpenGL; Graphics memory says 1.1 GB, peak 1.6 GB. At the bottom: OmacVM.app, Mac linked, and the keys space on/off, r repair, u update, enter details, U updates, ! report, esc quit." width="80%">
 </p>
 
 <a name="four-ways-parallels-utm-vmware-fusion-or-omacvmapp"></a>
@@ -73,12 +74,13 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
+| Touch ID for sudo, polkit and 1Password (experimental) | ✅ | ✅ | ✅ | ✅ |
 | Control centre in Omarchy | ✅ | ✅ | ✅ | ✅ |
 | Prebuilt VM (5 min) | ✅ | ✅ | ✅ | ✅ |
-| x86 Linux apps (optional, slower) | ✅ | ✅ | ✅ | ✅ |
+| x86 Linux apps (experimental, slower) | ✅ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL in 3.0.0); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows reach the screen by a copy on the Mac, faster than the VM's software copy (on KosmicKrisp since 3.0.1); OpenGL and browsers are the same either way; WebGPU and OpenCL opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows reach the screen by a copy on the Mac, faster than the VM's software copy; OpenGL and browser speed are the same either way, and Vulkan gives Chromium WebGPU; OpenCL and WebGPU in Firefox opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
 
 <!-- 3.0.0 benchmark chart: the final round (bare macOS = 100 %, OmacVM.app first) replaces docs/images/benchmarks.svg and this alt text. -->
 <p align="center">
