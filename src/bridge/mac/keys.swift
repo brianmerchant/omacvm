@@ -299,7 +299,9 @@ final class MediaKeys {
       else if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
       return
     }
-    if !guardTap.mayCreate(perms) || !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
+    // AXIsProcessTrustedWithOptions first: it shows macOS's prompt (once).
+    if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary)
+      || !guardTap.mayCreate(perms) {
       if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)") }
       askedAX = true
       return
