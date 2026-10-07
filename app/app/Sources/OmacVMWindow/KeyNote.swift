@@ -32,5 +32,5 @@ public enum KeyNote: Equatable {
         return line.contains("Input Monitoring allowed") || line.contains("Accessibility (keys) allowed")
     }
 
-    public static let allowedText = "Keyboard: allowed (takes effect at the next VM start)"
+    public static let allowedText = "Allowed (takes effect at the next VM start)"
 }
