@@ -10,7 +10,8 @@ in more words.
   trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
   VMs of its own app (told by the VM's code signature), as the Bridge
   does since 3.0.1.
-
+- Touch ID is no longer marked experimental (control centre, `omacvm
+  features`, README): it is a regular feature, still off until you turn it on.
 - Omanotch: when something moved the hidden NOTCH output after it was in
   place (a Hyprland config reload with an older rule, another `hyprctl
   eval`), the strip beside the notch could stay wrong for up to 30 s.
