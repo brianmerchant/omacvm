@@ -12,6 +12,15 @@ in more words.
   when the permission returns. The Bridge's media-key tap and OmacVM.app's
   own full-grab tap do the same, and `omacvm uninstall` waits for the
   helpers to quit before it resets their permissions. Fixes #192.
+- Touch ID: with 1Password in the VM, OmacVM says once (a notice, and a
+  line in the control centre's Touch ID details and `omacvm check`) that
+  1Password needs its own switch: Settings › Security › Unlock using
+  system authentication. Never while it is on; then the line says
+  "1Password: uses Touch ID". OmacVM does not change 1Password's settings.
+  The details also list Bitwarden's and KeePassXC's switches.
+- Touch ID turned on while an OmacVM.app VM runs: the control centre says
+  "on from the VM's next start: shut it down, then start it again" instead
+  of a red x.
 
 ## 3.0.3
 

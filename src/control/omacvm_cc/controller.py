@@ -10,7 +10,7 @@ import time
 
 from . import state as S
 from .bridge import Bridge, BridgeError, Hello
-from .local import Local, guest_checks, write_attention
+from .local import Local, guest_checks, next_start, write_attention
 
 ACTION_FOR = {True: "enable", False: "disable"}
 # With update checks off, an update is installed only from a check this recent
@@ -275,7 +275,7 @@ class Controller:
         rows = S.build_rows(self.local.features, on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
                             offer=self.offer(), mac_features=mac_features, show_updates=with_updates,
-                            fixed=fixed)
+                            fixed=fixed, next_start=next_start(self.local.vm_type, on))
         g = S.graphics_row(self.mac_status, self.local.vm_type, list(self.jobs.values()), checks,
                            offline=self.mac_error is not None)
         m = S.gpu_memory_row(self.gpu_memory, self.local.vm_type, self.gpu_memory_supported(), checks,
