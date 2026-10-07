@@ -18,9 +18,10 @@ OUT=$ROOT/.build/python-$PY_VERSION-$PY_RELEASE
 PY=$OUT/python
 
 # The modules OmacVM's Mac side imports (src/prebuilt, src/release, the
-# control centre's report, src/lib); a cut that took one away fails here.
+# control centre's report, src/lib); a cut that took one away fails here. Run
+# without PYTHONDONTWRITEBYTECODE: it must write no __pycache__ (below).
 smoke() {
-  PYTHONDONTWRITEBYTECODE=1 "$PY/bin/python3" -I -c '
+  "$PY/bin/python3" -I -c '
 import argparse, base64, binascii, dataclasses, datetime, fnmatch, getpass, hashlib, json, os, platform
 import plistlib, pwd, random, re, secrets, socket, stat, struct, subprocess, sys, unicodedata, urllib.parse
 import uuid, xml.etree.ElementTree
@@ -31,7 +32,8 @@ print("ok")'
 if [[ -x $PY/bin/python3 && $(smoke 2>/dev/null) == ok ]]; then echo "$PY"; exit 0; fi
 rm -rf "$OUT"
 T=$(mktemp -d)
-trap 'rm -rf "$T"' EXIT
+DONE=0
+trap 'rm -rf "$T"; (( DONE )) || rm -rf "$OUT"' EXIT
 echo "==> python $PY_VERSION ($PY_RELEASE, python-build-standalone)" >&2
 curl -fsSL --retry 3 -o "$T/py.tgz" "$URL"
 [[ $(shasum -a 256 "$T/py.tgz" | cut -d' ' -f1) == "$PY_SHA256" ]] || { echo "$NAME is not the pinned one" >&2; exit 1; }
@@ -50,5 +52,13 @@ rm -rf "$L/test" "$L/idlelib" "$L/tkinter" "$L/turtledemo" "$L/turtle.py" "$L/en
 # Python from warning that it is missing.
 rm -rf "$L/lib-dynload"; mkdir "$L/lib-dynload"
 cp "$L/LICENSE.txt" "$OUT/LICENSE.python.txt"
+# Inside the signed app a new __pycache__ breaks its seal ("a sealed resource
+# is missing or invalid"): this python never writes one, whoever runs it.
+# (Its own .pyc is made here: it is imported before it can say so.)
+printf 'import sys\nsys.dont_write_bytecode = True\n' > "$L/site-packages/sitecustomize.py"
+"$PY/bin/python3" -I -m py_compile "$L/site-packages/sitecustomize.py"
+touch "$T/before"
 [[ $(smoke) == ok ]] || { echo "the cut python does not run OmacVM's imports" >&2; exit 1; }
+[[ -z $(find "$OUT" -newer "$T/before" -name '*.pyc') ]] || { echo "the cut python wrote __pycache__" >&2; exit 1; }
+DONE=1
 echo "$PY"

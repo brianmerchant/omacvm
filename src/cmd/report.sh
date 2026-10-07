@@ -13,5 +13,6 @@ case ${1:-} in -h|--help) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 0 ;; esac
 # macOS's python3 with Xcode's Command Line Tools, else OmacVM.app's (never
 # the stub that asks to install them: src/lib/tools.sh).
 source "$R/src/lib/tools.sh"
+export PYTHONDONTWRITEBYTECODE=1   # nothing written into OmacVM.app's copy
 PY=$(tools_python) || { echo "omacvm report needs python3: install Xcode's Command Line Tools (xcode-select --install) or OmacVM.app" >&2; exit 3; }
 exec "$PY" "$R/src/control/omacvm" report --mac --root "$R" "$@"

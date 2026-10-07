@@ -65,6 +65,7 @@ printf '#!/bin/bash\necho 500\n' > "$RES/tools/mac-free-gb"
 chmod +x "$RES/runtime/bin/"* "$RES/tools/"*
 IN=$RES/omacvm/src
 
+touch "$T/start"
 # Which python3 and which Swift answers: the app's.
 got=$("${NOCLT[@]}" bash -c 'source "$1/lib/tools.sh"; tools_python' _ "$IN")
 expect "python3: the app's" "$RES/python/bin/python3" "$got"
@@ -138,6 +139,9 @@ expect "... says the Bridge needs the Command Line Tools" 1 "$(grep -c "^OmacVM 
 expect "... and Omanotch" 1 "$(grep -c "^Omanotch: building it needs Xcode's Command Line Tools" <<<"$out")"
 expect "... no installer ran" "" "$(cat "$T/installs" 2>/dev/null)"
 no_calls "src/mac/install.sh"
+
+# Nothing written into the app: a new __pycache__ there breaks its seal.
+expect "nothing written into the app (__pycache__)" "" "$(find "$APP" -newer "$T/start" -name '*.pyc')"
 
 # What the stand-ins cannot catch: a stub run by its full path. The Mac side's
 # scripts name none (install.sh's /usr/bin/git runs only once xcode-select found the tools).
