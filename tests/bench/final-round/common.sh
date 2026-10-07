@@ -12,6 +12,11 @@ GLMARK2_VERSION=${GLMARK2_VERSION:-2023.01}   # the same glmark2 in every VM
 # full screen gives every page 1728x1080 at 2x.
 MIN_GUEST_WIDTH=${FINAL_ROUND_MIN_GUEST_WIDTH:-3000}
 VIEWPORT=${FINAL_ROUND_VIEWPORT:-1728x1080 at 2x}
+# Several sizes may be agreed, "|"-separated (the Mac mini: apps that keep the menu bar in full screen are 30 points short).
+viewport_ok() { case "|$VIEWPORT|" in *"|$1|"*) [ -n "$1" ] ;; *) return 1 ;; esac; }
+# One test (all its runs together) gets at most this long per system (user, 2026-10-05 21:57:
+# "per vm 15 mins per each text max"); a test cut short keeps the runs it finished.
+TEST_CAP=${FINAL_ROUND_TEST_CAP:-900}
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 jstr() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
@@ -40,7 +45,10 @@ low_power() { [ "$(pm_value powermode)" = 1 ] || [ "$(pm_value lowpowermode)" = 
 
 # Everything that belongs to a hypervisor, by executable path: the apps,
 # their VM processes and their background services (Parallels' prl_disp_service
-# and prl_naptd, Fusion's vmnet daemons). Only the target's own may run.
+# and prl_naptd, Fusion's vmnet daemons). Listed for the record only: an idle
+# service runs no guest (Parallels' stays up after any prlctl call, and it
+# refused the Mac mini's Fusion run). Only a running VM of another kind (or a
+# second one of the target) makes the Mac busy.
 HV_PROCS='Parallels Desktop\.app/|VMware Fusion\.app/|UTM\.app/|OmacVM[^/]*\.app/|/prl_|/vmware-|/vmnet-|qemu-system-aarch64|com\.apple\.Virtualization\.VirtualMachine'
 VM_PROCS='qemu-system-aarch64|/runtime/bin/OmacVM$|/MacOS/OmacVM-VM$|/prl_vm_app$|/vmware-vmx$|/QEMULauncher$|com\.apple\.Virtualization\.VirtualMachine$'
 
@@ -48,18 +56,26 @@ VM_PROCS='qemu-system-aarch64|/runtime/bin/OmacVM$|/MacOS/OmacVM-VM$|/prl_vm_app
 # second VM of the target, Claude agents, the bench lock. Prints a JSON
 # object; busy=true if anything of it runs.
 busy_check() {   # [pattern of the target's processes, kept out of "other"]
-  local keep=${1:-NONE} procs other same agents lock load busy=false
+  local keep=${1:-NONE} procs hv other same agents lock load busy=false
   procs=$(ps -axo comm=)
-  other=$(echo "$procs" | grep -E "$HV_PROCS" | grep -Ev -- "$keep" | grep -c .)
+  # FINAL_ROUND_NOT_VM: processes under a VM app's name that are no VM (e.g. the user's installed
+  # OmacVM Bridge and Gestures helpers on the Mac mini): not counted.
+  hv=$(echo "$procs" | grep -E "$HV_PROCS" | grep -Ev -- "$keep" | grep -Ev -- "${FINAL_ROUND_NOT_VM:-^$}" | grep -c .)
+  other=$(echo "$procs" | grep -E "$VM_PROCS" | grep -Ev -- "$keep" | grep -c .)
   same=$(echo "$procs" | grep -E "$VM_PROCS" | grep -E -- "$keep" | grep -c .)
   agents=$(echo "$procs" | grep -Ec '(^|/)claude$')
+  # FINAL_ROUND_IDLE_AGENTS_OK=1: Claude sessions that sit idle (under 10 % CPU, e.g. the user's open
+  # terminals on the Mac mini) do not count; only working ones do (and the round's own, one).
+  if [ "${FINAL_ROUND_IDLE_AGENTS_OK:-0}" = 1 ]; then
+    agents=$(( $(ps -axo %cpu=,comm= | awk '$2 ~ /(^|\/)claude$/ && $1 >= 10' | grep -c .) + 1 ))
+  fi
   lock=$(cat "$HOME/.omacvm-bench.lock/owner" 2>/dev/null)
   load=$(sysctl -n vm.loadavg | tr -d '{}' | awk '{print $1}')
   # round.sh holds the lock for the whole round ("final-round ..."): that one is ours.
   if [ "$other" -gt 0 ] || [ "$same" -gt 1 ] || [ "$agents" -gt 1 ]; then busy=true; fi
   case $lock in ''|final-round*) ;; *) busy=true ;; esac
-  printf '{"other_vm_processes":%s,"target_vms":%s,"claude_processes":%s,"bench_lock":%s,"load1":%s,"busy":%s}' \
-    "$other" "$same" "$agents" "$(jstr "$lock")" "$load" "$busy"
+  printf '{"other_vm_processes":%s,"other_hypervisor_processes":%s,"target_vms":%s,"claude_processes":%s,"bench_lock":%s,"load1":%s,"busy":%s}' \
+    "$other" "$hv" "$same" "$agents" "$(jstr "$lock")" "$load" "$busy"
 }
 
 # Facts about the Mac for each line.
@@ -93,7 +109,7 @@ preflight_why() {
     why="$why; the energy mode changed in the round ($(cat "$state") at the start, $pm now): set it back"
   fi
   b=$(busy_check "${1:-}")
-  case $b in *'"busy":true'*) why="$why; the Mac is not quiet: $b (quit the other VM apps, Parallels' service, agents, test VMs)" ;; esac
+  case $b in *'"busy":true'*) why="$why; the Mac is not quiet: $b (stop the other VMs and test VMs, quit working agents)" ;; esac
   echo "${why#; }"
 }
 preflight() {   # [target pattern]
@@ -147,4 +163,18 @@ vm_running() {   # app|utm|fusion|parallels NAME [PORT]
         { echo "VMware Fusion runs no VM named \"$name\"" >&2; return 1; } ;;
     *) echo "unknown target $t" >&2; return 1 ;;
   esac
+}
+kill_tree() {   # pid: it and everything it started
+  local c; for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
+  kill -TERM "$1" 2>/dev/null
+}
+capped() {   # test cmd...: run it, stop it after TEST_CAP seconds; exit 124 when stopped
+  local t=$1 p w rc; shift
+  "$@" & p=$!
+  ( sleep "$TEST_CAP" & s=$!; trap 'kill $s 2>/dev/null; exit 0' TERM; wait $s
+    kill -0 $p 2>/dev/null && { say "$t: stopped at the ${TEST_CAP}s cap"; kill_tree $p; } ) >&2 & w=$!
+  wait $p; rc=$?
+  kill_tree $w; wait $w 2>/dev/null
+  [ $rc -ge 128 ] && ! kill -0 $p 2>/dev/null && rc=124
+  return $rc
 }

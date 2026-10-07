@@ -168,9 +168,10 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   Every other VM keeps its device list. A port on `vser0` moves no PCI
   device, and the VM finds it by its name. So turning Touch ID on for an
   app VM takes one restart of the VM: `omacvm apply` says so ("OmacVM.app:
-  Touch ID only from the VM's next start"), `omacvm check` fails with "shut
-  it down and start it again" (in the VM: "the VM has no Touch ID port
-  yet"), and the client says "Touch ID not available (shut the VM down and
+  Touch ID only from the VM's next start"), `omacvm check` on the Mac
+  fails its "Mac links" line with "shut it down and start it again" (in
+  the VM, from 3.0.4, a hint: "on from the VM's next start"; the control
+  centre's row says the same instead of failing), and the client says "Touch ID not available (shut the VM down and
   start it again once)". Off again: the port goes at the next start; until
   then the Bridge has no key for the VM and says `off`.
 - The app (`app/app/Sources/OmacVMAuth`, `AuthRelay`) passes each request
@@ -617,3 +618,80 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
   Bridge 3 s after `omarchy-theme-set`); after three misses the fast
   `rate` no; `"touch_id_panel": false` shows macOS's dialog, no click,
   Escape works; the Bridge stopped: the password after about 110 ms.
+
+## Addendum (3.0.4): apps with their own switch, and "from the next start"
+
+Status: built (`touchid-hint`, 2026-10-07). Touch ID stays opt-in and off
+by default.
+
+### Apps that ask polkit only when told to
+
+Touch ID answers sudo and polkit. An app that unlocks through polkit asks
+it only with its own switch on, and until then keeps asking for its own
+password: Touch ID looks broken for it. Checked (2026-10-07):
+
+- 1Password (the main case in Omarchy; omarchy-mac installs the aarch64
+  tarball: `/opt/1Password`, `/usr/share/applications/1password.desktop`,
+  `/usr/share/polkit-1/actions/com.1password.1Password.policy`). Settings
+  › Security › "Unlock using system authentication", off by default
+  (support.1password.com/system-authentication-linux). In
+  `~/.config/1Password/settings/settings.json` it is
+  `"security.authenticatedUnlock.enabled": true`; the file holds only the
+  settings changed from their defaults. Since 8.10.38 1Password signs
+  sensitive settings (`authTags`, one per key) and resets an unsigned one
+  at its next start (support.1password.com/settings-security, kb/202408c).
+  So OmacVM never writes the setting (1Password would undo it and it is
+  1Password's security choice), and a `true` without its tag counts as off.
+  The key and the tags were checked in real settings files of 1Password
+  for Linux 8.x (public dotfiles), not in a signed-in 1Password here (no
+  account in a test VM).
+- Bitwarden (desktop, Linux arm64 tar.gz and snap): Settings › Security ›
+  "Unlock with system authentication" (bitwarden.com/help/biometrics).
+  Listed only, not read: its settings file was not checked.
+- KeePassXC: quick unlock through polkit
+  (`org.keepassxc.KeePassXC.unlockDatabase`) only from 2.8.0 (beta1,
+  2026-09-23; 2.7.x has none on Linux), Settings › Security › "Enable
+  database quick unlock", on by default. Listed only.
+
+What the person sees, Touch ID on and 1Password installed:
+
+- While its switch is off, one desktop notice: "1Password: turn on
+  Settings › Security › Unlock using system authentication to use Touch
+  ID." `omacvm-touchid-apps --notify` (the desktop user) sends it from
+  `omacvm-touchid-apps.service`, which runs when Touch ID is turned on, at
+  login (`graphical-session.target`) and when 1Password's polkit action
+  appears (`omacvm-touchid-apps.path`). Once per app: a mark in
+  `~/.local/state/omacvm/touchid-hint-<app>`, cleared when Touch ID is
+  turned on again (`touchid.sh on` from off). Never while the switch is on.
+  No notification daemon yet: no mark, the next trigger tries again.
+- A line in `omacvm check` and the control centre's Touch ID details
+  (guest `check.sh`, as the desktop user): a hint (skip, needs a person)
+  with the same words while off, "1Password: uses Touch ID" (ok) once on.
+  Never a failure: Touch ID itself works.
+- The details list the three apps and their switches.
+
+### From the VM's next start
+
+On OmacVM.app the port comes at the VM's start, and a reboot inside the VM
+keeps the same QEMU (`-action reboot=reset`). Touch ID turned on while the
+VM runs was a red x ("failing") in the control centre. Now the guest check
+is a hint ("on from the VM's next start: shut it down, then start it
+again"), and the control centre gives the row its own state, "from the
+next start" (the refresh glyph, blue), when Touch ID is on in an app VM
+that has no `/dev/virtio-ports/org.omacvm.auth` (`local.next_start`). A
+real failure (no key, no PAM line) still wins. OmacVM.app's own window is
+hidden while the VM runs (the Dock icon brings QEMU's window to the front),
+so it has nothing to show; when the VM is stopped the next start has the
+port anyway.
+
+### Tests
+
+- pytest `test_touchid_apps.py`: no 1Password, 1Password found by any of
+  its three files, never set, signed on, unsigned on (off), a file from
+  before signatures, unreadable file, `XDG_CONFIG_HOME`, one notice and no
+  second, none while on, no daemon then a retry; the control centre's
+  status order with "next start", the port test, the details text, and
+  the row plus details in Textual's headless driver.
+- `src/tests/touchid-client.sh`: `touchid.sh` installs the script and its
+  two user units and takes them out again.
+

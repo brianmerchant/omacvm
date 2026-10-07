@@ -242,7 +242,8 @@ class FeaturesScreen(Screen):
             note = r.note or S.tag_note(r.feature, r.on)
             if len(note) > width:
                 note = note[: width - 1] + "…"
-            style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan"}.get(r.status, "bright_black")
+            style = {S.Status.NEEDS_PERSON: "yellow", S.Status.FAILING: "red", S.Status.BUSY: "cyan",
+                     S.Status.NEXT_START: "blue"}.get(r.status, "bright_black")
             t.update_cell(r.feature.name, "st", status_cell(r, app.tick))
             t.update_cell(r.feature.name, "title", Text(r.feature.title, style="bright_black" if dim else ""))
             t.update_cell(r.feature.name, "note", Text(note, style=style if (r.note or dim) else "bright_black"))
@@ -394,7 +395,7 @@ class DetailsScreen(Screen):
             t.append("\n")
             field("Record", fixed)
             t.append("\n")
-        if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY) or f.name == "gpu-memory") and r.note:
+        if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY, S.Status.NEXT_START) or f.name == "gpu-memory") and r.note:
             t.append("\n")
             field("Now", r.note)
             t.append("\n")
@@ -403,7 +404,7 @@ class DetailsScreen(Screen):
             t.append("  " + ("off: nothing to check" if not r.on else "no check result yet" if r.status is S.Status.UNKNOWN
                              else "nothing failed") + "\n", style="bright_black")
         for c in r.checks:
-            mark, style = {"ok": ("ok", "green"), "skip": ("–", "bright_black"),
+            mark, style = {"ok": ("ok", "green"), "skip": ("›", "blue") if c.human else ("–", "bright_black"),
                            "fail": ("!" if c.human else "x", "yellow" if c.human else "red")}[c.status]
             t.append(f"  {mark:<3}", style=style)
             t.append(f"{'Mac' if c.side == 'mac' else 'VM':<4}", style="bright_black")
@@ -411,7 +412,8 @@ class DetailsScreen(Screen):
             if c.detail:
                 # A long detail (often the step to take) on its own line, under the name.
                 sep = f"\n{' ' * 9}" if len(c.name) + len(c.detail) + 11 > self.size.width - 4 else "  "
-                t.append(sep + c.detail, style="" if c.status == "fail" else "bright_black")
+                # A step for the person (a failure, or a hint such as 1Password's own switch) stands out.
+                t.append(sep + c.detail, style="" if c.status == "fail" or c.human else "bright_black")
             t.append("\n")
         t.append(f"\nLog, last {60 if self.full_log else 12} lines" + ("" if self.full_log else "  (l: more)") + "\n", style="bold")
         for line in self.log_lines or ["(nothing logged)"]:
