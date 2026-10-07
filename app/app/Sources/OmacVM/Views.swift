@@ -13,6 +13,8 @@ enum Screen: Equatable {
     case building
     case ready
     case driveMissing
+    /// The drive with the shown VM went away (UnavailableView).
+    case unavailable
 }
 
 @MainActor
@@ -31,10 +33,55 @@ final class AppState: ObservableObject {
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
         storage.onMoved = { [weak self] in self?.reload() }
+        // A drive plugged in or gone: the VMs on it come and go.
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            driveObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.drivesChanged() }
+            })
+        }
         // The views read the storage through this state too (Start waits for a move).
         storageChanges = storage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
     private var storageChanges: AnyCancellable?
+    private var driveObservers: [NSObjectProtocol] = []
+
+    /// The drive with the shown VM's folder went away (while it ran, or
+    /// since): its name. The window shows the VM as unavailable until the
+    /// drive is back.
+    @Published private(set) var goneDrive: String?
+
+    /// "Show <VM>" on the unavailable screen: another VM, here now.
+    func showOther(_ c: VMConfig) {
+        goneDrive = nil
+        message = nil
+        config = c
+        screen = c.isReady ? .ready : .setup
+    }
+
+    /// The VM's drive went away while it ran (main.swift, Runner.driveLost).
+    func driveGone(_ drive: String) {
+        message = nil
+        goneDrive = drive
+        screen = .unavailable
+        storage.refresh()
+        FileHandle.standardError.write(Data("drive: \(config.name) unavailable: \(drive) is gone\n".utf8))
+    }
+
+    /// A drive was mounted or unmounted. Not while a VM runs (its Runner
+    /// watches its own drive), builds or is set up (the form keeps what was typed).
+    func drivesChanged() {
+        let was = screen
+        switch screen {
+        case .ready, .driveMissing, .unavailable:
+            if vmRunning() { storage.refresh() } else { reload() }
+        case .install, .setup, .building:
+            storage.refresh()
+        }
+        if screen != was {
+            FileHandle.standardError.write(Data("drive: the window shows \(screen) now (was \(was)): \(config.name)\n".utf8))
+        }
+    }
 
     /// The VM to show and the screen for it: the VM the app finds, else a
     /// new one (or the note that the VMs folder's drive is not connected).
@@ -61,7 +108,14 @@ final class AppState: ObservableObject {
         if let c = (config.location != nil ? VMConfig.named(config.name) : nil) {
             config = c
             screen = c.isReady ? .ready : .setup
+            goneDrive = nil
+        } else if let drive = config.location.flatMap({ Storage.missingDrive(for: $0) })
+                    ?? (screen == .unavailable && !FileManager.default.fileExists(atPath: config.folder.path) ? goneDrive : nil) {
+            // Its drive is not back yet: still shown, as unavailable.
+            goneDrive = drive
+            screen = .unavailable
         } else {
+            goneDrive = nil
             (config, screen) = Self.start()
         }
         storage.refresh()
@@ -83,6 +137,7 @@ struct RootView: View {
             case .building: BuildView(state: state, creator: state.creator)
             case .ready: ReadyView(state: state)
             case .driveMissing: DriveMissingView(state: state)
+            case .unavailable: UnavailableView(state: state)
             }
         }
         .frame(width: 520)
