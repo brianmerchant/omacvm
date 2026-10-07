@@ -84,8 +84,9 @@ rmdir "$T/drive/U t.utm"
 # osascript: logs its arguments (one line each, a record per call) and acts as
 # UTM's scripting: export makes the bundle, delete and update answer, the
 # configuration has 2 drives after the update, open puts the VM in UTM's list.
-# OSA_FAIL=export|delete|update|open (open: ignored, as a UTM started by an
-# Apple event did on the Mac mini).
+# OSA_FAIL=export|delete|update|updateerr|open|openerr (open: ignored, as a UTM started
+# by an Apple event did on the Mac mini; openerr: the scripting's open fails).
+# utm_move runs under set -euo pipefail, as in build.sh.
 mkdir -p "$T/fake"
 cat > "$T/fake/osascript" <<'EOF'
 #!/bin/bash
@@ -99,9 +100,11 @@ case $s in
     [[ ${OSA_FAIL:-} == delete ]] && { echo "execution error: no (-1728)"; exit 1; } ;;
   *"to open (POSIX file"*)
     # UTM opens it (listed from now on), unless it ignores the request.
+    [[ ${OSA_FAIL:-} == openerr ]] && { echo "execution error: UTM got an error (-1708)"; exit 1; }
     [[ ${OSA_FAIL:-} == open ]] || echo "osa ${@: -1}" >> "$OSA_LOG.open"
     echo "missing value" ;;
   *"update configuration"*)
+    [[ ${OSA_FAIL:-} == updateerr ]] && { echo "execution error: UTM got an error (-10000)"; exit 1; }
     [[ ${OSA_FAIL:-} == update ]] && echo 1 || echo 2 ;;
   *"make new virtual machine"*) echo "0A1B2C3D-0000-4000-8000-00000000ABCD" ;;
 esac
@@ -121,7 +124,7 @@ fresh() { rm -rf "$T/osa.log" "$T/osa.log.open" "$T/vms"; mkdir -p "$T/vms"; }
 
 fresh
 out=$(HOME=$T/home PATH="$T/fake:$PATH" UTMCTL=$T/fake/utmctl OSA_LOG=$T/osa.log \
-  bash -c 'source "$1/src/lib/mac.sh"; source "$1/src/vm/utm.sh"; utm_move "U t" "$2"' _ "$R" "$T/vms" 2>&1; echo "rc $?")
+  bash -c 'set -euo pipefail; source "$1/src/lib/mac.sh"; source "$1/src/vm/utm.sh"; utm_move "U t" "$2"' _ "$R" "$T/vms" 2>&1; echo "rc $?")
 expect "utm_move: done" "rc 0" "$(tail -1 <<<"$out")"
 expect "utm_move: exported into the folder" "yes" "$(grep -qxF "[$T/vms/U t.utm]" "$T/osa.log" && echo yes)"
 expect "utm_move: then UTM's copy deleted" "export delete" "$(grep -oE 'export \(virtual|to delete \(virtual' "$T/osa.log" | sed -e 's/^export.*/export/' -e 's/^to delete.*/delete/' | xargs)"
@@ -129,7 +132,7 @@ expect "utm_move: the export opened through UTM's scripting" "osa $T/vms/U t.utm
 
 move() {   # OSA_FAIL -> output, rc
   HOME=$T/home PATH="$T/fake:$PATH" UTMCTL=$T/fake/utmctl OSA_LOG=$T/osa.log OSA_FAIL=$1 \
-    bash -c 'source "$1/src/lib/mac.sh"; source "$1/src/vm/utm.sh"; utm_move "U t" "$2"' _ "$R" "$T/vms" 2>&1
+    bash -c 'set -euo pipefail; source "$1/src/lib/mac.sh"; source "$1/src/vm/utm.sh"; utm_move "U t" "$2"' _ "$R" "$T/vms" 2>&1
   echo "rc $?"
 }
 out=$(move "")
@@ -143,6 +146,9 @@ expect "utm_move: export fails: says why" "yes" "$(grep -q "UTM could not put th
 fresh
 out=$(move open)
 expect "utm_move: scripting's open ignored: LaunchServices' open, then listed" "rc 0|-a UTM $T/vms/U t.utm" "$(tail -1 <<<"$out")|$(cat "$T/osa.log.open")"
+fresh
+out=$(move openerr)
+expect "utm_move: scripting's open fails: LaunchServices' open, then listed" "rc 0|-a UTM $T/vms/U t.utm" "$(tail -1 <<<"$out")|$(cat "$T/osa.log.open")"
 fresh
 out=$(move delete)
 expect "utm_move: delete fails: stops, says what to do" "yes" "$(grep -q "delete 'U t' in UTM, then open $T/vms/U t.utm in UTM" <<<"$out" && [[ $(tail -1 <<<"$out") == "rc 1" ]] && echo yes)"
@@ -165,6 +171,8 @@ expect "utm_add_live: 2 drives: done" "rc 0" "$(call 'utm_add_live "U t" /x/live
 expect "utm_add_live: the image given to UTM" "yes" "$(grep -qxF '[/x/live.img]' "$T/osa.log" && echo yes)"
 out=$(OSA_FAIL=update call 'utm_add_live "U t" /x/live.img')
 expect "utm_add_live: still 1 drive: stops" "rc 1" "$(tail -1 <<<"$out")"
+out=$(OSA_FAIL=updateerr call 'set -euo pipefail; utm_add_live "U t" /x/live.img')
+expect "utm_add_live: UTM's error under set -e: says why" "yes" "$(grep -q "could not add the live installer disk: execution error" <<<"$out" && echo yes)"
 
 # Icon and sound card in a bundle outside UTM's folder.
 fresh

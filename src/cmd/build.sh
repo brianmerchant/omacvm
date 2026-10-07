@@ -157,9 +157,13 @@ fi
 # finished VM takes 10-12 GB and grows as it is used. With --vm-dir all of
 # that goes to the VM's folder (vm_dir_problem checks its drive); a VM on this
 # Mac's disk can still be chosen below, so the check waits for that answer.
+space_short() {   # OmacVM.app takes no --vm-dir
+  printf 'OmacVM needs about 30 GB free disk space to build (this Mac has %s GB free%s)' "$free_gb" \
+    "$( [[ $TYPE == app ]] || echo "; or put the VM on another drive with --vm-dir")"
+}
 if [[ -z ${VM_DIR:-} ]]; then
   if (( free_gb < 30 )) && { (( YES )) || [[ $TYPE == app ]]; }; then
-    needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free; or put the VM on another drive with --vm-dir)"
+    needs_person "$(space_short)"
   fi
   (( free_gb >= 50 || free_gb < 30 )) || info "$free_gb GB free: enough to build; the VM grows as you use it, so keep some room."
 fi
@@ -383,8 +387,8 @@ if [[ -n ${VM_DIR:-} ]]; then
     (( PLAN && JSON )) || info "On an external drive: connect it before you start the VM, and never unplug it while the VM runs."
   fi
   [[ $TYPE == fusion ]] && FUSION_DIR=$VM_DIR
-elif [[ $TYPE != app ]] && (( free_gb < 30 )); then
-  needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free; or put the VM on another drive with --vm-dir)"
+elif (( free_gb < 30 )); then   # also OmacVM.app picked above (no --vm-type)
+  needs_person "$(space_short)"
 fi
 [[ -n ${VM_DIR:-} || $TYPE == utm ]] || VM_DIR=$(default_dir)
 case $TYPE in
@@ -637,6 +641,8 @@ build_end() {
   local rc=$1
   if [[ $SOURCE == prebuilt ]]; then prebuilt_exit; fi   # the seed and an unused unpacked image go
   (( rc == 0 && DONE )) && return
+  # UTM with --vm-dir: the installer image and build-live's work folder on that drive
+  if [[ $TYPE == utm && -n ${VM_DIR:-} ]]; then rm -f "$VM_DIR/.$VM-live.img"; rm -rf "$VM_DIR/.omacvm-build-live"; fi
   (( rc )) || rc=1
   printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
   printf 'Fix what it says and run omacvm again (a half-built VM can be deleted in %s first).\n' \

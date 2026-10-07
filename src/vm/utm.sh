@@ -70,11 +70,11 @@ utm_move() {
     -e '  tell application "UTM"' \
     -e '    export (virtual machine named (item 1 of argv)) to f' \
     -e '  end tell' \
-    -e 'end run' "$name" "$b")
+    -e 'end run' "$name" "$b") || true   # build.sh runs with set -e: the check below says why
   [[ -f $b/config.plist ]] || die "UTM could not put the VM into $2: $out"
   out=$(utm_osa -e 'on run argv' -e 'tell application "UTM" to delete (virtual machine named (item 1 of argv))' -e 'end run' "$name") ||
     die "UTM could not delete its own copy of the VM ($out): delete '$name' in UTM, then open $b in UTM"
-  utm_osa -e 'on run argv' -e 'tell application "UTM" to open (POSIX file (item 1 of argv))' -e 'end run' "$b" >/dev/null
+  utm_osa -e 'on run argv' -e 'tell application "UTM" to open (POSIX file (item 1 of argv))' -e 'end run' "$b" >/dev/null || true
   for ((i = 0; i < 30; i++)); do
     "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { $1 = ""; $2 = ""; sub(/^  /, ""); print }' | grep -qxF "$name" && return 0
     (( i == 10 )) && open -a UTM "$b"
@@ -99,7 +99,7 @@ utm_add_live() {
     -e '    set ds to drives of c2' \
     -e '    return length of ds' \
     -e '  end tell' \
-    -e 'end run' "$1" "$2")
+    -e 'end run' "$1" "$2") || true
   [[ $out == 2 ]] || die "UTM could not add the live installer disk: $out"
 }
 
