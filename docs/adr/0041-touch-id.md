@@ -532,6 +532,8 @@ a signed yes or no, and never reaches the panel's socket or the relay.
   embedded view ended within 0.5 s with an error that says nothing about a
   finger. Then `error`, and the dialog. A request is never asked twice after
   the person could have seen a prompt (a later error is a `failed`).
+- The command (or polkit action) does not fit the panel's box whole (two
+  lines, about 60 characters): the dialog shows all of it (at most 120).
 
 ### The theme
 
@@ -559,11 +561,15 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
   (`not-front`, not a miss). One panel at a time.
 - The words come only from the request the Bridge verified; the guest sends
   colours, nothing that is shown as text.
+- The command is shown whole or not in the panel at all: a command cut in
+  the middle could hide what runs (`pacman -Syu …noconfirm` with a
+  `--hookdir` in the gap). A longer one goes to macOS's dialog (security
+  review, 2026-10-07).
 
 ### Tests
 
 - `swift run touchid-panel-tests` (app/app): theme, glyph paths, words that
-  fit (start and end kept), keys, how an evaluation ends, placement, the
+  fit (shown whole, else macOS's dialog), keys, how an evaluation ends, placement, the
   view drawn off screen (never on screen, no `LAContext`).
 - `swift run auth-tests`: the prompt and answer lines, the interim 103, the
   relay with a Bridge that asks for the panel, the client going away during

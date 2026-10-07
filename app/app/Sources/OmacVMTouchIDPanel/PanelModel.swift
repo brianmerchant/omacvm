@@ -132,6 +132,14 @@ public func panelFit(_ text: String, fits: (String) -> Bool) -> String {
     return panelCut(c, keep: lo)
 }
 
+/// The panel shows a request only when its box fits whole: a command cut
+/// in the middle could hide what runs ("pacman -Syu …noconfirm" with a
+/// --hookdir in the gap). Else "error": the Bridge shows macOS's dialog,
+/// which shows the whole command (at most 120 characters, ADR 0041).
+public func panelShowsWhole(_ box: String?, fits: (String) -> Bool) -> Bool {
+    box.map(fits) ?? true
+}
+
 func panelCut(_ c: [Character], keep: Int) -> String {
     guard keep < c.count else { return String(c) }
     let head = (keep + 1) / 2, tail = keep - head

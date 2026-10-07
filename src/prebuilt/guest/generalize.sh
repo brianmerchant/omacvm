@@ -82,6 +82,8 @@ rm -f /var/lib/dbus/machine-id
 rm -f /etc/NetworkManager/system-connections/* /var/lib/NetworkManager/* 2>/dev/null || true
 rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret
 rm -f /etc/sudoers.d/zz-omacvm-install
+# Touch ID is off in an image (src/prebuilt/lib.sh): its per-VM keys never ship in one.
+rm -f /etc/omacvm/touchid-key /etc/omacvm/touchid-token
 rm -rf /var/lib/systemd/coredump/* /var/tmp/* /tmp/* 2>/dev/null || true
 
 log "logs and caches"
