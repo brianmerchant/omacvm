@@ -8,7 +8,7 @@ APP=build/OmacVMGestures.app
 ID=org.omacvm.gestures; NAME="OmacVM Gestures"; DEFS=()
 if [[ ${OMACVM_HELPER_TEST:-0} == 1 ]]; then
   ID=org.omacvm.test.gestures; NAME="OmacVM Test Gestures"
-  DEFS=(-DPORT=47930 "-DGESTURES_DOMAIN=CFSTR(\"$ID\")" '-DBRIDGE_DIR="omacvm-test-bridge"')
+  DEFS=(-DPORT=47930 "-DGESTURES_DOMAIN=CFSTR(\"$ID\")" '-DBRIDGE_DIR="omacvm-test-bridge"' -DGESTURES_TEST_IDENTITY=1)
 fi
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ../../icon/make-icns.sh "$APP/Contents/Resources/OmacVM.icns"
