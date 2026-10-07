@@ -13,6 +13,13 @@ in more words.
 - Touch ID is no longer marked experimental (control centre, `omacvm
   features`, README): it is a regular feature, still off until you turn it on.
 
+- Omanotch: when something moved the hidden NOTCH output after it was in
+  place (a Hyprland config reload with an older rule, another `hyprctl
+  eval`), the strip beside the notch could stay wrong for up to 30 s.
+  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
+  does not take is sent again with growing waits, at most every 30 s once
+  it keeps failing, and never more than 4 times in 30 s.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
