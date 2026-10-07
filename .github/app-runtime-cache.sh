@@ -58,7 +58,7 @@ case ${1:-} in
     n=0
     while IFS= read -r e; do
       n=$((n + 1))
-      (( n > KEEP )) && rm -rf "${CACHE:?}/$e"
+      if (( n > KEEP )); then rm -rf "${CACHE:?}/$e"; fi
     done < <(ls -t "$CACHE" | grep -E '^[0-9a-f]{64}$' || true)
     ;;
   *) echo "usage: app-runtime-cache.sh restore BUILD_DIR KEY | save BUILD_DIR" >&2; exit 2 ;;

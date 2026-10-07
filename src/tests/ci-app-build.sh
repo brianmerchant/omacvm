@@ -15,6 +15,12 @@ bad() { echo "FAIL $1"; fail=1; }
 expect() {   # WHAT WANT GOT
   if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1: want '$2', got '$3'"; fi
 }
+# The cache script's answer and its exit code: a CI step fails on any but 0.
+cache() {   # ARGS...
+  local out rc
+  out=$("$C" "$@"); rc=$?
+  echo "$out"; [[ $rc == 0 ]] || echo "(exit $rc)"
+}
 
 # --- The workflow: one job per name, its lines as they are (no YAML module on
 # macOS's python3).
@@ -105,37 +111,38 @@ fake() {   # DIR KEY: a runtime build-app.sh would take
   echo "$2" > "$1/inputs.sha256"
 }
 K1=$(printf '1%.0s' {1..64}); K2=$(printf '2%.0s' {1..64}); K3=$(printf '3%.0s' {1..64}); K4=$(printf '4%.0s' {1..64})
-expect "restore with an empty cache is a miss" miss "$("$C" restore "$T/b0" "$K1")"
+expect "restore with an empty cache is a miss" miss "$(cache restore "$T/b0" "$K1")"
 [[ ! -e $T/b0 ]] && ok "a miss leaves the build folder alone" || bad "a miss made $T/b0"
 "$C" restore "$T/b0" "../x" >/dev/null 2>&1; expect "restore refuses a key that is not a hash" 2 "$?"
 fake "$T/b1" "$K1"
-expect "save keeps a complete runtime" saved "$("$C" save "$T/b1")"
+expect "save keeps a complete runtime" saved "$(cache save "$T/b1")"
 [[ ! -e $T/cache/$K1/edk2 ]] && ok "the edk2 build folder is not cached" || bad "edk2 went into the cache"
-expect "save twice: have" have "$("$C" save "$T/b1")"
+expect "save twice: have" have "$(cache save "$T/b1")"
 [[ -z $(ls "$T/cache/$K1" | grep '^\.new') && $(ls -A "$T/cache" | wc -l | tr -d ' ') == 1 ]] &&
   ok "no half-saved folders left" || bad "cache has: $(ls -A "$T/cache" "$T/cache/$K1" | tr '\n' ' ')"
-expect "restore of a saved key is a hit" hit "$("$C" restore "$T/b2" "$K1")"
+expect "restore of a saved key is a hit" hit "$(cache restore "$T/b2" "$K1")"
 [[ -x $T/b2/qemu-gpu-runtime/bin/qemu-system-aarch64 && -f $T/b2/firmware/edk2-aarch64-code.fd ]] &&
   ok "the hit gives QEMU and the firmware" || bad "the hit is not complete"
 expect "the hit's inputs.sha256 is the key" "$K1" "$(cat "$T/b2/inputs.sha256" 2>/dev/null)"
-expect "restore of another key is a miss" miss "$("$C" restore "$T/b3" "$K2")"
+expect "restore of another key is a miss" miss "$(cache restore "$T/b3" "$K2")"
 mkdir -p "$T/b4"
-expect "restore never writes over a build folder that is there" "miss ($T/b4 is there already)" "$("$C" restore "$T/b4" "$K1")"
+expect "restore never writes over a build folder that is there" "miss ($T/b4 is there already)" "$(cache restore "$T/b4" "$K1")"
 fake "$T/h" "$K2"; touch "$T/h/qemu-gpu-runtime.test-hooks"
-expect "a runtime with test hooks is never cached" "skip (no complete runtime in $T/h)" "$("$C" save "$T/h")"
+expect "a runtime with test hooks is never cached" "skip (no complete runtime in $T/h)" "$(cache save "$T/h")"
 fake "$T/i" "$K2"; rm "$T/i/firmware/edk2-aarch64-code.fd"
-expect "a runtime without firmware is not cached" "skip (no complete runtime in $T/i)" "$("$C" save "$T/i")"
+expect "a runtime without firmware is not cached" "skip (no complete runtime in $T/i)" "$(cache save "$T/i")"
 fake "$T/j" "not-a-hash"
-expect "an inputs.sha256 that is not a hash is not cached" "skip ($T/j/inputs.sha256 is not a hash)" "$("$C" save "$T/j")"
+expect "an inputs.sha256 that is not a hash is not cached" "skip ($T/j/inputs.sha256 is not a hash)" "$(cache save "$T/j")"
 # A cache entry someone broke is a miss, not a half runtime.
 mkdir -p "$T/cache/$K3"; echo "$K3" > "$T/cache/$K3/inputs.sha256"
-expect "a broken cache entry is a miss" miss "$("$C" restore "$T/b5" "$K3")"
+expect "a broken cache entry is a miss" miss "$(cache restore "$T/b5" "$K3")"
 rm -rf "${T:?}/cache/$K3"
 # The newest KEEP stay (the one restored last counts as new).
 fake "$T/s2" "$K2"; fake "$T/s3" "$K3"; fake "$T/s4" "$K4"
-"$C" save "$T/s2" >/dev/null; sleep 1; "$C" save "$T/s3" >/dev/null; sleep 1
-"$C" restore "$T/b6" "$K1" >/dev/null; sleep 1
-OMACVM_CI_RUNTIME_KEEP=3 "$C" save "$T/s4" >/dev/null
+expect "save with room left" saved "$(cache save "$T/s2")"; sleep 1
+expect "save of a third" saved "$(cache save "$T/s3")"; sleep 1
+expect "restore marks the entry as used" hit "$(cache restore "$T/b6" "$K1")"; sleep 1
+expect "save past KEEP" saved "$(OMACVM_CI_RUNTIME_KEEP=3 cache save "$T/s4")"
 expect "the oldest entry goes past KEEP" "$K1 $K3 $K4" "$(ls "$T/cache" | grep -E '^[0-9a-f]{64}$' | tr '\n' ' ' | sed 's/ $//')"
 unset OMACVM_CI_RUNTIME_CACHE
 "$C" save "$T/s4" >/dev/null 2>&1; [[ $? != 0 ]] && ok "no cache folder set: refused" || bad "ran without OMACVM_CI_RUNTIME_CACHE"
