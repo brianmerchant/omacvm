@@ -26,6 +26,13 @@ in more words.
   running QEMU. After the Bridge starts, or a VM does, the first request
   waits a few seconds for a fresh look at the VMs instead of minutes, and
   a VM the Mac cannot reach is told so instead of "not running".
+- Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
+  Settings while it ran could freeze the Mac's keyboard and clicks (the
+  pointer still moved) until the helper was killed. Gestures now removes
+  its event tap and lets go of the trackpads at once, and takes them back
+  when the permission returns. The Bridge's media-key tap and OmacVM.app's
+  own full-grab tap do the same, and `omacvm uninstall` waits for the
+  helpers to quit before it resets their permissions. Fixes #192.
 - Touch ID: with 1Password in the VM, OmacVM says once (a notice, and a
   line in the control centre's Touch ID details and `omacvm check`) that
   1Password needs its own switch: Settings › Security › Unlock using

@@ -1,4 +1,5 @@
-// Offline tests of keys-model.swift (when the media-key tap is created again)
+// Offline tests of keys-model.swift (when the media-key tap is created again,
+// and when it must go because a permission was taken away)
 // and wifi-model.swift (a steady Wi-Fi state). No permissions, no Wi-Fi.
 import Foundation
 
@@ -19,6 +20,20 @@ check(!r.front(nil) && r.front(800), "tap: OmacVM.app restarted (a new pid): aga
 check(r.failed() && !r.failed() && !r.failed(), "tap: a failed re-creation is logged once")
 r.worked()
 check(r.failed(), "tap: ... and again after one worked")
+
+// ---- TapGuard (issue #192) ----
+let both: TapPermissions = [.accessibility, .inputMonitoring]
+var g = TapGuard()
+check(!g.mayCreate([.inputMonitoring]) && !g.mayCreate([]), "tap: never created without Accessibility")
+check(g.mayCreate([.accessibility]) && g.mayCreate(both), "tap: created with Accessibility")
+g.created(both)
+check(!g.lost(both), "tap: kept while both permissions are there")
+check(g.lost([.inputMonitoring]), "tap: Accessibility taken away: it goes")
+check(g.lost([.accessibility]), "tap: Input Monitoring taken away (it was made with it): it goes")
+check(g.lost([]), "tap: both taken away: it goes")
+g.created([.accessibility])
+check(!g.lost([.accessibility]), "tap: made with Accessibility alone: stays without Input Monitoring")
+check(g.lost([.inputMonitoring]), "tap: ... and goes without Accessibility")
 
 // ---- WiFiSteady ----
 let t0 = Date(timeIntervalSince1970: 1_000_000)
