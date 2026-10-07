@@ -300,14 +300,18 @@ def cmd_updates(a: list[str]) -> None:
     time.sleep(1)
     if "Updates" not in screen():
         out(False, error="U did not open the updates screen", screen=screen())
+    before = screen()
     keys("c")
     time.sleep(1)
-    ok, text, seen = watch(lambda s: not re.search(r"checking|asking", s, re.I), secs)
+    # The check's answer: up to date, an offer (X → Y), or why not; the box says when it checked.
+    ok, text, seen = watch(lambda s: s != before and "No update information yet" not in s
+                           and re.search(r"Up to date|→|No connection|could not|refused|error|signature", s, re.I) is not None, secs)
     body = re.sub(r"\s+", " ", " ".join(l.strip(" │╭╮╰╯─") for l in text.splitlines()))
     keys("Escape")
     time.sleep(0.5)
-    bad = re.search(r"refused|could not|failed|no signature|not signed|error|needs the Mac", body, re.I)
-    out(ok and not bad, body=body[:1500], trouble=seen, screen=text)
+    bad = re.search(r"refused|could not|failed|no signature|not signed|error|needs the Mac|No connection", body, re.I)
+    out(ok and not bad, answer=("up to date" if "Up to date" in body else "offered" if "→" in body else "?"),
+        body=body[:1500], trouble=seen, screen=text)
 
 
 def cmd_sudo(a: list[str]) -> None:
