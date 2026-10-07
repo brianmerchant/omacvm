@@ -26,14 +26,15 @@ expect() {   # WHAT WANT GOT
 
 # The step: "Checking the Swift compiler" runs swiftc. This one writes its pid
 # and its child's, then sleeps; it never ends by itself. (swift: 100 GB free
-# for the free space check, no notch.)
+# for the free space check, swift -e or mac-free-gb.swift, so a Mac with less
+# free space runs it too; no notch.)
 cat > "$T/bin/swiftc" <<'EOF'
 #!/bin/bash
 sleep 600 &
 echo "$$ $!" >> "$OMACVM_TEST_PIDS"
 while :; do sleep 0.2; done
 EOF
-printf '#!/bin/bash\n[[ $1 == -e ]] && echo 100 || echo none\n' > "$T/bin/swift"
+printf '#!/bin/bash\n[[ $1 == -e || $1 == */mac-free-gb.swift ]] && echo 100 || echo none\n' > "$T/bin/swift"
 chmod +x "$T/bin/swiftc" "$T/bin/swift"
 
 # A step's output under ui_follow, as "Installing Omarchy": a producer that
