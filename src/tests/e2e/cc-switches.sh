@@ -135,6 +135,10 @@ fingerprint() {
   ls -ld "$HOME/OmacVM/Omarchy" 2>/dev/null | awk '{print $1, $NF}'
 }
 fingerprint > "$OUT/fp-before.txt"
+# The test identity's own state (its CLI, keys, pins, its Bridge's folder): as it was, at the end.
+TSTATE=("$HOME/Library/Application Support/omacvm-test" "$HOME/Library/Application Support/omacvm-test-bridge")
+mkdir -p "$OUT/state-before"
+for d in "${TSTATE[@]}"; do [[ -d $d ]] && ditto "$d" "$OUT/state-before/$(basename "$d")"; done
 
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'
 qemu_pid() { pgrep -f "$QPAT $VM( |$)" | head -1; }
@@ -155,6 +159,9 @@ cleanup() {
   if [[ -n $ROOTARG ]]; then
     if [[ -n $OLDROOT ]]; then defaults write "$APPID" vmsRoot "$OLDROOT"; else defaults delete "$APPID" vmsRoot 2>/dev/null; fi
   fi
+  for d in "${TSTATE[@]}"; do
+    rm -rf "$d"; [[ -d $OUT/state-before/$(basename "$d") ]] && ditto "$OUT/state-before/$(basename "$d")" "$d"
+  done
   fingerprint > "$OUT/fp-after.txt"
   if diff -q "$OUT/fp-before.txt" "$OUT/fp-after.txt" >/dev/null; then res cleanup ok "the person's helpers, app and VM unchanged"
   else res cleanup FAIL "the person's helpers, app or VM changed: diff $OUT/fp-before.txt $OUT/fp-after.txt"; fi
@@ -337,20 +344,24 @@ netd_blocked() {
 use_vm() {   # NAME [CLONE_FROM]: the VM of this pass (an APFS clone of a kept one, new name and SSH port)
   VM=$1; VMD=$ROOT/$VM; IP=""
   if [[ -n ${2:-} ]]; then
-    log "clone $2 -> $VM"
+    local src=$2
+    [[ $src == */* ]] || src=$ROOT/$src   # a name in the VMs folder, or a VM folder's path
+    log "clone $src -> $VM"
     [[ -e $VMD ]] && die "$VMD exists"
-    [[ -f $ROOT/$2/vm.env ]] || die "no VM $2 in $ROOT"
-    pgrep -f "$QPAT $2( |$)" >/dev/null && die "$2 runs: stop it first"
-    cp -cR "$ROOT/$2" "$VMD" || die "clone failed"
+    [[ -f $src/vm.env && -e $src/ready ]] || die "no finished VM at $src"
+    pgrep -f "$(basename "$src")" | while read -r p; do ps -o args= -p "$p"; done | grep -qE "$QPAT" && die "$src runs: stop it first"
+    cp -cR "$src" "$VMD" || die "clone failed"
     CLONES+=("$VMD")
     rm -f "$VMD/fast-network" "$VMD"/logs/*.pid
     local port=$(( 52500 + RANDOM % 400 ))
-    sed -i '' "s/^NAME=.*/NAME='$VM'/; s/^SSH_PORT=.*/SSH_PORT=$port/" "$VMD/vm.env"
-    res clone ok "$2 -> $VM (APFS clone, SSH port $port)"
+    # A test VM's size (STANDARDS: at most 8 GB / 6 CPUs), whatever the kept one had.
+    sed -i '' "s/^NAME=.*/NAME='$VM'/; s/^SSH_PORT=.*/SSH_PORT=$port/; s/^CPUS=.*/CPUS=${OMACVM_E2E_CPUS:-6}/; s/^MEM_MB=.*/MEM_MB=${OMACVM_E2E_MEM_MB:-8192}/" "$VMD/vm.env"
+    res clone ok "$(basename "$src") -> $VM (APFS clone, SSH port $port, ${OMACVM_E2E_CPUS:-6} CPUs, ${OMACVM_E2E_MEM_MB:-8192} MB)"
   fi
   [[ -f $VMD/vm.env && -e $VMD/ready ]] || die "no finished VM $VM in $ROOT"
   [[ -n $(qemu_pid) ]] && die "$VM runs already: shut it down first"
-  pgrep -f "$QPAT" >/dev/null && die "another test VM runs (one at a time)"
+  # One VM from the test app at a time (its launcher is one per Mac); other tests' QEMUs may run.
+  pgrep -f "OmacVM Test.app/Contents/[A-Za-z/]*$QPAT" >/dev/null && die "another VM of the test app runs (one launcher per Mac)"
   return 0
 }
 
