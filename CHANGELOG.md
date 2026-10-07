@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.4 (unreleased)
+
+- The control centre and Touch ID no longer say "needs the Mac" for an
+  OmacVM.app VM whose fast network was turned off while it ran (it keeps
+  vmnet until its next start): the Mac finds the VM's address from its
+  running QEMU. After the Bridge starts, or a VM does, the first request
+  waits a few seconds for a fresh look at the VMs instead of minutes, and
+  a VM the Mac cannot reach is told so instead of "not running".
+
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
