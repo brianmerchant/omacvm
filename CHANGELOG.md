@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.4 (unreleased)
+## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
   working when its protocol is the same (3.0.1 to 3.0.3 count as one), so
