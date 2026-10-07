@@ -569,14 +569,11 @@ struct ReadyView: View {
             case .allowedNextStart:
                 Text(KeyNote.allowedText).font(.caption).foregroundStyle(.secondary)
             case .needsUser:
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Keyboard: OmacVM is not allowed to read it").foregroundStyle(.red)
-                        Spacer()
-                        Button("Allow…") { KeyAccess.request() }
-                    }
-                    Text(KeyAccess.missingText).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text("Keyboard: \(KeyAccess.shortText)").foregroundStyle(.red)
+                    KeyStepsButton()
+                    Spacer()
+                    Button("Allow…") { KeyAccess.request() }
                 }
             }
         }
@@ -662,7 +659,26 @@ extension KeyAccess {
     /// before OmacVM was allowed. (Here, not in KeyAccess.swift, which
     /// src/tests/app-key-access.sh compiles on its own.)
     static func note(folder: URL) -> KeyNote {
-        KeyNote.decide(allowedNow: listen || post, lastLog: lastLog(folder: folder))
+        KeyNote.decide(allowedNow: allowed, lastLog: lastLog(folder: folder))
+    }
+}
+
+/// The keyboard note's (i): the steps in System Settings (KeyAccess).
+private struct KeyStepsButton: View {
+    @State private var shown = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "info.circle").foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .help("How to allow it")
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            Text(KeyAccess.missingText)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 320, alignment: .leading)
+                .padding(12)
+        }
     }
 }
 

@@ -135,17 +135,29 @@ for (name, script) in [("grow", DiskSize.growScript), ("compact", DiskSize.compa
 
 // MARK: Keyboard note
 
+// QEMU's tap is an active one: only "control the computer" (Accessibility
+// (keys) in the record, CGPreflightPostEventAccess now) counts.
 let refused = "OmacVM: keys: Input Monitoring NOT allowed, Accessibility (keys) NOT allowed for OmacVM\nCould not create event tap\n"
-let refusedWithAccess = "OmacVM: keys: Input Monitoring allowed, Accessibility (keys) NOT allowed for OmacVM\nCould not create event tap\n"
+// The user's MacBook, 2026-10-07: Input Monitoring on, Accessibility off.
+let refusedWithIM = "OmacVM: keys: Input Monitoring allowed, Accessibility (keys) NOT allowed for OmacVM\nCould not create event tap\n"
+let refusedWithAccess = "OmacVM: keys: Input Monitoring NOT allowed, Accessibility (keys) allowed for OmacVM\nCould not create event tap\n"
 let fine = "OmacVM: keys: Input Monitoring allowed, Accessibility (keys) allowed for OmacVM\n"
+let fineWithoutIM = "OmacVM: keys: Input Monitoring NOT allowed, Accessibility (keys) allowed for OmacVM\n"
 expect(KeyNote.decide(allowedNow: false, lastLog: nil) == .needsUser, "not allowed: the red note")
+expect(KeyNote.decide(allowedNow: false, lastLog: refusedWithIM) == .needsUser,
+       "Input Monitoring on, Accessibility off, tap refused: needs Accessibility")
+expect(KeyNote.decide(allowedNow: true, lastLog: refusedWithIM) == .allowedNextStart,
+       "Accessibility allowed after a start with Input Monitoring only: next start, not red")
 expect(KeyNote.decide(allowedNow: true, lastLog: refused) == .allowedNextStart, "allowed since the last start: next start")
 expect(KeyNote.decide(allowedNow: true, lastLog: refusedWithAccess) == .needsUser, "allowed at that start and still refused: red")
 expect(KeyNote.decide(allowedNow: true, lastLog: "Could not create event tap\n") == .allowedNextStart, "old log without a record: next start")
 expect(KeyNote.decide(allowedNow: true, lastLog: fine) == .none, "allowed and the tap worked: nothing")
+expect(KeyNote.decide(allowedNow: true, lastLog: fineWithoutIM) == .none, "Accessibility alone, the tap worked: nothing")
+expect(KeyNote.decide(allowedNow: false, lastLog: fine) == .needsUser, "taken away since the last start: red")
 expect(KeyNote.decide(allowedNow: true, lastLog: nil) == .none, "allowed, no start yet: nothing")
 expect(KeyNote.startHadAccess(refused) == false && KeyNote.startHadAccess(fine) == true
-       && KeyNote.startHadAccess("x") == nil, "the record read")
+       && KeyNote.startHadAccess(refusedWithIM) == false && KeyNote.startHadAccess(refusedWithAccess) == true
+       && KeyNote.startHadAccess("x") == nil, "the record read: Accessibility (keys) only")
 
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
