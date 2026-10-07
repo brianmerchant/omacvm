@@ -271,8 +271,11 @@ if (( MAC )) && needs_bridge; then
   fi
 fi
 # The gestures daemon says it too (OmacVM.app's VMs show it on 127.0.0.1 even
-# without the Bridge).
-if (( TOKEN )) && on gestures; then bridge_token_ensure; fi
+# without the Bridge). The Bridge's features need it in the VM before the Mac
+# side is there: OmacVM.app's first apply is --no-mac, and on a Mac that never
+# had the Bridge (Gestures off at setup) there was no token yet: the build
+# stopped at "Adding OmacVM to the VM". The Bridge installed later keeps it.
+if (( TOKEN )) && { on gestures || needs_bridge; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :
 elif [[ -f $T ]]; then

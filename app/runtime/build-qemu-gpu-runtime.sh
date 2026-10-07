@@ -830,6 +830,11 @@ grep -q 'dlsym(handle, "omacvm_touchid_panel_start")' "$source_dir/ui/cocoa.m" |
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-permission.patch"
 "$native_dir/Tests/keys/test-tap-permission.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: the full-grab tap stays without Accessibility (test-tap-permission.sh)"
+# A borderless window (the tests' full screen) has no shadow, so macOS 26 draws
+# no light rim around the display; windowed again with its shadow.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-borderless-no-rim.patch"
+"$native_dir/Tests/display/test-borderless-rim.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: a borderless window keeps its shadow and macOS 26's rim (test-borderless-rim.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

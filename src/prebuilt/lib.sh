@@ -131,12 +131,14 @@ prebuilt_download() {
 
 # prebuilt_unpack DIR [MEMBER...]: the bundle into DIR (sparse files stay
 # sparse); with MEMBERs only those paths. $ZSTD: OmacVM.app's own zstd (its
-# users need no Homebrew).
+# users need no Homebrew). tar stops at the archive's end marker, before the
+# zero padding after it: cat reads that, or zstd's last write could find the
+# pipe closed and fail the unpack (SIGPIPE, with pipefail) now and then.
 prebuilt_unpack() {
   local dir to=$1; dir=$(dirname "$PB_MANIFEST"); shift
   mkdir -p "$to"
   python3 "$R/src/prebuilt/manifest.py" parts "$PB_MANIFEST" | while read -r name _ _; do cat "$dir/$name"; done |
-    "${ZSTD:-zstd}" -dc --long=27 -q | tar -xSf - -C "$to" "$@" ||
+    "${ZSTD:-zstd}" -dc --long=27 -q | { tar -xSf - -C "$to" "$@" && cat > /dev/null; } ||
     die "could not unpack the image (free disk space?)"
   [[ -d $to/$PB_BUNDLE ]] || die "the image did not unpack ($to/$PB_BUNDLE missing)"
 }
