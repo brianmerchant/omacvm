@@ -3,6 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- OmacVM.app: Disk › Change… is one slider for the disk's size, with a
+  number field. It goes down to what Omarchy needs (what btrfs holds,
+  plus 10 % or 5 GB spare, never under 64 GB) and up to what the Mac has
+  free. Smaller is new: the VM starts, Omarchy moves its files below the
+  new size, the VM restarts once while disk.img is cut, and the file
+  system is checked. A copy of the disk (an APFS clone) is kept until
+  that check passes; if a step fails, Go Back brings it back. Compact is
+  gone: the space Omarchy frees already goes back to the Mac by itself.
+
 ## 3.0.4 (unreleased)
 
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
