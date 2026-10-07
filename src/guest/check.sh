@@ -296,7 +296,9 @@ elif [[ $BATTERY == on ]]; then
     if w=$(cat /sys/class/power_supply/BAT0/power_now 2>/dev/null); then
       ok "battery watts" "$(awk -v w="$w" 'BEGIN { printf "%.1f W", w / 1000000 }') $st (the Mac's)"
     elif [[ -e /sys/class/power_supply/BAT0/power_now ]]; then
-      bad "battery watts" "the Mac sends no current: omacvm update$(restart_hint)"
+      # Not a restart matter: the Mac's side is older than 3.0.6.
+      if [[ $TYPE == app ]]; then bad "battery watts" "OmacVM.app sends no current: update the app"
+      else bad "battery watts" "the Bridge sends no current: omacvm update on the Mac"; fi
     else bad "battery watts" "the module is older than 1.1.0: omacvm apply, or reboot"; fi
   fi
   if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
