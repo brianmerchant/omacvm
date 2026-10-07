@@ -437,10 +437,11 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   elif grep -q 'macOS shortcuts off' "$miclog"; then
     ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥ Esc is macOS's)"
   fi
-  # QEMU's keyboard tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to the VM) needs Input Monitoring
-  # or Accessibility for OmacVM; without it QEMU says so once at the start.
+  # QEMU's keyboard tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to the VM) is an active tap:
+  # OmacVM needs Accessibility ("control the computer"; Input Monitoring is
+  # not enough); without it QEMU says so once at the start.
   if grep -q 'Could not create event tap' "$miclog"; then
-    warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security: OmacVM on under Input Monitoring and Accessibility (on already: remove it with − and add it again), then restart the VM"
+    warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security › Accessibility: OmacVM on (listed already: remove it with − and add the app with +), then restart the VM"
   fi
 fi
 # The globe key on its own (3.0.1): to the VM while it has the keyboard.

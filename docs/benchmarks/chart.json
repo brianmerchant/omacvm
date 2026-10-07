@@ -55,5 +55,219 @@
   "parallels": {
    "geekbench-gpu-opencl": "not available (no OpenCL or Vulkan)"
   }
+ },
+ "power": {
+  "sources": {
+   "main": "2026-10-03 round on the MacBook Pro 16\" M4 Max (macOS 15.7.4, 100 Wh), one 3-minute run per load, power-suite.sh; OmacVM.app was the preview build. Mac video is the SDR run.",
+   "301": "2026-10-07, OmacVM.app 3.0.1, median of 3 per row, on the charger: MacBook Pro (macOS 15.7.4, 100 Wh) and MacBook Air M2 8 GB (macOS 26.6.2, 52.6 Wh)"
+  },
+  "battery_wh": 100,
+  "labels": {
+   "app": "OmacVM.app preview"
+  },
+  "watts": {
+   "mac": {
+    "idle": 6.1,
+    "light": 6.6,
+    "video": 8.0,
+    "cpu": 75.3,
+    "gpu": 35.6
+   },
+   "app": {
+    "idle": 6.2,
+    "light": 6.8,
+    "video": 21.3,
+    "cpu": 71.0,
+    "gpu": 27.2
+   },
+   "utm": {
+    "video": 39.2,
+    "cpu": 61.3,
+    "gpu": 29.1
+   },
+   "fusion": {
+    "idle": 5.5,
+    "light": 5.9,
+    "video": 20.4,
+    "cpu": 73.9,
+    "gpu": 37.3
+   },
+   "parallels": {
+    "idle": 5.7,
+    "light": 7.3,
+    "video": 24.2,
+    "cpu": 72.2,
+    "gpu": 27.4
+   }
+  },
+  "missing": {
+   "utm": {
+    "idle": "left out: measured again (#32)",
+    "light": "left out: measured again (#32)"
+   }
+  },
+  "round": {
+   "title": "OmacVM.app 3.0.1, 2026-10-07",
+   "subtitle": "Median of 3, macOS measured in the same session. One scale for these rows.",
+   "app_label": "OmacVM.app 3.0.1",
+   "rows": [
+    {
+     "mac": "MacBook Pro M4 Max, 100 Wh",
+     "wh": 100,
+     "load": "idle",
+     "app": 5.85,
+     "macos": 6.8
+    },
+    {
+     "mac": "MacBook Pro M4 Max, 100 Wh",
+     "wh": 100,
+     "load": "light",
+     "app": 8.27,
+     "macos": 7.71
+    },
+    {
+     "mac": "MacBook Air M2 8 GB, 52.6 Wh",
+     "wh": 52.6,
+     "load": "idle",
+     "app": 5.37,
+     "macos": 4.54
+    },
+    {
+     "mac": "MacBook Air M2 8 GB, 52.6 Wh",
+     "wh": 52.6,
+     "load": "light",
+     "app": 5.61,
+     "macos_missing": "no reading run"
+    }
+   ]
+  },
+  "note": [
+   "The whole Mac, display included, from the battery's own telemetry; brightness 50 %; each VM alone in full screen.",
+   "Top: one 3-minute run per load, OmacVM.app a preview build; each load has its own scale. Hours: battery capacity over the draw.",
+   "UTM idle and reading left out: the run gave 15.2 and 19.3 W, a later check about 5 W (#32)."
+  ]
+ },
+ "gpu_progress": {
+  "source": "2026-10-07, MacBook Air M2 8 GB, macOS 26.6.2, on the charger. The published 2.7.0, 2.8.0, 2.9.1, 3.0.0 and 3.0.3 zips re-signed as the test identity (QEMU runtime byte-identical). One VM (APFS clone of the prebuilt-based A-notch), 4 CPUs, 4 GB, native full screen. Three rounds, one boot per version each: forward, backward, forward. Raw: bench/gpu-progress-air.jsonl in the dev workspace.",
+  "versions": [
+   "2.7.0",
+   "2.8.0",
+   "2.9.1",
+   "3.0.0",
+   "3.0.3"
+  ],
+  "highlight": "3.0.3",
+  "tests": [
+   {
+    "key": "glmark2",
+    "label": "OpenGL in the VM",
+    "bench": "glmark2, 3 s per scene, score",
+    "runs": {
+     "2.7.0": [
+      764,
+      735,
+      764
+     ],
+     "2.8.0": [
+      764,
+      877,
+      760
+     ],
+     "2.9.1": [
+      1408,
+      1501,
+      1472
+     ],
+     "3.0.0": [
+      1822,
+      1831,
+      1827
+     ],
+     "3.0.3": [
+      1817,
+      1814,
+      1829
+     ]
+    }
+   },
+   {
+    "key": "aquarium",
+    "label": "Browser graphics",
+    "bench": "WebGL Aquarium, 30,000 fish, fps",
+    "unit": "fps",
+    "digits": 1,
+    "runs": {
+     "2.7.0": [
+      17.9,
+      17.4,
+      13.1
+     ],
+     "2.8.0": [
+      15.2,
+      11.0,
+      15.0
+     ],
+     "2.9.1": [
+      15.1,
+      15.1,
+      15.1
+     ],
+     "3.0.0": [
+      11.0,
+      15.1,
+      11.0
+     ],
+     "3.0.3": [
+      18.6,
+      19.1,
+      18.7
+     ]
+    }
+   },
+   {
+    "key": "basemark",
+    "label": "Browser overall",
+    "bench": "Basemark Web 3.0, one run each, score",
+    "runs": {
+     "2.7.0": [
+      1469
+     ],
+     "2.8.0": [
+      1359
+     ],
+     "2.9.1": [
+      1286
+     ],
+     "3.0.0": [
+      1326
+     ],
+     "3.0.3": [
+      1536
+     ]
+    }
+   },
+   {
+    "key": "vkmark",
+    "label": "Vulkan in the VM",
+    "bench": "vkmark, Graphics set to Vulkan, score",
+    "runs": {
+     "3.0.3": [
+      820,
+      828,
+      821
+     ]
+    },
+    "missing": {
+     "2.7.0": "no Vulkan setting",
+     "2.8.0": "no Vulkan setting",
+     "2.9.1": "not tested: only a hidden Vulkan flag",
+     "3.0.0": "skipped: no picture at start on M1/M2 (#161, fixed in 3.0.1)"
+    }
+   }
+  ],
+  "note": [
+   "Same MacBook Air and VM for every version; only the app changes. Graphics OpenGL (what Automatic picks in each), vkmark with Vulkan.",
+   "Median of 3 boots; the thin line runs from the lowest to the highest run. 3.0.0's Aquarium: the slowdown #173 fixed in 3.0.2."
+  ]
  }
 }

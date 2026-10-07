@@ -67,12 +67,15 @@ pam_remove() {
 }
 
 # The theme sender's and the app hint's user units, for the desktop user (only in a real VM).
+# The theme sender's record of what it sent goes either way: the Mac may not
+# have the theme (Touch ID was off, the Bridge is new), so "on" sends it again at once.
 user_units() {   # on|off [first: Touch ID was off before]
   [[ -n $U && -z $ROOT ]] || return 0
   local uc=(systemctl --user -M "$U@") home
+  home=$(getent passwd "$U" | cut -d: -f6) || true
+  [[ $home == /* ]] && rm -f "$home/.local/state/omacvm/touchid-theme-sent"
   if [[ $1 == on ]]; then
     # Turned on now: the app hints may show again (once each).
-    home=$(getent passwd "$U" | cut -d: -f6)
     if [[ ${2:-} == first && -n $home ]]; then rm -f "$home"/.local/state/omacvm/touchid-hint-*; fi
     "${uc[@]}" daemon-reload 2>/dev/null || true
     # shellcheck disable=SC2086

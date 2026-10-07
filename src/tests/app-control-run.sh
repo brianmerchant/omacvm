@@ -79,7 +79,8 @@ xcrun clang -O2 -o "$T/swap" "$T/swap.c"
 EXE=$APP/Contents/MacOS/OmacVM CLI=$APP/Contents/Resources/omacvm/omacvm
 REAL_CLI=$(cd "$(dirname "$CLI")" && pwd -P)/omacvm
 FIXED=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-MYHOME=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory | awk '{print $2}')
+# As a plist: a home with a space (/Volumes/Macintosh SSD/home) comes whole.
+MYHOME=$(dscl -plist . -read "/Users/$(id -un)" NFSHomeDirectory | plutil -extract dsAttrTypeStandard:NFSHomeDirectory.0 raw -o - -)
 JOBS=$T/support/jobs/0123456789abcdef.rc
 
 out=$(FOO=bar OMACVM_PROGRESS=json "$T/bridge" "$EXE" --control-run "$CLI" vms --json --app-only 2>&1); rc=$?

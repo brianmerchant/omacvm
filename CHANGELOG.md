@@ -26,6 +26,17 @@ in more words.
   running QEMU. After the Bridge starts, or a VM does, the first request
   waits a few seconds for a fresh look at the VMs instead of minutes, and
   a VM the Mac cannot reach is told so instead of "not running".
+- OmacVM.app's keyboard note asked for the wrong permission. The VM's
+  key tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to Omarchy) needs Accessibility; Input
+  Monitoring is not enough, but Allow… opened Input Monitoring, and with
+  it on the note stayed red even after Accessibility was turned on. Now
+  the note names only Accessibility, Allow… opens that pane, the (i)
+  has the steps, and once it is allowed the note says "allowed, takes
+  effect at the next VM start" at once.
+- VMware Fusion: setting up a new VM stopped at "failed during: VMware
+  Fusion" (3.0.0 to 3.0.3). The first Hyprland build ran from a copy that
+  could not install its build tools, and the VMware Tools build then
+  stopped at "here: unbound variable".
 - A new OmacVM.app VM on a Mac that never had OmacVM's Bridge, with Gestures
   turned off at setup: the build stopped at "Adding OmacVM to the VM" (no
   Bridge token yet). The token is now made for the VM's first setup too.
@@ -53,17 +64,30 @@ in more words.
 - Chromium video after a kernel update: when the decoder came late, its
   service stayed down until the next start and videos played on the CPU.
   The decoder now starts its service when it comes.
-- Ctrl-C during a step with a spinner in `omacvm build` (such as the
-  prebuilt image's unpack) always stops it; one that came just as the
-  spinner drew could be lost, and the step went on. A prebuilt image could
-  now and then fail to unpack with "could not unpack the image (free disk
-  space?)" although nothing was wrong. Closing the control centre while a
-  job ran could end with a Python error; it closes cleanly now.
+- Ctrl-C in `omacvm build` always stops the step that runs (waiting for
+  SSH or for the VM's address, the prebuilt image's unpack, asking whether
+  this terminal may control UTM) and everything it started, and its
+  spinner. Before, only the unpack stopped: the other steps went on in the
+  background after the build had ended, a spinner could go on drawing over
+  the prompt, and a Ctrl-C that came just as the spinner drew could be
+  lost. A prebuilt image could now and then fail to unpack with "could not
+  unpack the image (free disk space?)" although nothing was wrong. Closing
+  the control centre while a job ran could end with a Python error; it
+  closes cleanly now.
 - OmacVM.app on macOS 26: no light 1 pt line around the screen when the VM's
   window is borderless over a whole display (2.9.1's notch full screen
   had it; in 3.0 that window is left only for tests). macOS 26 draws that
   line with a window's shadow; borderless windows now have none. macOS's
   own full screen, which 3.0 uses, never had the line.
+- Touch ID in OmacVM.app: the panel now looks like Omarchy's own password
+  prompt in your theme, light themes too: its colours, a border in
+  Hyprland's border colours and its rounding. It follows a theme switch
+  within a second, and comes in your VM's last theme at once after Touch ID
+  was turned off and on (before, that sent it back to the dark default).
+- Touch ID is faster: after a yes the VM goes on the moment your finger
+  matches, and the panel is gone at once (a 90 ms check, none with Reduce
+  Motion), with your keyboard back in the VM in the same moment. Before,
+  the panel played 1.6 s of animation and held your keys meanwhile.
 
 ## 3.0.3
 
