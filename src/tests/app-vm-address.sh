@@ -111,14 +111,16 @@ echo "mac=52:54:00:dd:ee:ff" > "$D/fast-network"; echo vmnet > "$D/logs/network"
 check "a stale vmnet record, the file's MAC leased: still 127.0.0.1 (the running QEMU counts)" "127.0.0.1:$PORT" "$(app_ip Work)"
 echo "slirp off" > "$D/logs/network"
 check "on the user network: it does not run on the fast network" no "$(app_any_on_vmnet && echo yes || echo no)"
+check "why no address: QEMU's SSH port" "QEMU does not answer on its SSH port 127.0.0.1:$PORT (still starting?)" "$(app_no_address "$D")"
+echo "vmnet-down the fast network stopped working" > "$D/logs/network"
+check "why no address: the fast network is down" "its fast network is down: the fast network stopped working" "$(app_no_address "$D")"
+echo "slirp off" > "$D/logs/network"
 
 # 6. Stopped: no address.
 kill "$QPID" 2>/dev/null; wait "$QPID" 2>/dev/null; QPID=""
 check "stopped: no address" "" "$(app_ip Work)"
-check "stopped: why there is no address" "QEMU does not answer on its SSH port 127.0.0.1:$PORT (still starting?)" "$(app_no_address "$D")"
+check "stopped: why there is no address" "its QEMU is not running" "$(app_no_address "$D")"
 check "stopped: off is just off" "fast network: off" "$(app_fast_network_wish "$D" off)"
 check "stopped: on from the next start" "fast network: on from the VM's next start" "$(app_fast_network_wish "$D" on)"
-echo vmnet-down "the fast network stopped working" > "$D/logs/network"
-check "why: the fast network is down" "its fast network is down: the fast network stopped working" "$(app_no_address "$D")"
 
 exit $fail

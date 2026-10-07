@@ -279,6 +279,7 @@ app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
 app_no_address() {   # DIR: why app_ip finds no address for the VM, which runs (one line)
   local n p pid m
   n=$(head -1 "$1/logs/network" 2>/dev/null); p=$(app_env "$1" SSH_PORT); pid=$(app_pid_dir "$1")
+  [[ -n $pid ]] || { echo "its QEMU is not running"; return 0; }
   case $n in
     vmnet-down*) echo "its fast network is down: ${n#vmnet-down }" ;;
     vmnet)
