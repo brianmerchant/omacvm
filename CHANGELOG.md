@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- A Mac without Xcode's Command Line Tools: OmacVM.app no longer makes macOS
+  ask to install them. Before, the setup screen's look for a prebuilt VM ran
+  python3 and opened macOS's "install the command line developer tools?"
+  window as the app opened, Build refused until they were installed, and
+  the control centre's jobs and `omacvm vms` asked again (a Swift script
+  for the notch). The app now carries a python3, Omanotch and those Swift
+  programs ready made, so its whole route runs without them (and without
+  Homebrew). UTM, VMware Fusion and Parallels still need them, and
+  `omacvm build` asks for them only there.
+
 ## 3.0.4 (unreleased)
 
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
@@ -21,15 +33,6 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
-- A Mac without Xcode's Command Line Tools: OmacVM.app no longer makes macOS
-  ask to install them. Before, the setup screen's look for a prebuilt VM ran
-  python3 and opened macOS's "install the command line developer tools?"
-  window as the app opened, Build refused until they were installed, and
-  the control centre's jobs and `omacvm vms` asked again (a Swift script
-  for the notch). The app now carries a python3, Omanotch and those Swift
-  programs ready made, so its whole route runs without them (and without
-  Homebrew). UTM, VMware Fusion and Parallels still need them, and
-  `omacvm build` asks for them only there.
 - No sound after a kernel update: in OmacVM.app VMs with Chromium video on,
   the first start after a new kernel could leave every app silent until
   WirePlumber was restarted. WirePlumber hung on Chromium's video decoder
