@@ -13,9 +13,10 @@ struct MacLinks: Equatable {
     var bridge = true     // OmacVM Bridge, 127.0.0.1:47831
     var battery = true    // the app's battery port
     var camera = true     // the app's camera port
-    /// Touch ID (org.omacvm.auth): off unless the file says touch-id=on
-    /// (a feature that is off by default; VMs set up before it never had it).
-    /// Only then does the VM get the port at all.
+    /// Touch ID: off unless the file says touch-id=on (a feature that is off
+    /// by default; VMs set up before it never had it). Only for the record:
+    /// from 3.0.4 every VM gets the org.omacvm.auth port and its relay
+    /// (Runner), and the Bridge answers "off" while it is off.
     var touchID = false
 
     init() {}
@@ -57,9 +58,12 @@ struct MacLinks: Equatable {
     }
 
     /// For qemu.log, which omacvm check reads: "Omanotch on, Gestures off, ...".
+    /// "Touch ID port on": this start has the port whatever the setting, so
+    /// turning Touch ID on needs no restart (src/lib/app.sh app_links_stale;
+    /// an older omacvm still reads "Touch ID on|off" as the port).
     var record: String {
         [("Omanotch", omanotch), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera),
-         ("Touch ID", touchID)]
+         ("Touch ID", touchID), ("Touch ID port", true)]
             .map { "\($0.0) \($0.1 ? "on" : "off")" }.joined(separator: ", ")
     }
 }
