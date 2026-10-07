@@ -1,0 +1,106 @@
+From: OmacVM
+Subject: [PATCH] ui: where the guest's pointer goes when the Mac's leaves up into the notch strip
+
+What: a header with no AppKit in it: whether a pointer leaving the main
+view goes up into Omanotch's strip (absolute, grabbed, macOS full screen
+below a notch, through the top edge), and the tablet position on the top
+row of the guest's hidden NOTCH output, at the exit's x (only when NOTCH
+sits right above the built-in display's output). Used by
+omacvm-cocoa-notch-park.patch (which explains the why).
+
+Why its own file: so the decision and the place are tested without QEMU or
+a display (app/runtime/Tests/display/test-notch-park.sh applies this patch
+to an empty folder; at build time and in CI).
+
+Upstream: not applicable (OmacVM's notch strip).
+Test: app/runtime/Tests/display/test-notch-park.c.
+
+diff --git a/ui/omacvm-notch-park.h b/ui/omacvm-notch-park.h
+new file mode 100644
+--- /dev/null
++++ b/ui/omacvm-notch-park.h
+@@ -0,0 +1,84 @@
++/*
++ * OmacVM: where the guest's pointer goes when the Mac's pointer leaves the
++ * VM's full-screen window up into Omanotch's strip beside the camera.
++ *
++ * No AppKit in here, so it is tested on its own
++ * (app/runtime/Tests/display/test-notch-park.c); ui/cocoa.m feeds it.
++ *
++ * In macOS's full screen below a notch the strip is another app's window
++ * (Omanotch) above ours. The guest's pointer used to stay at its last place,
++ * on the VM's top rows, next to the Mac's arrow on the strip, until the
++ * guest hid it. The guest hides it through Hyprland's cursor:invisible,
++ * which Hyprland applies only on a periodic tick: 85-540 ms measured, so
++ * two arrows (on the way up) or none (on the way back) for up to half a
++ * second at every crossing. Now the guest's pointer goes into the guest's
++ * hidden NOTCH output (right above the built-in display under OmacVM.app,
++ * never shown: the strip masks it out) in the same moment the Mac's arrow
++ * shows, and comes back with the next motion over the VM. The guest never
++ * hides it (notchcast, OMACVM_NOTCHPOINTER=1 in /run/omacvm/host.env).
++ */
++#ifndef OMACVM_NOTCH_PARK_H
++#define OMACVM_NOTCH_PARK_H
++
++#include <stdbool.h>
++
++/* A guest output in Hyprland's logical pixels (y grows down). */
++typedef struct OmacVMParkBox { double x, y, w, h; } OmacVMParkBox;
++
++/* What ui/cocoa.m knows when the pointer leaves the main view. */
++typedef struct OmacVMParkIn {
++    bool absolute;      /* the guest's pointer is absolute (virtio-tablet) */
++    bool grabbed;       /* the VM has the pointer now */
++    bool full_screen;   /* the window is in macOS's full screen */
++    double notch_inset; /* the display's safe-area top (points; 0: no notch) */
++    double exit_y;      /* where it left, in the view (points, from the bottom) */
++    double view_h;      /* the view's height (points) */
++} OmacVMParkIn;
++
++/* Leaving up into the strip: absolute, ours, full screen below a notch, through the top. */
++static inline bool omacvm_park_wanted(const OmacVMParkIn *in)
++{
++    return in->absolute && in->grabbed && in->full_screen &&
++           in->notch_inset > 0 && in->view_h > 0 && in->exit_y >= in->view_h - 1;
++}
++
++/*
++ * The tablet position (0..1 of the box around all the guest's outputs) at
++ * the top row of NOTCH, at the exit's x (u: 0..1 of the screen's width).
++ * Only when NOTCH sits right above the screen's output and overlaps it
++ * sideways: in its other place (over the screen's top edge, when another
++ * display is above) its rows are the screen's, and a place above would be
++ * on that other display, where the pointer would show.
++ */
++static inline bool omacvm_park_place(OmacVMParkBox screen, OmacVMParkBox notch,
++                                     OmacVMParkBox all, double u,
++                                     double *nx, double *ny)
++{
++    double lo, hi, x, y;
++
++    if (screen.w <= 0 || screen.h <= 0 || notch.w <= 0 || notch.h <= 0 ||
++        all.w <= 0 || all.h <= 0) {
++        return false;
++    }
++    /* touching the screen's top edge (half a logical px of slack, scaled sizes) */
++    if (notch.y + notch.h < screen.y - 0.5 || notch.y + notch.h > screen.y + 0.5) {
++        return false;
++    }
++    lo = notch.x > screen.x ? notch.x : screen.x;
++    hi = notch.x + notch.w < screen.x + screen.w ? notch.x + notch.w : screen.x + screen.w;
++    if (hi - lo < 1) {
++        return false;
++    }
++    u = u < 0 ? 0 : u > 1 ? 1 : u;
++    x = screen.x + u * screen.w;
++    x = x < lo ? lo : x > hi - 1 ? hi - 1 : x;
++    /* the top row: the arrow hangs down from its tip, so all of it stays in NOTCH */
++    y = notch.y;
++    *nx = (x - all.x) / all.w;
++    *ny = (y - all.y) / all.h;
++    *nx = *nx < 0 ? 0 : *nx > 1 ? 1 : *nx;
++    *ny = *ny < 0 ? 0 : *ny > 1 ? 1 : *ny;
++    return true;
++}
++
++#endif

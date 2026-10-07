@@ -1,0 +1,149 @@
+From: OmacVM
+Subject: [PATCH] ui: one pointer between the VM and Omanotch's strip in full screen
+
+What: when the pointer leaves the main view up into Omanotch's strip
+(macOS full screen below a notch, absolute pointer, VM has it), QEMU sends
+one last tablet position: the top row of the guest's hidden NOTCH output
+at the exit's x (ui/omacvm-notch-park.h). The guest's layout message now
+also keeps NOTCH's box. Nothing else changes: the next motion over the VM
+brings the guest's pointer back, as before.
+
+Why: since full screen moved to its own Space (3.0.x), the strip is
+another app's window above ours. QEMU shows the Mac's arrow at once when
+the pointer leaves, but the guest's arrow stayed on the VM's top rows until
+notchcast hid it with Hyprland's cursor:invisible, which Hyprland applies
+only on a periodic tick (85-540 ms measured on the MacBook Air): two arrows
+on the way up, and on the way back no arrow until it was shown again.
+With the guest's pointer out of sight in NOTCH, the guest never has to hide
+it (notchcast reads omacvm.notchpointer=1, sent by OmacVM.app). Measured
+on the Air, 20 crossings each way (frames with a missing / an extra
+cursor): slow moves 255/98 -> 14/0, fast moves 37/251 -> 4/63 (single
+frames of render latency), tracks/notch-cursor-flicker.md.
+
+Upstream: not applicable (OmacVM's notch strip).
+Test: app/runtime/Tests/display/test-notch-park.c (the logic);
+src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -47,6 +47,7 @@
+ #include "ui/omacvm-gpu-memory.h"
+ #include "ui/omacvm-desktop-restart.h"
+ #include "ui/omacvm-clean-size.h"
++#include "ui/omacvm-notch-park.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -505,6 +506,7 @@
+ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
+                   button:(int)button down:(bool)down;
+ - (void) omacvmUngrabAfterDrag;
++- (void) omacvmParkInNotch:(NSEvent *)event;
+ - (void) omacvmGuestAtTop:(bool)top;
+ @end
+ 
+@@ -970,6 +972,7 @@
+ typedef struct OmacVMBox { double x, y, w, h; } OmacVMBox;
+ static bool omacvm_map_pointer(int output, double u, double v,
+                                double *nx, double *ny);
++static bool omacvm_notch_park_target(double u, double *nx, double *ny);
+ static int omacvm_active_outputs(void);
+ static bool omacvm_is_our_window(NSWindow *w);
+ static bool omacvm_pointer_over_ours(void);
+@@ -2508,6 +2511,7 @@
+ - (void) mouseExited:(NSEvent *)event
+ {
+     omacvm_pointer_left(&omacvm_ptr);
++    [self omacvmParkInNotch:event];
+     /*
+      * OmacVM: with several outputs the pointer may just be on the next one,
+      * or crossing the strip between them in the middle of a drag (the
+@@ -2517,6 +2521,44 @@
+         (omacvm_active_outputs() < 2 ||
+          (!omacvm_pointer_over_ours() && ![NSEvent pressedMouseButtons]))) {
+         [self ungrabMouse];
++    }
++}
++
++/*
++ * OmacVM: up into Omanotch's strip in full screen below a notch, the guest's
++ * pointer goes into its hidden NOTCH output in the same moment (one cursor:
++ * the Mac's shows on the strip at once; ui/omacvm-notch-park.h says why).
++ * The next motion over the VM brings it back.
++ */
++- (void) omacvmParkInNotch:(NSEvent *)event
++{
++    NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
++    NSSize size = [self bounds].size;
++    NSWindow *w = [self window];
++    OmacVMParkIn in = {
++        .absolute = isAbsoluteEnabled,
++        .grabbed = isMouseGrabbed,
++        .full_screen = w && ([w styleMask] & NSWindowStyleMaskFullScreen),
++        .notch_inset = w ? [[w screen] safeAreaInsets].top : 0,
++        .exit_y = p.y,
++        .view_h = size.height,
++    };
++    double nx, ny;
++
++    if (!omacvm_park_wanted(&in) || size.width <= 0 ||
++        !omacvm_notch_park_target(p.x / size.width, &nx, &ny)) {
++        return;
++    }
++    with_bql(^{
++        qemu_input_queue_abs(dcl.con, INPUT_AXIS_X, lround(nx * INPUT_EVENT_ABS_MAX),
++                             0, INPUT_EVENT_ABS_MAX);
++        qemu_input_queue_abs(dcl.con, INPUT_AXIS_Y, lround(ny * INPUT_EVENT_ABS_MAX),
++                             0, INPUT_EVENT_ABS_MAX);
++        qemu_input_event_sync();
++    });
++    if (omacvm_pointer_debug) {
++        fprintf(stderr, "omacvm-pointer: up into the strip: guest pointer to NOTCH (%.4f, %.4f)\n",
++                nx, ny);
+     }
+ }
+ 
+@@ -6755,6 +6797,7 @@
+ static OmacVMBox omacvm_guest_box[OMACVM_MAX_OUTPUTS];
+ static OmacVMBox omacvm_guest_bounds;
+ static bool omacvm_guest_known;
++static OmacVMBox omacvm_guest_notch;    /* Omanotch's hidden output (w 0: none) */
+ static NSString *omacvm_last_layout;
+ 
+ /*
+@@ -6881,6 +6924,18 @@
+     *nx = MIN(1.0, MAX(0.0, (b->x + u * b->w - all->x) / all->w));
+     *ny = MIN(1.0, MAX(0.0, (b->y + v * b->h - all->y) / all->h));
+     return true;
++}
++
++/* The top row of NOTCH above the main output, from the layout the guest reported. */
++static bool omacvm_notch_park_target(double u, double *nx, double *ny)
++{
++    const OmacVMBox *s = &omacvm_guest_box[0], *n = &omacvm_guest_notch;
++    const OmacVMBox *a = &omacvm_guest_bounds;
++
++    return omacvm_guest_known &&
++           omacvm_park_place((OmacVMParkBox){ s->x, s->y, s->w, s->h },
++                             (OmacVMParkBox){ n->x, n->y, n->w, n->h },
++                             (OmacVMParkBox){ a->x, a->y, a->w, a->h }, u, nx, ny);
+ }
+ 
+ static int omacvm_active_outputs(void)
+@@ -8058,6 +8113,7 @@
+     bool first = true;
+ 
+     memset(omacvm_guest_box, 0, sizeof(omacvm_guest_box));
++    memset(&omacvm_guest_notch, 0, sizeof(omacvm_guest_notch));
+     omacvm_guest_known = false;
+     for (NSDictionary *m in monitors) {
+         if (![m isKindOfClass:[NSDictionary class]]) {
+@@ -8083,6 +8139,8 @@
+                 omacvm_guest_box[index] = (OmacVMBox){ x, y, w, h };
+                 omacvm_guest_known = true;
+             }
++        } else if ([name isKindOfClass:[NSString class]] && [name isEqualToString:@"NOTCH"]) {
++            omacvm_guest_notch = (OmacVMBox){ x, y, w, h };
+         }
+     }
+     omacvm_guest_bounds = (OmacVMBox){ minx, miny, maxx - minx, maxy - miny };

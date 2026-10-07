@@ -835,6 +835,13 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-permissio
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-borderless-no-rim.patch"
 "$native_dir/Tests/display/test-borderless-rim.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a borderless window keeps its shadow and macOS 26's rim (test-borderless-rim.sh)"
+# Up into Omanotch's strip in full screen below a notch: the guest's pointer goes
+# into its hidden NOTCH output at once (one cursor at the edge, no flicker).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park.patch"
+"$native_dir/Tests/display/test-notch-park.sh"
+grep -q '\[self omacvmParkInNotch:event\];' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not park the guest's pointer in NOTCH (notch-park patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
