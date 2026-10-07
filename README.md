@@ -92,13 +92,6 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 
 Power: the whole Mac from its battery's telemetry, display at 50 %, each VM alone in full screen. Top: every route on the MacBook Pro on 2026-10-03, one 3-minute run per load, OmacVM.app a preview build then. Below: OmacVM.app 3.0.1 against macOS on the MacBook Pro and a MacBook Air M2 on 2026-10-07, median of 3. [How it was measured](docs/benchmarks/README.md#power-draw-and-battery-life).
 
-<a name="gpu-progress"></a>
-<p align="center">
-  <img src="docs/images/gpu-progress.svg" alt="Bar chart of GPU speed in each OmacVM.app release on one MacBook Air M2 8 GB, the same VM throughout, each test as a multiple of its oldest version measured, median of 3 runs. OpenGL in the VM, glmark2: 2.7.0 1.00x (764), 2.8.0 1.00x (764), 2.9.1 1.93x (1,472), 3.0.0 2.39x (1,827), 3.0.3 2.38x (1,817). Browser graphics, WebGL Aquarium with 30,000 fish: 2.7.0 1.00x (17.4 fps), 2.8.0 0.86x (15.0 fps), 2.9.1 0.87x (15.1 fps), 3.0.0 0.63x (11.0 fps), 3.0.3 1.07x (18.7 fps). Browser overall, Basemark Web 3.0, one run each: 2.7.0 1.00x (1,469), 2.8.0 0.93x (1,359), 2.9.1 0.88x (1,286), 3.0.0 0.90x (1,326), 3.0.3 1.05x (1,536). Vulkan in the VM, vkmark: 3.0.3 scores 821, the only version measured; 2.7.0 and 2.8.0 have no Vulkan setting, 2.9.1 was not tested, 3.0.0 was skipped because it showed no picture at start on M1 and M2 Macs, fixed in 3.0.1." width="100%">
-</p>
-
-GPU progress: the same MacBook Air M2 and the same VM for every bar; only the OmacVM.app version changes. [Numbers and method](docs/benchmarks/README.md#gpu-progress-2026-10-07).
-
 Full comparison with benchmarks: [docs/compare.md](docs/compare.md).
 
 ## Get started

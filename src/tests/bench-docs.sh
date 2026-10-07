@@ -11,8 +11,9 @@
 #   hours are the battery over the watts, and README.md's alt text gives every
 #   number in it
 # - the GPU progress chart (docs/images/gpu-progress.svg) is chart.py --panel
-#   progress's output, README.md's alt text gives every number in it, and the
-#   medians are the ones docs/benchmarks/README.md's table gives
+#   progress's output, docs/benchmarks/README.md's alt text gives every number
+#   in it, its medians are the ones that page's table gives, and README.md
+#   does not show it (the README shows only the current release)
 # - "not released yet" never names a release
 # - the CHANGELOG names what build-kosmickrisp.sh needs
 set -uo pipefail
@@ -104,7 +105,7 @@ expect("README.md: the battery line links to the power chart",
        re.search(r"Optimized for battery\*\*<br>[^|]*\]\(#power-draw\)", read("README.md")) is not None
        and '<a name="power-draw"></a>' in read("README.md"))
 
-# 3c. The GPU progress chart: chart.py's output, every number in README's alt text, medians as the docs give them.
+# 3c. The GPU progress chart: chart.py's output, every number in its alt text, medians as the docs give them, not in README.md.
 gsvg = read("docs/images/gpu-progress.svg")
 sub = re.search(r'font-size="13" fill="#908caa" text-anchor="middle">([^<]*)</text>', gsvg)
 out = f"{tmp}/gpu-progress.svg"
@@ -115,11 +116,13 @@ expect("chart.py --panel progress gives the committed GPU progress SVG", open(ou
 gdesc = re.search(r'<desc id="d">(.*?)</desc>', gsvg, re.S).group(1)
 nums = re.compile(r"(\d+\.\d\dx) \(([\d,.]+(?: fps)?)\)|\b(\d[\d,.]*), the only version measured")
 want = nums.findall(gdesc)
-alt = re.search(r'<img src="[^"]*gpu-progress\.svg" alt="([^"]*)"', read("README.md"))
+alt = re.search(r'<img src="[^"]*gpu-progress\.svg" alt="([^"]*)"', read("docs/benchmarks/README.md"))
 alt = alt.group(1) if alt else ""
 got = nums.findall(alt.replace(" scores ", " "))
-expect(f"README.md: GPU progress alt text gives the SVG's {len(want)} numbers in order", got == want and len(want) > 0,
+expect(f"docs/benchmarks/README.md: GPU progress alt text gives the SVG's {len(want)} numbers in order", got == want and len(want) > 0,
        f"SVG {want}, alt {got}")
+expect("README.md: no comparison between OmacVM.app releases (gpu-progress.svg stays in docs/benchmarks)",
+       "gpu-progress" not in read("README.md"))
 gp = data["gpu_progress"]
 sys.path.insert(0, f"{R}/src/bench")
 sys.dont_write_bytecode = True
