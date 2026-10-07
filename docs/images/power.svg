@@ -1,168 +1,134 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1194" width="1000" height="1194" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 842" width="1000" height="842" role="img" aria-labelledby="t d">
 <title id="t">Power draw of the whole Mac with Omarchy in OmacVM.app, UTM, VMware Fusion and Parallels, and macOS itself</title>
-<desc id="d">Idle (the desktop, nothing open): OmacVM.app preview 6.2 W (16.1 h), UTM left out: measured again (#32), VMware Fusion 5.5 W (18.2 h), Parallels 5.7 W (17.5 h), macOS 6.1 W (16.4 h). Reading (Chrome scrolling a text page): OmacVM.app preview 6.8 W (14.7 h), UTM left out: measured again (#32), VMware Fusion 5.9 W (16.9 h), Parallels 7.3 W (13.7 h), macOS 6.6 W (15.2 h). YouTube 4K (Chrome, SDR; macOS decodes in hardware, the VMs on the CPU): OmacVM.app preview 21.3 W (4.7 h), UTM 39.2 W (2.6 h), VMware Fusion 20.4 W (4.9 h), Parallels 24.2 W (4.1 h), macOS 8.0 W (12.5 h). Every core busy (all CPU cores at 100 %): OmacVM.app preview 71.0 W (1.4 h), UTM 61.3 W (1.6 h), VMware Fusion 73.9 W (1.4 h), Parallels 72.2 W (1.4 h), macOS 75.3 W (1.3 h). WebGL Aquarium (30,000 fish in Chrome; each draws its own frame rate): OmacVM.app preview 27.2 W (3.7 h), UTM 29.1 W (3.4 h), VMware Fusion 37.3 W (2.7 h), Parallels 27.4 W (3.6 h), macOS 35.6 W (2.8 h). MacBook Pro M4 Max, 100 Wh, Idle: OmacVM.app 3.0.1 5.85 W (17.1 h), macOS 6.80 W (14.7 h). MacBook Pro M4 Max, 100 Wh, Reading: OmacVM.app 3.0.1 8.27 W (12.1 h), macOS 7.71 W (13.0 h). MacBook Air M2 8 GB, 52.6 Wh, Idle: OmacVM.app 3.0.1 5.37 W (9.8 h), macOS 4.54 W (11.6 h). MacBook Air M2 8 GB, 52.6 Wh, Reading: OmacVM.app 3.0.1 5.61 W (9.4 h), macOS no reading run. Watts, lower is better; hours on a full battery.</desc>
+<desc id="d">Idle (the desktop, nothing open): OmacVM.app 3.0.3 6.13 W (8.6 h), UTM 6.30 W (8.3 h), VMware Fusion 6.21 W (8.5 h), Parallels 6.17 W (8.5 h), macOS 5.20 W (10.1 h). Reading (Chrome scrolling a text page): OmacVM.app 3.0.3 6.11 W (8.6 h), UTM 7.43 W (7.1 h), VMware Fusion 6.82 W (7.7 h), Parallels 6.68 W (7.9 h), macOS 5.48 W (9.6 h). YouTube 4K (60 fps, SDR, in the browser that played it best): OmacVM.app 3.0.3 (Chromium, Mac's media engine) 10.10 W (5.2 h), UTM (Chromium, CPU) 16.46 W (3.2 h), VMware Fusion (Chrome, CPU, 11 % dropped) 16.14 W (3.3 h), Parallels (Chromium, CPU) 16.78 W (3.1 h), macOS (Chrome, hardware) 6.07 W (8.7 h). Every core busy (every core at 100 %: the VM's 4, the Mac's 8): OmacVM.app 3.0.3 21.01 W (2.5 h), UTM 16.95 W (3.1 h), VMware Fusion 18.16 W (2.9 h), Parallels 18.01 W (2.9 h), macOS 19.69 W (2.7 h). WebGL Aquarium (30,000 fish in Chrome; each draws its own frame rate): OmacVM.app 3.0.3 (19 fps) 17.11 W (3.1 h), UTM (21 fps) 18.15 W (2.9 h), VMware Fusion (25 fps) 20.64 W (2.5 h), Parallels (17 fps) 17.43 W (3.0 h), macOS (60 fps, the display's limit) 17.34 W (3.0 h). Watts, lower is better; hours on a full battery.</desc>
 <defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><rect x="20" y="20" width="2" height="2" fill="#26233a"/></pattern></defs>
-<rect width="1000" height="1194" fill="#191724"/><rect width="1000" height="1194" fill="url(#dots)"/>
+<rect width="1000" height="842" fill="#191724"/><rect width="1000" height="842" fill="url(#dots)"/>
 <text x="500.0" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" fill="#e0def4" font-weight="600" text-anchor="middle">How much power does the Mac draw?</text>
-<text x="500.0" y="56" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#908caa" text-anchor="middle">MacBook Pro 16" M4 Max · macOS 15.7 · Google Chrome 154 · 2026-10-03</text>
-<rect x="240" y="69" width="12" height="12" rx="3" fill="#ebbcba"/>
-<text x="258" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4" font-weight="600">OmacVM.app preview</text>
-<rect x="407" y="69" width="12" height="12" rx="3" fill="#c4a7e7"/>
-<text x="425" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">UTM</text>
-<rect x="473" y="69" width="12" height="12" rx="3" fill="#f6c177"/>
-<text x="491" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">VMware Fusion</text>
-<rect x="606" y="69" width="12" height="12" rx="3" fill="#9ccfd8"/>
-<text x="624" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">Parallels</text>
-<rect x="701" y="69" width="12" height="12" rx="3" fill="#908caa"/>
-<text x="719" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">macOS</text>
-<text x="500.0" y="104" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4" text-anchor="middle">Watts, lower is better · hours on a full 100 Wh battery</text>
+<text x="500.0" y="56" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#908caa" text-anchor="middle">MacBook Air M2 8 GB · macOS 26.6.2 · each VM 4 CPUs, 4 GB · 2026-10-07</text>
+<rect x="250" y="69" width="12" height="12" rx="3" fill="#ebbcba"/>
+<text x="268" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4" font-weight="600">OmacVM.app 3.0.3</text>
+<rect x="397" y="69" width="12" height="12" rx="3" fill="#c4a7e7"/>
+<text x="415" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">UTM</text>
+<rect x="463" y="69" width="12" height="12" rx="3" fill="#f6c177"/>
+<text x="481" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">VMware Fusion</text>
+<rect x="596" y="69" width="12" height="12" rx="3" fill="#9ccfd8"/>
+<text x="614" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">Parallels</text>
+<rect x="692" y="69" width="12" height="12" rx="3" fill="#908caa"/>
+<text x="710" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4">macOS</text>
+<text x="500.0" y="104" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#e0def4" text-anchor="middle">Watts, lower is better · hours on a full 52.6 Wh battery</text>
 <text x="40" y="179.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Idle</text>
 <text x="40" y="197.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">the desktop, nothing open</text>
-<rect x="250" y="132.0" width="480.0" height="14" rx="4" fill="#ebbcba"/>
-<text x="738.0" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">6.2 W</text>
-<text x="786.3" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">16.1 h</text>
-<text x="840.9" y="143.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app preview</text>
-<text x="250" y="165.0" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" fill="#6e6a86">– UTM: left out: measured again (#32)</text>
-<rect x="250" y="176.0" width="425.8" height="14" rx="4" fill="#f6c177"/>
-<text x="683.8" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">5.5 W</text>
-<text x="732.1" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">18.2 h</text>
-<text x="786.7" y="187.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
-<rect x="250" y="198.0" width="441.3" height="14" rx="4" fill="#9ccfd8"/>
-<text x="699.3" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">5.7 W</text>
-<text x="747.6" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">17.5 h</text>
-<text x="802.2" y="209.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
-<rect x="250" y="220.0" width="472.3" height="14" rx="4" fill="#908caa"/>
-<text x="730.3" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.1 W</text>
-<text x="778.6" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">16.4 h</text>
-<text x="833.2" y="231.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
+<rect x="250" y="132.0" width="389.2" height="14" rx="4" fill="#ebbcba"/>
+<text x="647.2" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">6.13 W</text>
+<text x="703.6" y="143.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">8.6 h</text>
+<text x="750.8" y="143.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.3</text>
+<rect x="250" y="154.0" width="400.0" height="14" rx="4" fill="#c4a7e7"/>
+<text x="658.0" y="165.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.30 W</text>
+<text x="714.4" y="165.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">8.3 h</text>
+<text x="761.6" y="165.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM</text>
+<rect x="250" y="176.0" width="394.3" height="14" rx="4" fill="#f6c177"/>
+<text x="652.3" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.21 W</text>
+<text x="708.6" y="187.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">8.5 h</text>
+<text x="755.8" y="187.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
+<rect x="250" y="198.0" width="391.7" height="14" rx="4" fill="#9ccfd8"/>
+<text x="649.7" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.17 W</text>
+<text x="706.1" y="209.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">8.5 h</text>
+<text x="753.3" y="209.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
+<rect x="250" y="220.0" width="330.2" height="14" rx="4" fill="#908caa"/>
+<text x="588.2" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">5.20 W</text>
+<text x="644.5" y="231.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">10.1 h</text>
+<text x="699.2" y="231.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
 <text x="40" y="315.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Reading</text>
 <text x="40" y="333.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">Chrome scrolling a text page</text>
-<rect x="250" y="268.0" width="447.1" height="14" rx="4" fill="#ebbcba"/>
-<text x="705.1" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">6.8 W</text>
-<text x="753.4" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">14.7 h</text>
-<text x="808.1" y="279.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app preview</text>
-<text x="250" y="301.0" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" fill="#6e6a86">– UTM: left out: measured again (#32)</text>
-<rect x="250" y="312.0" width="387.9" height="14" rx="4" fill="#f6c177"/>
-<text x="645.9" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">5.9 W</text>
-<text x="694.2" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">16.9 h</text>
-<text x="748.9" y="323.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
-<rect x="250" y="334.0" width="480.0" height="14" rx="4" fill="#9ccfd8"/>
-<text x="738.0" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">7.3 W</text>
-<text x="786.3" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">13.7 h</text>
-<text x="840.9" y="345.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
-<rect x="250" y="356.0" width="434.0" height="14" rx="4" fill="#908caa"/>
-<text x="692.0" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.6 W</text>
-<text x="740.3" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">15.2 h</text>
-<text x="794.9" y="367.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
+<rect x="250" y="268.0" width="328.9" height="14" rx="4" fill="#ebbcba"/>
+<text x="586.9" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">6.11 W</text>
+<text x="643.3" y="279.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">8.6 h</text>
+<text x="690.5" y="279.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.3</text>
+<rect x="250" y="290.0" width="400.0" height="14" rx="4" fill="#c4a7e7"/>
+<text x="658.0" y="301.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">7.43 W</text>
+<text x="714.4" y="301.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">7.1 h</text>
+<text x="761.6" y="301.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM</text>
+<rect x="250" y="312.0" width="367.2" height="14" rx="4" fill="#f6c177"/>
+<text x="625.2" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.82 W</text>
+<text x="681.5" y="323.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">7.7 h</text>
+<text x="728.7" y="323.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
+<rect x="250" y="334.0" width="359.6" height="14" rx="4" fill="#9ccfd8"/>
+<text x="617.6" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.68 W</text>
+<text x="674.0" y="345.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">7.9 h</text>
+<text x="721.2" y="345.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
+<rect x="250" y="356.0" width="295.0" height="14" rx="4" fill="#908caa"/>
+<text x="553.0" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">5.48 W</text>
+<text x="609.4" y="367.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">9.6 h</text>
+<text x="656.6" y="367.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
 <text x="40" y="443.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">YouTube 4K</text>
-<text x="40" y="461.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">Chrome, SDR; macOS decodes in</text>
-<text x="40" y="476.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">hardware, the VMs on the CPU</text>
-<rect x="250" y="404.0" width="260.8" height="14" rx="4" fill="#ebbcba"/>
-<text x="518.8" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">21.3 W</text>
-<text x="575.2" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">4.7 h</text>
-<text x="622.4" y="415.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app preview</text>
-<rect x="250" y="426.0" width="480.0" height="14" rx="4" fill="#c4a7e7"/>
-<text x="738.0" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">39.2 W</text>
-<text x="794.4" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.6 h</text>
-<text x="841.6" y="437.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM</text>
-<rect x="250" y="448.0" width="249.8" height="14" rx="4" fill="#f6c177"/>
-<text x="507.8" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">20.4 W</text>
-<text x="564.2" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">4.9 h</text>
-<text x="611.4" y="459.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
-<rect x="250" y="470.0" width="296.3" height="14" rx="4" fill="#9ccfd8"/>
-<text x="554.3" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">24.2 W</text>
-<text x="610.7" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">4.1 h</text>
-<text x="657.9" y="481.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
-<rect x="250" y="492.0" width="98.0" height="14" rx="4" fill="#908caa"/>
-<text x="356.0" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">8.0 W</text>
-<text x="404.3" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">12.5 h</text>
-<text x="458.9" y="503.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
-<text x="40" y="587.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Every core busy</text>
-<text x="40" y="605.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">all CPU cores at 100 %</text>
-<rect x="250" y="540.0" width="452.6" height="14" rx="4" fill="#ebbcba"/>
-<text x="710.6" y="551.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">71.0 W</text>
-<text x="766.9" y="551.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1.4 h</text>
-<text x="814.1" y="551.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app preview</text>
-<rect x="250" y="562.0" width="390.8" height="14" rx="4" fill="#c4a7e7"/>
-<text x="648.8" y="573.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">61.3 W</text>
-<text x="705.1" y="573.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1.6 h</text>
-<text x="752.3" y="573.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM</text>
-<rect x="250" y="584.0" width="471.1" height="14" rx="4" fill="#f6c177"/>
-<text x="729.1" y="595.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">73.9 W</text>
-<text x="785.4" y="595.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1.4 h</text>
-<text x="832.6" y="595.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
-<rect x="250" y="606.0" width="460.2" height="14" rx="4" fill="#9ccfd8"/>
-<text x="718.2" y="617.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">72.2 W</text>
-<text x="774.6" y="617.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1.4 h</text>
-<text x="821.8" y="617.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
-<rect x="250" y="628.0" width="480.0" height="14" rx="4" fill="#908caa"/>
-<text x="738.0" y="639.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">75.3 W</text>
-<text x="794.4" y="639.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">1.3 h</text>
-<text x="841.6" y="639.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
+<text x="40" y="461.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">60 fps, SDR, in the browser that</text>
+<text x="40" y="476.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">played it best</text>
+<rect x="250" y="404.0" width="240.8" height="14" rx="4" fill="#ebbcba"/>
+<text x="498.8" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">10.10 W</text>
+<text x="563.2" y="415.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">5.2 h</text>
+<text x="610.4" y="415.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.3 · Chromium, Mac's media engine</text>
+<rect x="250" y="426.0" width="392.4" height="14" rx="4" fill="#c4a7e7"/>
+<text x="650.4" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">16.46 W</text>
+<text x="714.8" y="437.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.2 h</text>
+<text x="762.0" y="437.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM · Chromium, CPU</text>
+<rect x="250" y="448.0" width="384.7" height="14" rx="4" fill="#f6c177"/>
+<text x="642.7" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">16.14 W</text>
+<text x="707.2" y="459.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.3 h</text>
+<text x="754.4" y="459.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion · Chrome, CPU, 11 % dropped</text>
+<rect x="250" y="470.0" width="400.0" height="14" rx="4" fill="#9ccfd8"/>
+<text x="658.0" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">16.78 W</text>
+<text x="722.4" y="481.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.1 h</text>
+<text x="769.6" y="481.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels · Chromium, CPU</text>
+<rect x="250" y="492.0" width="144.7" height="14" rx="4" fill="#908caa"/>
+<text x="402.7" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.07 W</text>
+<text x="459.1" y="503.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">8.7 h</text>
+<text x="506.3" y="503.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS · Chrome, hardware</text>
+<text x="40" y="579.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Every core busy</text>
+<text x="40" y="597.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">every core at 100 %: the VM's 4,</text>
+<text x="40" y="612.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">the Mac's 8</text>
+<rect x="250" y="540.0" width="400.0" height="14" rx="4" fill="#ebbcba"/>
+<text x="658.0" y="551.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">21.01 W</text>
+<text x="722.4" y="551.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.5 h</text>
+<text x="769.6" y="551.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.3</text>
+<rect x="250" y="562.0" width="322.7" height="14" rx="4" fill="#c4a7e7"/>
+<text x="580.7" y="573.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">16.95 W</text>
+<text x="645.1" y="573.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.1 h</text>
+<text x="692.3" y="573.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM</text>
+<rect x="250" y="584.0" width="345.7" height="14" rx="4" fill="#f6c177"/>
+<text x="603.7" y="595.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">18.16 W</text>
+<text x="668.2" y="595.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.9 h</text>
+<text x="715.4" y="595.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
+<rect x="250" y="606.0" width="342.9" height="14" rx="4" fill="#9ccfd8"/>
+<text x="600.9" y="617.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">18.01 W</text>
+<text x="665.3" y="617.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.9 h</text>
+<text x="712.5" y="617.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
+<rect x="250" y="628.0" width="374.9" height="14" rx="4" fill="#908caa"/>
+<text x="632.9" y="639.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">19.69 W</text>
+<text x="697.3" y="639.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.7 h</text>
+<text x="744.5" y="639.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
 <text x="40" y="715.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">WebGL Aquarium</text>
 <text x="40" y="733.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">30,000 fish in Chrome; each</text>
 <text x="40" y="748.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">draws its own frame rate</text>
-<rect x="250" y="676.0" width="350.0" height="14" rx="4" fill="#ebbcba"/>
-<text x="608.0" y="687.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">27.2 W</text>
-<text x="664.4" y="687.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.7 h</text>
-<text x="711.6" y="687.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app preview</text>
-<rect x="250" y="698.0" width="374.5" height="14" rx="4" fill="#c4a7e7"/>
-<text x="632.5" y="709.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">29.1 W</text>
-<text x="688.8" y="709.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.4 h</text>
-<text x="736.0" y="709.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM</text>
-<rect x="250" y="720.0" width="480.0" height="14" rx="4" fill="#f6c177"/>
-<text x="738.0" y="731.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">37.3 W</text>
-<text x="794.4" y="731.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.7 h</text>
-<text x="841.6" y="731.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion</text>
-<rect x="250" y="742.0" width="352.6" height="14" rx="4" fill="#9ccfd8"/>
-<text x="610.6" y="753.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">27.4 W</text>
-<text x="667.0" y="753.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.6 h</text>
-<text x="714.2" y="753.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels</text>
-<rect x="250" y="764.0" width="458.1" height="14" rx="4" fill="#908caa"/>
-<text x="716.1" y="775.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">35.6 W</text>
-<text x="772.5" y="775.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.8 h</text>
-<text x="819.7" y="775.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
-<line x1="40" y1="808" x2="960" y2="808" stroke="#e0def4" stroke-opacity="0.12"/>
-<text x="40" y="834" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#e0def4" font-weight="600">OmacVM.app 3.0.1, 2026-10-07</text>
-<text x="305.68000000000006" y="834" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">Median of 3, macOS measured in the same session. One scale for these rows.</text>
-<text x="40" y="880.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Idle</text>
-<text x="40" y="898.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">MacBook Pro M4 Max, 100 Wh</text>
-<rect x="250" y="866.0" width="339.5" height="14" rx="4" fill="#ebbcba"/>
-<text x="597.5" y="877.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">5.85 W</text>
-<text x="653.9" y="877.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">17.1 h</text>
-<text x="708.5" y="877.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.1</text>
-<rect x="250" y="888.0" width="394.7" height="14" rx="4" fill="#908caa"/>
-<text x="652.7" y="899.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">6.80 W</text>
-<text x="709.0" y="899.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">14.7 h</text>
-<text x="763.7" y="899.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
-<text x="40" y="946.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Reading</text>
-<text x="40" y="964.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">MacBook Pro M4 Max, 100 Wh</text>
-<rect x="250" y="932.0" width="480.0" height="14" rx="4" fill="#ebbcba"/>
-<text x="738.0" y="943.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">8.27 W</text>
-<text x="794.4" y="943.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">12.1 h</text>
-<text x="849.0" y="943.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.1</text>
-<rect x="250" y="954.0" width="447.5" height="14" rx="4" fill="#908caa"/>
-<text x="705.5" y="965.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">7.71 W</text>
-<text x="761.9" y="965.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">13.0 h</text>
-<text x="816.5" y="965.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
-<text x="40" y="1012.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Idle</text>
-<text x="40" y="1030.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">MacBook Air M2 8 GB, 52.6 Wh</text>
-<rect x="250" y="998.0" width="311.7" height="14" rx="4" fill="#ebbcba"/>
-<text x="569.7" y="1009.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">5.37 W</text>
-<text x="626.0" y="1009.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">9.8 h</text>
-<text x="673.2" y="1009.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.1</text>
-<rect x="250" y="1020.0" width="263.5" height="14" rx="4" fill="#908caa"/>
-<text x="521.5" y="1031.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">4.54 W</text>
-<text x="577.9" y="1031.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">11.6 h</text>
-<text x="632.5" y="1031.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS</text>
-<text x="40" y="1078.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Reading</text>
-<text x="40" y="1096.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">MacBook Air M2 8 GB, 52.6 Wh</text>
-<rect x="250" y="1064.0" width="325.6" height="14" rx="4" fill="#ebbcba"/>
-<text x="583.6" y="1075.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">5.61 W</text>
-<text x="640.0" y="1075.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">9.4 h</text>
-<text x="687.2" y="1075.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.1</text>
-<text x="250" y="1097.0" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" fill="#6e6a86">– macOS: no reading run</text>
-<text x="500.0" y="1148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">The whole Mac, display included, from the battery's own telemetry; brightness 50 %; each VM alone in full screen.</text>
-<text x="500.0" y="1164" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">Top: one 3-minute run per load, OmacVM.app a preview build; each load has its own scale. Hours: battery capacity over the draw.</text>
-<text x="500.0" y="1180" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">UTM idle and reading left out: the run gave 15.2 and 19.3 W, a later check about 5 W (#32).</text>
+<rect x="250" y="676.0" width="331.6" height="14" rx="4" fill="#ebbcba"/>
+<text x="589.6" y="687.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">17.11 W</text>
+<text x="654.0" y="687.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.1 h</text>
+<text x="701.2" y="687.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">OmacVM.app 3.0.3 · 19 fps</text>
+<rect x="250" y="698.0" width="351.7" height="14" rx="4" fill="#c4a7e7"/>
+<text x="609.7" y="709.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">18.15 W</text>
+<text x="674.2" y="709.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.9 h</text>
+<text x="721.4" y="709.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">UTM · 21 fps</text>
+<rect x="250" y="720.0" width="400.0" height="14" rx="4" fill="#f6c177"/>
+<text x="658.0" y="731.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">20.64 W</text>
+<text x="722.4" y="731.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">2.5 h</text>
+<text x="769.6" y="731.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">VMware Fusion · 25 fps</text>
+<rect x="250" y="742.0" width="337.8" height="14" rx="4" fill="#9ccfd8"/>
+<text x="595.8" y="753.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">17.43 W</text>
+<text x="660.2" y="753.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.0 h</text>
+<text x="707.4" y="753.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">Parallels · 17 fps</text>
+<rect x="250" y="764.0" width="336.0" height="14" rx="4" fill="#908caa"/>
+<text x="594.0" y="775.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">17.34 W</text>
+<text x="658.5" y="775.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">3.0 h</text>
+<text x="705.7" y="775.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#908caa" stroke="#191724" stroke-width="4" paint-order="stroke">macOS · 60 fps, the display's limit</text>
+<text x="500.0" y="812" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">The whole Mac, display included, from the battery's own telemetry; brightness 50 %; each VM alone in native full screen; on the charger.</text>
+<text x="500.0" y="828" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">Median of 3 per load, each load on its own scale. Hours: the Air's 52.6 Wh over the draw.</text>
 </svg>

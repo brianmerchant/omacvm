@@ -22,8 +22,13 @@ quiet Mac.
 
 --panel power draws docs/images/power.svg from the JSON's "power" part: the
 whole Mac's draw in watts per load (lower is better) and the battery hours, a
-bar per route and one for macOS, each load on its own scale; below it a
-second round ("round") of OmacVM.app against macOS on one scale.
+bar per route and one for macOS, each load on its own scale; below it an
+optional second round ("round") of OmacVM.app against macOS on one scale.
+Optional: "digits" (decimals of the watts, default 1), "loads" ({load: what
+runs}, replaces the default text under a load's name) and "extra" ({route:
+{load: "Chrome, CPU"}}, said after the route's name, e.g. which decoder played
+the video or the frame rate; "bar_width" (pixels for the longest bar, default
+480) leaves room for it).
 
 --panel progress draws docs/images/gpu-progress.svg from the JSON's
 "gpu_progress" part: one Mac and one VM, a bar per OmacVM.app version and
@@ -346,7 +351,8 @@ def power_panel(src, out, subtitle=""):
     watts, missing, wh = data["watts"], data.get("missing", {}), data["battery_wh"]
     labels = data.get("labels", {})  # e.g. {"app": "OmacVM.app preview"}: the build the round ran
     routes = [(n, labels.get(n, rl), c) for n, rl, c in ROUTES if n in watts or n in missing] + [MACOS]
-    loads = [l for l in POWER_LOADS if any(l[0] in watts.get(r[0], {}) for r in routes)]
+    whats, extra, digits = data.get("loads", {}), data.get("extra", {}), data.get("digits", 1)
+    loads = [(k, l, whats.get(k, w)) for k, l, w in POWER_LOADS if any(k in watts.get(r[0], {}) for r in routes)]
     rnd = data.get("round")
     rows = rnd["rows"] if rnd else []
     rapp = rnd.get("app_label", "OmacVM.app") if rnd else ""
@@ -355,7 +361,7 @@ def power_panel(src, out, subtitle=""):
     def fmt(v, cap, digits=1):
         return f"{v:.{digits}f} W", f"{cap / v:.1f} h"
 
-    W, left, full = 1000, 250, 480
+    W, left, full = 1000, 250, data.get("bar_width", 480)
     pitch, bar, gap, top = 22, 14, 26, 128
     rgap, rpitch = 22, 22
     main_h = len(loads) * (len(routes) * pitch + gap) - gap
@@ -373,8 +379,9 @@ def power_panel(src, out, subtitle=""):
             if v is None:
                 parts.append(f"{rl} {missing.get(name, {}).get(key, 'not measured')}")
             else:
-                w, h = fmt(v, wh)
-                parts.append(f"{rl} {w} ({h})")
+                w, h = fmt(v, wh, digits)
+                ex = extra.get(name, {}).get(key)
+                parts.append(f"{rl}{f' ({ex})' if ex else ''} {w} ({h})")
         desc.append(f"{label} ({what}): " + ", ".join(parts))
     for r in rows:
         parts = []
@@ -430,7 +437,8 @@ def power_panel(src, out, subtitle=""):
             if v is None:
                 s.append(text(left, by + 11, f"– {rl}: " + missing.get(name, {}).get(key, "not measured"), 11, MUTED, MONO))
                 continue
-            bar_row(by, v, wh, col, rl, scale, name == routes[0][0])
+            ex = extra.get(name, {}).get(key)
+            bar_row(by, v, wh, col, f"{rl} · {ex}" if ex else rl, scale, name == routes[0][0], digits)
         y += group + gap
 
     if rows:
