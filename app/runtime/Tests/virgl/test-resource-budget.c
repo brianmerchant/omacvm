@@ -9,11 +9,17 @@
  *                                   and the context that attaches a refused resource is lost
  *                                   (virgl-resource-budget-context-loss.patch)
  *   test-resource-budget off        OMACVM_GPU_MEMORY_MB=0: no budget
- *   test-resource-budget default    unset: three quarters of the Mac's memory
- *   test-resource-budget critical   pressure critical: big resources refused after
- *                                   trying again (the next one at once), small ones,
- *                                   screens and cursors not
+ *   test-resource-budget default    unset: three quarters of the Mac's memory, and the
+ *                                   desktop reserve for this Mac's memory
+ *   test-resource-budget critical   pressure critical: a big resource is made for the
+ *                                   desktop only after trying again (the next one at
+ *                                   once): an app that takes it is lost, Hyprland keeps
+ *                                   it; small ones, screens and cursors fit; an app's
+ *                                   pipe resource is refused
  *   test-resource-budget warn       pressure warn, 100 MB left: what fits
+ *   test-resource-budget reserve    OMACVM_GPU_MEMORY_MB=64: the last 16 MB are kept for
+ *                                   the desktop (virgl-gpu-guard-desktop-reserve.patch):
+ *                                   the app past its share is lost, not Hyprland
  *   test-resource-budget status     the status file: in use, peak, a lost context
  *   test-resource-budget levelfile  the level read from a file at each look (the
  *                                   test hook that raises it while a VM runs) */
@@ -40,6 +46,8 @@ enum { T_BUFFER = 0, T_2D = 2, T_3D = 3, T_CUBE = 4, T_2D_ARRAY = 7 };
 #define MB (1u << 20)
 
 static uint64_t mac_memory(void);
+static void settle(void);
+static long status_value(const char *key, char *out, size_t out_len);
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -141,14 +149,15 @@ static void expect_fit(const char *what, struct spec s, int want)
    unref(h, n);
 }
 
-/* A guest context with a status buffer (VIRGL_CCMD_SET_RESET_STATUS_BUFFER), as the
- * guest's Mesa with mesa-virgl-reset-status.patch sets one up. */
-static uint32_t *status_context(int ctx_id, uint32_t handle)
+/* A guest context named NAME (the guest's kernel names it after the process) with a
+ * status buffer (VIRGL_CCMD_SET_RESET_STATUS_BUFFER), as the guest's Mesa with
+ * mesa-virgl-reset-status.patch sets one up. HANDLE: 899 + ctx_id (submit_nothing). */
+static uint32_t *named_context(int ctx_id, uint32_t handle, const char *name)
 {
    /* the renderer keeps the iovec array itself, so it lives as long as the buffer */
-   static struct iovec iovs[2];
+   static struct iovec iovs[8];
    uint32_t *status = calloc(1, 64);
-   struct iovec *iov = &iovs[ctx_id & 1];
+   struct iovec *iov = &iovs[ctx_id & 7];
    *iov = (struct iovec){ status, 64 };
    struct virgl_renderer_resource_create_args a = {
       .handle = handle, .target = T_BUFFER, .format = VIRGL_FORMAT_R8_UNORM,
@@ -156,13 +165,18 @@ static uint32_t *status_context(int ctx_id, uint32_t handle)
    };
    uint32_t cmd[2] = { VIRGL_CMD0(VIRGL_CCMD_SET_RESET_STATUS_BUFFER, 0,
                                   VIRGL_SET_RESET_STATUS_BUFFER_SIZE), handle };
-   if (virgl_renderer_context_create(ctx_id, 4, "test") ||
+   if (virgl_renderer_context_create(ctx_id, (uint32_t)strlen(name), name) ||
        virgl_renderer_resource_create(&a, NULL, 0) ||
        virgl_renderer_resource_attach_iov(handle, iov, 1))
       return status;
    virgl_renderer_ctx_attach_resource(ctx_id, handle);
    virgl_renderer_submit_cmd(cmd, ctx_id, 2);
    return status;
+}
+
+static uint32_t *status_context(int ctx_id, uint32_t handle)
+{
+   return named_context(ctx_id, handle, "test");
 }
 
 /* Names the context's status buffer again (changes nothing); a lost context refuses
@@ -222,6 +236,45 @@ static void run_refused_context(void)
    check(again != 0, "with the budget free again, handle 950 is made");
    if (again)
       virgl_renderer_resource_unref(again);
+}
+
+/* Not lost: nothing in its status buffer and its commands go through. */
+static int alive(int ctx_id, const uint32_t *status)
+{
+   return status[0] == 0 && submit_nothing(ctx_id) == 0;
+}
+
+static int lost(int ctx_id, const uint32_t *status)
+{
+   int refused = submit_nothing(ctx_id) != 0;
+   if (status[0] != VIRGL_RESET_STATUS_GUILTY || !refused)
+      printf("   (context %d: status %u, commands %s)\n", ctx_id, status[0], refused ? "refused" : "taken");
+   return status[0] == VIRGL_RESET_STATUS_GUILTY && refused;
+}
+
+/* A 4 MB texture for context CTX_ID: made, then attached to it, as the guest's kernel
+ * does; 0 when the renderer refused it. */
+static uint32_t tex_for(int ctx_id)
+{
+   uint32_t h = tex2d(1024, 1024, 1);
+   if (h)
+      virgl_renderer_ctx_attach_resource(ctx_id, h);
+   return h;
+}
+
+/* A buffer of SIZE bytes made in context CTX_ID's own commands (its context is known at
+ * once); the submit's result. */
+static int pipe_buffer(int ctx_id, uint32_t size, uint32_t blob_id)
+{
+   uint32_t cmd[12] = { VIRGL_CMD0(VIRGL_CCMD_PIPE_RESOURCE_CREATE, 0, VIRGL_PIPE_RES_CREATE_SIZE) };
+   cmd[VIRGL_PIPE_RES_CREATE_TARGET] = T_BUFFER;
+   cmd[VIRGL_PIPE_RES_CREATE_FORMAT] = VIRGL_FORMAT_R8_UNORM;
+   cmd[VIRGL_PIPE_RES_CREATE_BIND] = VIRGL_BIND_VERTEX_BUFFER;
+   cmd[VIRGL_PIPE_RES_CREATE_WIDTH] = size;
+   cmd[VIRGL_PIPE_RES_CREATE_HEIGHT] = cmd[VIRGL_PIPE_RES_CREATE_DEPTH] = 1;
+   cmd[VIRGL_PIPE_RES_CREATE_ARRAY_SIZE] = 1;
+   cmd[VIRGL_PIPE_RES_CREATE_BLOB_ID] = blob_id;
+   return virgl_renderer_submit_cmd(cmd, ctx_id, 12);
 }
 
 static int run_limit(void)
@@ -352,6 +405,17 @@ static int run_default(void)
    snprintf(line, sizeof line, "default budget (%u MB = three quarters of %llu MB): a 256 GB "
             "texture array is refused", default_mb, (unsigned long long)(mem / MB));
    check(default_mb >= 262144 ? 1 : b == 0, line);
+   /* the desktop reserve: a sixteenth of the Mac, 512 MB to 2 GB, at most a quarter of the budget */
+   uint64_t reserve = mem / 16;
+   reserve = reserve < 512ull * MB ? 512ull * MB : reserve > 2048ull * MB ? 2048ull * MB : reserve;
+   if (reserve > (uint64_t)default_mb * MB / 4)
+      reserve = (uint64_t)default_mb * MB / 4;
+   settle();
+   snprintf(line, sizeof line, "the desktop keeps the last %llu MB of it: reserve_mb=%ld, apps_mb=%ld",
+            (unsigned long long)(reserve / MB), status_value("reserve_mb", NULL, 0),
+            status_value("apps_mb", NULL, 0));
+   check(status_value("reserve_mb", NULL, 0) == (long)(reserve / MB) &&
+         status_value("apps_mb", NULL, 0) == (long)(default_mb - reserve / MB), line);
    if (a)
       virgl_renderer_resource_unref(a);
    if (b)
@@ -408,48 +472,157 @@ static void settle(void)
 static int run_critical(void)
 {
    char line[200], text[64] = "";
+   uint32_t *app = named_context(2, 901, "chromium"), *desk = named_context(3, 902, "Hyprland");
    double t = now_s();
    uint32_t big = tex2d(4096, 4096, 1);   /* 64 MB */
    double waited = now_s() - t;
-   check(big == 0, "pressure critical: a 64 MB texture is refused");
+   check(big != 0, "pressure critical: a 64 MB texture is made, for the desktop only");
    snprintf(line, sizeof line, "after trimming and looking again (%.0f ms)", waited * 1000);
    check(waited >= 0.09, line);
-   uint32_t small = tex2d(1024, 2048, 1); /* 8 MB */
-   check(small != 0, "an 8 MB texture still fits (small ones are never refused for pressure)");
-   uint32_t scan = make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT | VIRGL_BIND_RENDER_TARGET,
-                        5120, 2880, 1, 1, 0, 0);
-   check(scan != 0, "a 5K screen (56 MB) still fits (screens are never refused for pressure)");
-   check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
-         "the status file says pressure=critical at once");
+   virgl_renderer_ctx_attach_resource(2, big);
+   check(lost(2, app), "chromium attaches it: chromium is lost, told GUILTY");
+   check(status_value("lost_why", text, sizeof text) == 0 && !strcmp(text, "pressure"),
+         "the status file says lost_why=pressure");
    check(status_value("refused", NULL, 0) == 1, "and refused=1");
-   /* the next big one within a second: refused after one look, no 100 ms hold */
+   check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
+         "and pressure=critical");
+   /* the next big one within a second: after one look, no 100 ms hold */
    t = now_s();
    uint32_t big2 = tex2d(4096, 4096, 1);
    waited = now_s() - t;
-   check(big2 == 0, "a second 64 MB texture right after is refused too");
+   check(big2 != 0, "a second 64 MB texture right after is made for the desktop only too");
    snprintf(line, sizeof line, "at once, without holding the VM (%.0f ms)", waited * 1000);
    check(waited < 0.05, line);
-   check(status_value("refused", NULL, 0) == 2, "refused=2");
+   virgl_renderer_ctx_attach_resource(3, big2);
+   check(alive(3, desk), "Hyprland attaches it and keeps drawing");
+   uint32_t small = tex2d(1024, 2048, 1); /* 8 MB */
+   check(small != 0, "an 8 MB texture fits (small ones are never held back for pressure)");
+   uint32_t scan = make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT | VIRGL_BIND_RENDER_TARGET,
+                        5120, 2880, 1, 1, 0, 0);
+   check(scan != 0, "a 5K screen (56 MB) fits (screens are never held back for pressure)");
+   uint32_t *ff = named_context(4, 903, "firefox");
+   check(pipe_buffer(4, 64 * MB, 11) != 0, "firefox's own 64 MB pipe buffer is refused at once");
+   check(status_value("lost_why", text, sizeof text) == 0 && !strcmp(text, "pressure") && !alive(4, ff),
+         "firefox is lost, lost_why=pressure");
+   check(pipe_buffer(3, 64 * MB, 12) == 0, "Hyprland's own 64 MB pipe buffer is made");
+   check(alive(3, desk), "and Hyprland keeps drawing");
    settle();
-   check(status_value("in_use_mb", NULL, 0) == 64, "in_use_mb=64 (8 MB texture + 5K screen)");
-   if (small)
-      virgl_renderer_resource_unref(small);
-   if (scan)
-      virgl_renderer_resource_unref(scan);
+   check(status_value("in_use_mb", NULL, 0) == 64 + 64 + 64,
+         "in_use_mb=192 (Hyprland's 64 MB texture, 8 MB texture + 5K screen, Hyprland's buffer; "
+         "chromium's gave its memory back)");
+   virgl_renderer_context_destroy(4);
+   virgl_renderer_context_destroy(3);
+   virgl_renderer_context_destroy(2);
+   uint32_t done[] = { big, big2, small, scan, 901, 902, 903 };
+   unref(done, 7);
+   free(app);
+   free(desk);
+   free(ff);
    return 0;
 }
 
 static int run_warn(void)
 {
    /* the parent set macOS's free, inactive and purgeable memory to 100 MB */
-   uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB */
-   check(a != 0, "pressure warn: a 64 MB texture fits into the 100 MB macOS has left");
-   uint32_t b = tex2d(8192, 4096, 1);     /* 128 MB */
-   check(b == 0, "a 128 MB texture, more than macOS has left, is refused");
-   if (a)
-      virgl_renderer_resource_unref(a);
-   if (b)
-      virgl_renderer_resource_unref(b);
+   uint32_t *app = named_context(2, 901, "chromium");
+   uint32_t a = tex_for(2);
+   uint32_t b = tex2d(4096, 4096, 1);     /* 64 MB */
+   check(a != 0 && b != 0, "pressure warn: a 64 MB texture fits into the 100 MB macOS has left");
+   virgl_renderer_ctx_attach_resource(2, b);
+   check(alive(2, app), "chromium keeps it");
+   uint32_t c = tex2d(8192, 4096, 1);     /* 128 MB */
+   check(c != 0, "a 128 MB texture, more than macOS has left, is made for the desktop only");
+   virgl_renderer_ctx_attach_resource(2, c);
+   check(lost(2, app), "chromium attaches it: chromium is lost");
+   virgl_renderer_context_destroy(2);
+   uint32_t done[] = { a, b, c, 901 };
+   unref(done, 4);
+   free(app);
+   return 0;
+}
+
+static int run_reserve(void)
+{
+   char text[64] = "";
+   uint32_t h[16] = {0};
+   /* every context first: each status buffer is a resource too (4 KB), and past the
+    * apps' share a new one would already be for the desktop only */
+   uint32_t *app = named_context(2, 901, "chromium"), *desk = named_context(3, 902, "Hyprland"),
+            *bar = named_context(4, 903, "quickshell"), *ff = named_context(5, 904, "firefox"),
+            *app2 = named_context(6, 905, "chromium");
+   check(alive(2, app) && alive(3, desk) && alive(4, bar) && alive(5, ff) && alive(6, app2),
+         "chromium, Hyprland, quickshell, firefox and a second chromium, all alive");
+   settle();
+   check(status_value("apps_mb", NULL, 0) == 48 && status_value("reserve_mb", NULL, 0) == 16,
+         "a 64 MB budget: apps_mb=48, reserve_mb=16 (a quarter, the most a reserve takes)");
+   /* five status buffers of 4 KB are in use: 11 textures of 4 MB fit into the apps' 48 MB */
+   int n = 0;
+   while (n < 11 && (h[n] = tex_for(2)))
+      n++;
+   check(n == 11 && alive(2, app), "chromium makes 11 textures of 4 MB (44 MB) and keeps drawing");
+   h[n] = tex2d(2048, 2048, 1);           /* 16 MB: the status file follows in 8 MB steps */
+   check(h[n] != 0, "a 16 MB 12th (past the apps' 48 MB) is made, for the desktop only");
+   virgl_renderer_ctx_attach_resource(2, h[n++]);
+   check(lost(2, app), "chromium attaches it: chromium is lost, told GUILTY");
+   check(alive(3, desk) && alive(4, bar), "Hyprland and quickshell keep drawing");
+   check(status_value("lost_last", text, sizeof text) == 0 && !strcmp(text, "chromium"), "lost_last=chromium");
+   check(alive(5, ff) && alive(6, app2), "the other apps keep drawing");
+
+   check(status_value("lost_why", text, sizeof text) == 0 && !strcmp(text, "guard"),
+         "lost_why=guard (the apps' share)");
+   check(status_value("refused", NULL, 0) == 1, "refused=1");
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 44, "the 12th gave its memory back: in_use_mb=44");
+   /* chromium's driver was not told (no status buffer read) and goes on: what it makes past
+    * the share is dropped at once, no second loss */
+   uint32_t more = tex2d(2048, 2048, 1);
+   check(more != 0, "the lost chromium makes another texture: for the desktop only");
+   virgl_renderer_ctx_attach_resource(2, more);
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 44 && status_value("lost", NULL, 0) == 1 &&
+         status_value("refused", NULL, 0) == 2,
+         "dropped at once: in_use_mb=44, still lost=1, refused=2");
+   /* 44 MB + 20 KB in use: the desktop goes on into its reserve */
+   uint32_t d1 = tex_for(3), d2 = tex_for(4), d3 = tex_for(3), d4 = tex_for(4);
+   check(d1 && d2 && d3 && d4 && alive(3, desk) && alive(4, bar),
+         "Hyprland and quickshell make four more of 4 MB from the reserve and keep drawing");
+   check(tex2d(1024, 1024, 1) == 0, "past the whole 64 MB budget nothing is made, for the desktop neither");
+   /* an import: a buffer the desktop took first stays the desktop's */
+   virgl_renderer_ctx_attach_resource(5, d1);
+   check(alive(5, ff), "firefox attaching a buffer Hyprland already took (an import) loses nothing");
+   uint32_t ds[] = { d1, d2, d3, d4, more };
+   unref(ds, 5);
+   /* 44 MB + 20 KB in use: a new one is for the desktop only; freed before any context
+    * takes it, it is forgotten */
+   uint32_t f = tex2d(1024, 1024, 1);
+   check(f != 0, "with the apps' share full, another texture is made for the desktop only");
+   virgl_renderer_resource_unref(f);
+   virgl_renderer_ctx_attach_resource(5, f);
+   check(alive(5, ff), "freed before anyone took it: forgotten, firefox loses nothing");
+   /* made in a context's own commands: whose it is is known at once */
+   check(pipe_buffer(5, 4 * MB, 21) != 0, "firefox's own 4 MB pipe buffer past the apps' share is refused");
+   check(!alive(5, ff) && status_value("lost_why", text, sizeof text) == 0 && !strcmp(text, "guard"),
+         "firefox is lost, lost_why=guard");
+   check(pipe_buffer(3, 8 * MB, 22) == 0 && alive(3, desk), "Hyprland's own 8 MB pipe buffer is made");
+   check(status_value("lost_recent", text, sizeof text) == 0 && !strcmp(text, "chromium,firefox"),
+         "lost_recent=chromium,firefox");
+   check(status_value("lost_recent_why", text, sizeof text) == 0 && !strcmp(text, "guard,guard"),
+         "lost_recent_why=guard,guard");
+   virgl_renderer_context_destroy(2);
+   unref(h, n);
+   /* the app's textures are gone: the other chromium gets its share again */
+   uint32_t again = tex_for(6);
+   check(again != 0 && alive(6, app2), "chromium again after the old one ended: its textures fit");
+   virgl_renderer_resource_unref(again);
+   for (int c = 3; c <= 6; c++)
+      virgl_renderer_context_destroy(c);
+   uint32_t st[] = { 901, 902, 903, 904, 905 };
+   unref(st, 5);
+   free(app);
+   free(desk);
+   free(bar);
+   free(ff);
+   free(app2);
    return 0;
 }
 
@@ -503,8 +676,11 @@ static int run_levelfile(void)
    uint32_t a = tex2d(4096, 4096, 1);     /* 64 MB */
    check(a != 0, "level file says normal: a 64 MB texture fits");
    level_to("critical");
+   uint32_t *app = named_context(2, 901, "chromium");
    uint32_t b = tex2d(4096, 4096, 1);
-   check(b == 0, "level file says critical: the next 64 MB texture is refused");
+   virgl_renderer_ctx_attach_resource(2, b);
+   check(b != 0 && lost(2, app), "level file says critical: the next 64 MB texture is for the desktop only, "
+         "chromium that takes it is lost");
    usleep(1100000);                       /* the once-a-second look */
    settle();
    check(status_value("pressure", text, sizeof text) == 0 && !strcmp(text, "critical"),
@@ -512,10 +688,10 @@ static int run_levelfile(void)
    level_to("normal");
    uint32_t c = tex2d(4096, 4096, 1);
    check(c != 0, "back to normal: a 64 MB texture fits again");
-   if (a)
-      virgl_renderer_resource_unref(a);
-   if (c)
-      virgl_renderer_resource_unref(c);
+   virgl_renderer_context_destroy(2);
+   uint32_t done[] = { a, b, c, 901 };
+   unref(done, 4);
+   free(app);
    return 0;
 }
 
@@ -541,6 +717,8 @@ static int child(const char *mode)
       run_critical();
    else if (!strcmp(mode, "warn"))
       run_warn();
+   else if (!strcmp(mode, "reserve"))
+      run_reserve();
    else if (!strcmp(mode, "status"))
       run_status();
    else if (!strcmp(mode, "levelfile"))
@@ -595,6 +773,7 @@ int main(int argc, char **argv)
    int bad = spawn(argv[0], "limit", "64", "off") + spawn(argv[0], "off", "0", "off") +
              spawn(argv[0], "default", NULL, "off") + spawn(argv[0], "critical", "0", "critical") +
              spawn(argv[0], "warn", "0", "warn:100") + spawn(argv[0], "status", "0", "normal") +
+             spawn(argv[0], "reserve", "64", "off") +
              spawn(argv[0], "levelfile", "0", level_env);
    unlink(status_file);
    unlink(level_file);

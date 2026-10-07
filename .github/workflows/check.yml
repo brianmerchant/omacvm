@@ -282,6 +282,9 @@ jobs:
       - name: App menu memory lines (VM memory, graphics memory)
         run: app/runtime/Tests/display/test-gpu-memory-menu.sh
 
+      - name: Graphics memory guard keeps a part for the desktop (the rules)
+        run: app/runtime/Tests/virgl/test-gpu-guard-policy.sh
+
       - name: App menu Restart the Desktop after Later (QEMU's side)
         run: app/runtime/Tests/display/test-restart-desktop.sh
 

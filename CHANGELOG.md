@@ -29,6 +29,17 @@ in more words.
   Homebrew). UTM, VMware Fusion and Parallels still need them, and
   `omacvm build` asks for them only there.
 
+- OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
+  too much graphics memory (a browser with big WebGL pages) no longer turns
+  the whole VM black. The last part of the graphics memory guard (512 MB on
+  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland,
+  the bar and the lock screen): the app past its share, or the app that
+  wants more while macOS is short of memory, loses its own GPU context, and
+  the VM shows a note that says so. Before, whichever asked next lost it, often Hyprland,
+  and the app then restarted the desktop, closing every app. When the
+  desktop is still lost, the window and the note say why (the guard,
+  macOS short of memory, or a graphics failure).
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
