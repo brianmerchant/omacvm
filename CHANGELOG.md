@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
+  Gestures took the other app's VMs as its own too: both captured the
+  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
+  VMs of its own app (told by the VM's code signature), as the Bridge
+  does since 3.0.1.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
