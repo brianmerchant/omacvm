@@ -134,6 +134,10 @@ public final class AuthRelay: @unchecked Sendable {
     /// own dialog.
     public typealias Panel = (TouchIDPanelPrompt, @escaping () -> Bool) -> TouchIDPanelResult
     private let panel: Panel?
+    /// Touch ID is on for this VM now (its features, read per request): off,
+    /// the request never reaches the Bridge. The port is there for every VM
+    /// (3.0.4), so turning Touch ID on needs no restart.
+    private let enabled: () -> Bool
     public var pingTimeout: TimeInterval = 3
     /// The Bridge's dialog waits 30 s; the client gives up at 40 s.
     public var answerTimeout: TimeInterval = 45
@@ -158,13 +162,20 @@ public final class AuthRelay: @unchecked Sendable {
     /// a connected socket to the Bridge, or nil. `headers`: the app's own
     /// headers (token, relay key, VM name), or nil when the Bridge is not set up.
     public init(guest: Int32, connectBridge: @escaping () -> Int32?, headers: @escaping () -> [(String, String)]?,
-                panel: Panel? = nil, log: @escaping (String) -> Void = { _ in }) {
+                panel: Panel? = nil, enabled: @escaping () -> Bool = { true }, log: @escaping (String) -> Void = { _ in }) {
         self.guest = guest
         self.connectBridge = connectBridge
         self.headers = headers
         self.panel = panel
+        self.enabled = enabled
         self.log = log
     }
+
+    /// The answer for a VM with Touch ID off, as the Bridge gives it (it
+    /// cannot sign without the VM's key, and neither can the app): the
+    /// client says "Touch ID off" and the password comes.
+    public static let offAnswer = Answer(status: 403, signature: "",
+                                         body: Data("{\"code\":\"off\",\"error\":\"Touch ID is off for this VM\"}\n".utf8))
 
     /// Reads the VM's lines until the port's socket closes (or stop()), then
     /// closes it.
@@ -241,6 +252,9 @@ public final class AuthRelay: @unchecked Sendable {
             lastRequest = now
             drop(nil)   // one opener at a time: the client of the old one is gone
             send(Data("{\"ack\":true,\"id\":\"\(r.id)\"}\n".utf8))   // the client knows at once that the app relays (id: 32 hex digits)
+            guard enabled() else {
+                return answer(r.id, Self.offAnswer, note: "Touch ID is off for this VM: refused here, not passed to the Bridge")
+            }
             // A dropped exchange ends at once; one at a time, so a VM that
             // floods requests never piles up threads and connections.
             guard slot.wait(timeout: .now() + handoverTimeout) == .success else {

@@ -25,35 +25,66 @@ public struct PanelRGB: Equatable {
 }
 
 /// What the panel draws with: the VM's Omarchy theme as the Bridge checked
-/// it (contrast, opaque colours), Tokyo Night for what it did not send.
+/// it (contrast, opaque colours), Tokyo Night for what it did not send. The
+/// card is Omarchy's own prompt (shell.toml's [polkit]): its background, its
+/// text, its accent, its border (Hyprland's active border, a gradient too)
+/// and Hyprland's rounding; the Cancel button is an Omarchy control.
 public struct PanelTheme: Equatable {
-    public var background, foreground, accent, error, success, muted: PanelRGB
+    public var background, foreground, accent, error, success: PanelRGB
+    public var border: [PanelRGB]       // one colour, or two (Hyprland's gradient)
+    public var borderAngle: Double      // degrees, a gradient's only
+    public var radius: Double           // 0...12 pt
+
+    /// Omarchy's prompt border (Hyprland's default border_size).
+    public static let borderWidth: CGFloat = 2
 
     public static let tokyoNight = PanelTheme(
         background: PanelRGB(hex: "#1a1b26")!, foreground: PanelRGB(hex: "#a9b1d6")!, accent: PanelRGB(hex: "#7aa2f7")!,
-        error: PanelRGB(hex: "#f7768e")!, success: PanelRGB(hex: "#9ece6a")!, muted: PanelRGB(hex: "#414868")!)
+        error: PanelRGB(hex: "#f7768e")!, success: PanelRGB(hex: "#9ece6a")!, border: [PanelRGB(hex: "#7aa2f7")!])
 
-    public init(background: PanelRGB, foreground: PanelRGB, accent: PanelRGB, error: PanelRGB, success: PanelRGB, muted: PanelRGB) {
+    public init(background: PanelRGB, foreground: PanelRGB, accent: PanelRGB, error: PanelRGB, success: PanelRGB,
+                border: [PanelRGB] = [], borderAngle: Double = 0, radius: Double = 0) {
         self.background = background; self.foreground = foreground; self.accent = accent
-        self.error = error; self.success = success; self.muted = muted
+        self.error = error; self.success = success
+        self.border = border.isEmpty || border.count > 2 ? [accent] : border
+        self.borderAngle = self.border.count == 2 ? borderAngle : 0
+        self.radius = min(max(radius, 0), TouchIDPanelPrompt.radiusMax)
     }
 
     /// From the prompt's colours. Background and text come together or not
     /// at all (one without the other could be unreadable); the rest fall
-    /// back to the text colour (muted: a mix of the two).
-    public init(_ colors: [String: String]) {
+    /// back to the text colour (the border: the accent, as Omarchy's prompt
+    /// without a Hyprland border).
+    public init(_ colors: [String: String], border: [String] = [], borderAngle: Double = 0, radius: Double = 0) {
         let t = PanelTheme.tokyoNight
         guard let bg = colors["background"].flatMap(PanelRGB.init(hex:)),
               let fg = colors["foreground"].flatMap(PanelRGB.init(hex:)) else { self = t; return }
         func c(_ k: String) -> PanelRGB? { colors[k].flatMap(PanelRGB.init(hex:)) }
+        let frame = border.compactMap(PanelRGB.init(hex:))
         self.init(background: bg, foreground: fg, accent: c("accent") ?? fg, error: c("error") ?? fg,
-                  success: c("success") ?? fg, muted: c("muted") ?? bg.mix(fg, 0.28))
+                  success: c("success") ?? fg, border: frame.count == border.count ? frame : [], borderAngle: borderAngle, radius: radius)
     }
 
-    /// Secondary text and the ridges' resting colour while they trace.
+    /// The prompt's theme (TouchIDPanelPrompt's colours and frame).
+    public init(_ p: TouchIDPanelPrompt) {
+        self.init(p.colors, border: p.border, borderAngle: p.borderAngle, radius: p.radius)
+    }
+
+    /// Secondary text.
     public var dim: PanelRGB { background.mix(foreground, 0.7) }
-    public var faint: PanelRGB { background.mix(foreground, 0.2) }
     public var dark: Bool { background.luminance < 0.18 }
+    /// Omarchy's controls ([controls] normal-*): the text colour at 4 % over
+    /// the background, its border at 40 %.
+    public var controlFill: PanelRGB { background.mix(foreground, 0.04) }
+    public var controlBorder: PanelRGB { background.mix(foreground, 0.4) }
+}
+
+/// Where a Hyprland gradient border starts and ends in a layer's unit square
+/// (y up). Hyprland measures the angle with y down: 0 deg runs left to
+/// right, 45 deg from the top left to the bottom right.
+public func panelGradientEnds(angle: Double) -> (CGPoint, CGPoint) {
+    let a = angle * .pi / 180, dx = cos(a) / 2, dy = -sin(a) / 2
+    return (CGPoint(x: 0.5 - dx, y: 0.5 - dy), CGPoint(x: 0.5 + dx, y: 0.5 + dy))
 }
 
 // MARK: The glyph (fingerprint.svg: five strokes, round caps)
@@ -165,11 +196,10 @@ public func panelKey(keyCode: UInt16, command: Bool, marker: Int64) -> PanelKey 
 
 // MARK: How it ends
 
-/// The panel's states (the Ridge design): idle (a slow breath), reading
-/// (the ridges trace from the core outwards), done (green, the ridges fade
-/// from the outside in, a check draws), refused (red, the ridges jolt, the
-/// panel shakes).
-public enum PanelLook: Equatable { case idle, reading, done, refused }
+/// The panel's states (the Ridge design): idle (a slow breath), done (the
+/// green check in the ridges' place, at once: the yes is already with the
+/// VM), refused (red, the ridges jolt, the panel shakes).
+public enum PanelLook: Equatable { case idle, done, refused }
 
 /// LocalAuthentication's end, as the panel cares.
 public enum PanelLAEnd: Equatable { case yes, cancelled, failed, lockout, notAvailable, other }
@@ -185,6 +215,18 @@ public func panelEnd(_ e: PanelLAEnd, after: TimeInterval) -> (TouchIDPanelResul
     case .lockout: return (.no("lockout"), .refused)
     case .notAvailable: return (.no("no-touch-id"), nil)
     case .other: return after < 0.5 ? (.error, nil) : (.no("failed"), .refused)
+    }
+}
+
+/// How long the panel stays after its end. By then the answer is with the
+/// VM and the person's input is back with it: nothing waits for this. A yes
+/// shows its check for one short moment (none with Reduce Motion); not
+/// recognised stays red long enough to read; a cancel goes at once.
+public func panelLinger(_ look: PanelLook?, reduceMotion: Bool) -> TimeInterval {
+    switch look {
+    case .done?: return reduceMotion ? 0 : 0.09
+    case .refused?: return 0.6
+    case .idle?, nil: return 0
     }
 }
 

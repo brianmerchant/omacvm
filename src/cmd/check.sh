@@ -217,18 +217,22 @@ netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, 
   return 0
 }
 if [[ $TYPE == app ]]; then
+  d=$(app_dir "$VM" 2>/dev/null); net=$(head -1 "$d/logs/network" 2>/dev/null)
+  # The switch (fast-network) says how the NEXT start goes; this start keeps
+  # the network it took (logs/network).
   if [[ $FAST_NET == on ]]; then
     st=$("$R/src/net/mac/install.sh" --status 2>/dev/null)
+    upd="omacvm enable fast-network --vm \"$VM\", or Update… under Fast network in OmacVM (macOS asks for your password once); until then the VM starts on QEMU's own network"
     case $(head -1 <<<"$st") in
       ok) ok "fast network service" "omacvm-netd, for this OmacVM.app" ;;
-      old) bad "fast network service" "for another build of the app, or older: omacvm enable fast-network --vm \"$VM\"" ;;
-      down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" ;;
-      stopped) bad "fast network service" "vmnet failed too often in a row, so omacvm-netd stopped trying (each failure costs macOS's vmnet service for good): restart the Mac, or omacvm enable fast-network --vm \"$VM\" again" ;;
-      *) bad "fast network service" "not installed: omacvm enable fast-network --vm \"$VM\"" ;;
+      old) bad "fast network service" "needs an update for this OmacVM.app (it is from another version of the app): $upd" human ;;
+      down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" human ;;
+      stopped) bad "fast network service" "vmnet failed too often in a row, so omacvm-netd stopped trying (each failure costs macOS's vmnet service for good): restart the Mac, or omacvm enable fast-network --vm \"$VM\" again" human ;;
+      *) bad "fast network service" "not installed: $upd" human ;;
     esac
-    d=$(app_dir "$VM" 2>/dev/null); net=$(head -1 "$d/logs/network" 2>/dev/null)
     case $net in
       vmnet) ok "fast network" "on (vmnet), the VM is $IP" ;;
+      "slirp off") warn "fast network" "on from the VM's next start; this start runs on QEMU's own network (shut the VM down, then start it again)" ;;
       slirp\ fallback*) bad "fast network" "${net#slirp fallback: }$(netd_said)" ;;
       slirp*) bad "fast network" "this start took QEMU's user network: ${net#slirp }" ;;
       vmnet-down*) bad "fast network" "${net#vmnet-down }$(netd_said)" ;;
@@ -243,6 +247,7 @@ if [[ $TYPE == app ]]; then
       bad "VPN NAT" "$(cut -d' ' -f3- <<<"$natlog") (a VPN connected while the VM runs may not work for it)"
     elif [[ -n $nat ]]; then ok "VPN NAT" "omacvm-netd translates the VM's addresses on $nat (came up after macOS's sharing started, e.g. a VPN)"
     elif [[ $net == vmnet ]]; then ok "VPN NAT" "not needed: macOS's sharing covers every network that is up"; fi
+  elif [[ $net == vmnet ]]; then ok "fast network" "off from the VM's next start; this start runs on it (vmnet), the VM is $IP"
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
 fi
 
@@ -437,10 +442,11 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   elif grep -q 'macOS shortcuts off' "$miclog"; then
     ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥ Esc is macOS's)"
   fi
-  # QEMU's keyboard tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to the VM) needs Input Monitoring
-  # or Accessibility for OmacVM; without it QEMU says so once at the start.
+  # QEMU's keyboard tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to the VM) is an active tap:
+  # OmacVM needs Accessibility ("control the computer"; Input Monitoring is
+  # not enough); without it QEMU says so once at the start.
   if grep -q 'Could not create event tap' "$miclog"; then
-    warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security: OmacVM on under Input Monitoring and Accessibility (on already: remove it with − and add it again), then restart the VM"
+    warn "VM keyboard" "macOS refused OmacVM's key tap: ⌘ Tab, ⌘ Space, ⌘ ⇧ 4 can go to macOS. System Settings › Privacy & Security › Accessibility: OmacVM on (listed already: remove it with − and add the app with +), then restart the VM"
   fi
 fi
 # The globe key on its own (3.0.1): to the VM while it has the keyboard.
@@ -615,6 +621,31 @@ if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
     (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old for the fast network: it does not listen on 192.168.77.1, so this VM's strip stays empty (omacvm update)"
   fi
 fi
+# Touch ID (ADR 0041), the Mac's side: what a prompt needs here, one line
+# that says what is missing (the VM's side: its own check).
+FEATURE=touch-id
+if [[ $(feat touch_id off) == on ]]; then
+  tk=""; [[ -n ${VM:-} ]] && tk="$(vm_key_file "$TYPE" "$VM").touchid"
+  tm=""
+  if [[ -z $tk ]]; then tm="no VM name (--ip): the Mac keeps Touch ID keys by VM name (omacvm apply --vm NAME)"
+  elif [[ ! -s $tk ]]; then tm="no Touch ID key for this VM on the Mac: omacvm apply --vm NAME makes it, or omacvm enable touch-id"
+  elif ! running org.omacvm.bridge; then tm="OmacVM Bridge is not running, and it asks the Mac's Touch ID: omacvm update"
+  elif [[ $TYPE == app && ! -S $OMA_BRIDGE_SUPPORT/relay.sock ]]; then tm="OmacVM Bridge has no socket for OmacVM.app's requests: omacvm update"
+  fi
+  # The last request the Bridge logged for this VM (never what it was for).
+  tl=$(grep -F "touchid: from " "$BRIDGE_LOG" 2>/dev/null | grep -F "(${VM:-?}): " | tail -1)
+  [[ -z $tl ]] || tl="; last request ${tl:11:5}: ${tl##*): }"
+  tn=$(bioutil -c 2>/dev/null | sed -n 's/.*:[[:space:]]*\([0-9][0-9]*\) biometric.*/\1/p' | head -1)
+  tp=0; [[ $TYPE == app ]] && td=$(app_dir "$VM" 2>/dev/null) && { app_touchid_port "$td" || tp=$?; }
+  if [[ -n $tm ]]; then bad "Touch ID (Mac)" "$tm"
+  elif (( tp == 1 )); then
+    # Started by OmacVM.app 3.0.3 or older, which added the port only with touch-id on at the start.
+    skip "Touch ID (Mac)" "on from the VM's next start: shut it down, then start it again (OmacVM.app adds its Touch ID port at the start)" human
+  elif [[ $tn == 0 ]]; then
+    bad "Touch ID (Mac)" "no fingerprint in this Mac's Touch ID (or no sensor): System Settings › Touch ID & Password; until then the VM asks for the password" human
+  else ok "Touch ID (Mac)" "the VM's key, OmacVM Bridge$( [[ -n $tn ]] && echo " and $tn fingerprint(s)") ready$tl"; fi
+fi
+FEATURE=omanotch   # the Mac links row below, as before
 # OmacVM.app: what of the Mac this start of the VM may use (the app reads
 # the VM's features at start and says so in qemu.log). A feature that is off
 # must get nothing; one switched on while the VM runs waits for its next start.
@@ -624,13 +655,16 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
   else
     fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
-    fs+="touch-id=$(feat touch_id off)"   # Touch ID's port (off by default)
     open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
     m=""
     [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
     [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
+    # Touch ID is not one of these (its own "Touch ID (Mac)" row): the line's
+    # "Touch ID off" is only how it was at the start, and it may be on now.
+    lv=", $l, "; lv=${lv//, Touch ID port on, /, }; lv=${lv//, Touch ID on, /, }; lv=${lv//, Touch ID off, /, }
+    lv=${lv#, }; lv=${lv%, }
     if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
-    else ok "Mac links (app)" "$l"; fi
+    else ok "Mac links (app)" "$lv"; fi
   fi
 fi
 # OmacVM.app's USB devices (off by default, docs/usb.md): the switch at this
