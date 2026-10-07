@@ -2,6 +2,7 @@
 // LAContext or a finger: the theme, the glyph, the words that fit, the keys,
 // how an evaluation ends, where it goes, and the panel drawn off screen.
 //   cd app/app && swift run touchid-panel-tests [<png dir>]
+//   swift run touchid-panel-tests --live OUT.json   (timing on a real screen, Live.swift)
 // Exit 0 when all pass. CI runs it on every pull request.
 import AppKit
 import Foundation
@@ -13,6 +14,8 @@ let fontDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().append
 for f in ["JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf"] {
     CTFontManagerRegisterFontsForURL(fontDir.appendingPathComponent(f) as CFURL, .process, nil)
 }
+
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--live" { runLive(CommandLine.arguments[2]) }
 
 var failures = 0
 func expect(_ ok: Bool, _ what: String, line: Int = #line) {

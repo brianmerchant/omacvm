@@ -335,13 +335,65 @@ final class PanelWindow: NSPanel {
     }
 }
 
+/// What reads the finger for one request, on the main thread:
+/// LocalAuthentication with Apple's embedded Touch ID view (the dylib always
+/// uses this one), or touchid-panel-tests' stand-in that ends on cue.
+protocol PanelEvaluator: AnyObject {
+    /// Nil when it can ask now; else why not (.lockout or .notAvailable).
+    func unavailable() -> PanelLAEnd?
+    /// The view that drives the evaluation (it sits under the glyph).
+    var view: NSView? { get }
+    /// Starts it; `done` comes once, on the main thread.
+    func evaluate(reason: String, _ done: @escaping (PanelLAEnd) -> Void)
+    /// Ends it (closes Apple's view); a `done` after this is ignored.
+    func invalidate()
+}
+
+/// LocalAuthentication: a fresh context per request, biometrics only.
+final class LAPanelEvaluator: PanelEvaluator {
+    private let context = LAContext()
+    private lazy var authView = LAAuthenticationView(context: context, controlSize: .regular)
+
+    init() {
+        context.touchIDAuthenticationAllowableReuseDuration = 0
+        context.localizedFallbackTitle = ""
+    }
+
+    func unavailable() -> PanelLAEnd? {
+        var e: NSError?
+        guard !context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &e) else { return nil }
+        return (e as? LAError)?.code == .biometryLockout ? .lockout : .notAvailable
+    }
+
+    var view: NSView? { authView }
+
+    func evaluate(reason: String, _ done: @escaping (PanelLAEnd) -> Void) {
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { ok, err in
+            let end: PanelLAEnd
+            if ok { end = .yes } else {
+                switch (err as? LAError)?.code {
+                case .userCancel?, .appCancel?, .systemCancel?, .userFallback?: end = .cancelled
+                case .authenticationFailed?: end = .failed
+                case .biometryLockout?: end = .lockout
+                case .biometryNotAvailable?, .biometryNotEnrolled?, .passcodeNotSet?: end = .notAvailable
+                default: end = .other
+                }
+            }
+            DispatchQueue.main.async { done(end) }
+        }
+    }
+
+    func invalidate() { context.invalidate() }
+}
+
 /// One request at a time: shows the panel, evaluates, answers once.
 final class PanelController: NSObject {
     var willShow: () -> Void = {}
     var didClose: () -> Void = {}
     private var window: PanelWindow?
     private var view: PanelView?
-    private var context: LAContext?
+    private var evaluator: PanelEvaluator?
+    private let makeEvaluator: () -> PanelEvaluator
     private var once = PanelOnce()
     private var reply: ((TouchIDPanelResult) -> Void)?
     private var began = Date()
@@ -351,6 +403,14 @@ final class PanelController: NSObject {
     private var generation = 0   // which panel a delayed close belongs to
 
     var busy: Bool { window != nil }
+
+    private let reduceMotion: () -> Bool
+
+    init(evaluator: @escaping () -> PanelEvaluator = { LAPanelEvaluator() },
+         reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }) {
+        makeEvaluator = evaluator
+        self.reduceMotion = reduceMotion
+    }
 
     /// The VM's window: QEMU's key or main window, else its biggest visible one.
     private func vmWindow() -> NSWindow? {
@@ -371,24 +431,17 @@ final class PanelController: NSObject {
         // A command the box would show only cut: macOS's dialog shows it whole.
         guard panelShowsWhole(prompt.box, fits: PanelView.boxFits) else { return reply(.error) }
         guard let vm = vmWindow(), let screen = vm.screen ?? NSScreen.main else { return reply(.error) }
-        let c = LAContext()
-        var e: NSError?
-        guard c.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &e) else {
-            let code = (e as? LAError)?.code
-            return reply(code == .biometryLockout ? .no("lockout") : .no("no-touch-id"))
-        }
-        c.touchIDAuthenticationAllowableReuseDuration = 0
-        c.localizedFallbackTitle = ""
+        let c = makeEvaluator()
+        if let why = c.unavailable() { return reply(why == .lockout ? .no("lockout") : .no("no-touch-id")) }
         once = PanelOnce()
         generation += 1
         self.reply = reply
-        context = c
+        evaluator = c
         let theme = PanelTheme(prompt.colors)
-        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let reduce = reduceMotion()
         let size = CGSize(width: PanelMetrics.side, height: PanelMetrics.side)
         let frame = panelFrame(window: vm.frame, visible: screen.visibleFrame, size: size)
-        let auth = LAAuthenticationView(context: c, controlSize: .regular)
-        let v = PanelView(prompt: prompt, theme: theme, authView: auth, reduceMotion: reduce)
+        let v = PanelView(prompt: prompt, theme: theme, authView: c.view, reduceMotion: reduce)
         let w = PanelWindow(frame: frame)
         w.contentView = v
         w.onCancel = { [weak self] in self?.finish(.no("cancelled"), look: nil) }
@@ -414,11 +467,9 @@ final class PanelController: NSObject {
         RunLoop.main.add(t, forMode: .common)   // also while a menu or a drag tracks
         timer = t
         let reason = prompt.box.map { "\(prompt.line): \($0)" } ?? prompt.line
-        c.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { ok, err in
-            DispatchQueue.main.async { [weak self, weak c] in
-                guard let self, let c, c === self.context else { return }
-                self.ended(ok, err)
-            }
+        c.evaluate(reason: reason) { [weak self, weak c] end in
+            guard let self, let c, c === self.evaluator else { return }
+            self.ended(end)
         }
     }
 
@@ -427,17 +478,7 @@ final class PanelController: NSObject {
     /// The app gave up (the VM's client went away) or closed the connection.
     func cancel() { finish(.no("cancelled"), look: nil) }
 
-    private func ended(_ ok: Bool, _ err: Error?) {
-        let e: PanelLAEnd
-        if ok { e = .yes } else {
-            switch (err as? LAError)?.code {
-            case .userCancel?, .appCancel?, .systemCancel?, .userFallback?: e = .cancelled
-            case .authenticationFailed?: e = .failed
-            case .biometryLockout?: e = .lockout
-            case .biometryNotAvailable?, .biometryNotEnrolled?, .passcodeNotSet?: e = .notAvailable
-            default: e = .other
-            }
-        }
+    private func ended(_ e: PanelLAEnd) {
         let (result, look) = panelEnd(e, after: Date().timeIntervalSince(began))
         finish(result, look: look, lockout: e == .lockout)
     }
@@ -448,8 +489,8 @@ final class PanelController: NSObject {
         timer?.invalidate(); timer = nil
         for o in observers { NotificationCenter.default.removeObserver(o); DistributedNotificationCenter.default().removeObserver(o) }
         observers = []
-        context?.invalidate()
-        context = nil
+        evaluator?.invalidate()
+        evaluator = nil
         reply?(r)
         reply = nil
         guard let look, let v = view else { return close() }
