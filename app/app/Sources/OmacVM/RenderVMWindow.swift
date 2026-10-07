@@ -84,6 +84,7 @@ enum RenderVMWindow {
         let info = VMDisk.Info(maxBytes: 128 * DiskSize.gib, usedBytes: 11 * DiskSize.gib, freeBytes: 300 * DiskSize.gib)
         let need = DiskSize.Need(allocated: 13 * DiskSize.gib, used: 9 * DiskSize.gib, rootStart: 2 * DiskSize.gib)
         draw("vm-window-6-disk-size", into: dir) { DiskSizeSheet(state: state, info: info, done: {}, preview: need) }
+        draw("vm-window-7-disk-smaller", into: dir) { DiskSizeSheet(state: state, info: info, done: {}, preview: need, previewGB: 96) }
 
         try? FileManager.default.removeItem(at: tmp)
         let text = lines.joined(separator: "\n") + "\n"

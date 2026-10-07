@@ -428,8 +428,9 @@ struct DiskSizeSheet: View {
     @ObservedObject var state: AppState
     let info: VMDisk.Info
     var done: () -> Void
-    /// The window pictures: no disk to read.
+    /// The window pictures: no disk to read, and the size chosen.
     var preview: DiskSize.Need?
+    var previewGB: Int?
     @State private var bounds: DiskSize.Bounds?
     @State private var newGB = 0
     @State private var field = ""
@@ -534,7 +535,7 @@ struct DiskSizeSheet: View {
         let free = info.freeBytes
         if let p = preview {
             bounds = DiskSize.bounds(currentGB: current, need: p, freeBytes: free)
-            set(current)
+            set(previewGB ?? current)
             return
         }
         let running = state.vmRunning()
