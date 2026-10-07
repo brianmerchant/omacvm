@@ -1,11 +1,13 @@
 """omacvm-touchid-theme (ADR 0041, addendum 3.0.2): the Omarchy theme's
 colours as the VM sends them for the Mac's Touch ID panel, from the theme's
-files and Hyprland, signed with the VM's key; sent once per change."""
+files and Hyprland as Omarchy's own password prompt draws them, signed with
+the VM's key; sent once per change and boot, after a switch has settled."""
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -15,14 +17,16 @@ from fakes import SRC, FakeMac, vm_env  # noqa: E402
 
 SENDER = os.path.join(SRC, "bridge", "guest", "omacvm-touchid-theme")
 FIX = os.path.join(SRC, "bridge", "mac", "tests", "fixtures")
-TOKYO = {"accent": "#7aa2f7", "background": "#1a1b26", "border": ["#7aa2f7"], "border_angle": 0.0, "error": "#f7768e",
+TOKYO = {"accent": "#7aa2f7", "background": "#1a1b26", "border": ["#7aa2f7"], "error": "#f7768e",
          "foreground": "#a9b1d6", "radius": 0, "success": "#9ece6a", "muted": "#414868"}
+FLEXOKI = 'mode = "light"\naccent = "#205EA6"\nmuted = "#B7B5AC"\nbackground = "#FFFCF0"\nforeground = "#100F0F"\n' \
+          'red = "#D14D41"\ngreen = "#879A39"\n'
 
 
 @pytest.fixture
 def vm(tmp_path):
-    theme = tmp_path / "theme"
-    theme.mkdir()
+    theme = tmp_path / "current" / "theme"
+    theme.mkdir(parents=True)
     shutil.copy(os.path.join(FIX, "tokyo-night-shell.toml"), theme / "shell.toml")
     shutil.copy(os.path.join(FIX, "tokyo-night-colors.toml"), theme / "colors.toml")
     hypr = tmp_path / "hyprctl"
@@ -32,8 +36,10 @@ def vm(tmp_path):
     hypr.chmod(0o755)
     (tmp_path / "rounding").write_text('{"option": "decoration:rounding", "int": 0, "set": true }')
     (tmp_path / "border").write_text('{"option": "general:col.active_border", "gradient": "ff7aa2f7 0deg", "set": true }')
+    (tmp_path / "boot_id").write_text("boot-1\n")
     env = dict(os.environ, OMACVM_TOUCHID_THEME_DIR=str(theme), OMACVM_TOUCHID_THEME_STATE=str(tmp_path / "sent"),
-               OMACVM_TOUCHID_THEME_DELAY="0", OMACVM_HYPRCTL=str(hypr), HOME=str(tmp_path))
+               OMACVM_TOUCHID_THEME_DELAY="0", OMACVM_HYPRCTL=str(hypr), HOME=str(tmp_path),
+               OMACVM_TOUCHID_THEME_BOOT=str(tmp_path / "boot_id"))
     return tmp_path, env
 
 
@@ -68,8 +74,8 @@ def test_without_hyprland_the_polkit_border(vm):
 
 def test_colors_toml_alone(vm):
     tmp, env = vm
-    (tmp / "theme" / "shell.toml").unlink()
-    (tmp / "theme" / "colors.toml").write_text('mode = "dark"\nbackground = "#282828"\nforeground = "#D4BE98"\n'
+    (tmp / "current" / "theme" / "shell.toml").unlink()
+    (tmp / "current" / "theme" / "colors.toml").write_text('mode = "dark"\nbackground = "#282828"\nforeground = "#D4BE98"\n'
                                                'accent = "#7daea3"\nred = "#ea6962"\n')
     t = printed(env)
     assert (t["background"], t["foreground"], t["accent"], t["error"]) == ("#282828", "#d4be98", "#7daea3", "#ea6962")
@@ -77,19 +83,67 @@ def test_colors_toml_alone(vm):
 
 def test_success_and_muted_from_colors_toml(vm):
     tmp, env = vm
-    text = (tmp / "theme" / "colors.toml").read_text()
-    (tmp / "theme" / "colors.toml").write_text(text.replace('green = "#9ece6a"', 'green = "nope"'))
+    text = (tmp / "current" / "theme" / "colors.toml").read_text()
+    (tmp / "current" / "theme" / "colors.toml").write_text(text.replace('green = "#9ece6a"', 'green = "nope"'))
     t = printed(env)
     assert "success" not in t and t["muted"] == "#414868", "a colour it cannot read is left out (the Mac uses the text colour)"
 
 
 def test_odd_values_are_left_out(vm):
     tmp, env = vm
-    (tmp / "theme" / "shell.toml").unlink()
-    (tmp / "theme" / "colors.toml").write_text('background = "#282828"\nforeground = "#ebdbb2"\naccent = "blue"\nred = 5\n')
+    (tmp / "current" / "theme" / "shell.toml").unlink()
+    (tmp / "current" / "theme" / "colors.toml").write_text('background = "#282828"\nforeground = "#ebdbb2"\naccent = "blue"\nred = 5\n')
     (tmp / "rounding").write_text('{"int": true}')
     t = printed(env)
     assert t["accent"] == "#ebdbb2" and t["error"] == "#ebdbb2" and t["radius"] == 0
+
+
+def test_a_light_theme_without_shell_toml(vm):
+    tmp, env = vm
+    (tmp / "current" / "theme" / "shell.toml").unlink()
+    (tmp / "current" / "theme" / "colors.toml").write_text(FLEXOKI)
+    t = printed(env)
+    assert (t["background"], t["foreground"], t["accent"], t["error"], t["success"]) == \
+        ("#fffcf0", "#100f0f", "#205ea6", "#d14d41", "#879a39"), "flexoki-light, as the user's VM has it"
+
+
+def test_the_prompts_own_accent_and_border(vm):
+    tmp, env = vm
+    shell = (tmp / "current" / "theme" / "shell.toml")
+    text = shell.read_text()
+    # Omarchy's prompt: its lock glyph in [polkit] accent, its border the theme's own gradient.
+    text = text.replace('accent           = "#7aa2f7"', 'accent           = "#bb9af7"')
+    text = text.replace('border           = "hyprland.active-border"\nborder-error',
+                        'border           = "rgba(33ccffee) rgba(00ff99ee) 45deg"\nborder-error')
+    shell.write_text(text)
+    t = printed(env)
+    assert t["accent"] == "#bb9af7" and t["border"] == ["#33ccff", "#00ff99"] and t["border_angle"] == 45.0
+
+
+def test_the_hyprland_token_when_hyprland_does_not_answer(vm):
+    tmp, env = vm
+    env["OMACVM_HYPRCTL"] = str(tmp / "nothing-here")
+    shell = (tmp / "current" / "theme" / "shell.toml")
+    shell.write_text(shell.read_text().replace('active-border            = "#7aa2f7"', 'active-border            = "rgb(dcd7ba)"'))
+    assert printed(env)["border"] == ["#dcd7ba"]
+
+
+def test_a_switch_is_sent_once_its_files_settled(vm):
+    tmp, env = vm
+    env["OMACVM_TOUCHID_THEME_DELAY"] = "3"
+    old = time.time() - 60
+    for p in (tmp / "current" / "theme").iterdir():
+        os.utime(p, (old, old))
+    for d in (tmp / "current" / "theme", tmp / "current"):
+        os.utime(d, (old, old))
+    t0 = time.monotonic()
+    run(env, "--force")   # nothing to send to (no Mac here): the wait is what counts
+    assert time.monotonic() - t0 < 0.6, "settled files: no wait (a login sends at once)"
+    (tmp / "current" / "theme" / "colors.toml").write_text((tmp / "current" / "theme" / "colors.toml").read_text())
+    t0 = time.monotonic()
+    run(env, "--force")
+    took = time.monotonic() - t0
+    assert 0.7 <= took < 2.5, f"files just written: waits until they are quiet ({took:.2f} s)"
 
 
 def test_no_theme_sends_nothing(vm):
@@ -122,6 +176,14 @@ def test_sent_signed_once_per_change(mac):
     (tmp / "rounding").write_text('{"int": 4}')
     run(env)
     assert m.requests[-1][2]["radius"] == 4, "a change goes out"
+    (tmp / "boot_id").write_text("boot-2\n")
+    run(env)
+    assert len([q for q in m.requests if q[1] == "/omacvm/theme"]) == 4, "a new boot (login) sends it again"
+    run(env)
+    assert len([q for q in m.requests if q[1] == "/omacvm/theme"]) == 4
+    (tmp / "sent").unlink()   # touchid.sh on/off clears the record
+    run(env)
+    assert len([q for q in m.requests if q[1] == "/omacvm/theme"]) == 5, "Touch ID switched on again: sent again"
 
 
 def test_refused_is_tried_again_next_time(mac):

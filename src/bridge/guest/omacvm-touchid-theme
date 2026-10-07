@@ -5,12 +5,19 @@ omacvm-touchid-theme.path when the theme changes, and once at login.
 
 Sends colours and a corner radius only, signed with this VM's control key
 (POST /omacvm/theme, through the control centre's client): the panel's words
-never come from the VM. The Mac checks them again and keeps the last good
-theme per VM; until one arrives it draws Tokyo Night.
+and its font never come from the VM. The Mac checks them again and keeps the
+last good theme per VM (also while Touch ID is off); until one arrives it
+draws Tokyo Night.
 
-From ~/.local/state/omarchy/current/theme: shell.toml's [polkit] (what
-Omarchy's own password prompt draws with), else colors.toml; Hyprland's
-decoration:rounding and general:col.active_border (the border).
+The panel looks like Omarchy's own password prompt: from
+~/.local/state/omarchy/current/theme, shell.toml's [polkit] (background,
+text, accent, text-error, border), else colors.toml; Hyprland's
+general:col.active_border (the border, a gradient too) and
+decoration:rounding.
+
+Sent once per change and boot: at login (the Mac may have lost its copy),
+when Touch ID is switched on (touchid.sh clears the record), and on a theme
+switch once its files have settled.
 
   omacvm-touchid-theme            send it when it changed since the last time
   omacvm-touchid-theme --force    send it anyway
@@ -31,7 +38,9 @@ THEME = E.get("OMACVM_TOUCHID_THEME_DIR", HOME + "/.local/state/omarchy/current/
 STATE = E.get("OMACVM_TOUCHID_THEME_STATE", E.get("XDG_STATE_HOME", HOME + "/.local/state") + "/omacvm/touchid-theme-sent")
 SHARE = E.get("OMACVM_SHARE", "/usr/local/share/omacvm")
 HYPRCTL = E.get("OMACVM_HYPRCTL", "hyprctl")
-DELAY = float(E.get("OMACVM_TOUCHID_THEME_DELAY", "2"))   # a theme switch writes many files: one send after it
+DELAY = float(E.get("OMACVM_TOUCHID_THEME_DELAY", "3"))   # a theme switch writes many files: at most this long ...
+QUIET = min(DELAY, 0.8)                                    # ... for them to be this long untouched
+BOOT = E.get("OMACVM_TOUCHID_THEME_BOOT", "/proc/sys/kernel/random/boot_id")
 HEX = re.compile(r"#[0-9a-fA-F]{6}")
 
 
@@ -48,6 +57,46 @@ def colour(v) -> str | None:
     if isinstance(v, str) and HEX.fullmatch(v[:7]) and len(v) in (7, 9):
         return v[:7].lower()
     return None
+
+
+def border_value(v) -> tuple[list[str], float] | None:
+    """shell.toml's border: '#rrggbb', or Hyprland's 'rgba(7aa2f7ee) rgba(bb9af7ee) 45deg'
+    / 'rgb(dcd7ba)' -> (colours, angle)."""
+    if not isinstance(v, str):
+        return None
+    c = colour(v.strip())
+    if c:
+        return [c], 0.0
+    cols, angle = [], 0.0
+    for tok in v.split():
+        m = re.fullmatch(r"rgba?\(([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?\)", tok)
+        if m:
+            cols.append("#" + m.group(1).lower())
+        elif re.fullmatch(r"-?[0-9.]+deg", tok):
+            try:
+                angle = float(tok[:-3])
+            except ValueError:
+                pass
+        else:
+            return None
+    return (cols[:2], angle) if cols else None
+
+
+def settle():
+    """A theme switch writes many files (and Hyprland reloads its rounding):
+    wait until the theme's files are QUIET seconds old, at most DELAY."""
+    end = time.monotonic() + DELAY
+    while True:
+        newest = 0.0
+        for d in (THEME, os.path.dirname(THEME)):
+            try:
+                newest = max(newest, os.stat(d).st_mtime, *(e.stat().st_mtime for e in os.scandir(d)))
+            except (OSError, ValueError):
+                pass
+        left = QUIET - (time.time() - newest)
+        if left <= 0 or time.monotonic() >= end:
+            return
+        time.sleep(min(left, max(end - time.monotonic(), 0)) + 0.01)
 
 
 def hypr_env() -> dict:
@@ -94,27 +143,32 @@ def theme() -> dict | None:
     hypr = shell.get("hyprland") if isinstance(shell.get("hyprland"), dict) else {}
 
     def ref(v):
-        if v == "hyprland.active-border":
-            return colour(hypr.get("active-border"))
-        return colour(v)
+        """A [polkit] value: a colour, or one of the [hyprland] tokens it names."""
+        if isinstance(v, str) and v.startswith("hyprland."):
+            v = hypr.get(v[len("hyprland."):])
+        return v
 
-    bg = ref(polkit.get("background")) or colour(colors.get("background"))
-    fg = ref(polkit.get("text")) or colour(colors.get("foreground"))
+    bg = colour(ref(polkit.get("background"))) or colour(colors.get("background"))
+    fg = colour(ref(polkit.get("text"))) or colour(colors.get("foreground"))
     if not bg or not fg:
         return None
-    accent = colour(colors.get("accent")) or ref(hypr.get("active-border")) or fg
+    # The prompt's accent is its lock glyph's colour.
+    accent = colour(ref(polkit.get("accent"))) or colour(colors.get("accent")) or fg
     out = {"background": bg, "foreground": fg, "accent": accent,
-           "error": ref(polkit.get("text-error")) or colour(colors.get("red")) or fg}
-    # The panel's "done" and its lines (the Mac checks their contrast).
+           "error": colour(ref(polkit.get("text-error"))) or colour(colors.get("red")) or fg}
+    # The panel's "done", and the lines of the 3.0.2/3.0.3 panels (the Mac checks their contrast).
     for key, name in (("success", "green"), ("muted", "muted")):
         c = colour(colors.get(name))
         if c:
             out[key] = c
-    border = hypr_border(hypr_option("general:col.active_border"))
-    if border:
-        out["border"], out["border_angle"] = border[0], border[1]
-    else:
-        out["border"] = [ref(polkit.get("border")) or accent]
+    # The prompt's border: Hyprland's active border as Hyprland has it now
+    # (the theme's or the person's own), unless the theme gives the prompt its own.
+    pb = polkit.get("border", "hyprland.active-border")
+    own = None if pb == "hyprland.active-border" else border_value(ref(pb))
+    border = own or hypr_border(hypr_option("general:col.active_border")) or border_value(hypr.get("active-border"))
+    out["border"] = border[0] if border else [accent]
+    if border and len(border[0]) == 2:
+        out["border_angle"] = border[1]
     r = hypr_option("decoration:rounding").get("int")
     out["radius"] = r if isinstance(r, int) and not isinstance(r, bool) else 0
     return out
@@ -122,7 +176,7 @@ def theme() -> dict | None:
 
 def main(argv: list[str]) -> int:
     if DELAY > 0 and "--print" not in argv:
-        time.sleep(DELAY)
+        settle()
     t = theme()
     if t is None:
         print("omacvm-touchid-theme: no Omarchy theme found", file=sys.stderr)
@@ -131,9 +185,15 @@ def main(argv: list[str]) -> int:
     if "--print" in argv:
         print(body)
         return 0
+    # Once per change and boot: a new boot (a login) sends it again.
+    try:
+        with open(BOOT, encoding="utf-8") as f:
+            sent = f.read().strip() + "\n" + body
+    except OSError:
+        sent = body
     try:
         with open(STATE, encoding="utf-8") as f:
-            if f.read() == body and "--force" not in argv:
+            if f.read() == sent and "--force" not in argv:
                 return 0
     except OSError:
         pass
@@ -162,7 +222,7 @@ def main(argv: list[str]) -> int:
         return 0
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     with open(STATE + ".new", "w", encoding="utf-8") as f:
-        f.write(body)
+        f.write(sent)
     os.replace(STATE + ".new", STATE)
     print(f"omacvm-touchid-theme: {t['background']} on {t['foreground']} -> the Mac")
     return 0

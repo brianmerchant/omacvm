@@ -61,9 +61,13 @@ pam_remove() {
 }
 
 # The theme sender's user units, for the desktop user (only in a real VM).
+# Its record of what it sent goes either way: the Mac may not have the theme
+# (Touch ID was off, the Bridge is new), so "on" sends it again at once.
 user_units() {   # on|off
   [[ -n $U && -z $ROOT ]] || return 0
-  local uc=(systemctl --user -M "$U@")
+  local uc=(systemctl --user -M "$U@") h
+  h=$(getent passwd "$U" | cut -d: -f6)
+  [[ $h == /* ]] && rm -f "$h/.local/state/omacvm/touchid-theme-sent"
   if [[ $1 == on ]]; then
     "${uc[@]}" daemon-reload 2>/dev/null || true
     "${uc[@]}" enable omacvm-touchid-theme.path omacvm-touchid-theme.service >/dev/null 2>&1 || true
