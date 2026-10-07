@@ -207,6 +207,13 @@ VM runs, and goes back by itself when a new version does not start
   "Use the notch for the menu bar", whose full screen covered the strip
   but had no Space of its own: other windows could share it and the
   escape combo had nothing to leave. It is gone.
+  One pointer at the strip's edge: leaving the VM up into the strip, QEMU
+  moves the guest's pointer into the hidden NOTCH output (right above the
+  display, never shown) as the Mac's arrow appears, and the next motion over
+  the VM brings it back (`omacvm-cocoa-notch-park.patch`). The app tells the
+  VM (`omacvm.notchpointer=1`), so notchcast never hides the guest's pointer
+  there: Hyprland applies `cursor:invisible` only on a periodic tick, up to
+  half a second late, which showed two arrows or none at every crossing.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).

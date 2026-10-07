@@ -5,6 +5,12 @@ in more words.
 
 ## 3.0.5 (unreleased)
 
+- Notch: moving the pointer between the VM and Omanotch's strip beside the
+  camera in full screen no longer flickers. For up to half a second at each
+  crossing there were two arrows (the VM's stayed on its top rows) or none
+  (on the way back). The VM's arrow now moves out of sight in the same
+  moment the Mac's shows on the strip, and comes back with the next move.
+  Full screen keeps its own Space.
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
   Gestures took the other app's VMs as its own too: both captured the
   trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
