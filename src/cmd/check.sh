@@ -653,8 +653,12 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     m=""
     [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
     [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
+    # Touch ID is not one of these (its own "Touch ID (Mac)" row): the line's
+    # "Touch ID off" is only how it was at the start, and it may be on now.
+    lv=", $l, "; lv=${lv//, Touch ID port on, /, }; lv=${lv//, Touch ID on, /, }; lv=${lv//, Touch ID off, /, }
+    lv=${lv#, }; lv=${lv%, }
     if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
-    else ok "Mac links (app)" "$l"; fi
+    else ok "Mac links (app)" "$lv"; fi
   fi
 fi
 # OmacVM.app's USB devices (off by default, docs/usb.md): which ones this

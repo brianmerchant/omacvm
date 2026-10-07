@@ -356,13 +356,16 @@ printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery 
 expect "app 3.0.4, Touch ID off at the start: the port is there" 0 "$(tport)"
 expect "app 3.0.4: Touch ID turned on while it runs: nothing stale" "" \
   "$(app_links_stale "$V" "omanotch=off battery=off touch-id=on" on)$(app_links_stale "$V" "omanotch=off battery=off touch-id=on" off)"
-expect "check, app 3.0.4: Touch ID turned on while it runs: the Mac links row is ok" \
-  "ok: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID off, Touch ID port on" \
+expect "check, app 3.0.4: Touch ID turned on while it runs: the Mac links row is ok, without the start's \"Touch ID off\"" \
+  "ok: Omanotch off, Gestures on, Bridge on, battery off, camera on" \
   "$(check_app "omanotch=off battery=off touch_id=on")"
 printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID off" > "$V/logs/qemu.log"
 expect "app 3.0.3, Touch ID off at the start: no port (a restart adds it)" 1 "$(tport)"
 expect "check, app 3.0.3: Touch ID turned on while it runs: not in the Mac links row" \
-  "ok: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID off" "$(check_app "omanotch=off battery=off touch_id=on")"
+  "ok: Omanotch off, Gestures on, Bridge on, battery off, camera on" "$(check_app "omanotch=off battery=off touch_id=on")"
+printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID on, Touch ID port on" > "$V/logs/qemu.log"
+expect "check, app 3.0.4: Touch ID on at the start: not in the Mac links row either" \
+  "ok: Omanotch off, Gestures on, Bridge on, battery off, camera on" "$(check_app "omanotch=off battery=off touch_id=on")"
 printf '%s\n' "OmacVM: Mac links: Omanotch off, Gestures on, Bridge on, battery off, camera on, Touch ID on" > "$V/logs/qemu.log"
 expect "app 3.0.3, Touch ID on at the start: the port" 0 "$(tport)"
 expect "app 3.0.3: Touch ID turned off while it runs: nothing stale (the Bridge says off)" "" \
