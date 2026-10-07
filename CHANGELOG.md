@@ -14,6 +14,12 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
+- Ctrl-C during a step with a spinner in `omacvm build` (such as the
+  prebuilt image's unpack) always stops it; one that came just as the
+  spinner drew could be lost, and the step went on. A prebuilt image could
+  now and then fail to unpack with "could not unpack the image (free disk
+  space?)" although nothing was wrong. Closing the control centre while a
+  job ran could end with a Python error; it closes cleanly now.
 
 ## 3.0.3
 
