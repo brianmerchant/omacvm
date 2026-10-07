@@ -54,14 +54,15 @@ static int comboHere(const char *name, const char *exe, const char *ident) {
 
 int main(void) {
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
-  check(identityTest == 0, "built without GESTURES_TEST_IDENTITY: the normal identity");
+  check(testIdentity() == 0, "built without GESTURES_TEST_IDENTITY and run outside its bundle: the normal identity");
   check(vmOursRule("org.omacvm.app.qemu", 0) && vmOursRule("org.omacvm.app", 0) &&
         !vmOursRule("org.omacvm.app.qemu", 1) && !vmOursRule("org.omacvm.app", 1), "OmacVM.app's VM and launcher: the normal Gestures'");
   check(vmOursRule("org.omacvm.app.test.qemu", 1) && vmOursRule("org.omacvm.app.test", 1) &&
         !vmOursRule("org.omacvm.app.test.qemu", 0) && !vmOursRule("org.omacvm.app.test", 0),
         "OmacVM Test.app's VM and launcher: the test Gestures'");
-  check(vmOursRule("org.omacvm.app.test.lane.qemu", 0) && !vmOursRule("org.omacvm.app.test.lane.qemu", 1),
-        "a lane-only id (org.omacvm.app.test.<lane>): production, as the app itself treats it");
+  check(!vmOursRule("org.omacvm.app.test.lane.qemu", 0) && vmOursRule("org.omacvm.app.test.lane.qemu", 1) &&
+        vmOursRule("org.omacvm.app.test.lane", 1), "a lane's copy (org.omacvm.app.test.<lane>): the test Gestures', as the app's TestIdentity");
+  check(vmOursRule("org.omacvm.apps", 1) && vmOursRule("org.omacvm.apps", 0), "org.omacvm.apps is no OmacVM.app signature");
   check(vmOursRule(NULL, 0) && vmOursRule(NULL, 1) && vmOursRule("qemu-system-aarch64-5555", 0) &&
         vmOursRule("qemu-system-aarch64-5555", 1), "no OmacVM signature (a development build): every Gestures'");
 
@@ -74,6 +75,9 @@ int main(void) {
         "normal Gestures: OmacVM Test.app's VM is the other one's");
   check(vmNetOf("OmacVM", TEST_LAUNCHER, "org.omacvm.app.test", &foreign) < 0 && !foreign,
         "normal Gestures: OmacVM Test.app's launcher is just another app");
+  check(vmNetOf("OmacVM", NULL, "org.omacvm.app.test.qemu", &foreign) < 0 && foreign &&
+        vmNetOf("OmacVM", NULL, "org.omacvm.app.test", &foreign) < 0 && !foreign,
+        "no path: the signature alone tells the other identity's QEMU from its launcher");
   identityTest = 1;   // the test identity's Gestures
   check(vmNetOf("OmacVM", TEST_QEMU, "org.omacvm.app.test.qemu", &foreign) == NET_APP &&
         vmNetOf("OmacVM", TEST_LAUNCHER, "org.omacvm.app.test", &foreign) == NET_APP,

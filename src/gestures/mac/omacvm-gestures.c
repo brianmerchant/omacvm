@@ -1062,12 +1062,21 @@ static int comboAction(int vmFront, int esc, int haveVM, int winVM, int winBack)
 #define APP_ID "org.omacvm.app"
 #define TEST_APP_ID "org.omacvm.app.test"
 
-// The test identity's Gestures (build.sh with OMACVM_HELPER_TEST=1), set at
-// build time like its port and settings domain.
+// The test identity's Gestures: built so (build.sh with OMACVM_HELPER_TEST=1,
+// like its port and settings domain), or running as its bundle
+// (org.omacvm.test.gestures). -1: not looked yet; tests set it.
 #ifndef GESTURES_TEST_IDENTITY
 #define GESTURES_TEST_IDENTITY 0
 #endif
-static int identityTest = GESTURES_TEST_IDENTITY;   // tests change it
+static int identityTest = GESTURES_TEST_IDENTITY ? 1 : -1;
+static int testIdentity(void) {
+  if (identityTest < 0) {
+    CFBundleRef b = CFBundleGetMainBundle();
+    CFStringRef id = b ? CFBundleGetIdentifier(b) : NULL;
+    identityTest = id && CFStringCompare(id, CFSTR("org.omacvm.test.gestures"), 0) == kCFCompareEqualTo;
+  }
+  return identityTest;
+}
 
 // The code-signing identifier of a running process (the kernel's copy).
 extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
@@ -1083,14 +1092,20 @@ static int signingID(pid_t pid, char *out, size_t cap) {
 
 // Whether a process signed as `ident` (NULL: unknown) is this Gestures'.
 // An OmacVM.app launcher or QEMU ("<bundle id>" or "<bundle id>.qemu",
-// bundle id org.omacvm.app or one starting with it): the test Gestures takes
-// only OmacVM Test.app's, every other Gestures all the others (as the
-// Bridge's VMOwner and the app's own test-identity check, an exact match).
-// Anything else: every Gestures'.
+// bundle id org.omacvm.app or org.omacvm.app.*): the test Gestures takes
+// OmacVM Test.app's (org.omacvm.app.test, and a lane's copy re-signed as
+// org.omacvm.app.test.<lane>, as the app's own TestIdentity.isTest), every
+// other Gestures all the others. Anything else (no OmacVM signature, or one
+// that macOS no longer holds valid): every Gestures', as before.
 static int vmOursRule(const char *ident, int test) {
-  if (!ident || strncmp(ident, APP_ID, strlen(APP_ID))) return 1;
-  int isTest = !strcmp(ident, TEST_APP_ID) || !strcmp(ident, TEST_APP_ID ".qemu");
+  if (!ident || (strcmp(ident, APP_ID) && strncmp(ident, APP_ID ".", strlen(APP_ID ".")))) return 1;
+  int isTest = !strcmp(ident, TEST_APP_ID) || !strncmp(ident, TEST_APP_ID ".", strlen(TEST_APP_ID "."));
   return isTest == !!test;
+}
+
+static int endsWith(const char *s, const char *end) {
+  size_t a = strlen(s), b = strlen(end);
+  return a >= b && !strcmp(s + a - b, end);
 }
 
 // Which VM app a front process `name` (its executable `exe` and signing
@@ -1103,12 +1118,14 @@ static int vmNetOf(const char *name, const char *exe, const char *ident, int *fo
   if (!strcmp(name, "UTM")) return NET_UTM;
   if (!strcmp(name, "VMware Fusion")) return listenAddrs[NET_FUSION][0] ? NET_FUSION : -1;
   if (strcmp(name, "OmacVM")) return -1;
-  if (vmOursRule(ident, identityTest)) return NET_APP;
-  *foreign = !exe || !strstr(exe, "/Contents/MacOS/");
+  if (vmOursRule(ident, testIdentity())) return NET_APP;
+  // Its QEMU ("<id>.qemu", or not the launcher's path), not its launcher.
+  *foreign = endsWith(ident, ".qemu") || (exe && !strstr(exe, "/Contents/MacOS/"));
   return -1;
 }
 
 static int vmNet(pid_t pid, const char *name, int *foreign) {
+  if (strcmp(name, "OmacVM")) return vmNetOf(name, NULL, NULL, foreign);   // no system calls for other apps
   char exe[PROC_PIDPATHINFO_MAXSIZE], ident[256];
   int haveExe = proc_pidpath(pid, exe, sizeof exe) > 0;
   return vmNetOf(name, haveExe ? exe : NULL, signingID(pid, ident, sizeof ident) ? ident : NULL, foreign);
@@ -1120,7 +1137,7 @@ static int vmNet(pid_t pid, const char *name, int *foreign) {
 static int isQemu(pid_t pid) {
   char path[PROC_PIDPATHINFO_MAXSIZE], ident[256];
   if (proc_pidpath(pid, path, sizeof path) <= 0) return 0;
-  return !strstr(path, "/Contents/MacOS/") && vmOursRule(signingID(pid, ident, sizeof ident) ? ident : NULL, identityTest);
+  return !strstr(path, "/Contents/MacOS/") && vmOursRule(signingID(pid, ident, sizeof ident) ? ident : NULL, testIdentity());
 }
 
 static int alive(pid_t p) { return p > 0 && (kill(p, 0) == 0 || errno == EPERM); }

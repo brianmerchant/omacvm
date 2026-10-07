@@ -241,4 +241,4 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-identity" "$HERE/test-identity.
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-identity" > "$T/identity" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/identity"
-(( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }
+(( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" "$T/identity" >&2; exit 1; }
