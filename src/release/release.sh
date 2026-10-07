@@ -19,6 +19,9 @@
 #   verify    every file read back as the app, the command line and the Bridge
 #             read them
 #   image     the app's prebuilt VM (make-image.sh app), its manifest signed
+#   e2e       the gate: the person's path end to end on the test Mac
+#             (src/tests/e2e/cc-switches.sh) passed for a test identity
+#             build of M; publish refuses without it
 #   publish   tag M, the GitHub release (latest), the prebuilt pre-release
 #             (dry run: prints the commands only)
 #   after     download what GitHub serves and check it again
@@ -40,7 +43,12 @@
 # OMACVM_RELEASE_IMAGE_FROM (a folder with a signed image of this version:
 # used instead of building one), OMACVM_RELEASE_UNNOTARIZED=1 (release
 # without notarization, as 2.x), OMACVM_RELEASE_FROM (dry run only: the
-# commit to start from instead of the PR's head).
+# commit to start from instead of the PR's head). The e2e gate:
+# OMACVM_RELEASE_E2E_RESULT (a result.json of cc-switches.sh, default
+# OUT/e2e/result.json), or OMACVM_E2E_SSH + OMACVM_E2E_ARGS (run it on the
+# test Mac now: src/tests/e2e/remote.sh), or OMACVM_RELEASE_E2E_OVERRIDE=
+# "<why>" (publish without it; written to the output folder's
+# e2e-override.log and said again at publish and after).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 GH_REPO=gillesgoetsch/omacvm
@@ -61,7 +69,7 @@ VERSION=${1:-}
 [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 2; }
 shift
 STEPS=("$@")
-(( ${#STEPS[@]} )) || STEPS=(check bump merge build notarize package verify image publish after)
+(( ${#STEPS[@]} )) || STEPS=(check bump merge build notarize package verify image e2e publish after)
 
 # release-key.sh signs with the Keychain's release key only inside this run.
 export OMACVM_RELEASE_RUN=$VERSION
@@ -342,6 +350,41 @@ step_image() {
   note "image ok: $(du -ch "$img"/$base.tar.zst.part-* | tail -1 | cut -f1) in $(ls "$img"/$base.tar.zst.part-* | wc -l | tr -d ' ') parts, Omarchy $(python3 "$R/src/prebuilt/manifest.py" get "$img/$base.json" omarchy)"
 }
 
+# The gate (src/tests/e2e/README.md): the person's path end to end for M, or
+# an override that is written down.
+e2e_override() {
+  local why=$OMACVM_RELEASE_E2E_OVERRIDE
+  [[ ${#why} -ge 10 ]] || die "OMACVM_RELEASE_E2E_OVERRIDE: say why in a sentence (it is logged)"
+  printf '%s\t%s\tM=%s\tby %s\t%s\n' "$(date '+%F %T')" "$VERSION" "$(get M)" "$(id -un)" "$why" >> "$OUT/e2e-override.log"
+  put E2E "override"
+  printf '\n    !!! E2E GATE OVERRIDDEN for %s: %s\n    !!! (logged in %s)\n\n' "$VERSION" "$why" "$OUT/e2e-override.log"
+}
+
+step_e2e() {
+  local m; m=$(get M); [[ -n $m ]] || die "no M: run merge first"
+  if [[ -n ${OMACVM_RELEASE_E2E_OVERRIDE:-} ]]; then e2e_override; return; fi
+  local r=${OMACVM_RELEASE_E2E_RESULT:-$OUT/e2e/result.json}
+  if [[ ! -f $r && -n ${OMACVM_E2E_SSH:-} ]]; then
+    log "e2e on the test Mac ($OMACVM_E2E_SSH), 1-2 h"
+    "$R/src/tests/e2e/remote.sh" "$m" "$OUT/e2e" | tee "$OUT/e2e.log" || true
+    r=$OUT/e2e/result.json
+  fi
+  [[ -f $r ]] || die "no e2e result for M ($r): run src/tests/e2e/cc-switches.sh on the test Mac with a test identity build of $m (src/tests/e2e/README.md), set OMACVM_E2E_SSH + OMACVM_E2E_ARGS, or OMACVM_RELEASE_E2E_OVERRIDE=\"<why>\""
+  python3 - "$r" "$m" <<'PY' || die "the e2e gate did not pass for M ($r)"
+import json, sys
+o = json.load(open(sys.argv[1]))
+print(f"    e2e: {o.get('counts')} in {o.get('seconds', 0) // 60} min, commit {str(o.get('commit'))[:12]}, steps {o.get('only')}")
+for st, status, detail in o.get("not_ok", [])[:20]:
+    print(f"      {status:7} {st}: {detail[:200]}")
+assert o.get("kind") == "omacvm-e2e-cc-switches", "not a cc-switches result"
+assert o.get("commit") == sys.argv[2], f"tested {o.get('commit')}, not M {sys.argv[2]}"
+assert o.get("only") == "all", "not every step ran"
+assert o.get("pass") is True, "not passed"
+PY
+  put E2E pass
+  note "e2e gate passed for M"
+}
+
 notes_file() {   # the release text, without the unnotarized lines once notarized
   if [[ $(get NOTARIZED) == 1 ]]; then
     sed '/<!-- if-unnotarized -->/,/<!-- end-if -->/d' "$NOTES"
@@ -353,6 +396,12 @@ notes_file() {   # the release text, without the unnotarized lines once notarize
 
 step_publish() {
   local m; m=$(get M); [[ -n $m ]] || die "no M"
+  case $(get E2E) in
+    pass) note "e2e gate: passed for M" ;;
+    override) note "e2e gate: OVERRIDDEN ($(tail -1 "$OUT/e2e-override.log" | cut -f5))" ;;
+    *) if (( DRY )); then note "dry run: the e2e gate has not passed (a real publish stops here)"
+       else die "the e2e gate has not passed for M: release.sh $VERSION e2e (or OMACVM_RELEASE_E2E_OVERRIDE=\"<why>\" release.sh $VERSION e2e)"; fi ;;
+  esac
   local title=${OMACVM_RELEASE_TITLE:-OmacVM $VERSION}
   local nf; nf=$(notes_file)
   local assets=("$FILES/OmacVM-$VERSION.zip" "$FILES/OmacVM-$VERSION.zip.sha256" "$FILES/OmacVM-appcast.json"
@@ -394,6 +443,7 @@ step_after() {
   if gh release view "prebuilt-$VERSION" -R "$GH_REPO" >/dev/null 2>&1; then
     (cd "$WT" && app/scripts/prebuilt-vm.sh --lookup) && note "prebuilt lookup ok" || die "prebuilt-vm.sh --lookup finds no image"
   fi
+  [[ $(get E2E) == override ]] && note "!!! published WITHOUT the e2e gate: $OUT/e2e-override.log"
   note "published files check out; releases/latest = $TAG"
 }
 
@@ -448,7 +498,7 @@ clean() {
 TIMES=$OUT/times.tsv
 for s in "${STEPS[@]}"; do
   case $s in
-    check|bump|merge|build|notarize|package|verify|image|publish|after) fn=step_$s ;;
+    check|bump|merge|build|notarize|package|verify|image|e2e|publish|after) fn=step_$s ;;
     rollback-prep) fn=rollback_prep ;;
     rollback|clean) fn=$s ;;
     *) die "unknown step $s" ;;

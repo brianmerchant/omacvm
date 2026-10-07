@@ -59,6 +59,31 @@ expect 1 "release.sh: no version prints the usage" "$R/src/release/release.sh"
 expect 1 "release.sh: not a version" "$R/src/release/release.sh" --dry-run 3.0 check
 OMACVM_RELEASE_OUT=$T/out expect 1 "release.sh: an unknown step" "$R/src/release/release.sh" --dry-run 9.9.9 nonsense
 expect 1 "release.sh: an unknown option" "$R/src/release/release.sh" --force 9.9.9 check
+# The e2e gate (step e2e, checked again by publish): a passing result for M only.
+G=$T/gate; mkdir -p "$G/release/e2e"; echo "M=1111111111111111111111111111111111111111" > "$G/release/state"
+gate() {   # PASS COMMIT ONLY: a result.json as cc-switches.sh writes it
+  printf '{"kind": "omacvm-e2e-cc-switches", "commit": "%s", "version": "9.9.9", "only": "%s", "pass": %s, "counts": {"ok": 40, "FAIL": 0, "BLOCKED": 0, "skip": 2}, "not_ok": [], "seconds": 3600}\n' \
+    "$2" "$3" "$1" > "$G/release/e2e/result.json"
+}
+rel() { OMACVM_RELEASE_OUT=$G "$R/src/release/release.sh" 9.9.9 "$@"; }
+expect 1 "e2e: no result is refused" rel e2e
+expect 1 "publish: refused while the gate has not passed" rel publish
+[[ $(rel publish 2>&1) == *"e2e gate has not passed"* ]] && ok "publish: says why" || bad "publish: no reason given"
+gate true 2222222222222222222222222222222222222222 all
+expect 1 "e2e: a result for another commit is refused" rel e2e
+gate false 1111111111111111111111111111111111111111 all
+expect 1 "e2e: a result that did not pass is refused" rel e2e
+gate true 1111111111111111111111111111111111111111 ",switches,"
+expect 1 "e2e: a run of some steps only is refused" rel e2e
+gate true 1111111111111111111111111111111111111111 all
+expect 0 "e2e: a passing result for M is taken" rel e2e
+[[ $(sed -n 's/^E2E=//p' "$G/release/state" | tail -1) == pass ]] && ok "e2e: the state says pass" || bad "e2e: state"
+rm "$G/release/e2e/result.json"; echo "E2E=" >> "$G/release/state"
+OMACVM_RELEASE_E2E_OVERRIDE=short expect 1 "e2e: an override without a reason is refused" rel e2e
+OMACVM_RELEASE_E2E_OVERRIDE="the test Mac is away; checked by hand on the Air" expect 0 "e2e: an override with a reason" rel e2e
+grep -q "checked by hand on the Air" "$G/release/e2e-override.log" && ok "e2e: the override is logged" || bad "e2e: override not logged"
+[[ $(sed -n 's/^E2E=//p' "$G/release/state" | tail -1) == override ]] && ok "e2e: the state says override" || bad "e2e: override state"
+
 # appcast.sh ZIP: only an OmacVM-<version>.zip.
 touch "$T/Other.zip"
 expect 1 "appcast.sh: a zip with another name is refused" "$R/app/scripts/appcast.sh" "$T/Other.zip"
