@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.4 (unreleased)
+
+- No sound after a kernel update: in OmacVM.app VMs with Chromium video on,
+  the first start after a new kernel could leave every app silent until
+  WirePlumber was restarted. WirePlumber hung on Chromium's video decoder
+  when it came late; it now leaves the decoder alone.
+
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
