@@ -48,6 +48,16 @@ inst --omanotch > /dev/null
 echo "// changed" >> "$T/src/omanotch/mac/install.sh"
 n=$(runs omanotch)
 expect "changed sources: tried again with --skip-failed" "5 $((n + 1))" "$(inst --omanotch --skip-failed) $(runs omanotch)"
+# The stamp does not depend on the caller's locale: the control centre's jobs
+# run with LANG=en_US.UTF-8, a terminal maybe without. A different sum means
+# "changed sources", and every switch between the two built and restarted the
+# helpers again (the Bridge restarted on each Touch ID switch, 3.0.3).
+touch "$T/src/bridge/mac/touchid.swift" "$T/src/bridge/mac/touchid_policy.swift" "$T/src/bridge/mac/Touch.swift"
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 inst > /dev/null; a=$(cat "$STAMPS/OmacVM Bridge")
+env -u LANG -u LC_ALL -u LC_COLLATE "$T/src/mac/install.sh" --quiet > /dev/null 2>&1; b=$(cat "$STAMPS/OmacVM Bridge")
+expect "the stamp is the same in any locale" "$a" "$b"
+expect "a helpers' sum is the same in any locale" "$(LC_ALL=en_US.UTF-8 bash -c "source '$T/src/lib/helpers.sh'; helpers_src_sum '$T/src' bridge/mac")" \
+  "$(env -u LANG -u LC_ALL bash -c "source '$T/src/lib/helpers.sh'; helpers_src_sum '$T/src' bridge/mac")"
 # apply: the helper each feature needs (a run that turns it on stops when
 # that helper did not build).
 eval "$(sed -n '/^helper_of() {/,/^}/p' "$R/src/cmd/apply.sh")"
