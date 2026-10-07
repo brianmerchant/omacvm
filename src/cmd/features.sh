@@ -79,7 +79,7 @@ if (( INVM )); then
   esac
   exit 0
 fi
-NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
+NOTCH=$(mac_tool mac-notch 2>/dev/null || echo none)
 if [[ $MODE == features && -z $VM ]] && (( JSON )); then
   resolve_vm soft || { VM=""; TYPE=""; IP=""; }
   [[ -n $IP ]] || { VM=""; TYPE=""; }

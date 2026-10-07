@@ -81,7 +81,7 @@ macos=$(sw_vers -productVersion 2>/dev/null)
 (( ${macos%%.*} >= 14 )) || { echo "omacvm apply: OmacVM needs macOS 14 (Sonoma) or newer; this Mac runs $macos" >&2; exit 3; }
 export OMA_KEY=$KEY
 [[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; mkdir -p "$(dirname "$KEY")" && chmod 700 "$(dirname "$KEY")"; ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q; }
-NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
+NOTCH=$(mac_tool mac-notch 2>/dev/null || echo none)
 
 # ---------- which VM ----------
 # Its SSH host key: remembered now when there is none yet, checked after that.
@@ -102,7 +102,7 @@ if (( ssh_ok )); then
   printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
   exit 3
 fi
-[[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
+[[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(mac_tool mac-display)
 [[ -z $MODE || $MODE =~ ^[0-9]+x[0-9]+(@[0-9.]+)?$ ]] || die "--display WxH@Hz, not '$MODE'"
 # OmacVM.app's VMs keep the layout chosen at setup (vm.env KEYBOARD, as the
 # app's own apply-vm.sh passes it): a switch from the control centre or the
@@ -368,7 +368,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycac
 # older OmacVM, when going back), all when empty.
 GI_ARGS=""; KNOWN=""
 guest_install() {
-  local fargs="" i v=("$@")
+  local fargs="" i fmt v=("$@")
   for ((i = 0; i < ${#FN[@]}; i++)); do
     if [[ -n $KNOWN && $'\n'$KNOWN$'\n' != *$'\n'${FN[$i]}$'\n'* ]]; then
       # A copy from before 3.0.1 knows no-idle-lock by its old name.
@@ -379,7 +379,11 @@ guest_install() {
     fargs+=" --feature ${FN[$i]}=${v[$i]}"
   done
   [[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
-  [[ ${v[$(feature_index mac-clock)]} == on ]] && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swift" | base64)"
+  # The Mac's clock format (the app's built copy, else swift; without either
+  # the bar keeps its own format).
+  if [[ ${v[$(feature_index mac-clock)]} == on ]] && fmt=$(mac_tool mac-clock 2>/dev/null) && [[ -n $fmt ]]; then
+    fargs+=" --clock-format-b64 $(printf '%s\n' "$fmt" | base64)"
+  fi
   # Its name, so the Mac's gestures helper tells it from another VM in the same app.
   (( NAMED )) && fargs+=" --vm-name-b64 $(printf %s "$VM" | base64 | tr -d '\n')"
   gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs$GI_ARGS" < /dev/null
