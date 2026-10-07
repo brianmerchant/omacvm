@@ -8,8 +8,8 @@ in more words.
 - OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
   too much graphics memory (a browser with big WebGL pages) no longer turns
   the whole VM black. The last part of the graphics memory guard (512 MB on
-  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland
-  and the bar): the app past its share, or the app that wants more while
+  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland,
+  the bar and the lock screen): the app past its share, or the app that wants more while
   macOS is short of memory, loses its own GPU context, and the VM shows a
   note that says so. Before, whichever asked next lost it, often Hyprland,
   and the app then restarted the desktop, closing every app. When the

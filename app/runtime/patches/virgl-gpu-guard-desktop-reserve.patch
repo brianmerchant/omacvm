@@ -3,7 +3,8 @@ virglrenderer: the last part of the guest GPU memory budget is kept for the VM's
 What: the budget (virgl-resource-memory-budget.patch, OMACVM_GPU_MEMORY_MB, default
 three quarters of the Mac's memory) gets a desktop reserve at its top. Apps and Venus
 memory stop below it; the desktop's own GPU contexts (OMACVM_GPU_MEMORY_DESKTOP,
-default "Hyprland,quickshell": the guest's kernel names a context after its process)
+default "Hyprland,quickshell,hyprlock": the guest's kernel names a context after its
+process; hyprlock is the lock screen, which may start with the apps' share full)
 may use the whole budget. Screens and cursors keep their 256 MB past the budget.
 The reserve is a sixteenth of the Mac's memory, at least 512 MB and at most 2 GB, never
 more than a quarter of the budget (8 GB Mac: 512 MB of 6 GB; 16 GB: 1 GB of 12 GB;
@@ -84,7 +85,7 @@ of textures each): e2e-mbp.sh in tracks/gpu-guard-8gb.md.
 +/* The desktop's GPU contexts by name: the guest's kernel names a context after the
 + * process that made it. The guest chooses that name, so an app could take it; the
 + * reserve stays inside the budget either way. */
-+#define VIRGL_GPU_GUARD_DESKTOP_DEFAULT "Hyprland,quickshell"
++#define VIRGL_GPU_GUARD_DESKTOP_DEFAULT "Hyprland,quickshell,hyprlock"
 +
 +enum virgl_gpu_guard_who {
 +   /* an app's resource (its context is known), Venus memory: up to the budget less
@@ -366,7 +367,7 @@ of textures each): e2e-mbp.sh in tracks/gpu-guard-8gb.md.
 +/*
 + * OmacVM: the desktop reserve (virgl-gpu-guard-desktop-reserve.patch, rules in
 + * virgl_gpu_guard.h). The budget's last part is kept for the desktop's contexts
-+ * (OMACVM_GPU_MEMORY_DESKTOP, default Hyprland and quickshell): apps and Venus memory
++ * (OMACVM_GPU_MEMORY_DESKTOP, default Hyprland, quickshell, hyprlock): apps and Venus memory
 + * stop below it. OMACVM_GPU_MEMORY_RESERVE_MB sets its size (0: none); the default is
 + * a sixteenth of the Mac's memory, 512 MB to 2 GB, at most a quarter of the budget.
 + */

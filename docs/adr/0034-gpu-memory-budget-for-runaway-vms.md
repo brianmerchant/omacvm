@@ -1,6 +1,6 @@
 # 0034: The GPU memory budget stops a runaway VM, never a desktop
 
-Status: accepted, amended twice (dynamic; the desktop's reserve, 3.0.4: see the end). Built on `fractional-scale`
+Status: accepted, amended twice (dynamic; the desktop's reserve, 3.0.5: see the end). Built on `fractional-scale`
 (`app/runtime/patches/virgl-resource-memory-budget.patch`,
 `app/runtime/patches/virgl-darwin-memory-pressure.patch`).
 
@@ -86,7 +86,7 @@ mark the resource for that immediate loss (the context is lost at its first
 use, as before). Venus allocations stop at the budget, not at the pressure.
 The bytes in use in QEMU's log and the status file include Venus memory.
 
-## Amendment: the desktop keeps the guard's last part (3.0.4)
+## Amendment: the desktop keeps the guard's last part (3.0.5)
 
 On a MacBook Air M2 with 8 GB (2026-10-06) a browser with big WebGL pages
 filled the 6 GB guard while macOS still said "normal" (it had swapped 2 GB
@@ -105,7 +105,9 @@ Decision: option 3 (`virgl-gpu-guard-desktop-reserve.patch`, rules in
 `src/virgl_gpu_guard.h`). The reserve is a sixteenth of the Mac's memory,
 512 MB to 2 GB, at most a quarter of the guard (8 GB Mac: apps 5.5 GB of
 6 GB). The desktop's contexts are named by their process (the guest's
-kernel names a context after it): Hyprland and quickshell. The guest
+kernel names a context after it): Hyprland, quickshell and the lock
+screen, hyprlock (it starts when the apps' share may already be full,
+and a lock screen that stops drawing leaves the VM locked). The guest
 chooses that name, so an app could claim it, but the reserve stays inside
 the guard. The guest's kernel makes a resource before it says for which
 context and attaches it right after, so a resource past the apps' share is

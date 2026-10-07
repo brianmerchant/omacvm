@@ -160,7 +160,7 @@ commit 82927e9. Changes here:
   `omacvm check` (ADR 0034). Checked by `Tests/virgl/test-resource-budget.c`
 - `patches/virgl-gpu-guard-desktop-reserve.patch`: the guard's last part (a
   sixteenth of the Mac's memory, 512 MB to 2 GB) is kept for the VM's
-  desktop (Hyprland, quickshell; `OMACVM_GPU_MEMORY_DESKTOP`,
+  desktop (Hyprland, quickshell, hyprlock; `OMACVM_GPU_MEMORY_DESKTOP`,
   `OMACVM_GPU_MEMORY_RESERVE_MB`). A resource past the apps' share, or one
   macOS has no room for, is made "for the desktop only": the first GL
   context that attaches it keeps it if it is the desktop's, else that

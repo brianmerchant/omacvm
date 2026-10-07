@@ -57,7 +57,7 @@ public struct GPUMemory: Equatable {
     }
 
     /// Why the last of `names` to be lost was lost (guard, pressure, error),
-    /// nil when QEMU did not say (a runtime from before 3.0.4).
+    /// nil when QEMU did not say (a runtime from before 3.0.5).
     public func why(of names: Set<String>) -> String? {
         guard lostRecentWhy.count == lostRecent.count,
               let i = lostRecent.lastIndex(where: names.contains) else { return nil }

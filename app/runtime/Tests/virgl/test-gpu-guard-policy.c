@@ -102,6 +102,7 @@ int main(void)
    const char *list = VIRGL_GPU_GUARD_DESKTOP_DEFAULT;
    check(virgl_gpu_guard_is_desktop("Hyprland", list), "Hyprland is the desktop");
    check(virgl_gpu_guard_is_desktop("quickshell", list), "quickshell (the bar) is the desktop");
+   check(virgl_gpu_guard_is_desktop("hyprlock", list), "hyprlock (the lock screen) is the desktop");
    check(!virgl_gpu_guard_is_desktop("chromium", list), "chromium is an app");
    check(!virgl_gpu_guard_is_desktop("hyprland", list), "case counts: hyprland is not Hyprland");
    check(!virgl_gpu_guard_is_desktop("Hypr", list), "a prefix is not enough");

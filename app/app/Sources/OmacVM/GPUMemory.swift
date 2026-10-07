@@ -127,7 +127,7 @@ final class GPUMemoryWatch {
     }
 
     /// Apps that lost their GPU context to the memory guard or to macOS's
-    /// pressure: logged, and a note in the VM (a VM from before 3.0.4 has no
+    /// pressure: logged, and a note in the VM (a VM from before 3.0.5 has no
     /// such note: its agent refuses, nothing else happens).
     private func tellApps(_ names: [String], _ why: [String], _ m: GPUMemory) {
         let now = Date()

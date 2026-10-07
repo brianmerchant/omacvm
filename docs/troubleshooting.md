@@ -512,7 +512,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   and its last part is kept for the desktop: on an 8 GB Mac a browser could
   fill the guard while macOS still said normal, and the next buffer refused
   was Hyprland's. Now the app past its share loses its own GPU context and
-  the VM says so (3.0.4, `app/runtime/patches/virgl-gpu-guard-desktop-reserve.patch`).
+  the VM says so (3.0.5, `app/runtime/patches/virgl-gpu-guard-desktop-reserve.patch`).
   If the desktop still loses its GPU context, the app says so and offers to
   restart the desktop session instead of leaving the VM black.
   `omacvm check` shows the graphics memory now and its peak ("graphics

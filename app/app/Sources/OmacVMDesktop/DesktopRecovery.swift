@@ -20,8 +20,8 @@ public enum DesktopRecovery {
     public static let window: TimeInterval = 600
     public static let shellWindow: TimeInterval = 60
     /// The compositor draws the whole desktop. QEMU keeps the last part of
-    /// the graphics memory for these and the shell (the same names as its
-    /// VIRGL_GPU_GUARD_DESKTOP_DEFAULT, virgl-gpu-guard-desktop-reserve.patch).
+    /// the graphics memory for these, the shell and the lock screen (hyprlock)
+    /// (its VIRGL_GPU_GUARD_DESKTOP_DEFAULT, virgl-gpu-guard-desktop-reserve.patch).
     public static let compositors: Set<String> = ["Hyprland"]
     public static let shells: Set<String> = ["quickshell"]
 
@@ -57,8 +57,8 @@ public enum DesktopRecovery {
 
     /// What omacvm-desktop-recover is told about the cause. `why`: what QEMU
     /// said for the desktop's context (guard, pressure, error; nil from a
-    /// runtime before 3.0.4, then guessed from the pressure and refusals).
-    /// A VM from before 3.0.4 takes "guard" as "graphics".
+    /// runtime before 3.0.5, then guessed from the pressure and refusals).
+    /// A VM from before 3.0.5 takes "guard" as "graphics".
     public static func reason(why: String?, pressure: String, refused: Int) -> String {
         switch why {
         case "guard": return "guard"
