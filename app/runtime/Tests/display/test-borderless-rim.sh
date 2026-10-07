@@ -4,7 +4,8 @@
 # about 20 %) with a window's shadow; a window made titled and then switched
 # borderless keeps its shadow, so the rim ran around the whole display:
 #   - every switch to borderless goes through omacvm_set_borderless, which
-#     drops the shadow (no other setStyleMask:NSWindowStyleMaskBorderless);
+#     drops the shadow: any style mask change the check does not know (a
+#     computed mask, a property assignment, a new window) fails it;
 #   - the main window's borderless full screen (tests) and the other displays'
 #     borderless windows (tests) use it;
 #   - leaving the main window's borderless full screen gives the shadow back
@@ -30,8 +31,11 @@ problems() {
     awk '/setStyleMask:NSWindowStyleMaskBorderless/{m=NR} /\[w setHasShadow:NO\];/{s=NR} END{exit !(m && s && m < s)}' \
       <<<"$helper" || echo "omacvm_set_borderless keeps the shadow (macOS 26 draws its rim around the display)"
   fi
-  [[ $(grep -c 'setStyleMask:NSWindowStyleMaskBorderless' "$f") -le 1 ]] ||
-    echo "a window is made borderless outside omacvm_set_borderless (it keeps its shadow and rim)"
+  # Every style mask change in ui/cocoa.m, as code: the helper's, the way back
+  # from the tests' full screen, and upstream's zoom to fit (Resizable only).
+  local other
+  other=$(grep -nE 'setStyleMask|[.]styleMask *=[^=]' "$f" | grep -vE ':(    \[w setStyleMask:NSWindowStyleMaskBorderless \| extra\];|        \[w setStyleMask:notchSavedMask\];|    \[\[cocoaView window\] setStyleMask:styleMask\];)$')
+  [[ -z $other ]] || echo "a style mask change outside omacvm_set_borderless (a borderless window keeps its shadow and rim; route it through the helper, then list it here): $(head -1 <<<"$other")"
   [[ -n $toggle ]] || echo "no omacvm_toggle_notch_full_screen"
   [[ -z $toggle ]] || {
     grep -q 'omacvm_set_borderless(w, NSWindowStyleMaskResizable);' <<<"$toggle" ||
@@ -85,6 +89,13 @@ static void omacvm_head_on(OmacVMHead *hd, NSScreen *s)
         [hd->window setFrame:r display:YES];
     }
 }
+
+- (void)zoomToFit:(id) sender
+{
+    NSWindowStyleMask styleMask = [[cocoaView window] styleMask] ^ NSWindowStyleMaskResizable;
+
+    [[cocoaView window] setStyleMask:styleMask];
+}
 EOF
   }
   case_() {   # WHAT WANT(ok|fail) FILE
@@ -106,6 +117,10 @@ EOF
   case_ "windowed again without a shadow" fail "$T/restore.m"
   good | sed '/^        notchSavedShadow = \[w hasShadow\];$/d' > "$T/save.m"
   case_ "the shadow not saved first" fail "$T/save.m"
+  good | sed 's/^        omacvm_set_borderless(hd->window, 0);$/        [hd->window setStyleMask:[hd->window styleMask] \& ~NSWindowStyleMaskTitled];/' > "$T/computed.m"
+  case_ "a computed borderless mask" fail "$T/computed.m"
+  good | sed 's/^        omacvm_set_borderless(hd->window, 0);$/        hd->window.styleMask = NSWindowStyleMaskBorderless;/' > "$T/property.m"
+  case_ "a borderless mask set as a property" fail "$T/property.m"
   exit $fail
 fi
 

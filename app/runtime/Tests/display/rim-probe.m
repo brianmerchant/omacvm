@@ -42,11 +42,16 @@ static bool pixels_from(CGImageRef img, Pixels *px)
     px->w = CGImageGetWidth(img);
     px->h = CGImageGetHeight(img);
     px->rgba = calloc(px->w * px->h, 4);
+    if (!px->rgba) {
+        return false;
+    }
     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     CGContextRef c = CGBitmapContextCreate(px->rgba, px->w, px->h, 8, px->w * 4, cs,
                                            (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
     CGColorSpaceRelease(cs);
     if (!c) {
+        free(px->rgba);
+        px->rgba = NULL;
         return false;
     }
     CGContextDrawImage(c, CGRectMake(0, 0, px->w, px->h), img);
@@ -130,9 +135,11 @@ int main(int argc, char **argv)
             how = "screencapture";
             printf("wid=%u\n", wid);
             fflush(stdout);
+            /* The script writes OUT.png whole (screencapture to a temporary name, then mv). */
             for (int i = 0; i < 100 && !img; i++) {
                 [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
-                NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithData:[NSData dataWithContentsOfFile:out]];
+                NSData *d = [NSData dataWithContentsOfFile:out];
+                NSBitmapImageRep *rep = d ? [[NSBitmapImageRep alloc] initWithData:d] : nil;
                 if (rep) {
                     img = CGImageRetain([rep CGImage]);
                 }
@@ -140,11 +147,14 @@ int main(int argc, char **argv)
         }
         [w orderOut:nil];
         Pixels px = {0, 0, NULL};
-        if (!img || !pixels_from(img, &px)) {
+        bool got = img && pixels_from(img, &px);
+        if (img) {
+            CGImageRelease(img);
+        }
+        if (!got) {
             printf("mode=%s capture=none\n", argv[1]);
             return 3;
         }
-        CGImageRelease(img);
         /* The window: the opaque box (shadow pixels are see-through). */
         size_t x0 = px.w, y0 = px.h, x1 = 0, y1 = 0;
         for (size_t y = 0; y < px.h; y++) {
@@ -157,6 +167,7 @@ int main(int argc, char **argv)
         }
         if (x0 > x1 || x1 - x0 < 40 || y1 - y0 < 40) {
             printf("mode=%s capture=%s no window in the picture (%zux%zu)\n", argv[1], how, px.w, px.h);
+            free(px.rgba);
             return 3;
         }
         int edge = brightest(&px, x0, y0, x1, y1, 0);

@@ -71,15 +71,16 @@ echo "$out" | sed 's/^/     /'
 expect "test-quit-clean.sh catches the old code" 0 "$rc"
 
 # A borderless window has no shadow (macOS 26's light rim around the
-# display): after the Touch ID panel, then tested.
+# display): after the Touch ID panel and the tap permission, then tested.
 p=omacvm-cocoa-borderless-no-rim.patch
 expect "$p pinned" yes \
   "$(cd "$R/app/runtime/patches" && grep -q " $p\$" SHA256SUMS && shasum -a 256 -c --status <(grep " $p\$" SHA256SUMS) && echo yes || echo no)"
 panel=$(line 'patches/omacvm-cocoa-touchid-panel.patch"')
+tap=$(line 'patches/omacvm-cocoa-tap-permission.patch"')
 rim=$(line 'patches/omacvm-cocoa-borderless-no-rim.patch"')
 rtest=$(line 'Tests/display/test-borderless-rim.sh" "$source_dir/ui/cocoa.m"')
-expect "the build applies it after the Touch ID panel, then tests" yes \
-  "$([[ -n $panel && -n $rim && -n $rtest ]] && (( quit < panel && panel < rim && rim < rtest )) && echo yes || echo no)"
+expect "the build applies it after the Touch ID panel and the tap permission (its header), then tests" yes \
+  "$([[ -n $panel && -n $tap && -n $rim && -n $rtest ]] && (( quit < panel && panel < tap && tap < rim && rim < rtest )) && echo yes || echo no)"
 out=$("$R/app/runtime/Tests/display/test-borderless-rim.sh" --self-test 2>&1); rc=$?
 echo "$out" | sed 's/^/     /'
 expect "test-borderless-rim.sh catches the old code" 0 "$rc"

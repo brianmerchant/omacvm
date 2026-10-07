@@ -46,8 +46,13 @@ fixed=$(run fixed); echo "     $fixed"
 [[ $fixed == *" rim="* ]] || { echo "FAIL the probe could not measure its window"; exit 1; }
 [[ $fixed == *" shadow=no "* ]] || { echo "FAIL the helper left the shadow on"; exit 1; }
 [[ $fixed == *" rim=no" ]] || { echo "FAIL the borderless window still has a light edge"; exit 1; }
+major=$(sw_vers -productVersion | cut -d. -f1)
 if [[ $old == *" rim=yes" ]]; then
   echo "ok   this Mac draws the rim on a borderless window with a shadow; without the shadow, none"
+elif (( major >= 26 )); then
+  # macOS 26 draws it (MacBook Air, 26.6.2: edge 25,5 over black): not seeing
+  # it on the old window means the probe measures the wrong thing.
+  echo "FAIL macOS $major: the old window (shadow kept) shows no rim, so the probe proves nothing"; exit 1
 else
-  echo "ok   no rim with the helper (this Mac drew none without it either: the proof needs macOS 26+)"
+  echo "ok   no rim with the helper (macOS $major draws none without it either: the proof needs macOS 26+)"
 fi
