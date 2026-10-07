@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- OmacVM.app's VM window is compact and fits a 13-inch MacBook without
+  scrolling (it was up to about 900 points tall); on a smaller screen it stops at
+  the screen and scrolls. Settings sit in two columns, on/off settings are
+  switches, and the long explanations moved behind an (i). Disk is one row
+  with **Change…**. USB devices now have their own switch, off by default
+  (a VM that already had devices keeps them).
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
@@ -109,13 +118,6 @@ in more words.
   had it; in 3.0 that window is left only for tests). macOS 26 draws that
   line with a window's shadow; borderless windows now have none. macOS's
   own full screen, which 3.0 uses, never had the line.
-
-- OmacVM.app's VM window is compact and fits a 13-inch MacBook without
-  scrolling (it was up to about 900 points tall); on a smaller screen it stops at
-  the screen and scrolls. Settings sit in two columns, on/off settings are
-  switches, and the long explanations moved behind an (i). Disk is one row
-  with **Change…**. USB devices now have their own switch, off by default
-  (a VM that already had devices keeps them).
 
 ## 3.0.3
 
