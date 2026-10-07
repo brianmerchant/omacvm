@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.2 (unreleased)
+## 3.0.2
 
 - Touch ID in the VM (experimental, off by default; turn it on in the
   control centre or with `omacvm enable touch-id`): sudo, polkit prompts
