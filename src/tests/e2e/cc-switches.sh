@@ -138,6 +138,7 @@ fingerprint > "$OUT/fp-before.txt"
 # The test identity's own state (its CLI, keys, pins, its Bridge's folder): as it was, at the end.
 TSTATE=("$HOME/Library/Application Support/omacvm-test" "$HOME/Library/Application Support/omacvm-test-bridge")
 mkdir -p "$OUT/state-before"
+HELPERS_BEFORE=$(pgrep -f "OmacVM Test (Bridge|Gestures).app/Contents/MacOS/" | tr '\n' ' ')
 for d in "${TSTATE[@]}"; do [[ -d $d ]] && ditto "$d" "$OUT/state-before/$(basename "$d")"; done
 
 QPAT='(runtime/bin/OmacVM|MacOS/OmacVM-VM) -name'
@@ -159,6 +160,8 @@ cleanup() {
   if [[ -n $ROOTARG ]]; then
     if [[ -n $OLDROOT ]]; then defaults write "$APPID" vmsRoot "$OLDROOT"; else defaults delete "$APPID" vmsRoot 2>/dev/null; fi
   fi
+  # The test helpers this run started go again (one that ran before keeps running).
+  [[ -z $HELPERS_BEFORE ]] && pkill -f "OmacVM Test (Bridge|Gestures).app/Contents/MacOS/" 2>/dev/null
   for d in "${TSTATE[@]}"; do
     rm -rf "$d"; [[ -d $OUT/state-before/$(basename "$d") ]] && ditto "$OUT/state-before/$(basename "$d")" "$d"
   done
