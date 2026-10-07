@@ -10,6 +10,9 @@
 #   test-borderless-rim-live.sh            (in a GUI login session; over SSH too)
 #   RIM_PROBE_AT="x,y" test-borderless-rim-live.sh   (the window on screen there)
 #   test-borderless-rim-live.sh --build-only          (CI: the probe builds with the patch's helper)
+# When the probe cannot capture its own window it asks for `screencapture -l`;
+# RIM_NO_SCREENCAPTURE=1 skips that (over SSH it can raise macOS's screen
+# capture prompt).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 patch_file="$here/../../patches/omacvm-cocoa-borderless-no-rim.patch"
@@ -29,7 +32,8 @@ run() {   # MODE: prints the probe's line
   exec 3< <("$work/rim-probe" "$mode" "$png")
   while IFS= read -r line <&3; do
     case $line in
-      wid=*) /usr/sbin/screencapture -x -l "${line#wid=}" "$png.tmp" && mv "$png.tmp" "$png" ;;
+      wid=*) [[ -n ${RIM_NO_SCREENCAPTURE:-} ]] ||
+               { /usr/sbin/screencapture -x -l "${line#wid=}" "$png.tmp" && mv "$png.tmp" "$png"; } ;;
       *) echo "$line" ;;
     esac
   done
