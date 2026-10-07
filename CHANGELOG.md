@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- `omacvm build` checked for 30 GB free on the Mac's own disk even when the
+  VM goes to another drive (an SD card or external drive, with `--vm-dir` or
+  OmacVM.app's VMs folder there). It now checks the drive the VM goes to, and
+  the Mac's disk only for the download when that stays there, and says which
+  drive is short.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
