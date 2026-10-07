@@ -442,6 +442,8 @@ def over_port(key, data):
                 chunk = os.read(fd, 8192)
             except BlockingIOError:
                 continue
+            except OSError:
+                chunk = b""   # ECONNRESET (Linux): the app went away with our request unread
             if not chunk:
                 return password(WHY["app"])   # the app went away (POLLHUP)
             buf += chunk
