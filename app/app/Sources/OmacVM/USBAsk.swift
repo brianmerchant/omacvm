@@ -6,7 +6,7 @@ import OmacVMUSB
 /// over a full-screen window (as GPUMemory's alert), so it shows on the VM's
 /// full-screen Space without switching. After the answer the VM's window
 /// gets the keys back. Non-modal: the session can close it when the device
-/// is unplugged. Both buttons wait 0.5 s, so a Return typed into the VM
+/// is unplugged. Both buttons and the box wait 0.5 s, so a Return typed into the VM
 /// does not answer it.
 @MainActor
 final class USBAlertAsker: NSObject, @preconcurrency USBAsker {
@@ -24,12 +24,14 @@ final class USBAlertAsker: NSObject, @preconcurrency USBAsker {
         a.buttons[0].action = #selector(connect)
         a.buttons[1].target = self
         a.buttons[1].action = #selector(keep)
-        a.buttons.forEach { $0.isEnabled = false }
+        // The box too: a Space typed into the VM must not check it.
+        let controls = a.buttons + [a.suppressionButton].compactMap { $0 }
+        controls.forEach { $0.isEnabled = false }
         alert = a
         self.answer = answer
         show(a.window)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.guardTime) { [weak a] in
-            a?.buttons.forEach { $0.isEnabled = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.guardTime) {
+            controls.forEach { $0.isEnabled = true }
         }
     }
 

@@ -225,6 +225,17 @@ fq.takes = false
 fq.sent = []
 expect(USBQMP.attach(boardA, over: fq, wait: { _ in }) == .busy && fq.sent.last == "device_del" && fq.sent.filter { $0 == "human-monitor-command" }.count == 10,
        "attach that info usb never lists (3 s): removed again, busy")
+final class SilentQMP: USBQMPTransport {
+    var sent: [String] = []
+    func execute(_ command: String, _ arguments: [String: Any]?) throws -> [String: Any] {
+        sent.append(command)
+        if command == "human-monitor-command" { throw NSError(domain: "qmp", code: 2, userInfo: [NSLocalizedDescriptionKey: "timed out"]) }
+        return [:]
+    }
+}
+let sq = SilentQMP()
+expect(USBQMP.attach(boardA, over: sq, wait: { _ in }) == .failed("QEMU did not answer") && sq.sent.last == "device_del",
+       "attach: info usb never answers: removed again, QEMU's failure (not \"a Mac app is using it\")")
 fq.addFails = "QMP command device_add failed: failed to open host usb device 1:0"
 expect(USBQMP.attach(boardA, over: fq, wait: { _ in }) == .busy, "device_add refused (macOS has it): busy")
 
@@ -400,6 +411,52 @@ do {
     s3.plugged(probe)
     expect(a3.asked.count == 2 && m3.log == ["attach 1100000", "detach 1100000"], "6: back after the grace time: a new plug-in, asked")
 }
+// 6b. Review fixes: back and gone again; a different board back; a late result at a reused place.
+do {
+    let (s, m, a, c, _, _) = rig()
+    s.plugged(probe); a.answer(true)
+    s.unplugged(location: probe.location)
+    var back = probe
+    back.address = 9
+    s.plugged(back)
+    m.have.removeAll()
+    s.unplugged(location: probe.location)
+    c.advance(USBSession.grace)
+    expect(s.plugs.isEmpty && m.log == ["attach 1100000", "detach 1100000"],
+           "6b: back and gone again within the grace time: gone, not given to the VM again")
+    let (s2, m2, a2, c2, _, _) = rig()
+    let one = board("ONE", loc: 0x0110_0000), two = board("TWO", loc: 0x0110_0000)
+    s2.plugged(one); a2.answer(true)
+    s2.unplugged(location: one.location)
+    m2.have.removeAll()
+    s2.plugged(two)
+    c2.advance(USBSession.grace)
+    expect(a2.asked.count == 2 && a2.asked[1].location == two.location && m2.log == ["attach 1100000", "detach 1100000"]
+           && s2.plugs[two.location]?.state == .asking,
+           "6b: an identical board with another serial at that place: a new plug-in, asked")
+    var busyBack = probe
+    busyBack.interfaces = [I(number: 0, interfaceClass: 2, users: ["AppleUSBACMData"])]
+    let (s3, m3, a3, c3, _, _) = rig()
+    s3.plugged(probe); a3.answer(true)
+    s3.unplugged(location: probe.location)
+    m3.have.removeAll()
+    s3.plugged(busyBack)
+    c3.advance(USBSession.grace)
+    expect(m3.log == ["attach 1100000", "detach 1100000"] && s3.plugs[probe.location]?.state == .kept("macOS uses it as a serial port"),
+           "6b: back as a device macOS took: stays with the Mac, never given again")
+    let (s4, m4, a4, _, _, _) = rig(USBMemory(devices: [.init(vendor: "0483", product: "3748", name: "STM32 STLink", choice: .omarchy)]))
+    m4.hold = true
+    s4.plugged(probe)
+    s4.unplugged(location: probe.location)
+    let sdr = USBDevice(id: USBDeviceID(vendor: 0x1d50, product: 0x6089), name: "HackRF One", deviceClass: 0,
+                        interfaces: [I(number: 0, interfaceClass: 0xff, users: [])], location: probe.location, address: 7)
+    s4.plugged(sdr)
+    a4.answer(true)
+    m4.held.forEach { $0() }
+    expect(s4.plugs[sdr.location]?.state == .connected && s4.plugs[sdr.location]?.device == sdr
+           && m4.log == ["attach 1100000", "detach 1100000", "attach 1100000"],
+           "6b: a late answer for the device that left is not taken for the new one at that place (no device_del of it)")
+}
 // 7. Busy; the four-device limit.
 do {
     let (s, m, a, _, _, lines) = rig()
@@ -429,6 +486,12 @@ do {
     s.plugged(probe); a.answer(false)
     var rows = USBListRows.make(memory: s.memory, devices: [probe], states: s.plugs.mapValues(\.state), vmName: "Omarchy")
     expect(rows.plugged.first?.status == "Plugged in, on the Mac" && rows.plugged.first?.canConnect == true, "8: kept this time: the list offers Connect")
+    let (sa, ma, aa, _, _, _) = rig()
+    sa.plugged(probe)
+    let asking = USBListRows.make(memory: sa.memory, devices: [probe], states: sa.plugs.mapValues(\.state), vmName: "Omarchy")
+    sa.connectNow(location: probe.location)
+    expect(asking.plugged.first?.canConnect == false && ma.log.isEmpty && aa.open != nil,
+           "8: while its question is open the list offers no Connect (answered in the question)")
     s.connectNow(location: probe.location)
     rows = USBListRows.make(memory: s.memory, devices: [probe], states: s.plugs.mapValues(\.state), vmName: "Omarchy")
     expect(m.have.contains(probe.location) && rows.plugged.first?.status == "Connected to Omarchy" && rows.plugged.first?.canDisconnect == true,
@@ -459,6 +522,13 @@ do {
     expect(twin.remembered.map(\.detail) == ["STMicroelectronics · 0483:3748 · serial …7867", "STMicroelectronics · 0483:3748 · serial …4851"]
            && twin.remembered.map(\.status) == ["Not plugged in", "Plugged in"],
            "10: two identical boards: the serial tells them apart, each its own status")
+}
+do {
+    let twin = board("", loc: 0x0120_0000)
+    let shared = USBMemory(devices: [.init(vendor: "0483", product: "3748", name: "STM32 STLink", choice: .omarchy)])
+    let rows = USBListRows.make(memory: shared, devices: [probe, twin], states: nil, vmName: "Omarchy")
+    expect(rows.remembered.count == 1 && rows.plugged.count == 1 && rows.plugged[0].plan == .omarchy,
+           "10: two boards without a serial: the second shows the choice they share")
 }
 try? FileManager.default.removeItem(at: tmp)
 

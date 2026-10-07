@@ -148,7 +148,8 @@ public final class USBSession {
     public func plugged(_ d: USBDevice) {
         guard !stopped else { return }
         if var p = plugs[d.location] {
-            if p.state == .leaving && p.device.id == d.id {
+            // The same device back (same id and serial, still free): a reset.
+            if p.state == .leaving && p.device.id == d.id && p.device.serial == d.serial && d.availability == .free {
                 p.returned = d
                 plugs[d.location] = p
                 return
@@ -216,7 +217,10 @@ public final class USBSession {
                 }
             }
         case .leaving:
-            break
+            // Back and gone again within the grace time: gone (unless it comes back once more).
+            var q = p
+            q.returned = nil
+            plugs[location] = q
         default:
             plugs[location] = nil
         }
@@ -335,10 +339,12 @@ public final class USBSession {
 
     private func attachDone(_ loc: UInt32, _ d: USBDevice, _ result: USBAttachResult) {
         guard !stopped else { return }
-        guard var p = plugs[loc], p.device.location == d.location,
+        guard var p = plugs[loc], p.device == d,
               p.state == .connecting || p.state == .leaving else {
-            // Unplugged (and something else there now) meanwhile: take it back.
-            if result == .attached { machine.detach(d) { _ in } }
+            // Unplugged meanwhile (its device_del is queued already). Another
+            // device at that place now has the same QEMU id: only when nothing
+            // is there may it be taken back once more.
+            if result == .attached && plugs[loc] == nil { machine.detach(d) { _ in } }
             return
         }
         if p.state == .leaving {

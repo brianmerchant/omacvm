@@ -58,12 +58,17 @@ public enum USBQMP {
         } catch {
             return reason(qemuError: "\(error)")
         }
+        var answered = false
         for i in 0..<10 {
             if i > 0 { wait(0.3) }
-            if let ids = try? attached(over: qmp), ids.contains(id) { return .attached }
+            if let ids = try? attached(over: qmp) {
+                answered = true
+                if ids.contains(id) { return .attached }
+            }
         }
         _ = try? qmp.execute("device_del", ["id": id])
-        return .busy
+        // QEMU never answered "info usb": not a Mac app's doing.
+        return answered ? .busy : .failed("QEMU did not answer")
     }
 
     /// Takes it from the VM (the Mac gets it back when QEMU closes it).

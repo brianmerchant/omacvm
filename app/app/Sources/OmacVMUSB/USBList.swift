@@ -55,7 +55,9 @@ public struct USBListRows: Equatable, Sendable {
             switch states[d.location] {
             case .connected?: return ("Connected to \(vmName)", false, true)
             case .connecting?: return ("Connecting…", false, false)
-            case .asking?, .waiting?: return ("Plugged in, waiting for your answer", true, false)
+            // Asking: answered in the question (Connect here would race it).
+            case .asking?: return ("Plugged in, waiting for your answer", false, false)
+            case .waiting?: return ("Plugged in, waiting for your answer", true, false)
             case .leaving?: return ("Reconnecting…", false, false)
             default: return ("Plugged in, on the Mac", true, false)
             }
@@ -76,7 +78,8 @@ public struct USBListRows: Equatable, Sendable {
             let (s, c, dis) = status(d)
             out.plugged.append(Row(id: "plug-\(String(format: "%08x", d.location))", name: d.displayName,
                                    detail: detail(maker: d.maker, id: d.id.description, serial: d.serial, sharedID: false),
-                                   status: s, plan: .ask, key: nil, device: d,
+                                   // A device without a serial shares its twin's entry (USBMemory.entry).
+                                   status: s, plan: memory.entry(for: d)?.choice ?? .ask, key: nil, device: d,
                                    canConnect: running && c, canDisconnect: running && dis))
         }
         for d in devices {
