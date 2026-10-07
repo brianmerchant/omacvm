@@ -35,6 +35,9 @@ public enum DiskSize {
 
     // MARK: The size slider
 
+    /// disk.img's length in whole GB (nearest).
+    public static func wholeGB(_ bytes: Int64) -> Int { Int((bytes + gib / 2) / gib) }
+
     /// The smallest disk OmacVM makes: the prebuilt image's and the setup's.
     public static let floorGB = 64
     /// What the Mac keeps free should the disk fill up (the slider's top).
@@ -201,7 +204,8 @@ public enum DiskSize {
 
     /// Shrinks btrfs on / to `fsBytes` while it is mounted (btrfs moves what
     /// lies past the new end). A refused resize leaves it as it was. Prints
-    /// "dev=BYTES", btrfs' size afterwards.
+    /// "dev=BYTES", btrfs' size afterwards (filesystem show; device usage's
+    /// "Device size" is the partition's).
     public static func shrinkScript(fsBytes: Int64) -> String {
         """
         fs=$(findmnt -no FSTYPE /)
@@ -211,7 +215,7 @@ public enum DiskSize {
         btrfs filesystem resize \(fsBytes) / 2>&1 || exit 4
         btrfs filesystem sync /
         sync
-        echo "dev=$(btrfs device usage -b / | awk '/Device size:/ {print $3; exit}')"
+        echo "dev=$(btrfs filesystem show --raw / | awk '/devid/ {print $4; exit}')"
         """
     }
 
@@ -233,7 +237,7 @@ public enum DiskSize {
         [ -b "$disk" ] || exit 3
         v=$(sfdisk --verify "$disk" 2>&1) || { echo "partition table: $v"; exit 7; }
         p=$(blockdev --getsize64 "$part")
-        f=$(btrfs device usage -b / | awk '/Device size:/ {print $3; exit}')
+        f=$(btrfs filesystem show --raw / | awk '/devid/ {print $4; exit}')
         [ -n "$f" ] && [ "$f" -le "$p" ] || { echo "fs=$f part=$p"; exit 8; }
         s=$(btrfs scrub start -B -r / 2>&1) || { echo "scrub: $s"; exit 9; }
         case $s in *"no errors found"*) ;; *) echo "scrub: $s"; exit 9 ;; esac

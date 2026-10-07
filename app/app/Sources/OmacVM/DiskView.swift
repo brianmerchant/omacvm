@@ -90,12 +90,24 @@ enum VMDisk {
 
     enum Change { case larger, smaller }
 
-    /// Apply in Disk › Change… (the VM off). Larger: done here. Smaller: a
-    /// clone of disk.img and the plan; the VM's next start does the rest.
+    /// Apply in Disk › Change… (the VM off), checked against the slider's
+    /// bounds again. Larger: done here. Smaller: a clone of disk.img and the
+    /// plan; the VM's next start does the rest.
     static func change(_ c: VMConfig, to newGB: Int) throws -> Change {
         guard let now = info(c) else { throw HelperError.io("No disk.img in \(c.folder.path).") }
         guard resize(c) == nil else { throw HelperError.io("The last change of the disk is not finished.") }
-        if Int64(newGB) * DiskSize.gib > now.maxBytes {
+        let currentGB = DiskSize.wholeGB(now.maxBytes)
+        guard newGB != currentGB else { throw HelperError.io("The disk is already \(currentGB) GB.") }
+        var known: DiskSize.Need?, why = ""
+        switch need(c) {
+        case .success(let n): known = n
+        case .failure(let p): why = p.description
+        }
+        let bounds = DiskSize.bounds(currentGB: currentGB, need: known, unknownWhy: why, freeBytes: now.freeBytes)
+        if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: bounds, vmRunning: inUse(c)) {
+            throw HelperError.io(p)
+        }
+        if newGB > currentGB {
             try grow(c, to: newGB)
             return .larger
         }
@@ -131,7 +143,7 @@ enum VMDisk {
             let why = String(cString: strerror(errno))
             throw HelperError.io("Could not copy disk.img first (\(why)). Making it smaller needs a Mac-formatted (APFS) drive.")
         }
-        let fromGB = Int((now.maxBytes + DiskSize.gib - 1) / DiskSize.gib)
+        let fromGB = DiskSize.wholeGB(now.maxBytes)
         do {
             try setResize(DiskSize.Resize(step: .shrink, fromGB: fromGB, toGB: newGB, plan: plan), c)
         } catch {
@@ -405,7 +417,7 @@ struct DiskSizeSheet: View {
     @State private var field = ""
     @State private var note: String?
 
-    private var currentGB: Int { Int((info.maxBytes + DiskSize.gib / 2) / DiskSize.gib) }
+    private var currentGB: Int { DiskSize.wholeGB(info.maxBytes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

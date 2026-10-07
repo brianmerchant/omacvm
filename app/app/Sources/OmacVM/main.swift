@@ -159,11 +159,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Test builds (the disk size check on a test Mac): Apply in Disk ›
         // Change… for this size, before --start.
         if let v = TestHooks.value("OMACVM_TEST_DISK_GB", bundleID: Bundle.main.bundleIdentifier), let gb = Int(v) {
-            do {
-                VMDisk.log(state.config, "test: disk to \(gb) GB: \(try VMDisk.change(state.config, to: gb))")
-            } catch {
-                VMDisk.log(state.config, "test: disk to \(gb) GB refused: \(error.localizedDescription)")
-            }
+            let result: String
+            do { result = "\(try VMDisk.change(state.config, to: gb))" } catch { result = "refused: \(error.localizedDescription)" }
+            try? "disk to \(gb) GB: \(result)\n".write(to: state.config.folder.appendingPathComponent("logs/test-disk-change"),
+                                                     atomically: true, encoding: .utf8)
             reloadConfig()
         }
         if let again {
