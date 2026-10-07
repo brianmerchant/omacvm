@@ -103,6 +103,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -518,10 +519,14 @@ static int mouseFrameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int
 // A VM's full-screen window is a normal window (layer 0).
 static int isQemu(pid_t pid);
 static int (*isQemuFn)(pid_t) = isQemu;
-static int vmNet(pid_t pid, const char *name);
-// The app in front is a VM of the other identity's OmacVM app (vmNet):
-// to this Gestures any other app; its escape combo is the other one's.
+static int vmNet(pid_t pid, const char *name, int *foreign);
+// The app in front is a VM (QEMU) of the other identity's OmacVM app (vmNet):
+// to this Gestures any other app; its escape combo is the other one's. Its
+// launcher is not: the combo there goes back into this Gestures' VM.
 static int frontForeign;
+// The full-screen VM in front last (vmPid) is a QEMU, not OmacVM.app's
+// launcher: found on the capture check, so the event tap never reads a file.
+static int vmIsQemu;
 
 static int vmFullScreen(pid_t pid, CGWindowID *win) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
@@ -790,6 +795,7 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
       retargetLocked(capturing);
     }
     pthread_mutex_unlock(&sendLock);
+    if (pid != vmPid) vmIsQemu = isQemuFn(pid);
     vmPid = pid; vmWin = win;
   } else if (other) {
     otherPid = pid; otherWin = win;
@@ -846,8 +852,7 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   logPermissions();
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  int net = vmNet(pid, name);
-  frontForeign = net < 0 && !strcmp(name, "OmacVM");
+  int net = vmNet(pid, name, &frontForeign);
   CGWindowID win = 0;
   int front = net >= 0 && vmFullScreen(pid, &win);
   // Which of the app's VMs: its window title, on this check (every 0.2 s
@@ -1057,20 +1062,15 @@ static int comboAction(int vmFront, int esc, int haveVM, int winVM, int winBack)
 // its own app's VMs; the app is read from the process's path
 // (<app>.app/Contents/...). An unknown one (a development build's QEMU
 // outside a bundle, a bundle that cannot be read) stays every Gestures', as
-// before. Main thread.
+// before. Main thread (the capture check), never in the event tap.
 #define TEST_APP_ID "org.omacvm.app.test"
-#define TEST_GESTURES_ID "org.omacvm.test.gestures"
 
-// 1: this is the test identity's Gestures (its bundle id); -1: not looked yet.
-static int identityTest = -1;
-static int testIdentity(void) {
-  if (identityTest < 0) {
-    CFBundleRef b = CFBundleGetMainBundle();
-    CFStringRef id = b ? CFBundleGetIdentifier(b) : NULL;
-    identityTest = id && CFStringCompare(id, CFSTR(TEST_GESTURES_ID), 0) == kCFCompareEqualTo;
-  }
-  return identityTest;
-}
+// The test identity's Gestures (build.sh with OMACVM_HELPER_TEST=1), set at
+// build time like its port and settings domain.
+#ifndef GESTURES_TEST_IDENTITY
+#define GESTURES_TEST_IDENTITY 0
+#endif
+static int identityTest = GESTURES_TEST_IDENTITY;   // tests change it
 
 // The .app an executable runs from: its path up to the first
 // ".app/Contents/". 0 if it is in no bundle.
@@ -1091,52 +1091,92 @@ static int vmOursRule(const char *appID, int test) {
   return !strcmp(appID, TEST_APP_ID) == !!test;
 }
 
-// The bundle id of the app at `app` (read once per path; a failed read is not
-// kept, so an app being swapped by an update is read again next time).
+// The bundle id in an app's Info.plist (read itself: CFBundle keeps what it
+// read about a path, a failed read too, for the life of the process). Kept
+// per path while the file is the same (inode, size, change time); a failed
+// read is kept 5 s, so an app being swapped by an update is read again soon
+// but not on every 0.2 s check.
 #define APP_IDS 8
-static struct { char path[PROC_PIDPATHINFO_MAXSIZE]; char id[128]; } appIds[APP_IDS];
+#define PLIST_MAX (1 << 20)
+static struct {
+  char path[PROC_PIDPATHINFO_MAXSIZE];
+  char id[128];          // "" = no id read
+  ino_t ino; off_t size; struct timespec ctime;
+  double failedAt;
+} appIds[APP_IDS];
 static int appIdsNext;
-static int appBundleID(const char *app, char *out, size_t cap) {
-  for (int i = 0; i < APP_IDS; i++)
-    if (appIds[i].path[0] && !strcmp(appIds[i].path, app)) { snprintf(out, cap, "%s", appIds[i].id); return 1; }
-  // Its Info.plist itself: CFBundle keeps what it read about a path for the
-  // life of the process, a failed read too.
-  char plist[PROC_PIDPATHINFO_MAXSIZE + 32];
-  snprintf(plist, sizeof plist, "%s/Contents/Info.plist", app);
+static int readBundleID(const char *plist, off_t size, char *out, size_t cap) {
+  if (size <= 0 || size > PLIST_MAX) return 0;
   FILE *f = fopen(plist, "rb");
   if (!f) return 0;
-  char buf[65536];
-  size_t n = fread(buf, 1, sizeof buf, f);
+  char *buf = malloc((size_t)size);
+  size_t n = buf ? fread(buf, 1, (size_t)size, f) : 0;
   fclose(f);
-  CFDataRef data = CFDataCreate(NULL, (const UInt8 *)buf, (CFIndex)n);
+  CFDataRef data = n ? CFDataCreate(NULL, (const UInt8 *)buf, (CFIndex)n) : NULL;
+  free(buf);
   CFPropertyListRef pl = data ? CFPropertyListCreateWithData(NULL, data, kCFPropertyListImmutable, NULL, NULL) : NULL;
   CFTypeRef id = pl && CFGetTypeID(pl) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(pl, CFSTR("CFBundleIdentifier")) : NULL;
   int ok = id && CFGetTypeID(id) == CFStringGetTypeID() && CFStringGetCString(id, out, (CFIndex)cap, kCFStringEncodingUTF8);
   if (pl) CFRelease(pl);
   if (data) CFRelease(data);
-  if (!ok) return 0;
-  int k = appIdsNext++ % APP_IDS;
-  snprintf(appIds[k].path, sizeof appIds[k].path, "%s", app);
-  snprintf(appIds[k].id, sizeof appIds[k].id, "%s", out);
-  return 1;
+  return ok;
+}
+static int appBundleID(const char *app, char *out, size_t cap) {
+  char plist[PROC_PIDPATHINFO_MAXSIZE + 32];
+  snprintf(plist, sizeof plist, "%s/Contents/Info.plist", app);
+  struct stat st;
+  int have = stat(plist, &st) == 0;
+  int k = -1;
+  for (int i = 0; i < APP_IDS; i++)
+    if (appIds[i].path[0] && !strcmp(appIds[i].path, app)) k = i;
+  if (k >= 0) {
+    if (!appIds[k].id[0] && monoNow() - appIds[k].failedAt < 5) return 0;
+    if (appIds[k].id[0] && have && st.st_ino == appIds[k].ino && st.st_size == appIds[k].size &&
+        st.st_ctimespec.tv_sec == appIds[k].ctime.tv_sec && st.st_ctimespec.tv_nsec == appIds[k].ctime.tv_nsec) {
+      snprintf(out, cap, "%s", appIds[k].id);
+      return 1;
+    }
+  } else {
+    k = appIdsNext++ % APP_IDS;
+    snprintf(appIds[k].path, sizeof appIds[k].path, "%s", app);
+  }
+  int ok = have && readBundleID(plist, st.st_size, out, cap);
+  if (ok) {
+    snprintf(appIds[k].id, sizeof appIds[k].id, "%s", out);
+    appIds[k].ino = st.st_ino; appIds[k].size = st.st_size; appIds[k].ctime = st.st_ctimespec;
+  } else {
+    appIds[k].id[0] = 0;
+    appIds[k].failedAt = monoNow();
+  }
+  return ok;
 }
 
 // An executable of this identity's OmacVM app, or of no known app.
 static int ourExe(const char *exe) {
   char app[PROC_PIDPATHINFO_MAXSIZE], id[128];
-  if (!vmAppPath(exe, app, sizeof app) || !appBundleID(app, id, sizeof id)) return vmOursRule(NULL, testIdentity());
-  return vmOursRule(id, testIdentity());
+  if (!vmAppPath(exe, app, sizeof app) || !appBundleID(app, id, sizeof id)) return vmOursRule(NULL, identityTest);
+  return vmOursRule(id, identityTest);
 }
 
-// Which VM app a front process `name` is: Parallels' VM window, UTM's,
-// VMware Fusion's, or this identity's OmacVM app (-1: none of them).
-static int vmNet(pid_t pid, const char *name) {
+// Which VM app a front process `name` (executable `exe`, "" if unknown) is:
+// Parallels' VM window, UTM's, VMware Fusion's, or this identity's OmacVM app
+// (-1: none of them). *foreign: a VM (QEMU, not the launcher) of the other
+// identity's OmacVM app.
+static int vmNetOf(const char *name, const char *exe, int *foreign) {
+  *foreign = 0;
   if (!strcmp(name, "prl_client_app")) return 0;
   if (!strcmp(name, "UTM")) return NET_UTM;
   if (!strcmp(name, "VMware Fusion")) return listenAddrs[NET_FUSION][0] ? NET_FUSION : -1;
   if (strcmp(name, "OmacVM")) return -1;
-  char exe[PROC_PIDPATHINFO_MAXSIZE];
-  return proc_pidpath(pid, exe, sizeof exe) <= 0 || ourExe(exe) ? NET_APP : -1;
+  if (!exe[0] || ourExe(exe)) return NET_APP;
+  *foreign = !strstr(exe, "/Contents/MacOS/");
+  return -1;
+}
+
+static int vmNet(pid_t pid, const char *name, int *foreign) {
+  char exe[PROC_PIDPATHINFO_MAXSIZE] = "";
+  if (proc_pidpath(pid, exe, sizeof exe) <= 0) exe[0] = 0;
+  return vmNetOf(name, exe, foreign);
 }
 
 // This identity's OmacVM.app QEMU (Contents/Resources/runtime/bin/OmacVM, or
@@ -1552,7 +1592,8 @@ static pid_t topAppOn(CGRect b, pid_t skip, CGWindowID *win) {
 }
 
 // The test identity (build.sh with OMACVM_HELPER_TEST=1) builds with its own
-// domain, port and Bridge folder, so it never meets the installed Gestures.
+// domain, port and Bridge folder, so it never meets the installed Gestures,
+// and takes only OmacVM Test.app's VMs (GESTURES_TEST_IDENTITY).
 #ifndef GESTURES_DOMAIN
 #define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
 #endif
@@ -2124,7 +2165,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo && !frontIsVM && vmOffSpace && appPid > 0 && appPid == vmPid &&
         !(f & (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift)) &&
         CGEventGetIntegerValueField(e, kCGEventSourceStateID) == kCGEventSourceStateHIDSystemState &&
-        !CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) && isQemuFn(vmPid) && missionControlOpenFn()) {
+        !CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) && vmIsQemu && missionControlOpenFn()) {
       escClosedMC = 1;   // its repeats and its up too: QEMU must not see half a key
       later(closeMissionControl);
       return NULL;

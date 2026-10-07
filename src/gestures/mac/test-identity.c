@@ -1,26 +1,33 @@
 // Offline test (test.sh): each Gestures takes only its own OmacVM app's VMs.
 // OmacVM.app (org.omacvm.app) and OmacVM Test.app (org.omacvm.app.test) both
 // run their VMs as processes named OmacVM; the normal Gestures takes the
-// first's, the test identity's Gestures (org.omacvm.test.gestures) the
-// second's, and a VM of no known app (a development build's QEMU) stays
-// every Gestures'. Made-up app bundles in a temporary folder (the bundle read
-// is the helper's own) and a real process outside any bundle (the kernel's
-// path). The escape combo pressed in the other identity's VM is
-// passed on (its own Gestures acts on it). No permissions, no VM.
+// first's, the test identity's Gestures (built with GESTURES_TEST_IDENTITY)
+// the second's, and a VM of no known app (a development build's QEMU) stays
+// every Gestures'. Made-up app bundles in a temporary folder (the plist read
+// and its cache are the helper's own) and a real process outside any bundle
+// (the kernel's path). The escape combo in the other identity's VM is passed
+// on (its own Gestures acts on it); in its launcher it goes back into ours.
+// No permissions, no VM.
 #define main helper_main
 #include "omacvm-gestures.c"
 #undef main
 #include <copyfile.h>
 #include <spawn.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 
 extern char **environ;
 static int fail;
+static char dir[64];
 static void check(int ok, const char *what) {
   printf("%s %s\n", ok ? "ok  " : "FAIL", what);
   fflush(stdout);
   if (!ok) fail = 1;
+}
+static void cleanup(void) {
+  if (!dir[0]) return;
+  char cmd[128];
+  snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);
+  if (system(cmd)) {}
 }
 
 static void mkdirs(const char *path) {
@@ -31,40 +38,60 @@ static void mkdirs(const char *path) {
   mkdir(p, 0755);
 }
 
-// <dir>/<name>.app with this bundle id (NULL: no Info.plist). Only paths
-// into it are asked about: a new executable in an app bundle can wait many
-// seconds for macOS's first-run check before it runs.
-static void makeApp(const char *dir, const char *name, const char *id) {
+// <dir>/<name>.app/Contents/Info.plist with this bundle id and `pad` bytes of
+// comment (a large plist). Only paths into it are asked about: a new
+// executable in an app bundle can wait many seconds for macOS's first-run
+// check before it runs.
+static int writePlist(const char *name, const char *id, int pad) {
   char p[1024];
-  snprintf(p, sizeof p, "%s/%s.app/Contents/MacOS", dir, name); mkdirs(p);
-  snprintf(p, sizeof p, "%s/%s.app/Contents/Resources/runtime/bin", dir, name); mkdirs(p);
-  if (id) {
-    snprintf(p, sizeof p, "%s/%s.app/Contents/Info.plist", dir, name);
-    FILE *f = fopen(p, "w");
-    fprintf(f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>"
-               "<key>CFBundleIdentifier</key><string>%s</string>"
-               "<key>CFBundleExecutable</key><string>OmacVM</string></dict></plist>\n", id);
-    fclose(f);
+  snprintf(p, sizeof p, "%s/%s.app/Contents", dir, name);
+  mkdirs(p);
+  snprintf(p, sizeof p, "%s/%s.app/Contents/Info.plist", dir, name);
+  FILE *f = fopen(p, "w");
+  if (!f) return 0;
+  fprintf(f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>");
+  if (pad > 0) {
+    fprintf(f, "<!-- ");
+    for (int i = 0; i < pad; i++) fputc('x', f);
+    fprintf(f, " -->");
   }
+  fprintf(f, "<key>CFBundleIdentifier</key><string>%s</string></dict></plist>\n", id);
+  return fclose(f) == 0;
 }
-
-static pid_t run(const char *path) {
-  pid_t pid = 0;
-  char *argv[] = {(char *)path, "30", NULL};
-  if (posix_spawn(&pid, path, NULL, NULL, argv, environ)) return 0;
-  return pid;
+static void makeApp(const char *name, const char *id) {
+  char p[1024];
+  snprintf(p, sizeof p, "%s/%s.app/Contents/MacOS", dir, name);
+  mkdirs(p);
+  if (id && !writePlist(name, id, 0)) check(0, "write a plist");
 }
-
-static void stop(pid_t pid) { if (pid > 0) { kill(pid, SIGKILL); waitpid(pid, NULL, 0); } }
+static void exe(char *out, size_t cap, const char *name, int launcher) {
+  snprintf(out, cap, "%s/%s.app/Contents/%s", dir, name, launcher ? "MacOS/OmacVM" : "Resources/runtime/bin/OmacVM");
+}
+static void forgetFailures(void) { for (int i = 0; i < APP_IDS; i++) appIds[i].failedAt -= 10; }
 
 static int fakeWindow(pid_t pid, CGWindowID win) { (void)win; return pid > 0; }
 static int fakeNoMC(void) { return 0; }
-
 static CGEventRef combo(int down) {
   CGEventRef e = CGEventCreateKeyboardEvent(NULL, ESC_KEYCODE, down);
   CGEventSetFlags(e, kCGEventFlagMaskControl | kCGEventFlagMaskAlternate);
   CGEventSetIntegerValueField(e, kCGEventSourceStateID, kCGEventSourceStateHIDSystemState);
   return e;
+}
+// The combo pressed with this front app (as updateCapture classifies it):
+// 1 = handled here (back into our full-screen VM), 0 = passed on.
+static int comboHere(const char *exePath) {
+  int foreign;
+  int net = vmNetOf("OmacVM", exePath, &foreign);
+  frontForeign = foreign;
+  frontChanged(700, net, 0, "", 0, net < 0);
+  int before = pendingSteps;
+  CGEventRef d = combo(1), u = combo(0);
+  CGEventRef rd = tapCb(NULL, kCGEventKeyDown, d, NULL);
+  tapCb(NULL, kCGEventKeyUp, u, NULL);
+  int here = rd == NULL && pendingSteps == before + 1;
+  CFRelease(d); CFRelease(u);
+  lastComboAt = -1;   // no double press
+  return here;
 }
 
 int main(void) {
@@ -80,78 +107,78 @@ int main(void) {
   check(vmOursRule(NULL, 0) && vmOursRule(NULL, 1), "an unknown VM: every Gestures'");
   check(vmOursRule("org.example.renamed", 0) && !vmOursRule("org.example.renamed", 1),
         "another bundle id (a renamed copy): the normal Gestures'");
-  identityTest = -1;
-  check(testIdentity() == 0, "this test (no bundle) is the normal identity");
+  check(identityTest == 0, "built without GESTURES_TEST_IDENTITY: the normal identity");
 
-  char tmpl[] = "/tmp/omacvm-gestures-identity.XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir) { printf("FAIL no temporary folder\n"); return 1; }
-  makeApp(dir, "OmacVM", "org.omacvm.app");
-  makeApp(dir, "OmacVM Test", TEST_APP_ID);
-  makeApp(dir, "Broken", NULL);   // no Info.plist: unknown
-  char prodQemu[1024], prodLauncher[1024], testQemu[1024], testLauncher[1024], brokenQemu[1024], p[1024];
-  snprintf(prodQemu, sizeof prodQemu, "%s/OmacVM.app/Contents/Resources/runtime/bin/OmacVM", dir);
-  snprintf(prodLauncher, sizeof prodLauncher, "%s/OmacVM.app/Contents/MacOS/OmacVM", dir);
-  snprintf(testQemu, sizeof testQemu, "%s/OmacVM Test.app/Contents/Resources/runtime/bin/OmacVM", dir);
-  snprintf(testLauncher, sizeof testLauncher, "%s/OmacVM Test.app/Contents/MacOS/OmacVM", dir);
-  snprintf(brokenQemu, sizeof brokenQemu, "%s/Broken.app/Contents/Resources/runtime/bin/OmacVM", dir);
+  snprintf(dir, sizeof dir, "/tmp/omacvm-gestures-identity.XXXXXX");
+  if (!mkdtemp(dir)) { dir[0] = 0; printf("FAIL no temporary folder\n"); return 1; }
+  atexit(cleanup);
+  makeApp("OmacVM", "org.omacvm.app");
+  makeApp("OmacVM Test", TEST_APP_ID);
+  makeApp("Broken", NULL);   // no Info.plist: unknown
+  char prodQemu[512], prodLauncher[512], testQemu[512], testLauncher[512], brokenQemu[512], p[512];
+  exe(prodQemu, sizeof prodQemu, "OmacVM", 0);
+  exe(prodLauncher, sizeof prodLauncher, "OmacVM", 1);
+  exe(testQemu, sizeof testQemu, "OmacVM Test", 0);
+  exe(testLauncher, sizeof testLauncher, "OmacVM Test", 1);
+  exe(brokenQemu, sizeof brokenQemu, "Broken", 0);
+  int foreign;
 
   identityTest = 0;   // the normal Gestures
-  check(ourExe(prodQemu) && ourExe(prodLauncher), "normal Gestures: OmacVM.app's VM and launcher are its own");
-  check(!ourExe(testQemu) && !ourExe(testLauncher), "normal Gestures: OmacVM Test.app's are not");
-  check(ourExe(brokenQemu), "normal Gestures: a VM of an unreadable app stays its own");
+  check(vmNetOf("OmacVM", prodQemu, &foreign) == NET_APP && !foreign &&
+        vmNetOf("OmacVM", prodLauncher, &foreign) == NET_APP && !foreign,
+        "normal Gestures: OmacVM.app's VM and launcher are its own");
+  check(vmNetOf("OmacVM", testQemu, &foreign) < 0 && foreign, "normal Gestures: OmacVM Test.app's VM is the other one's");
+  check(vmNetOf("OmacVM", testLauncher, &foreign) < 0 && !foreign,
+        "normal Gestures: OmacVM Test.app's launcher is just another app");
+  check(vmNetOf("OmacVM", brokenQemu, &foreign) == NET_APP, "normal Gestures: a VM of an unreadable app stays its own");
   identityTest = 1;   // the test identity's Gestures
-  check(ourExe(testQemu) && ourExe(testLauncher), "test Gestures: OmacVM Test.app's VM and launcher are its own");
-  check(!ourExe(prodQemu) && !ourExe(prodLauncher), "test Gestures: OmacVM.app's are not");
-  check(ourExe(brokenQemu), "test Gestures: a VM of an unreadable app stays its own");
+  check(vmNetOf("OmacVM", testQemu, &foreign) == NET_APP && vmNetOf("OmacVM", testLauncher, &foreign) == NET_APP,
+        "test Gestures: OmacVM Test.app's VM and launcher are its own");
+  check(vmNetOf("OmacVM", prodQemu, &foreign) < 0 && foreign, "test Gestures: OmacVM.app's VM is the other one's");
+  check(vmNetOf("OmacVM", brokenQemu, &foreign) == NET_APP, "test Gestures: a VM of an unreadable app stays its own");
+  check(vmNetOf("OmacVM", "", &foreign) == NET_APP && vmNetOf("UTM", prodQemu, &foreign) == NET_UTM &&
+        vmNetOf("prl_client_app", "", &foreign) == 0 && vmNetOf("Safari", "", &foreign) < 0,
+        "no path: as before; Parallels, UTM and other apps as before");
 
-  // The bundle id is read again after a failed read (an app being swapped).
+  // The plist cache: a failed read is kept a few seconds, then read again;
+  // an app replaced at the same path is read again; a large plist is read whole.
   identityTest = 0;
-  makeApp(dir, "Late", NULL);
-  snprintf(p, sizeof p, "%s/Late.app/Contents/Resources/runtime/bin/OmacVM", dir);
+  makeApp("Late", NULL);
+  exe(p, sizeof p, "Late", 0);
   check(ourExe(p), "an app without Info.plist yet: unknown, its own");
-  char plist[1024];
-  snprintf(plist, sizeof plist, "%s/Late.app/Contents/Info.plist", dir);
-  FILE *f = fopen(plist, "w");
-  fprintf(f, "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key>"
-             "<string>" TEST_APP_ID "</string></dict></plist>\n");
-  fclose(f);
-  check(!ourExe(p), "... once it has one (the test app's), read again: not the normal Gestures'");
+  writePlist("Late", TEST_APP_ID, 0);
+  check(ourExe(p), "... its plist written now: the failed read is kept for a few seconds");
+  forgetFailures();
+  check(!ourExe(p), "... then read again: the test app's, not the normal Gestures'");
+  sleep(1);   // a new change time
+  writePlist("Late", "org.omacvm.app", 0);
+  check(ourExe(p), "the app replaced at the same path (another bundle id): read again");
+  makeApp("Big", NULL);
+  writePlist("Big", TEST_APP_ID, 200000);
+  exe(p, sizeof p, "Big", 0);
+  check(!ourExe(p), "a 200 KB plist is read whole");
 
   // A real process (the kernel's path): a development build's QEMU, outside
   // any bundle, is every Gestures' (a copy of sleep stands in for it).
   snprintf(p, sizeof p, "%s/qemu-system-aarch64", dir);
   copyfile("/bin/sleep", p, NULL, COPYFILE_ALL);
-  pid_t devQemu = run(p);
+  pid_t devQemu = 0;
+  char *argv[] = {p, "30", NULL};
+  posix_spawn(&devQemu, p, NULL, NULL, argv, environ);
   for (int i = 0; i < 100; i++) { char e[PROC_PIDPATHINFO_MAXSIZE]; if (proc_pidpath(devQemu, e, sizeof e) > 0) break; usleep(20000); }
   identityTest = 0;
-  check(isQemu(devQemu) && vmNet(devQemu, "OmacVM") == NET_APP, "normal Gestures: a development build's QEMU is its own");
+  check(isQemu(devQemu) && vmNet(devQemu, "OmacVM", &foreign) == NET_APP, "normal Gestures: a development build's QEMU is its own");
   identityTest = 1;
-  check(isQemu(devQemu) && vmNet(devQemu, "OmacVM") == NET_APP, "test Gestures: a development build's QEMU is its own");
-  check(vmNet(devQemu, "UTM") == NET_UTM && vmNet(devQemu, "prl_client_app") == 0 && vmNet(devQemu, "Safari") < 0,
-        "Parallels, UTM and other apps as before");
-  stop(devQemu);
+  check(isQemu(devQemu) && vmNet(devQemu, "OmacVM", &foreign) == NET_APP, "test Gestures: a development build's QEMU is its own");
+  if (devQemu > 0) { kill(devQemu, SIGKILL); waitpid(devQemu, NULL, 0); }
 
-  // The escape combo in the other identity's full-screen VM, with one of ours
-  // full screen on another Space: passed on, nothing done here.
+  // The escape combo with one of ours full screen on another Space, through
+  // the same classification as the capture check.
   identityTest = 0;
   vmWindowFn = fakeWindow; missionControlOpenFn = fakeNoMC;
   frontChanged(getppid(), NET_APP, 1, "Omarchy", 0, 0);   // ours in front, full screen (a live pid)
-  frontChanged(700, -1, 0, "", 0, 1);               // the test app's VM: any other app
-  frontForeign = 1;
-  CGEventRef d = combo(1), u = combo(0);
-  CGEventRef rd = tapCb(NULL, kCGEventKeyDown, d, NULL), ru = tapCb(NULL, kCGEventKeyUp, u, NULL);
-  check(rd == d && ru == u && pendingSteps == 0 && !capturing,
-        "the combo in the other identity's VM: passed on, not back into ours");
-  frontForeign = 0;
-  CGEventRef d2 = combo(1), u2 = combo(0);
-  CGEventRef rd2 = tapCb(NULL, kCGEventKeyDown, d2, NULL);
-  tapCb(NULL, kCGEventKeyUp, u2, NULL);
-  check(rd2 == NULL && pendingSteps == 1, "... in any other app: back into ours, as before");
-  CFRelease(d); CFRelease(u); CFRelease(d2); CFRelease(u2);
-
-  char cmd[1100];
-  snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);
-  if (system(cmd)) {}
+  check(!comboHere(testQemu), "the combo in the other identity's VM: passed on, not back into ours");
+  check(comboHere(testLauncher), "... in the other identity's launcher (no VM): back into ours");
+  check(comboHere("/Applications/Safari.app/Contents/MacOS/Safari"), "... in any other app: back into ours, as before");
   return fail;
 }
