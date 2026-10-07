@@ -152,10 +152,14 @@ OmacVM.app, Parallels, UTM, VMware Fusion).
   The app relays it like `org.omacvm.control` (see "OmacVM.app's port").
 - Timeouts in the client: 1 s to connect, 35 s for the answer, and one
   deadline of 40 s for the whole request (a "Bridge" that drips a byte at a
-  time cannot hold sudo or the agent), then exit 1. Ctrl+C in sudo kills
-  the client; the agent's Cancel kills the helper, and the client, which
-  watches its parent, stops too; either way the closed connection cancels
-  the Mac dialog.
+  time cannot hold sudo or the agent), then exit 1. Ctrl+C in sudo's
+  terminal never reaches the client: pam_exec starts it in a session of
+  its own, and sudo blocks SIGINT and SIGQUIT while PAM runs. The client
+  watches its parent: a stop signal pending at sudo (`/proc/<sudo>/status`)
+  cancels the request at once (then sudo's password prompt; a second
+  Ctrl+C ends sudo), and the agent's Cancel kills the helper, so the
+  client's parent changes and it stops too. Either way the Mac's dialog
+  or panel closes.
 
 ### OmacVM.app's port
 
@@ -587,7 +591,23 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
   stand-in Bridge and a stand-in panel, no dialog or window on that Mac):
   real PAM, polkit 127 and the port. sudo and pkexec yes with and without
   the panel path (64-129 ms; the Bridge's 103 and the app's `yes` line),
-  the panel's `no cancelled` gives sudo's password prompt, Ctrl+C with the
-  panel up closes the panel and drops the Bridge connection, SSH never
+  the panel's `no cancelled` gives sudo's password prompt, a SIGINT to sudo
+  alone with the panel up (`timeout -s INT`, not a real Ctrl+C: see the
+  3.0.2 Air re-check below) closed the panel, SSH never
   asks, `touchid.sh off` takes it all out. A pkexec within 2 s of a sudo
   gets the password: the Bridge's own 2 s rule (and the relay's 0.2 s).
+- MacBook Air re-check of the 3.0.2 candidate (5c7fc40b, 2026-10-07 03:01-03:40;
+  the test app, a fresh VM from the 3.0.0 image, `omacvm enable touch-id`,
+  full screen, Omanotch on). Two bugs, both fixed in #204: (1) the Bridge
+  answered `not-front` to every request: since DockIdentity (3.0.1)
+  LaunchServices names `Contents/MacOS/OmacVM` for QEMU, and `frontType`
+  read that before the kernel's path. (2) A real Ctrl+C (typed in the VM's
+  terminal) left the panel up for its 30 s: the client runs in its own
+  session and the SIGINT waits at sudo; the client now watches for it and
+  the panel closed 0.5 s after the Ctrl+C. With both fixes: the panel from
+  QEMU with no click and the sensor armed; Escape, a Cancel click, the
+  timeout, Finder to the front each a signed no and the password; the
+  panel follows an Omarchy theme switch (catppuccin-latte reached the
+  Bridge 3 s after `omarchy-theme-set`); after three misses the fast
+  `rate` no; `"touch_id_panel": false` shows macOS's dialog, no click,
+  Escape works; the Bridge stopped: the password after about 110 ms.

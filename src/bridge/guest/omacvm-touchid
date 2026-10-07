@@ -270,15 +270,40 @@ def polkit_action(user):
     return names.pop() if len(names) == 1 else ""
 
 
+# Ctrl+C, Ctrl+\, a closed terminal, a kill: pending at the caller.
+STOP_SIGNALS = (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM)
+
+
+def interrupted(pid):
+    """pam_exec starts this client in a session of its own, so the terminal's
+    Ctrl+C never reaches it, and sudo blocks SIGINT and SIGQUIT while PAM
+    runs: the Ctrl+C waits at sudo (its /proc status, SigPnd or ShdPnd)."""
+    mask = sum(1 << (int(n) - 1) for n in STOP_SIGNALS)
+    try:
+        for line in read(f"{PROC}/{pid}/status", 4096).decode(errors="replace").splitlines():
+            k, _, v = line.partition(":")
+            if k in ("SigPnd", "ShdPnd") and int(v.strip() or "0", 16) & mask:
+                return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
 def watch_parent():
     """The PAM caller went away (the agent's Cancel kills the helper): stop,
-    so the closed connection takes the Mac's dialog down with it."""
-    parent = os.getppid()
+    so the closed connection takes the Mac's dialog down with it. Ctrl+C in
+    sudo's terminal (pending at sudo): the same, through the deadline's path,
+    so the Mac's dialog is cancelled at once."""
+    parent, main = os.getppid(), threading.main_thread().ident
 
     def run():
         while True:
             time.sleep(0.25)
             if os.getppid() != parent:
+                os._exit(1)
+            if interrupted(parent):
+                signal.pthread_kill(main, signal.SIGALRM)   # Deadline: the cancel goes out, then the password
+                time.sleep(1)
                 os._exit(1)
     threading.Thread(target=run, daemon=True).start()
 
