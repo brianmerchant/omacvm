@@ -463,7 +463,7 @@ class UpdatesScreen(Screen):
 
     def counted(self, n: int | None) -> None:
         self.app.omarchy_waiting = n
-        if self in self.app.screen_stack:   # not after esc
+        if self.app.is_running and self in self.app.screen_stack:   # not after esc, nor while the app closes
             self.redraw()
 
     def redraw(self) -> None:
@@ -796,15 +796,22 @@ class ControlCentre(App):
         self.c.refresh_vm_checks()
         self.call_from_thread(self.refresh_all)
 
+    # The timers and the workers' answers find nothing to draw on once the app
+    # closes: Textual takes the screens' widgets down, then the screens, while
+    # the app's timers still run (q while a job runs; every test's end).
     def refresh_all(self) -> None:
         self.rows = self.c.rows()
         if self.c.vm_checks is not None and not self.c.from_cache:
             self.c.write_attention(self.rows)
+        if not self.is_running:
+            return
         for s in self.screen_stack:
             if hasattr(s, "redraw"):
                 s.redraw()
 
     def spin(self) -> None:
+        if not self.is_running:
+            return
         if any(r.status is S.Status.BUSY for r in self.rows):
             self.tick += 1
             s = self.screen
@@ -826,7 +833,7 @@ class ControlCentre(App):
                                 "Force Off and Update).")
             self.refresh_all()
             return
-        if not self.progress():
+        if not self.progress() or not self.is_running:
             return
         for s in self.screen_stack:
             if isinstance(s, FeaturesScreen):

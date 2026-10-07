@@ -76,6 +76,13 @@ vmnet_return_t fake_set_callback(interface_ref i, interface_event_t ev, dispatch
 }
 
 static int failures;
+// Seconds by the monotonic clock, to the microsecond: time() counts whole
+// seconds, so a serve() of 50 ms that spanned a second's turn took "1 s".
+static double now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
 static void expect(int ok, const char *what) {
     printf("%s %s\n", ok ? "ok  " : "FAIL", what);
     if (!ok) failures++;
@@ -90,9 +97,9 @@ static double oneConnection(void) {
     struct conn *c = calloc(1, sizeof *c);
     c->fd = sv[0]; c->uid = 501; c->pid = 1;
     if (!slotTake(501)) return -1;
-    time_t t0 = time(NULL);
+    double t0 = now();
     serve(c);
-    return difftime(time(NULL), t0);
+    return now() - t0;
 }
 
 // One connection whose VM sends a small frame every 100 ms for up to `secs`
@@ -123,9 +130,9 @@ static double talkingConnection(int secs) {
     if (!slotTake(501)) return -1;
     pthread_t t;
     pthread_create(&t, NULL, sendFrames, (void *)(intptr_t)secs);
-    time_t t0 = time(NULL);
+    double t0 = now();
     serve(c);
-    double took = difftime(time(NULL), t0);
+    double took = now() - t0;
     pthread_join(t, NULL);
     return took;
 }
@@ -475,7 +482,9 @@ int main(void) {
     // closed within seconds; soon after its start that counts as a failure.
     writeFails = VMNET_FAILURE;
     t = talkingConnection(10);
-    expect(t >= FAIL_SECS && t < 5 && nconns == 0 && liveIfaces == 0 && vmnetFailures == 1,
+    // The daemon counts FAIL_SECS in whole seconds of time() (from x.9 to
+    // (x+2).0 is "2 s"), so it may close after just over FAIL_SECS - 1.
+    expect(t > FAIL_SECS - 1 && t < 5 && nconns == 0 && liveIfaces == 0 && vmnetFailures == 1,
            "vmnet writes keep failing: connection closed, counts as a failed start");
     resetBackoff(); writeFails = 0;
     t = talkingConnection(3);

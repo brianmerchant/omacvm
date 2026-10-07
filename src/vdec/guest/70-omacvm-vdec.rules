@@ -1,2 +1,5 @@
-# The decoder's control device belongs to its daemon only.
-KERNEL=="omacvm-vdec", OWNER="omacvm-vdec", GROUP="omacvm-vdec", MODE="0600"
+# The decoder's control device belongs to its daemon only. It also starts the
+# daemon whenever it appears: a module that comes after the boot started its
+# services (DKMS builds it at the first boot of a new kernel) would else leave
+# the daemon down, and Chromium decoding on the CPU, until the next start.
+SUBSYSTEM=="misc", KERNEL=="omacvm-vdec", OWNER="omacvm-vdec", GROUP="omacvm-vdec", MODE="0600", TAG+="systemd", ENV{SYSTEMD_WANTS}+="omacvm-vdecd.service"
