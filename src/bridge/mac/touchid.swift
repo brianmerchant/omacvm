@@ -133,7 +133,17 @@ func touchIDPasswordFallback() -> Bool {
   return strictBool(o["touch_id_password_fallback"]) ?? false
 }
 
-let touchID = TouchIDDecider(auth: LATouchID(), mac: LiveMacState())
+/// The test identity's stand-in (touchid_policy.swift): `touchid-test` in the
+/// test Bridge's own folder. Never read by a release Bridge.
+func touchIDTestFile() -> TouchIDOutcome? {
+  guard testIdentity else { return nil }
+  return touchIDTestAnswer(try? String(contentsOfFile: supportDir + "/touchid-test", encoding: .utf8))
+}
+
+let touchID = testIdentity
+  ? TouchIDDecider(auth: TouchIDTestAuth(real: LATouchID(), answer: touchIDTestFile),
+                   mac: TouchIDTestMac(real: LiveMacState(), answer: touchIDTestFile, frontWhenTesting: "app"))
+  : TouchIDDecider(auth: LATouchID(), mac: LiveMacState())
 
 /// True once the VM's client closed its end (Ctrl+C in sudo).
 func peerGone(_ fd: Int32) -> Bool {
@@ -180,5 +190,6 @@ func touchIDRequest(fd: Int32, peer: String, method: String, path: String, heade
   if case .no(let n) = o { result = "no " + n.rawValue } else { result = "yes" }
   var fast = false
   if case .no(let n) = o, n == .rate || n == .busy { fast = true }
-  reply(200, touchIDAnswer(o), "\(r.kind.rawValue) \(result)", quiet: fast)   // never the detail
+  let stand = touchIDTestFile() != nil ? " (test stand-in, no dialog)" : ""
+  reply(200, touchIDAnswer(o), "\(r.kind.rawValue) \(result)\(stand)", quiet: fast)   // never the detail
 }
