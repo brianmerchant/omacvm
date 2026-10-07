@@ -63,8 +63,8 @@ prebuilt_make_vm() {
   t0=$(date +%s)
   case $TYPE in
     parallels) SEED_NET=10.211.55.0/24 ;;
-    utm) SEED_NET=192.168.64.0/24; SEED_DISPLAY=$(swift "$R/src/display/mac-display.swift" 2>/dev/null || true) ;;
-    fusion) b=$(fusion_host); SEED_NET=${b%.*}.0/24; SEED_DISPLAY=$(swift "$R/src/display/mac-display.swift" 2>/dev/null || true) ;;
+    utm) SEED_NET=192.168.64.0/24; SEED_DISPLAY=$(mac_tool mac-display 2>/dev/null || true) ;;
+    fusion) b=$(fusion_host); SEED_NET=${b%.*}.0/24; SEED_DISPLAY=$(mac_tool mac-display 2>/dev/null || true) ;;
   esac
   case $TYPE in
     parallels)

@@ -19,6 +19,16 @@ in more words.
   does not take is sent again with growing waits, at most every 30 s once
   it keeps failing, and never more than 4 times in 30 s.
 
+- A Mac without Xcode's Command Line Tools: OmacVM.app no longer makes macOS
+  ask to install them. Before, the setup screen's look for a prebuilt VM ran
+  python3 and opened macOS's "install the command line developer tools?"
+  window as the app opened, Build refused until they were installed, and
+  the control centre's jobs and `omacvm vms` asked again (a Swift script
+  for the notch). The app now carries a python3, Omanotch and those Swift
+  programs ready made, so its whole route runs without them (and without
+  Homebrew). UTM, VMware Fusion and Parallels still need them, and
+  `omacvm build` asks for them only there.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps
