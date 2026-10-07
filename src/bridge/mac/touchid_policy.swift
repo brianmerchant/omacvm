@@ -12,6 +12,28 @@ let touchIDDialogTimeout: Double = 30
 /// The file name of a VM's Touch ID key on the Mac: the control key's name + ".touchid".
 func touchIDKeyName(type: String, name: String) -> String { vmKeyName(type: type, name: name) + ".touchid" }
 
+/// The OmacVM.app VM a Touch ID request through the app's relay is for,
+/// without waiting for `omacvm vms`. The app named the VM (the guest cannot),
+/// and the request came through that VM's port in the running app, so it
+/// runs; a Touch ID key on this Mac for it (`hasKey`) says OmacVM set it up
+/// and the feature is on. Then the list's entry for it, or one made from the
+/// name when the list does not have it yet (a Bridge that just started, a
+/// VM that just started): the first Touch ID after either worked only with
+/// the list, which takes seconds (3.0.3: the password that time). nil: no
+/// key, so the list decides (unknown VM, or Touch ID off).
+func touchIDRelayVM(_ name: String, list: [VMEntry], hasKey: (VMEntry) -> Bool) -> VMEntry? {
+  let named = VMEntry(name: name, type: "app", state: "running", ip: "", omacvm: "", setup: true)
+  guard !name.isEmpty, hasKey(named) else { return nil }
+  let hits = list.filter { $0.type == "app" && $0.name == name }
+  return hits.count == 1 ? hits[0] : named
+}
+
+/// How long a Touch ID request from an address the VM list does not have
+/// waits for a fresh list (Parallels, UTM, Fusion; the control centre waits
+/// VMListCache.unknownWait). The person waits for a prompt anyway, and the
+/// client gives the Mac 35 s: a slow `omacvm vms` must not mean the password.
+let touchIDListWait: Double = 10
+
 enum TouchIDKind: String { case sudo, polkit, onePassword = "1password" }
 
 struct TouchIDRequest: Equatable {

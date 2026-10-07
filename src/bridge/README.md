@@ -368,9 +368,18 @@ program a VMs folder on an external drive without asking (Removable
 Volumes): through the app, the run is the app's, with the access the person
 gave the app. The app runs only the Bridge's commands, only for OmacVM Bridge
 of its own identity and signer (app/app/Sources/OmacVM/ControlRun.swift). It is read again in the background, one run at a time, when the list
-is a minute old, after a job, and for an address the list does not have (a
-VM that just started) at most once a minute, since any guest can add
-addresses. Also when a request does not prove with the key of the VM the
+is a minute old and after a job. A VM the list does not have (or not as
+running, set up and reachable: it just started, or the Bridge did) gets a
+run first, and its request waits up to 4 s for it before the answer is
+409 unknown-vm: at most once a second for an OmacVM.app VM (the app names
+it), every 10 s for an address, since any guest can add addresses. A VM
+that runs but whose SSH did not answer the Mac is told so ("the Mac cannot
+reach this VM"), not "not running": a fresh look 5 s after the last list
+(waited for, up to 4 s: a VM that just started again is found by it); when
+that look still cannot reach it, the next ones wait 30, 60, then 120 s
+(each probes the VM over SSH, and its sshd may be turning the Mac away), and
+the answer comes from the list at once in between. Jobs a VM asks for never
+become root on the Mac (`OMACVM_ADMIN_PROMPT=none`). Also when a request does not prove with the key of the VM the
 list has at its address (that VM stopped and another took the address): at
 most once a minute, when the list is 5 s old or more; the 403 then says
 "looking" (`"looking": true`) and the VM asks again instead of telling the
@@ -405,10 +414,16 @@ for 60 s, then 5 min, then 30 min, until a yes. The log has the VM, the
 kind and the result, never the command. In the VM the client asks only
 for the person at the VM's screen (logind's display session; sudo from a
 terminal of theirs, not over SSH) and only for a sudo command it can show
-whole. OmacVM.app's VMs ask through the virtio port `org.omacvm.auth` (only
-with `touch-id=on` at the VM's start); the app passes the request on to
+whole. OmacVM.app's VMs ask through the virtio port `org.omacvm.auth`
+(every VM has it from its start since 3.0.4, so Touch ID works as soon as
+it is turned on; the Bridge answers `off` while the VM has no Touch ID
+key); the app passes the request on to
 the relay socket with the relay key and the VM's name, the guest's
-signature along, and the signed answer back unchanged (`AuthRelay`).
+signature along, and the signed answer back unchanged (`AuthRelay`). The
+Bridge takes such a request by that name when it has the VM's Touch ID
+key, without waiting for its VM list (`touchIDRelayVM`): the first request
+after the Bridge or the VM started used to get `409 unknown-vm`. Requests
+from an address (Parallels, UTM, Fusion) wait up to 10 s for a fresh list.
 
 For OmacVM.app's VMs the Mac asks in a panel in the VM's Omarchy theme
 (from 3.0.2), shown by QEMU, the VM window's own process: macOS reads the

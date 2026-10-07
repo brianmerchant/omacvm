@@ -310,7 +310,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
-    private func startVM(openGLOnce: String? = nil) {
+    /// How a start takes the network: `.ask` checks the fast network's
+    /// service first (askFastNetwork); `.decided(why)`: checked, and why this
+    /// start goes on QEMU's user network although the fast network is on (nil:
+    /// as FastNetwork.choose says).
+    enum NetworkStart { case ask, decided(String?) }
+
+    private func startVM(openGLOnce: String? = nil, network: NetworkStart = .ask) {
         // A build or an update runs the VM without a window: a second QEMU on
         // its disk (a start from the Dock or `omacvm start`) would corrupt it.
         if state.screen == .building {
@@ -330,6 +336,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // The fast network on, and its service not for this app (after an app
+        // update): asked first, never a start that cannot work.
+        guard case .decided(let userNetwork) = network else {
+            if FastNetwork.isOn(state.config) {
+                askFastNetwork { [weak self] why in self?.startVM(openGLOnce: openGLOnce, network: .decided(why)) }
+            } else {
+                startVM(openGLOnce: openGLOnce, network: .decided(nil))
+            }
+            return
+        }
         // A smaller disk: the guest shrank btrfs at the last start; cut
         // disk.img before QEMU opens it (VMDisk, DiskImage.cut).
         if VMDisk.resize(state.config)?.step == .cut {
@@ -338,9 +354,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let r = Runner(config: state.config)
         r.openGLOnce = openGLOnce
+        r.userNetwork = userNetwork
         r.onExit = { [weak self, weak r] status in
             guard let self else { return }
             let fellBack = r?.venusFallback
+            let userNetwork = r?.userNetwork
             self.runner = nil
             // An update with a VM restart: it installs now; the new app starts the VM.
             if !self.quitting, Updater.shared.vmEndedForRestart() { return }
@@ -357,7 +375,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? FileManager.default.copyItem(at: logs.appendingPathComponent("qemu.log"),
                                                   to: logs.appendingPathComponent("qemu-vulkan-fallback.log"))
                 if !self.quitting {
-                    self.startVM(openGLOnce: fb.keep ? nil : fb.why)
+                    self.startVM(openGLOnce: fb.keep ? nil : fb.why, network: .decided(userNetwork))
                     if self.runner != nil {
                         self.state.message = fb.keep
                             ? "\(Graphics.didNotStart) (\(fb.why)). \"Try Vulkan again\" under Graphics tries it once more."
@@ -412,6 +430,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             state.message = "Could not start the VM: \(error.localizedDescription)"
             showWindow()
+        }
+    }
+
+    /// Before a start of a VM with the fast network on: its service must
+    /// serve this app. After an app update it may be from another protocol
+    /// (src/net/mac/install.sh --status "old"), or missing: the person
+    /// updates it now (macOS's password dialog, once) or the VM starts on
+    /// QEMU's user network this time and says so. `done` gets why the start
+    /// takes the user network, nil when the service is fine.
+    private var askingFastNetwork = false
+    private func askFastNetwork(_ done: @escaping (String?) -> Void) {
+        guard !askingFastNetwork else { return }   // a second start while asking: the first one starts
+        askingFastNetwork = true
+        let finish: (String?) -> Void = { [weak self] why in
+            self?.askingFastNetwork = false
+            done(why)
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let status = FastNetwork.statusBeforeStart()
+            DispatchQueue.main.async {
+                // Stopped after vmnet failures: the normal network until the Mac restarts, no question.
+                if status == "stopped" { finish(FastNetwork.stoppedText); return }
+                guard let need = FastNetwork.serviceNeeds(status) else { finish(nil); return }
+                // Test builds answer without the question (OMACVM_TEST_FAST_NETWORK_ANSWER=update|normal);
+                // a run without a window has nobody to ask.
+                let hook = TestHooks.value("OMACVM_TEST_FAST_NETWORK_ANSWER", bundleID: Bundle.main.bundleIdentifier)
+                let hidden = ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil
+                let update: Bool
+                if let hook {
+                    update = hook == "update"
+                } else if hidden {
+                    finish(FastNetwork.notUpdated("there was no window to ask in")); return
+                } else {
+                    let a = NSAlert()
+                    a.messageText = need.title
+                    a.informativeText = "\(need.why)\n\n\(need.action): macOS asks for your password once. "
+                        + "Or start on the normal network (QEMU's own) this time; the fast network stays on for the next starts."
+                    a.addButton(withTitle: need.button)
+                    a.addButton(withTitle: "Start on Normal Network")
+                    NSApp.activate()
+                    update = a.runModal() == .alertFirstButtonReturn
+                }
+                guard update else { finish(FastNetwork.notUpdated("you chose the normal network for this start")); return }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let err = FastNetwork.updateService()
+                    DispatchQueue.main.async {
+                        guard let err else { finish(nil); return }
+                        if hook == nil && !hidden {
+                            let b = NSAlert()
+                            b.messageText = "The fast network was not updated"
+                            b.informativeText = "\(err)\n\nThe VM starts on the normal network (QEMU's own) this time."
+                            b.addButton(withTitle: "Start")
+                            NSApp.activate()
+                            b.runModal()
+                        }
+                        finish(FastNetwork.notUpdated(err))
+                    }
+                }
+            }
         }
     }
 

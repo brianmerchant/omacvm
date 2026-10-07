@@ -24,12 +24,22 @@ public struct TouchIDPanelPrompt: Equatable {
     public var timeout: Int
     /// "#rrggbb" for the keys in `colorKeys` the Bridge sent (others dropped).
     public var colors: [String: String]
+    /// The card's frame as Omarchy draws its own prompt: its border (one
+    /// colour, or two for Hyprland's gradient at `borderAngle` degrees) and
+    /// its corners (Hyprland's rounding). Empty, 0, 0: what the Bridge did
+    /// not send (an older one).
+    public var border: [String]
+    public var borderAngle: Double
+    public var radius: Double
 
-    public static let colorKeys = ["background", "foreground", "accent", "error", "success", "muted"]
+    public static let colorKeys = ["background", "foreground", "accent", "error", "success"]
     public static let maximumHeaderBytes = 4096
+    public static let radiusMax = 12.0
 
-    public init(title: String, line: String, box: String?, timeout: Int, colors: [String: String]) {
+    public init(title: String, line: String, box: String?, timeout: Int, colors: [String: String],
+                border: [String] = [], borderAngle: Double = 0, radius: Double = 0) {
         self.title = title; self.line = line; self.box = box; self.timeout = timeout; self.colors = colors
+        self.border = border; self.borderAngle = borderAngle; self.radius = radius
     }
 
     static func isHexColor(_ s: String) -> Bool {
@@ -53,11 +63,24 @@ public struct TouchIDPanelPrompt: Equatable {
             guard let s = text(b, max: 1024) else { return nil }
             box = s
         }
-        var colors: [String: String] = [:]
+        var colors: [String: String] = [:], border: [String] = [], angle = 0.0, radius = 0.0
         if let c = o["theme"] as? [String: Any] {
             for k in colorKeys { if let v = c[k] as? String, isHexColor(v) { colors[k] = v } }
+            // The frame: whole or not at all (a half gradient is no gradient).
+            if let b = c["border"] as? [String], (1...2).contains(b.count), b.allSatisfy(isHexColor) {
+                border = b
+                if b.count == 2, let a = number(c["border_angle"]), (0..<360).contains(a) { angle = a }
+            }
+            if let r = number(c["radius"]) { radius = min(max(r, 0), radiusMax) }
         }
-        return TouchIDPanelPrompt(title: title, line: line, box: box, timeout: t, colors: colors)
+        return TouchIDPanelPrompt(title: title, line: line, box: box, timeout: t, colors: colors,
+                                  border: border, borderAngle: angle, radius: radius)
+    }
+
+    /// A finite JSON number that is not a bool.
+    static func number(_ v: Any?) -> Double? {
+        guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue.isFinite else { return nil }
+        return n.doubleValue
     }
 
     /// The prompt from the Bridge's X-OmacVM-Panel header, or nil.
@@ -68,7 +91,10 @@ public struct TouchIDPanelPrompt: Equatable {
     }
 
     public var json: [String: Any] {
-        var o: [String: Any] = ["title": title, "line": line, "timeout": timeout, "theme": colors]
+        var theme: [String: Any] = colors
+        if !border.isEmpty { theme["border"] = border; theme["border_angle"] = borderAngle }
+        theme["radius"] = radius
+        var o: [String: Any] = ["title": title, "line": line, "timeout": timeout, "theme": theme]
         if let box { o["box"] = box }
         return o
     }

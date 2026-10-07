@@ -384,6 +384,8 @@ struct ReadyView: View {
     @State private var fastNetBusy = false
     @State private var fastNetNote: String?
     @State private var fastNetStatus = ""
+    /// The service needs the person (FastNetwork.serviceNeeds): its button.
+    @State private var fastNetFix: String?
     @State private var graphics = GraphicsChoice.auto
     @State private var graphicsNote: String?
     @State private var macFolder: String?
@@ -656,6 +658,9 @@ struct ReadyView: View {
                   isOn: Binding(get: { fastNetOn }, set: { on in if on != fastNetOn { toggleFastNetwork() } }),
                   enabled: !fastNetBusy) {
             if fastNetBusy { ProgressView().controlSize(.small) }
+            if let fix = fastNetFix, fastNetOn {
+                Button(fix) { updateFastNetwork() }.disabled(fastNetBusy)
+            }
             InfoButton(topic: "the fast network", text: Self.fastNetworkInfo)
         }
         if !fastNetStatus.isEmpty { RowNote(fastNetStatus) }
@@ -666,37 +671,68 @@ struct ReadyView: View {
 
     /// The line under the switch, worked out off the main thread (the service
     /// check verifies QEMU's code signature, which reads the whole binary).
-    /// Off says nothing: the (i) explains.
-    nonisolated private static func fastNetworkStatus(_ c: VMConfig) -> (Bool, String) {
-        guard FastNetwork.isOn(c) else { return (false, "") }
-        if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): switch it off, then on again.") }
-        return (true, FastNetwork.lastRecord(c) == "vmnet" ? "" : "On from the VM's next start.")
+    /// Off says nothing: the (i) explains. The service is checked as the installer checks it (an older build of
+    /// the same protocol is fine; another protocol after an app update needs
+    /// an update): its button then, Update… or Install…
+    nonisolated private static func fastNetworkStatus(_ c: VMConfig) -> (on: Bool, text: String, fix: String?) {
+        guard FastNetwork.isOn(c) else {
+            return (false, "", nil)
+        }
+        let status = FastNetwork.serviceStatus()
+        if status == "stopped" { return (true, "On, but \(FastNetwork.stoppedText); until then the VM starts on the normal network.", nil) }
+        if let need = FastNetwork.serviceNeeds(status) {
+            return (true, "On. \(need.why) \(need.button) fixes it (macOS asks for your password once); until then the VM starts on the normal network.", need.button)
+        }
+        if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): switch it off, then on again.", nil) }
+        return (true, FastNetwork.lastRecord(c) == "vmnet" ? "" : "On from the VM's next start.", nil)
     }
 
     private func refreshFastNetwork() {
         let c = state.config
         fastNetOn = FastNetwork.isOn(c)
         Task.detached {
-            let (on, text) = Self.fastNetworkStatus(c)
+            let st = Self.fastNetworkStatus(c)
             await MainActor.run {
-                fastNetOn = on
-                fastNetStatus = text
+                fastNetOn = st.on
+                fastNetStatus = st.text
+                fastNetFix = st.fix
             }
         }
     }
 
     private func toggleFastNetwork() {
         let c = state.config, on = !fastNetOn
+        // A VM of this app that runs on the fast network keeps it until it shuts down.
+        let inUse = state.vmRunning() && FastNetwork.lastRecord(c) == "vmnet"
         fastNetBusy = true
         fastNetNote = nil
         Task.detached {
-            let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c)
-            let (now, text) = Self.fastNetworkStatus(c)
+            let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c, vmnetInUse: inUse)
+            let st = Self.fastNetworkStatus(c)
             await MainActor.run {
                 fastNetBusy = false
                 fastNetNote = err
-                fastNetOn = now
-                fastNetStatus = text
+                fastNetOn = st.on
+                fastNetStatus = st.text
+                fastNetFix = st.fix
+            }
+        }
+    }
+
+    /// Update… / Install…: the service for this app (macOS's password dialog).
+    private func updateFastNetwork() {
+        let c = state.config
+        fastNetBusy = true
+        fastNetNote = nil
+        Task.detached {
+            let err = FastNetwork.updateService()
+            let st = Self.fastNetworkStatus(c)
+            await MainActor.run {
+                fastNetBusy = false
+                fastNetNote = err
+                fastNetOn = st.on
+                fastNetStatus = st.text
+                fastNetFix = st.fix
             }
         }
     }
@@ -708,7 +744,7 @@ extension KeyAccess {
     /// before OmacVM was allowed. (Here, not in KeyAccess.swift, which
     /// src/tests/app-key-access.sh compiles on its own.)
     static func note(folder: URL) -> KeyNote {
-        KeyNote.decide(allowedNow: listen || post, lastLog: lastLog(folder: folder))
+        KeyNote.decide(allowedNow: allowed, lastLog: lastLog(folder: folder))
     }
 }
 

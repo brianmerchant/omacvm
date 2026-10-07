@@ -525,11 +525,32 @@ longer goes through one QEMU thread. Measured: see
   address. So two running app VMs with the same name (an APFS clone before
   `omacvm apply` renames it), one on each network, push each other out of
   Gestures every 2 s: give clones their own name.
-- `omacvm disable fast-network` (or the switch) goes back at the next start; when none of
-  your app VMs has the fast network any more it also removes the service
-  (a VM still running on it then moves to the user network at once).
+- Turning it on or off (the app, `omacvm enable`/`disable`, the control
+  centre, Update VM) is for the VM's next start: a VM that runs keeps the
+  network it has until it shuts down, and every address lookup follows the
+  running QEMU (its network in `logs/network`, its card's MAC address on its
+  command line), never the `fast-network` file. When none of your app VMs
+  has the fast network any more and none runs on it, turning it off also
+  removes the service; while one still runs on it the service stays (`omacvm
+  uninstall` takes it off).
   `omacvm uninstall` removes it for your Mac user, and from the Mac when no
   other user has it.
+- After an app update: the service has a protocol number (`omacvm-netd
+  --protocol`; builds from 3.0.1 to 3.0.3, which have none, count as 1;
+  3.0.0's and 2.9's are installed again). An
+  installed service of the same protocol serves the new app as it is, so most
+  updates need no new install and no password. When the protocol changed (or
+  the service was installed for another app), `src/net/mac/install.sh
+  --status` says `old`: the app asks before the VM's next start (**The fast
+  network needs an update: Update…**, one password), its window has
+  **Update…** beside the switch, and `omacvm check` and `omacvm enable
+  fast-network` say and do the same. The control centre (anything a VM
+  asks for) never puts up macOS's password dialog nor uses sudo: turning
+  the fast network on there sets it for the next start, and the app asks on
+  the Mac then. If
+  you say no, the VM starts on QEMU's user network and says so
+  (`logs/network`, `omacvm check`); nothing else stops on it (other
+  switches, Update VM).
 
 What is missing before it can become the default: [below](#fast-network-not-done-yet).
 

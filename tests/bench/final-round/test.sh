@@ -257,7 +257,8 @@ rm -rf "$T/home/.omacvm-bench.lock"
 
 # ---------- round.sh: plan, budget, order, resume (dry runs, nothing started) ----------
 RD=$T/rd; W=$T/wall.png; : > "$W"
-RS() { WALLPAPER=$W HOME=$T/home bash "$FR/round.sh" "$@" 2>&1; }
+# The rows of a laptop on any Mac: a desktop Mac (the CI's Mac mini) would drop the idle rows.
+RS() { WALLPAPER=$W HOME=$T/home FINAL_ROUND_IDLE_DESKTOP=1 bash "$FR/round.sh" "$@" 2>&1; }
 check "round: idle windows 3 minutes at any budget" '[[ $(RS --plan) == *"idle windows 180s"* ]] && [[ $(RS --plan --budget 240) == *"idle windows 180s"* ]]'
 check "round: FINAL_ROUND_IDLE_MAX lets a long budget give longer windows" '[[ $(FINAL_ROUND_IDLE_MAX=600 RS --plan --budget 240) == *"idle windows 600s"* ]]'
 check "round: RC2 steps only with RC2_APP" '[[ $(RS --plan) == *"rc2-vulkan      app-rc2    gpu    10 min  not run"* ]] && [[ $(RC2_APP=/x RS --plan) == *"rc2-vulkan      app-rc2    gpu    10 min  run"* ]]'
