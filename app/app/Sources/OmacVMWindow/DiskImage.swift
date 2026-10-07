@@ -214,6 +214,12 @@ public enum DiskImage {
         return .success(ShrinkPlan(fromBytes: l.imageBytes, newBytes: newBytes, partitionLast: lastUsable, fsBytes: fsBytes))
     }
 
+    /// disk.img is cut as `plan` says already (a start that stopped before
+    /// it saved the step).
+    public static func isCut(_ l: Layout, plan: ShrinkPlan) -> Bool {
+        l.imageBytes == plan.newBytes && l.root.last == plan.partitionLast && l.fs.deviceBytes <= plan.fsBytes
+    }
+
     /// The new primary header, entry array and backup header for `plan` (pure:
     /// tested without a disk).
     public static func shrunkTables(_ g: GPT, plan: ShrinkPlan) -> (primary: [UInt8], entries: [UInt8], backup: [UInt8], backupEntriesLBA: Int64)? {

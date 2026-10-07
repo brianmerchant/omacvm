@@ -160,11 +160,16 @@ enum VMDisk {
         guard var r = resize(c), r.step == .cut, let plan = r.plan else { return }
         if inUse(c) { return }
         do {
-            try DiskImage.cut(c.disk.path, plan: plan)
-            try c.writeEnv(["DISK_GB": "\(r.toGB)"])
+            // Cut already, and stopped before the step was saved: only the record.
+            if case .success(let l) = DiskImage.read(c.disk.path), DiskImage.isCut(l, plan: plan) {
+                log(c, "disk smaller: disk.img was cut already")
+            } else {
+                try DiskImage.cut(c.disk.path, plan: plan)
+                log(c, "disk smaller: disk.img cut to \(r.toGB) GB; checked at this start")
+            }
+            try? c.writeEnv(["DISK_GB": "\(r.toGB)"])
             r.step = .check
-            try setResize(r, c)
-            log(c, "disk smaller: disk.img cut to \(r.toGB) GB; checked at this start")
+            try? setResize(r, c)
         } catch let p as DiskImage.Problem where !DiskImage.wrote(p) {
             try? setJobs(jobs(c) + [.grow], c)
             try? FileManager.default.removeItem(at: clone(c))
@@ -278,7 +283,13 @@ enum VMDisk {
         case .check:
             let result = exec(agentPath: agentPath, script: DiskSize.checkScript, seconds: 3600, running: running)
             guard let result else {
-                log(c, "disk smaller: no answer from the guest for the check, tried again at the next start")
+                // Still running after ten minutes without an answer: the cut
+                // disk may not start. Go Back stays offered.
+                if running() {
+                    fail(c, r, "Omarchy did not answer after the disk was cut. If it does not start, Go Back brings the disk from before.")
+                } else {
+                    log(c, "disk smaller: the VM ended before the check, tried again at the next start")
+                }
                 return
             }
             if result.exitCode == 0, DiskSize.checked(result.output, diskBytes: plan.newBytes) {
@@ -372,18 +383,25 @@ struct DiskRow: View {
                 .disabled(state.vmRunning())
         case .cut, .check:
             RowNote("Making it \(r.toGB) GB: finished and checked at the next start.")
+            backButtons(r)
         case .failed:
             RowNote(r.note ?? "Could not make the disk smaller.", error: true)
             if FileManager.default.fileExists(atPath: VMDisk.clone(state.config).path) {
-                HStack {
-                    Button("Go Back to \(r.fromGB) GB") { act { try VMDisk.goBack(state.config) } }
-                    Button("Keep This Disk") { VMDisk.dropResize(state.config); refresh() }
-                }
-                .disabled(state.vmRunning())
+                backButtons(r)
             } else {
                 Button("OK") { VMDisk.dropResize(state.config); refresh() }
             }
         }
+    }
+
+    /// The disk from before the change (the clone), or this one as it is.
+    @ViewBuilder
+    private func backButtons(_ r: DiskSize.Resize) -> some View {
+        HStack {
+            Button("Go Back to \(r.fromGB) GB") { act { try VMDisk.goBack(state.config) } }
+            Button("Keep This Disk") { VMDisk.dropResize(state.config); refresh() }
+        }
+        .disabled(state.vmRunning())
     }
 
     private func act(_ f: () throws -> Void) {
@@ -429,6 +447,10 @@ struct DiskSizeSheet: View {
                         .multilineTextAlignment(.trailing)
                         .frame(width: 64)
                         .onSubmit { typed(b) }
+                        .onChange(of: field) { _, v in
+                            // As typed, when it is a size inside the ends.
+                            if let gb = DiskSize.parseGB(v), gb >= b.minGB, gb <= b.maxGB { newGB = gb }
+                        }
                     Text("GB")
                 }
                 Text(b.why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -536,7 +558,12 @@ struct DiskSizeSheet: View {
 
     private func apply() {
         guard let b = bounds else { return }
-        typed(b)
+        // A typed size outside the ends: shown as kept inside them, not applied yet.
+        if DiskSize.parseGB(field) != newGB {
+            typed(b)
+            note = "\(b.minGB) to \(b.maxGB) GB."
+            return
+        }
         // Checked again: the VM may have started meanwhile.
         if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: b, vmRunning: state.vmRunning()) {
             note = p

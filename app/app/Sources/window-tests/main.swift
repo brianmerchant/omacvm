@@ -192,6 +192,7 @@ if makeDisk(img, gib: 128, allocated: 13 * gb), case .success(let l) = DiskImage
                 expect(a.imageBytes == 64 * gb && a.root.last == p.partitionLast && a.gpt.lastUsable == p.partitionLast
                        && a.fs.deviceBytes == p.fsBytes && a.gpt.partitions.count == 2 && a.gpt.partitions[0].last == 133_119,
                        "cut: 64 GB, root partition to the new end, EFI untouched, btrfs intact")
+                expect(DiskImage.isCut(a, plan: p) && !DiskImage.isCut(l, plan: p), "cut already: seen as cut (and before: not)")
             } else {
                 expect(false, "cut: the disk reads back")
             }
