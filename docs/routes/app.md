@@ -36,6 +36,19 @@ VM runs, and goes back by itself when a new version does not start
 
 - Setup in the app: VM name, user, password, resources, disk size, the VMs
   folder (any APFS or Mac OS Extended drive).
+- The disk's size: Disk › Change… in the VM window (the VM shut down). The
+  slider goes from what Omarchy needs (btrfs' chunks plus 10 % or 5 GB,
+  never under 64 GB; read from the VM while it runs, else from disk.img)
+  to the Mac's free space plus the size now, less 10 GB. Larger: Omarchy
+  grows into it at the next start. Smaller: an APFS clone of disk.img
+  first (`disk-before-resize.img`), then the VM starts and shrinks btrfs,
+  shuts down, the app writes the smaller partition table and cuts
+  disk.img, and at the next start a read-only scrub checks every block.
+  The clone goes when the check passes; on a failed step the window
+  offers Go Back. The steps are in the VM folder's `disk-resize`, the
+  results in `logs/disk`. Space Omarchy frees goes back to the Mac by
+  itself (btrfs `discard=async`, `fstrim.timer`, disk.img sparse:
+  [disk options](../adr/0039-system-disk-options.md)).
 - Where things are: the app in `~/Applications`, the VMs in
   `~/OmacVM/<VM name>/`; moves, other drives, sizes and downloads:
   [where things are](#where-things-are).
@@ -413,8 +426,8 @@ the VM's SSH on `127.0.0.1:<port>`.
 
 ## Fast network (experimental, off by default)
 
-`omacvm enable fast-network --vm NAME`, or **Fast network (experimental) ›
-Turn On…** on the VM's screen in the app, puts the VM on macOS's own VM
+`omacvm enable fast-network --vm NAME`, or the **Fast network
+(experimental)** switch on the VM's screen in the app, puts the VM on macOS's own VM
 network (vmnet, shared mode, as Parallels and UTM) instead of QEMU's user
 network.
 The VM gets an address of its own on a network of its own, `192.168.77.0/24`
@@ -657,9 +670,9 @@ What is missing before it can become the default: [below](#fast-network-not-done
 
 ## Mac folder (off by default)
 
-**Mac folder › Choose…** in the VM's settings shares one folder of the Mac
-with the VM. From the VM's next start it is at `~/Mac` in Omarchy. **Turn
-Off** stops it from the next start.
+The **Mac folder** switch in the VM's settings asks for a folder and shares
+it with the VM (**Choose…** picks another). From the VM's next start it is at
+`~/Mac` in Omarchy. Switched off, it stops from the next start.
 
 - The VM can read and change everything in that folder, as your Mac user,
   and nothing outside it. Share a project folder: the app refuses your home

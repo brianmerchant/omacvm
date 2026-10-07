@@ -282,3 +282,42 @@ func touchIDAnswer(_ o: TouchIDOutcome) -> [String: Any] {
   case .no(let n): return ["result": "no", "reason": n.rawValue]
   }
 }
+
+// ---- the test identity's stand-in (src/tests/e2e/cc-switches.sh) ----
+// The e2e test runs the whole Touch ID path (VM's PAM client, the app's relay,
+// the Bridge, the signed answer) on a test Mac nobody sits at, which may have
+// no Touch ID. Only the test identity's Bridge (org.omacvm.test.bridge) reads
+// the file `touchid-test` in its own folder; "yes" or "no" then answers in
+// place of LocalAuthentication, and the Mac counts as unlocked with the VM in
+// front. No file, or anything else in it: the real dialog. A release Bridge
+// (org.omacvm.bridge) never looks (touchid.swift).
+
+/// "yes" / "no" (one word, a newline allowed): the stand-in's answer.
+func touchIDTestAnswer(_ text: String?) -> TouchIDOutcome? {
+  switch text?.trimmingCharacters(in: .whitespacesAndNewlines) {
+  case "yes": return .yes
+  case "no": return .no(.cancelled)
+  default: return nil
+  }
+}
+
+/// LocalAuthentication, unless the stand-in answers (read per request).
+struct TouchIDTestAuth: TouchIDAuthenticator {
+  let real: TouchIDAuthenticator
+  let answer: () -> TouchIDOutcome?
+  func unavailable(passwordFallback: Bool) -> TouchIDNo? {
+    answer() != nil ? nil : real.unavailable(passwordFallback: passwordFallback)
+  }
+  func evaluate(_ p: TouchIDPrompt, passwordFallback: Bool, timeout: Double, gone: @escaping () -> Bool) -> TouchIDOutcome {
+    answer() ?? real.evaluate(p, passwordFallback: passwordFallback, timeout: timeout, gone: gone)
+  }
+}
+
+/// The Mac's state, unless the stand-in answers: unlocked, the asking VM's app in front.
+struct TouchIDTestMac: TouchIDMacState {
+  let real: TouchIDMacState
+  let answer: () -> TouchIDOutcome?
+  let frontWhenTesting: String
+  var locked: Bool { answer() != nil ? false : real.locked }
+  var frontType: String? { answer() != nil ? frontWhenTesting : real.frontType }
+}

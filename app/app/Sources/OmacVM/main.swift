@@ -36,6 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             buildMenu()
             RenderUpdateUI.run(into: URL(fileURLWithPath: args[i + 1]))
         }
+        // Test builds and `swift build`: pictures and heights of the VM window (RenderVMWindow.swift).
+        if let i = args.firstIndex(of: "--render-vm-window"), i + 1 < args.count,
+           RenderVMWindow.allowed(bundleID: Bundle.main.bundleIdentifier) {
+            buildMenu()
+            RenderVMWindow.run(into: URL(fileURLWithPath: args[i + 1]))
+        }
         // Started by update-swap.sh after an update: check that this build
         // works (else the previous version goes back), then start as usual.
         if let i = args.firstIndex(of: "--update-check"), i + 1 < args.count {
@@ -149,6 +155,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--update-now") {
             Task { await Updater.shared.runScripted(quitWhenDone: true) }
             return
+        }
+        // Test builds (the disk size check on a test Mac): Apply in Disk ›
+        // Change… for this size, before --start.
+        if let v = TestHooks.value("OMACVM_TEST_DISK_GB", bundleID: Bundle.main.bundleIdentifier), let gb = Int(v) {
+            let result: String
+            do { result = "\(try VMDisk.change(state.config, to: gb))" } catch { result = "refused: \(error.localizedDescription)" }
+            try? "disk to \(gb) GB: \(result)\n".write(to: state.config.folder.appendingPathComponent("logs/test-disk-change"),
+                                                     atomically: true, encoding: .utf8)
+            reloadConfig()
         }
         if let again {
             startAgain(again)
@@ -334,6 +349,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        // A smaller disk: the guest shrank btrfs at the last start; cut
+        // disk.img before QEMU opens it (VMDisk, DiskImage.cut).
+        if VMDisk.resize(state.config)?.step == .cut {
+            VMDisk.cutIfDue(state.config)
+            reloadConfig()
+        }
         let r = Runner(config: state.config)
         r.openGLOnce = openGLOnce
         r.userNetwork = userNetwork
@@ -376,6 +397,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     return
                 }
+            }
+            // The guest shrank btrfs and shut down for the cut: start again
+            // (startVM cuts first, then the guest checks the disk).
+            if !self.quitting, VMDisk.resize(self.state.config)?.step == .cut {
+                self.startVM()
+                return
             }
             if self.quitting {
                 self.quitting = false

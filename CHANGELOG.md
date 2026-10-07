@@ -48,6 +48,22 @@ in more words.
   A VMs folder whose drive was not plugged in at launch shows up by itself
   once it is.
 
+- OmacVM.app's VM window is compact and fits a 13-inch MacBook without
+  scrolling (it was up to about 900 points tall); on a smaller screen it stops at
+  the screen and scrolls. Settings sit in two columns, on/off settings are
+  switches, and the long explanations moved behind an (i). Disk is one row
+  with **Change…**. USB devices now have their own switch, off by default
+  (a VM that already had devices keeps them).
+
+- OmacVM.app: Disk › Change… is one slider for the disk's size, with a
+  number field. It goes down to what Omarchy needs (what btrfs holds,
+  plus 10 % or 5 GB spare, never under 64 GB) and up to what the Mac has
+  free. Smaller is new: the VM starts, Omarchy moves its files below the
+  new size, the VM restarts once while disk.img is cut, and the file
+  system is checked. A copy of the disk (an APFS clone) is kept until
+  that check passes; if a step fails, Go Back brings it back. Compact is
+  gone: the space Omarchy frees already goes back to the Mac by itself.
+
 - A VM built behind a proxy on the Mac's 127.0.0.1 (Clash, V2Ray, Surge)
   no longer keeps `10.0.2.2:<port>` as its proxy on the fast network, where
   that address leads nowhere and apps failed (Helium could not install

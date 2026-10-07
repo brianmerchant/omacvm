@@ -72,7 +72,7 @@ jobs:
       - name: Control centre tests (state, redaction, Textual Pilot against a fake Mac)
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
+          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest pyte
           cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
 
       - name: Bridge's control centre and Touch ID requests (allow-list, limits, manifest signatures, LocalAuthentication mocked)
@@ -93,6 +93,19 @@ jobs:
       - name: OmacVM.app builds
         working-directory: app/app
         run: swift build
+
+      - name: OmacVM.app VM window fits a 13-inch MacBook (pictures in the run's artifacts)
+        working-directory: app/app
+        timeout-minutes: 5
+        run: .build/debug/OmacVM --render-vm-window "$RUNNER_TEMP/vm-window"
+
+      - name: Keep the VM window pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-window
+          path: ${{ runner.temp }}/vm-window
+          if-no-files-found: ignore
 
       - name: OmacVM.app network switch tests (fast network <-> user network)
         working-directory: app/app
