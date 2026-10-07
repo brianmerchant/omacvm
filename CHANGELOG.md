@@ -5,6 +5,10 @@ in more words.
 
 ## 3.0.4 (unreleased)
 
+- VMware Fusion: setting up a new VM stopped at "failed during: VMware
+  Fusion" (3.0.0 to 3.0.3). The first Hyprland build ran from a copy that
+  could not install its build tools, and the VMware Tools build then
+  stopped at "here: unbound variable".
 - A new OmacVM.app VM on a Mac that never had OmacVM's Bridge, with Gestures
   turned off at setup: the build stopped at "Adding OmacVM to the VM" (no
   Bridge token yet). The token is now made for the VM's first setup too.
