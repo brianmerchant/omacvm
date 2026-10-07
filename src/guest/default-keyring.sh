@@ -7,7 +7,8 @@
 # keyrings: generalize.sh removes them).
 #   guest/default-keyring.sh setup USER HOME   as root: makes it for a home
 #       without a keyring of its own (Omarchy's script as the user when the VM
-#       has it, else the same files); a home with its own keyrings is left alone
+#       has it, else the same files), then restarts the user's gnome-keyring
+#       if it runs; a home with its own keyrings is left alone
 #   guest/default-keyring.sh status HOME       prints the default keyring's
 #       name, or "none" (exit 1) when an app would be asked for a password
 set -uo pipefail
@@ -71,6 +72,11 @@ case ${1:-} in
       runuser -u "$U" -- env HOME="$H" bash -c "$OMARCHY_COPY" || true
     fi
     n=$(default_keyring "$H")
-    if [[ -n $n ]]; then echo "made ($n, $from)"; else echo "could not make it in $H/.local/share/keyrings" >&2; exit 1; fi ;;
+    [[ -n $n ]] || { echo "could not make it in $H/.local/share/keyrings" >&2; exit 1; }
+    # A gnome-keyring that runs already (apply in a logged-in VM) does not take
+    # a new default keyring: Chromium would still ask. It had no keyrings to
+    # keep; stopped, it starts again on the next request (D-Bus) with this one.
+    if pkill -u "$U" -x gnome-keyring-d 2>/dev/null; then from+="; gnome-keyring restarted"; fi
+    echo "made ($n, $from)" ;;
   *) sed -n '8,13s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac

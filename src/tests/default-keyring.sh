@@ -22,6 +22,14 @@ while [[ $1 != -- ]]; do shift; done; shift
 exec "$@"
 EOF
 chmod +x "$T/bin/runuser"
+# pkill: a gnome-keyring of the user runs when $T/daemon exists
+cat > "$T/bin/pkill" <<'EOF2'
+#!/bin/bash
+echo "pkill $*" >> "$CALLS"
+[[ -e $DAEMON ]]
+EOF2
+chmod +x "$T/bin/pkill"
+export DAEMON=$T/daemon
 export PATH=$T/bin:$PATH CALLS=$T/calls
 export OMACVM_OMARCHY_DIR=$T/no-omarchy   # no Omarchy installer files unless a case makes them
 perms() { ls -ld "$1" | cut -c1-10; }
@@ -50,6 +58,17 @@ before=$(cat "$d/Default_keyring.keyring")
 out=$("$K" setup tester "$T/h")
 expect "second run keeps it" "kept (Default_keyring)" "$out"
 expect "second run: keyring unchanged" "$before" "$(cat "$d/Default_keyring.keyring")"
+
+# A gnome-keyring that runs (apply in a logged-in VM) does not see a new
+# default keyring: setup restarts it, only when it made one.
+fresh; : > "$T/daemon"
+out=$("$K" setup tester "$T/h")
+expect "running gnome-keyring restarted" "made (Default_keyring, OmacVM's copy of Omarchy's step; gnome-keyring restarted)" "$out"
+expect "restart: the user's daemon only" "pkill -u tester -x gnome-keyring-d" "$(grep '^pkill' "$CALLS")"
+: > "$CALLS"
+expect "kept keyring: gnome-keyring not restarted" "kept (Default_keyring)" "$("$K" setup tester "$T/h")"
+expect "kept keyring: no pkill" "" "$(cat "$CALLS")"
+rm -f "$T/daemon"
 
 # 2. Omarchy's own step when the VM has it (run as the user, with HOME).
 fresh
@@ -88,7 +107,7 @@ fresh; d=$T/h/.local/share/keyrings; mkdir -p "$d"; echo secret > "$d/work.keyri
 expect "own default keyring" "kept (work)" "$("$K" setup tester "$T/h")"
 fresh; d=$T/h/.local/share/keyrings; mkdir -p "$d"; echo ../../x > "$d/default"
 expect "odd default name: status none" "none" "$("$K" status "$T/h")"
-expect "no runuser for kept homes" "" "$(grep -c . "$CALLS" | grep -v '^0$')"
+expect "no runuser or pkill for kept homes" "" "$(grep -c . "$CALLS" | grep -v '^0$')"
 
 # 4. Who runs it: the prebuilt first boot (new images) and omacvm apply's
 # system steps (VMs from older images).
