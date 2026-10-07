@@ -612,14 +612,30 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
 // a QEMU from before that. The new tap goes in before the old one is removed:
 // no gap without one.
 // Never without Accessibility (an active tap needs it; issue #192, below).
-#define PERM_AX 1   // Accessibility
-#define PERM_IM 2   // Input Monitoring
-static int permNow(void) { return (AXIsProcessTrusted() ? PERM_AX : 0) | (CGPreflightListenEventAccess() ? PERM_IM : 0); }
+#define PERM_AX 1     // Accessibility
+#define PERM_IM 2     // Input Monitoring
+#define PERM_POST 4   // "control the computer" (CGPreflightPostEventAccess): what macOS checks
+                      // before it takes the events an active tap hands back
+// AXIsProcessTrusted is answered in the process (about 5 us). The two
+// CGPreflight calls ask tccd each time (about 5 ms of tccd's CPU each, M4 Mac
+// mini, macOS 27): they are asked off the main thread (refreshSlowPerms) every
+// 10 s, when macOS says its Accessibility list changed and when it disabled the
+// tap, and their last answer is used in between; never in the tap's thread.
+static int slowPermNow(void) {
+  return (CGPreflightListenEventAccess() ? PERM_IM : 0) | (CGPreflightPostEventAccess() ? PERM_POST : 0);
+}
+static int slowPerm;   // main thread: slowPermNow's last answer
+static int permNow(void) { return (AXIsProcessTrusted() ? PERM_AX : 0) | slowPerm; }
 static int (*permFn)(void) = permNow;
 static int tapPerm;       // the permissions the tap was created with (main thread)
+static int seenPerm;      // every permission a tap of this process was created with
 static int installTap(void) {
   int perm = permFn();
   if (!(perm & PERM_AX)) return 0;
+  // "Control the computer" gone after a tap had it: macOS would not take the
+  // events this one hands back either. (Never asked for it otherwise: where
+  // macOS answers the preflight differently, Accessibility alone decides.)
+  if ((seenPerm & PERM_POST) && !(perm & PERM_POST)) return 0;
   CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
   if (!newTap) return 0;
   CFRunLoopSourceRef newSource = CFMachPortCreateRunLoopSource(NULL, newTap, 0);
@@ -635,6 +651,7 @@ static int installTap(void) {
   tapPort = newTap;
   tapSource = newSource;
   tapPerm = perm;
+  seenPerm |= perm;
   return 1;
 }
 
@@ -664,8 +681,9 @@ static void removeTap(void) {
 // created with still is. When one goes, the tap and its run-loop source are
 // removed, the trackpads and Magic Mice stopped (MultitouchSupport) and
 // capture is off, before anything else; it all comes back once Accessibility
-// is granted again. Looked at every second, when macOS says its
-// Accessibility list changed, and when macOS disables the tap.
+// is granted again. Looked at every second (Input Monitoring and "control
+// the computer" every 10 s, slowPermNow), when macOS says its Accessibility
+// list changed, and when macOS disables the tap.
 static int inputPaused;   // main thread: no tap, no trackpads until the permission is back
 static int permitted(int perm) { return (perm & PERM_AX) && (perm & tapPerm) == tapPerm; }
 static void stopTrackpads(void);
@@ -693,12 +711,33 @@ static void checkPermissions(void) {
   }
 }
 
-static void permissionTimer(CFRunLoopTimerRef t, void *info) { (void)t; (void)info; checkPermissions(); }
+// Input Monitoring and "control the computer" asked off the main thread
+// (slowPermNow), then looked at on it. Main thread.
+static void refreshSlowPerms(void) {
+  static int asking;
+  if (asking) return;
+  asking = 1;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    int p = slowPermNow();
+    dispatch_async(dispatch_get_main_queue(), ^{ asking = 0; slowPerm = p; checkPermissions(); });
+  });
+}
+
+static void permissionTimer(CFRunLoopTimerRef t, void *info) {
+  (void)t; (void)info;
+  static int ticks;
+  checkPermissions();
+  if (++ticks % 10 == 0) refreshSlowPerms();
+}
 // macOS's Accessibility list changed: look now, and once more when it has settled.
 static void accessibilityChanged(CFNotificationCenterRef c, void *o, CFNotificationName n, const void *obj, CFDictionaryRef info) {
   (void)c; (void)o; (void)n; (void)obj; (void)info;
   checkPermissions();
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ checkPermissions(); });
+  refreshSlowPerms();
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    checkPermissions();
+    refreshSlowPerms();
+  });
 }
 
 // Main thread only. A failed re-creation keeps the old tap while the
@@ -1968,7 +2007,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
     // Enabled again only with the permissions; without them the tap goes
     // (after this callback has returned), never enabled again (#192).
-    if (permitted(permFn())) CGEventTapEnable(tapPort, true);
+    // (This callback runs on the main thread: refreshSlowPerms asks tccd
+    // off it, so a "control the computer" taken away is seen within ms.)
+    if (permitted(permFn())) { CGEventTapEnable(tapPort, true); refreshSlowPerms(); }
     else dispatch_async(dispatch_get_main_queue(), ^{ checkPermissions(); });
     return e;
   }
@@ -2506,7 +2547,8 @@ int main(int argc, char **argv) {
   CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
   CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   int asked = 0;
-  while (!installTap()) {
+  // (Before the run loop runs: Input Monitoring and the rest asked here, each time.)
+  while ((slowPerm = slowPermNow(), !installTap())) {
     if (!asked) {
       logf_("waiting for Accessibility and Input Monitoring permission");
       logPermissions();   // which one is missing

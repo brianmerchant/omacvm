@@ -168,5 +168,22 @@ int main(void) {
   frontChanged(1400, NET_APP, 1, "Omarchy", 0, 0);
   check(created == 12 && !tapPort && inputPaused && !capturing,
         "a VM comes to the front just after Accessibility went: no new tap, the old one goes");
+
+  // "Control the computer" (CGPreflightPostEventAccess: what macOS checks
+  // before it takes the events an active tap hands back) taken away while
+  // Accessibility stays: the tap goes and none is made until it is back.
+  perm = PERM_AX | PERM_IM | PERM_POST;
+  checkPermissions();
+  check(tapPort && created == 13 && !inputPaused, "a tap made with 'control the computer' too");
+  perm = PERM_AX | PERM_IM;
+  checkPermissions();
+  check(!tapPort && inputPaused, "'control the computer' taken away, Accessibility still there: the tap goes");
+  checkPermissions();
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1500, NET_APP, 1, "Omarchy", 0, 0);
+  check(!tapPort && created == 13 && inputPaused && !capturing, "... and no tap is made while it is missing");
+  perm = PERM_AX | PERM_IM | PERM_POST;
+  checkPermissions();
+  check(tapPort && created == 14 && !inputPaused, "... back with it");
   return fail;
 }
