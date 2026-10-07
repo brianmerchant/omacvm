@@ -15,8 +15,10 @@ enum VMDisk {
     static func info(_ c: VMConfig) -> Info? {
         let keys: Set<URLResourceKey> = [.fileSizeKey, .totalFileAllocatedSizeKey]
         guard let v = try? c.disk.resourceValues(forKeys: keys), let size = v.fileSize else { return nil }
-        let free = (try? c.folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
-            .volumeAvailableCapacityForImportantUsage
+        let vol = try? c.folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        var free = vol?.volumeAvailableCapacityForImportantUsage
+        // Some drives answer 0 or nothing for "important usage": their plain free space then.
+        if (free ?? 0) <= 0, let plain = vol?.volumeAvailableCapacity { free = Int64(plain) }
         return Info(maxBytes: Int64(size), usedBytes: Int64(v.totalFileAllocatedSize ?? 0), freeBytes: free)
     }
 
@@ -75,6 +77,17 @@ enum VMDisk {
         }
     }
 
+    /// Why the disk can only get larger before its size is read: a grow not
+    /// done yet (the partition table is not at the new end), or a drive
+    /// without APFS clones (the copy kept while it shrinks). nil: it can.
+    static func smallerBlocked(_ c: VMConfig) -> String? {
+        if jobs(c).contains(.grow) { return "Omarchy grows into the last change at the next start first." }
+        if (try? c.folder.resourceValues(forKeys: [.volumeSupportsFileCloningKey]))?.volumeSupportsFileCloning == false {
+            return "making it smaller needs the VM on a Mac-formatted (APFS) drive."
+        }
+        return nil
+    }
+
     /// What btrfs holds, read from disk.img (the VM off; its last shutdown's numbers).
     static func need(_ c: VMConfig) -> Result<DiskSize.Need, DiskImage.Problem> {
         DiskImage.read(c.disk.path).map {
@@ -98,10 +111,12 @@ enum VMDisk {
         guard resize(c) == nil else { throw HelperError.io("The last change of the disk is not finished.") }
         let currentGB = DiskSize.wholeGB(now.maxBytes)
         guard newGB != currentGB else { throw HelperError.io("The disk is already \(currentGB) GB.") }
-        var known: DiskSize.Need?, why = ""
-        switch need(c) {
-        case .success(let n): known = n
-        case .failure(let p): why = p.description
+        var known: DiskSize.Need?, why = smallerBlocked(c) ?? ""
+        if why.isEmpty {
+            switch need(c) {
+            case .success(let n): known = n
+            case .failure(let p): why = p.description
+            }
         }
         let bounds = DiskSize.bounds(currentGB: currentGB, need: known, unknownWhy: why, freeBytes: now.freeBytes)
         if let p = DiskSize.changeProblem(currentGB: currentGB, newGB: newGB, bounds: bounds, vmRunning: inUse(c)) {
@@ -171,9 +186,15 @@ enum VMDisk {
             r.step = .check
             try? setResize(r, c)
         } catch let p as DiskImage.Problem where !DiskImage.wrote(p) {
-            try? setJobs(jobs(c) + [.grow], c)
-            try? FileManager.default.removeItem(at: clone(c))
-            fail(c, r, "Could not make the disk smaller: \(p). Nothing changed.")
+            if case .success = DiskImage.read(c.disk.path) {
+                // The disk reads as before: btrfs grows back, the copy goes.
+                try? setJobs(jobs(c) + [.grow], c)
+                try? FileManager.default.removeItem(at: clone(c))
+                fail(c, r, "Could not make the disk smaller: \(p). Nothing changed.")
+            } else {
+                // Not as OmacVM left it: the copy stays for Go Back.
+                fail(c, r, "Could not make the disk smaller: \(p). The copy from before is kept.")
+            }
         } catch {
             let back = restore(c, r)
             fail(c, r, "Could not make the disk smaller: \(error.localizedDescription). " + (back ? "The disk is back as it was before." : "The copy from before is \(clone(c).lastPathComponent)."))
@@ -201,6 +222,10 @@ enum VMDisk {
     /// Disk › Keep (after a failed step) or Cancel (before the VM started):
     /// the disk stays as it is, the clone goes.
     static func dropResize(_ c: VMConfig) {
+        // btrfs shrunk but the disk not cut: it grows back into its partition at the next start.
+        if case .success(let l) = DiskImage.read(c.disk.path), l.fs.deviceBytes + 64 * (1 << 20) < l.root.bytes {
+            try? setJobs(jobs(c) + [.grow], c)
+        }
         try? FileManager.default.removeItem(at: clone(c))
         try? setResize(nil, c)
     }
@@ -445,6 +470,7 @@ struct DiskSizeSheet: View {
                 HStack(spacing: 10) {
                     slider(b)
                     TextField("GB", text: $field)
+                        .accessibilityLabel("Disk size in GB")
                         .multilineTextAlignment(.trailing)
                         .frame(width: 64)
                         .onSubmit { typed(b) }
@@ -452,7 +478,7 @@ struct DiskSizeSheet: View {
                             // As typed, when it is a size inside the ends.
                             if let gb = DiskSize.parseGB(v), gb >= b.minGB, gb <= b.maxGB { newGB = gb }
                         }
-                    Text("GB")
+                    Text("GB").accessibilityHidden(true)
                 }
                 Text(b.why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if newGB < currentGB {
@@ -494,11 +520,16 @@ struct DiskSizeSheet: View {
     private func slider(_ b: DiskSize.Bounds) -> some View {
         let value = Binding<Double>(get: { Double(newGB) }, set: { set(DiskSize.snap($0, b)) })
         return VStack(spacing: 2) {
-            if b.maxGB > b.minGB {
-                Slider(value: value, in: Double(b.minGB)...Double(b.maxGB))
-            } else {
-                Slider(value: .constant(0), in: 0...1).disabled(true)
+            Group {
+                if b.maxGB > b.minGB {
+                    Slider(value: value, in: Double(b.minGB)...Double(b.maxGB))
+                } else {
+                    Slider(value: .constant(0), in: 0...1).disabled(true)
+                }
             }
+            .accessibilityLabel("Disk size")
+            .accessibilityValue("\(newGB) GB")
+            .accessibilityHint("Now \(currentGB) GB. \(b.minGB) to \(b.maxGB) GB.")
             GeometryReader { g in
                 // The knob's centre runs about 10 pt inside each end.
                 let span = Double(max(1, b.maxGB - b.minGB))
@@ -513,6 +544,7 @@ struct DiskSizeSheet: View {
                     .opacity(abs(g.size.width - 10 - x) > 44 ? 1 : 0)
             }
             .frame(height: 12)
+            .accessibilityHidden(true)
         }
     }
 
@@ -541,9 +573,9 @@ struct DiskSizeSheet: View {
         let running = state.vmRunning()
         Task.detached {
             // Running: the guest's own numbers; off (or no answer): disk.img's.
-            var need = running ? VMDisk.liveNeed(c) : nil
-            var why = ""
-            if need == nil {
+            var why = VMDisk.smallerBlocked(c) ?? ""
+            var need = running && why.isEmpty ? VMDisk.liveNeed(c) : nil
+            if need == nil, why.isEmpty {
                 switch VMDisk.need(c) {
                 case .success(let n): need = n
                 case .failure(let p): why = p.description

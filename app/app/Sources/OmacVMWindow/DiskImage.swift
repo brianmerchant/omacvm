@@ -260,7 +260,10 @@ public enum DiskImage {
         let layout: Layout
         switch read(path) {
         case .success(let l): layout = l
-        case .failure(let p): throw p
+        case .failure(let p):
+            // A cut that stopped part way: finished from its new backup GPT.
+            guard let l = startedCut(path, plan: plan) else { throw p }
+            layout = l
         }
         guard layout.imageBytes == plan.fromBytes else { throw Problem.layout("disk.img changed size since the plan.") }
         guard layout.fs.deviceBytes <= plan.fsBytes else {
@@ -279,13 +282,13 @@ public enum DiskImage {
         do {
             try write(h, padded(t.entries), at: t.backupEntriesLBA * sector)
             try write(h, padded(t.backup), at: plan.newBytes - sector)
-            try h.synchronize()
+            try flush(h)
             try write(h, padded(t.entries), at: 2 * sector)
             try write(h, padded(t.primary), at: sector)
             if let m = newMBR { try write(h, m, at: 0) }
-            try h.synchronize()
+            try flush(h)
             try h.truncate(atOffset: UInt64(plan.newBytes))
-            try h.synchronize()
+            try flush(h)
         } catch {
             throw Problem.written("Writing disk.img failed: \(error.localizedDescription)")
         }
@@ -294,6 +297,41 @@ public enum DiskImage {
               l.fs.deviceBytes == layout.fs.deviceBytes else {
             throw Problem.written("disk.img does not read back as written.")
         }
+    }
+
+    /// A cut that stopped (power cut, crash) after it wrote the new backup
+    /// GPT and before the truncate: disk.img has its old length, the primary
+    /// GPT is old, half new (entries only) or new, so `read` refuses it. The
+    /// backup at the new end is whole (written and flushed first) and has the
+    /// same disk GUID as the primary header: the layout from it. nil when
+    /// the disk is not in that state.
+    static func startedCut(_ path: String, plan: ShrinkPlan) -> Layout? {
+        guard let h = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? h.close() }
+        let newSectors = plan.newBytes / sector
+        guard let end = try? h.seekToEnd(), Int64(end) == plan.fromBytes, newSectors > 2,
+              let header = read(h, at: plan.newBytes - sector, count: Int(sector)),
+              let head = parseHeaderOnly(header),
+              le64(header, 24) == UInt64(newSectors - 1), le64(header, 32) == 1,
+              le64(header, 48) == UInt64(plan.partitionLast),
+              let entries = read(h, at: head.entriesLBA * sector, count: head.arrayBytes),
+              let g = parseGPT(header: header, entries: entries),
+              g.entriesLBA == newSectors - 1 - g.entrySectors,
+              let root = g.last, root.last == plan.partitionLast, root.first < root.last,
+              let primary = read(h, at: sector, count: Int(sector)),
+              Array(primary[0..<8]) == Array("EFI PART".utf8), primary[56..<72] == header[56..<72],
+              let sb = read(h, at: root.first * sector + superblockOffset, count: superblockSize),
+              let fs = parseBtrfs(sb), fs.devices == 1 else { return nil }
+        return Layout(imageBytes: plan.fromBytes, gpt: g, root: root, fs: fs)
+    }
+
+    /// fsync, then the drive's own cache too (F_FULLFSYNC): the backup GPT is
+    /// on the disk before the primary one changes, even after a power cut.
+    private static func flush(_ h: FileHandle) throws {
+        try h.synchronize()
+        #if canImport(Darwin)
+        _ = fcntl(h.fileDescriptor, F_FULLFSYNC)
+        #endif
     }
 
     /// Whole sectors: the rest of a header's sector is zero.

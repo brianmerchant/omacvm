@@ -209,6 +209,29 @@ if makeDisk(img, gib: 128, allocated: 13 * gb), case .success(let l) = DiskImage
         } catch {
             expect(false, "cut after the guest shrank btrfs: \(error)")
         }
+        // A cut stopped by a power cut after the new backup GPT: with the
+        // primary GPT new (not truncated yet), or only its entries new. The
+        // next try finishes it; a damaged disk without that backup is refused.
+        for (what, primaryHeader) in [("primary GPT new", true), ("only the primary entries new", false)] {
+            _ = makeDisk(img, gib: 128, fsBytes: p.fsBytes, allocated: 13 * gb)
+            guard case .success(let s) = DiskImage.read(img), let t = DiskImage.shrunkTables(s.gpt, plan: p),
+                  let h = FileHandle(forWritingAtPath: img) else { expect(false, "stopped cut: set up"); continue }
+            let pad = { (b: [UInt8]) in b + [UInt8](repeating: 0, count: 512 - b.count) }
+            var parts: [([UInt8], Int64)] = [(t.entries, t.backupEntriesLBA * 512), (pad(t.backup), p.newBytes - 512), (t.entries, 1024)]
+            if primaryHeader { parts.append((pad(t.primary), 512)) }
+            for (b, at) in parts { try? h.seek(toOffset: UInt64(at)); try? h.write(contentsOf: Data(b)) }
+            try? h.close()
+            let stuck = (try? DiskImage.read(img).get()) == nil
+            var done = false
+            if (try? DiskImage.cut(img, plan: p)) != nil, case .success(let a) = DiskImage.read(img) { done = DiskImage.isCut(a, plan: p) }
+            expect(stuck && done, "cut stopped (\(what)): finished at the next try")
+        }
+        _ = makeDisk(img, gib: 128, fsBytes: p.fsBytes, allocated: 13 * gb)
+        if let h = FileHandle(forWritingAtPath: img) { try? h.seek(toOffset: 1024 + 40); try? h.write(contentsOf: Data([9])); try? h.close() }
+        var refusedDamaged = false
+        do { try DiskImage.cut(img, plan: p) } catch let e as DiskImage.Problem { refusedDamaged = !DiskImage.wrote(e) } catch {}
+        let length = ((try? FileManager.default.attributesOfItem(atPath: img))?[.size] as? NSNumber)?.int64Value
+        expect(refusedDamaged && length == 128 * gb, "cut of a damaged GPT without a new backup: refused")
     } else {
         expect(false, "plan at the slider's bottom")
     }
