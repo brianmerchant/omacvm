@@ -1,6 +1,6 @@
 #!/bin/bash
 # Benchmarks, the same way on the Mac and in a VM, so the routes compare.
-#   bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,gpu,glmark2] [OUT.jsonl]
+#   bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,webgpu,gpu,glmark2] [OUT.jsonl]
 # Google Chrome everywhere (in a VM: install-chrome.sh first), run as the
 # desktop user in the session. Each test runs N times (default 3); every result is a
 # JSON line in OUT (default ./bench-<host>-<date>.jsonl).
@@ -26,7 +26,7 @@ rec() {   # test run value [extra json]
 
 # ---- Geekbench 7 ----
 if [[ $OS == Darwin ]]; then
-  GB="/Applications/Geekbench 7.app/Contents/Resources/geekbench7"
+  GB=${GEEKBENCH_MAC:-/Applications/Geekbench 7.app}/Contents/Resources/geekbench7   # GEEKBENCH_MAC: the app elsewhere
 else
   GB=$HOME/.cache/omacvm-bench/Geekbench-7.0.0-LinuxARMPreview/geekbench7
   if [[ ! -x $GB ]]; then
@@ -36,8 +36,10 @@ else
 fi
 # The free version prints only a link to the result; report.py reads the
 # scores from there later, on the Mac.
-gb_run() {   # args... -> url
-  "$GB" "$@" 2>&1 | grep -o 'https://browser.geekbench.com/v7/[a-z]*/[0-9]*' | tail -1
+GB_LOG=$(mktemp); trap 'rm -f "$GB_LOG"' EXIT
+gb_run() {   # args... -> url; Geekbench's own output stays in $GB_LOG
+  "$GB" "$@" >"$GB_LOG" 2>&1
+  grep -o 'https://browser.geekbench.com/v7/[a-z]*/[0-9]*' "$GB_LOG" | tail -1
 }
 if want geekbench; then
   for ((i = 1; i <= RUNS; i++)); do
@@ -67,19 +69,26 @@ gpu_device() {   # OpenCL|Vulkan -> prints the device; exit 1 with the reason on
   head -1 <<<"$devs"
 }
 if want gpu; then
-  # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where Geekbench lists
-  # them and the VM has a GPU device for them (OmacVM.app with Venus and
-  # rusticl); the other VMs have none.
-  apis=$([[ $OS == Darwin ]] && echo "Metal OpenCL" || echo "Vulkan OpenCL")
+  # The Mac: Metal and OpenCL. A VM: Vulkan and OpenCL where the VM has a GPU
+  # device for them (OmacVM.app with Venus and rusticl); the other VMs have none.
+  # GEEKBENCH_GPU_APIS: only these (e.g. "OpenCL" when Metal is not compared).
+  apis=${GEEKBENCH_GPU_APIS:-$([[ $OS == Darwin ]] && echo "Metal OpenCL" || echo "Vulkan OpenCL")}
   for api in $apis; do
     dev=
     if [[ $OS != Darwin ]]; then
       dev=$(gpu_device "$api") || { rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: $dev\""; continue; }
-      "$GB" --gpu-list 2>&1 | grep -qi "$api" || { rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: Geekbench lists no $api device\""; continue; }
     fi
+    # No check with --gpu-list: in the VMs it listed no OpenCL device although
+    # clinfo had the rusticl GPU and --gpu OpenCL ran fine. Run it; when the
+    # first run gives no result, Geekbench has no such device: say why.
     for ((i = 1; i <= RUNS; i++)); do
       say "Geekbench 7 GPU ($api), run $i/$RUNS"
       url=$(gb_run --gpu "$api")
+      if [[ -z $url && $i == 1 && $OS != Darwin ]]; then
+        why=$(grep -v '^ *$' "$GB_LOG" | tail -1 | tr -d '"\\' | cut -c1-200)
+        rec "geekbench-gpu-$api" 1 null "\"error\":\"not available: Geekbench ran no $api workload (${why:-no output})\""
+        break
+      fi
       rec "geekbench-gpu-$api" "$i" null "\"url\":\"${url:-}\",\"device\":\"${dev//\"/}\""
     done
   done
@@ -105,7 +114,15 @@ browser_start() {
     for f in /etc/chrome-flags.conf "$HOME/.config/chrome-flags.conf"; do
       if [[ -f $f ]]; then mapfile -t -O "${#flags[@]}" flags < <(grep -v -e '^#' -e '^$' -e '--load-extension' "$f"); fi
     done
-    /opt/google/chrome/google-chrome "${flags[@]}" --ozone-platform=wayland --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
+    # WebGPU: Chrome on Linux hands pages a Vulkan adapter only with its compositor on Vulkan (Skia
+    # Graphite on Dawn), which it allows only on X11 (Xwayland): OmacVM's omacvm-chrome-webgpu flags,
+    # the same in every VM. MESA_VK_WSI_DEBUG=sw as there (Venus presents through the software path).
+    local plat=(--ozone-platform=wayland) envs=()
+    if [[ ${CHROME_WEBGPU:-0} == 1 ]]; then
+      plat=(--ozone-platform=x11 --enable-skia-graphite --skia-graphite-dawn-backend=vulkan)
+      envs=(MESA_VK_WSI_DEBUG=sw DISPLAY="${DISPLAY:-:0}")
+    fi
+    env ${envs[@]+"${envs[@]}"} /opt/google/chrome/google-chrome "${flags[@]}" "${plat[@]}" --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
       --no-first-run --no-default-browser-check --start-fullscreen about:blank >/dev/null 2>&1 &
   fi
   BROWSER=$!
@@ -113,18 +130,23 @@ browser_start() {
   echo "the browser did not start" >&2; return 1
 }
 browser_stop() { kill "$BROWSER" 2>/dev/null; wait "$BROWSER" 2>/dev/null; rm -rf "$PROFILE" "$PROFILE.err"; }
-if want speedometer || want motionmark || want aquarium || want basemark; then
+if want speedometer || want motionmark || want aquarium || want basemark || want webgpu; then
   browser_start || exit 1
   version=$(curl -fs http://127.0.0.1:9222/json/version | python3 -c 'import json,sys; print(json.load(sys.stdin)["Browser"])')
-  for t in speedometer motionmark aquarium basemark; do
+  for t in speedometer motionmark aquarium basemark webgpu; do
     want $t || continue
     for ((i = 1; i <= RUNS; i++)); do
       say "$t, run $i/$RUNS ($version)"
       v=$(python3 "$here/browser-bench.py" "$t" 2>"$PROFILE.err")
+      extra=""
+      if [[ $t == webgpu ]]; then   # the adapter (a CPU one is no GPU number), or the page's error
+        extra=$(python3 "$here/webgpu-result.py" "$v" "$PROFILE.err")
+        [[ $extra == *'"error"'* ]] && v=""
+      fi
       [[ $v =~ ^[0-9.]+$ ]] || v=null
       # The page size Chrome gave the test (it must be the same everywhere).
       vp=$(sed -n 's/^viewport //p' "$PROFILE.err" | head -1)
-      rec "$t" "$i" "$v" "\"browser\":\"$version\",\"viewport\":\"$vp\""
+      rec "$t" "$i" "$v" "\"browser\":\"$version\",\"viewport\":\"$vp\"${extra:+,$extra}"
       [[ $v == null ]] && break   # no result: the next runs would end the same way
     done
   done
