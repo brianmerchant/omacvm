@@ -114,7 +114,7 @@ def journal(line):
         pass
 
 
-WHAT = ""   # "sudo by vincent": who asked how, for the journal
+WHAT = ""   # "sudo for vincent": which service asked for whom, for the journal
 
 
 def password(why, show=True):
