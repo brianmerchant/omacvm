@@ -448,7 +448,7 @@ bad=$(git grep -nE 'pacman +(-S[a-zA-Z]*|--sync)( |$)' -- 'src/**' ':!src/tests/
   grep -q 'vk OMACVM_SYSTEM_UPDATE_OK=1' src/cmd/graphics.sh && grep -q 'read -r -p "Update the VM' src/cmd/graphics.sh &&
   pass "only omacvm graphics updates the VM's system, after asking (or --yes)" || fail "the system update runs from apply, or unasked"
 grep -q "^ExecCondition=.*OMACVM_GRAPHICS=vulkan" src/app/guest/venus/omacvm-venus-driver.service &&
-  grep -q 'systemctl disable --now omacvm-venus-driver.timer' src/app/guest/install.sh &&
+  grep -q 'systemctl disable --now omacvm-venus-driver.timer' src/app/guest/venus/timer.sh &&
   pass "Venus driver unit only with Graphics Vulkan (or the vulkan feature)" || fail "Venus driver unit also runs with OpenGL"
 
 exit $fails

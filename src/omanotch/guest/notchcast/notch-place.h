@@ -48,6 +48,16 @@ static int notch_place(NotchRect screen, double lh, const NotchRect *others, int
     return 1;
 }
 
+// The screen sits right beside NOTCH, level with it: Hyprland put it there
+// by itself (its place is "auto", e.g. right after the first login's config
+// reload, before omacvm-display-sync placed it again). Moving NOTCH after it
+// would move the screen on again, every 2 s, without end (Air, 2026-10-06).
+// screen and notch in logical px.
+static int notch_screen_pushed(NotchRect screen, NotchRect notch) {
+    double dx = screen.x - (notch.x + notch.w), dy = notch.y + notch.h - screen.y;
+    return dx > -1 && dx < 1 && dy > -1 && dy < 1;
+}
+
 // The enabled outputs of a `j/monitors all` reply but `skip_a` and `skip_b`,
 // in logical px (width / scale; a transform of 90/270 swaps them). Returns
 // how many (at most `max`).
@@ -101,6 +111,19 @@ static int notch_other_outputs(const char *json, const char *skip_a, const char 
         out[n++] = (NotchRect){v[0], v[1], w, h};
     }
     return n;
+}
+
+// Whether notchcast masks the guest cursor in a captured NOTCH frame (it
+// restores those pixels from the previous frame, so the strip never shows a
+// cursor the Mac draws itself). Only while the hotspot is on NOTCH: a cursor
+// on the display below that reaches up into NOTCH is drawn there by Hyprland,
+// which also repaints NOTCH when it moves away. Masking it froze the strip
+// under it: hiding the bar left a box of the old bar at the strip's end. Not
+// while notchcast keeps the cursor hidden either (hidden_ms > 300: the first
+// frame after hiding may still show it).
+static inline int notch_cursor_masked(NotchRect out, double cx, double cy, double hidden_ms) {
+    if (hidden_ms > 300) return 0;
+    return cx >= out.x && cx < out.x + out.w && cy >= out.y && cy < out.y + out.h;
 }
 
 #endif

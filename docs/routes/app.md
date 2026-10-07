@@ -222,9 +222,10 @@ VM runs, and goes back by itself when a new version does not start
   either place.
 - **The VMs**: `~/OmacVM/<VM name>/`, one folder per VM: `vm.env` (the
   settings), `disk.img` (the disk; sparse: it takes what it holds, not its
-  full size), `efi-vars.fd`, `logs/`. To take a VM to another Mac, copy its
-  folder into that Mac's VMs folder (the VM must be shut down; above) with
-  `cp -R`, which keeps the disk sparse (`ditto` wrote it in full). Where
+  full size; what Omarchy deletes goes back to the Mac within a minute),
+  `efi-vars.fd`, `logs/` ([disk options](../adr/0039-system-disk-options.md)).
+  To take a VM to another Mac, copy its folder into that Mac's VMs folder
+  (the VM must be shut down; above) with `cp -R`, which keeps the disk sparse (`ditto` wrote it in full). Where
   something else already has the name ~/OmacVM (a file, a git clone
   ~/omacvm: the same folder on a case-insensitive disk), new VMs go to the
   old place below instead.
@@ -254,10 +255,15 @@ VM runs, and goes back by itself when a new version does not start
   Show in Finder. **All VMs…** lists every VM with its size, Show in Finder
   and Delete (to the Trash; not while it runs).
 - **Downloaded images**: the Omarchy images the app downloaded to set up
-  VMs (try-omarchy's live system, prebuilt VMs), in `~/Library/Caches/omacvm`.
-  **Remove…** deletes them after a confirmation with the size (not while a
-  VM is being set up). Your VMs keep everything; a new VM downloads them
-  again. The Mac's Downloads folder is not touched.
+  VMs (try-omarchy's live system, prebuilt VMs), in `~/Library/Caches/omacvm`,
+  or in `.downloads` inside the VMs folder when that is on another drive:
+  builds then leave the Mac's own disk alone. A live system downloaded
+  before, in another such folder, moves there at the next build; a VMs
+  folder you leave takes its downloads along on the same drive, else they
+  stay listed here until a build or **Remove…** takes them. **Remove…**
+  deletes them after a confirmation with the size (not while a VM is being
+  set up). Your VMs keep everything; a new VM downloads them again. The
+  Mac's Downloads folder is not touched.
 - **Backups and search**: Time Machine leaves VM folders out (the disk
   changes all the time). Spotlight never reads a VM's disk (it has no
   importer for it), but lists the files' names; macOS has no switch an app
@@ -914,12 +920,22 @@ new session shows a notification that says so and names the apps that
 closed. A session that was locked locks itself again. At most once in 10 minutes: when the desktop is lost again that
 soon (macOS still short of memory), the app shows "The VM's desktop
 stopped drawing" with a button that restarts it, as it always did with
-the automatic restart off (`defaults write org.omacvm.app
-desktopAutoRestart -bool false`). When only the shell (Omarchy's bar and
+the automatic restart off; the window says why: the VM's graphics reached
+the guard, macOS ran short, or the graphics failed (`defaults write org.omacvm.app
+desktopAutoRestart -bool false`). After Later in that window the app menu
+(beside the Apple menu, under "Graphics memory") has "Restart the
+Desktop…", which brings the window back; it goes away once the desktop
+restarts or the VM stops. When only the shell (Omarchy's bar and
 launcher, Quickshell) is lost, only the shell starts again, and no app
 closes. `logs/qemu.log` says which app lost its context and why, and each
 restart the app made; `journalctl -t omacvm-desktop-recover` in the VM
 says what was closed (ADR 0038).
+
+The guard is not only for runaway VMs on an 8 GB Mac: on a MacBook Air M2
+(8 GB, 4 GB VM, 2026-10-06) Chromium with 7 windows of big WebGL pages
+(5K canvas and 512 MB of textures each) reached 6 GB while macOS still said
+normal (it said warn on the way, never critical; 2.3 GB swap, the Mac stayed
+responsive). The browser lost its context first, Hyprland a few seconds later.
 
 **On an 8 GB Mac** the VM gets 4 GB of VM memory by default; with apps
 open on a 4K or 5K display the Mac is near its limit. macOS then compresses

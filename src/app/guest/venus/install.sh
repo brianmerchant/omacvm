@@ -91,7 +91,8 @@ if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
     -Dplatforms=wayland,x11 -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Degl=disabled \
     -Dglx=disabled -Dgbm=disabled -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled \
     > "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; cp "$B/build.log" "$LOG"; exit 1; }
-  ninja -C "$S/build" install >> "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; cp "$B/build.log" "$LOG"; exit 1; }
+  # At the lowest priority: the desktop keeps its frames while it builds.
+  nice -n 19 ninja -C "$S/build" install >> "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; cp "$B/build.log" "$LOG"; exit 1; }
   echo "$STAMP" > "$PREFIX/omacvm-mesa-version"
 fi
 

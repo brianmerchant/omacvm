@@ -64,6 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
                 return
             }
+            // Test builds (self-update-test.sh): an update with a VM restart, as Shut Down and Update does.
+            if args.contains("--update-restart"), TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
+                DistributedNotificationCenter.default().postNotificationName(
+                    Self.restartRequest, object: nil, userInfo: nil, deliverImmediately: true)
+                NSApp.terminate(nil)
+                return
+            }
             if CommandLine.arguments.contains("--start") {
                 let vm = args.firstIndex(of: "--vm").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ""
                 DistributedNotificationCenter.default().postNotificationName(
@@ -82,6 +89,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: Self.updateRequest, object: nil, queue: .main) { _ in
             // From `--update-now` of a second launcher: this one stays open.
             Task { @MainActor in await Updater.shared.runScripted(quitWhenDone: false) }
+        }
+        if TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
+            DistributedNotificationCenter.default().addObserver(
+                forName: Self.restartRequest, object: nil, queue: .main) { _ in
+                Task { @MainActor in await Updater.shared.restartFromMac() }
+            }
         }
         // Before any VM start reads the Graphics setting.
         Settings.migrateVenusSwitch()
@@ -109,7 +122,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.quitting { return "Quitting" }
             return nil
         }
-        let starting = state.config.isReady && args.contains("--start")
+        // Update with a VM restart (Updater.swift): the launcher's VM and its controls.
+        let u = Updater.shared
+        u.runningVM = { [weak self] in
+            guard let r = self?.runner, r.isRunning else { return nil }
+            return (r.config.folder, r.config.name)
+        }
+        u.powerDownVM = { [weak self] in self?.runner?.powerDown() }
+        u.forceStopVM = { [weak self] in self?.runner?.forceStop() }
+        u.startVMAgain = { [weak self] folder in self?.startAgain(folder) }
+        u.restartBlocker = { [weak self] in
+            guard let self else { return nil }
+            if self.state.screen == .building { return "a VM is being built" }
+            if self.state.storage.moving != nil { return "a VM is being moved" }
+            if self.quitting { return "it is quitting" }
+            return nil
+        }
+        // A restart-update shut a VM down for this version (or the old one
+        // came back): start it again, once.
+        let again = args.contains("--update-now") ? nil : u.takeRestartVM(afterSwap: args.contains("--update-check"))
+        let starting = again != nil || (state.config.isReady && args.contains("--start"))
         Updater.shared.start(pending: args.contains("--update-now") || args.contains("--update-check") ? .leave
                              : starting ? .waitUntilIdle : .installNow)
         buildMenu()
@@ -118,9 +150,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Updater.shared.runScripted(quitWhenDone: true) }
             return
         }
-        if starting {
+        if let again {
+            startAgain(again)
+        } else if starting {
             startVM()
         } else {
+            showWindow()
+        }
+    }
+
+    /// Starts the VM in this folder (after a restart-update), else the window.
+    private func startAgain(_ folder: URL) {
+        guard runner?.isRunning != true else { return }
+        if let c = VMConfig.load(from: folder), c.isReady {
+            state.config = c
+            state.screen = .ready
+            startVM()
+        } else {
+            state.message = "The VM at \(folder.path) could not be started again after the update: start it here."
             showWindow()
         }
     }
@@ -129,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// installed app's start requests.
     static let startRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").start")
     static let updateRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").update-now")
+    static let restartRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").update-restart")
     /// The VM's window belongs to QEMU's process: the one from this app
     /// (another copy of OmacVM may run a VM of its own).
     /// By the kernel's path: LaunchServices reports this app's own executable
@@ -254,6 +302,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // Start in the window while an update with a VM restart waits: it stops.
+        Updater.shared.vmStarting()
         reloadConfig()
         if state.storage.moving != nil {
             state.message = "A VM is being moved; start once that is done."
@@ -271,6 +321,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let fellBack = r?.venusFallback
             self.runner = nil
+            // An update with a VM restart: it installs now; the new app starts the VM.
+            if !self.quitting, Updater.shared.vmEndedForRestart() { return }
             // Vulkan showed nothing (Runner.watchVenusStart, or QEMU stopped
             // at once): start once more on OpenGL. keep: from now on OpenGL
             // until Vulkan is chosen again; else for that start only. The
@@ -298,6 +350,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if self.quitting {
                 self.quitting = false
+                // Quit during an update with a VM restart: no VM starts by itself later.
+                Updater.shared.cancelRestart("quitting")
                 // An update asked for while the VM ran goes in now, quietly:
                 // the user is quitting.
                 if Updater.shared.installWhenIdle { Updater.shared.install(quit: false, quiet: true) }
@@ -490,41 +544,13 @@ extension AppDelegate: NSMenuDelegate {
     @objc func checkForUpdates(_ sender: Any?) {
         let u = Updater.shared
         Task { @MainActor in
-            let outcome = await u.check(manual: true)
-            let alert = Self.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow)
-            if alert.runModal() == .alertFirstButtonReturn, case .ready = outcome { u.install() }
+            let outcome = await u.checkNow()
+            // This launcher runs the VM: it can shut it down, update and start it again.
+            let restart = u.runningVM() != nil
+            let alert = Updater.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow, restart: restart)
+            guard alert.runModal() == .alertFirstButtonReturn, case .ready = outcome else { return }
+            if restart { await u.restartFromMac() } else { u.install() }
         }
-    }
-
-    /// What Check for Updates… says. busy: why the app cannot be replaced
-    /// right now (a VM runs from it): the update then waits for it.
-    static func checkAlert(_ outcome: Updater.Outcome, current: String, busy: String?) -> NSAlert {
-        let alert = NSAlert()
-        switch outcome {
-        case .ready(let v):
-            alert.messageText = "\(Product.name) \(v) is ready to install"
-            if let busy {
-                alert.informativeText = "You have \(current). \(busy), so \(v) goes in once it has shut down. Your VMs are not changed."
-                alert.addButton(withTitle: "Update After Shutdown")
-            } else {
-                alert.informativeText = "You have \(current). \(Product.name) restarts with the new version; your VMs are not changed. If it does not start, \(current) comes back by itself."
-                alert.addButton(withTitle: "Update and Relaunch")
-            }
-            alert.addButton(withTitle: "Later")
-        case .upToDate:
-            alert.messageText = "\(Product.name) is up to date"
-            alert.informativeText = "\(current) is the newest version."
-        case .skipped(let v):
-            alert.messageText = "\(Product.name) \(v) is skipped"
-        case .needsMacOS(let v, let m):
-            alert.messageText = "\(Product.name) \(v) needs macOS \(m)"
-            alert.informativeText = "This Mac stays on \(current). Update macOS to get \(v)."
-        case .failed(let why):
-            alert.messageText = "Could not check for updates"
-            // The reasons are log lines ("no connection to ..."): as a sentence.
-            alert.informativeText = why.prefix(1).uppercased() + why.dropFirst() + (why.hasSuffix(".") ? "" : ".")
-        }
-        return alert
     }
 
     @objc func goBack(_ sender: Any?) {

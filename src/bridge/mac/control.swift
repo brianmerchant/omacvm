@@ -9,6 +9,7 @@
 // (caches, jobs, limiter) is only touched on `q`; CLI runs and downloads
 // happen outside it.
 import Foundation
+import IOKit
 
 /// The test identity's Bridge (org.omacvm.test.bridge, from app/scripts/build-app.sh
 /// --test-identity) keeps its own port and folders: it never meets the installed Bridge
@@ -17,6 +18,8 @@ let testIdentity = Bundle.main.bundleIdentifier == VMOwner.testBridge
 let omacvmSupport = FileManager.default.homeDirectoryForCurrentUser.path
   + (testIdentity ? "/Library/Application Support/omacvm-test" : "/Library/Application Support/omacvm")
 let jobsDir = supportDir + "/jobs"
+/// OmacVM Gestures' settings (Magic Mouse swipe): the test identity's own Gestures.
+let gesturesDomain = (testIdentity ? "org.omacvm.test.gestures" : "org.omacvm.gestures") as CFString
 let feedDefault = "https://github.com/gillesgoetsch/omacvm/releases/latest/download/omacvm-manifest.json"
 
 /// What a spawned CLI run gets: a fixed, small environment.
@@ -96,7 +99,7 @@ func controlCLI() -> Result<String, PolicyError> {
   let raw = env["OMACVM_CONTROL_CLI"] ?? (try? String(contentsOfFile: omacvmSupport + "/cli", encoding: .utf8)) ?? ""
   let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
   guard path.hasPrefix("/"), !path.contains("/../") else {
-    return .failure(PolicyError(503, "no-cli", "the Mac's OmacVM is not set up for the control centre: open OmacVM.app once (or omacvm update on the Mac)"))
+    return .failure(PolicyError(503, "no-cli", "the Mac's OmacVM is not set up for the control centre: open OmacVM on the Mac once"))
   }
   let root = (path as NSString).deletingLastPathComponent
   for p in [path, root, root + "/src", root + "/src/cmd", root + "/src/lib"] {
@@ -130,6 +133,11 @@ func macFeatures(_ cli: String) -> [String] {
     let name = String(line.split(separator: "\t", maxSplits: 1).first ?? "")
     return validFeatureName(name) ? name : nil
   }
+}
+
+/// The Mac's omacvm is OmacVM.app's own copy: the app updates it.
+func macIsAppCopy(_ cli: String) -> Bool {
+  cliIsAppCopy(cli, hasGit: FileManager.default.fileExists(atPath: cliRoot(cli) + "/.git"))
 }
 
 func macVersion(_ cli: String) -> String {
@@ -236,7 +244,8 @@ final class Control {
     let proto: Int
     switch negotiateProto(headers["x-omacvm-proto"]) { case .success(let p): proto = p; case .failure(let e): return refuse(e) }
     let version = macVersion(cli)
-    quiet = route == .gpuMemory
+    // Graphics memory and the Magic Mouse swipe are asked while the control centre is open.
+    quiet = route == .gpuMemory || route == .mouseSwipe
     // The VM list as it is for graphics memory (asked every 2 s): a new run of
     // omacvm vms only when the VM is not in it, not each minute.
     let fresh = route != .gpuMemory
@@ -245,7 +254,7 @@ final class Control {
       let v = ProcessInfo.processInfo.operatingSystemVersion
       return answer(200, ["proto": proto, "proto_min": controlProtoMin, "omacvm": version,
                           "requests": ["hello", "status", "updates", "updates/check", "settings/update-checks", "jobs",
-                                       "gpu-memory"],
+                                       "gpu-memory", "settings/mouse-swipe", "app-update", "theme"],
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
@@ -257,6 +266,7 @@ final class Control {
     // socket (server.swift), or on 127.0.0.1 from an app older than it.
     let vm: VMEntry
     let relayed = peer == relayPeer || fromThisMac(fd, peer: peer)
+    var viaApp = false
     if relayed {
       guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
@@ -266,6 +276,7 @@ final class Control {
       case .success(let v): vm = v
       case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
+      viaApp = true
       if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
       switch vmForPeer(peer, vmList(cli, fresh: fresh) { if case .success = vmForPeer(peer, $0) { return true }; return false }) {
@@ -299,7 +310,22 @@ final class Control {
     }
     vmName = vm.name
     switch route {
-    case .updates: return answer(200, updatesAnswer(version))
+    case .updates: return answer(200, updatesAnswer(version, cli))
+    case .appUpdate:
+      // OmacVM.app asks this for its VM, then checks its own signed feed and
+      // updates itself (it shuts the VM down cleanly first). The Bridge gates
+      // as for an update job: a verified release, newer than the Mac's.
+      let m = verifiedManifest()
+      if let e = appUpdateGate(viaApp: viaApp, vmType: vm.type, macAppCopy: macIsAppCopy(cli), release: m?.version, mac: version) {
+        return refuse(e)
+      }
+      let at = (lastResult()["checked_at"] as? String).flatMap { isoFormat.date(from: $0) }
+      if let e = updateGate(checksEnabled: updateChecks(), checkedAt: at) { return refuse(e) }
+      if runningOnDisk(vmKey(vm)) { return refuse(PolicyError(409, "busy", "a job runs for this VM: wait for it")) }
+      // Counts toward the jobs per hour; nothing runs here, so it is free again at once.
+      if let e = q.sync(execute: { limiter.admit(vmKey(vm)) }) { return refuse(e) }
+      q.sync { limiter.finished(vmKey(vm)) }
+      return answer(200, ["go": true, "release": m?.version ?? "", "mac": version], "app-update for \(vm.name)")
     case .updatesCheck:
       let wait = q.sync { () -> Double in
         let w = 60 - Date().timeIntervalSince(lastCheck)
@@ -308,10 +334,15 @@ final class Control {
       }
       if wait > 0 { return refuse(PolicyError(429, "rate", "checked a moment ago: try again in \(Int(wait) + 1) s")) }
       _ = checkFeed()
-      return answer(200, updatesAnswer(version))
+      return answer(200, updatesAnswer(version, cli))
     case .setUpdateChecks(let on):
       setUpdateChecks(on)
-      return answer(200, updatesAnswer(version), on ? "checks on" : "checks off")
+      return answer(200, updatesAnswer(version, cli), on ? "checks on" : "checks off")
+    case .mouseSwipe:
+      answer(200, mouseSwipeAnswer(magicMouse: magicMouseConnected(), fingers: mouseSwipeNow()))
+    case .setMouseSwipe(let n):
+      setMouseSwipe(n)
+      answer(200, mouseSwipeAnswer(magicMouse: magicMouseConnected(), fingers: mouseSwipeNow()), "mouse swipe \(n) fingers")
     case .status:
       answer(200, statusAnswer(cli, vm, version))
     case .gpuMemory:
@@ -319,6 +350,17 @@ final class Control {
       // The app sends the file with the request: the Bridge does not read an external drive itself.
       let fromApp = relayed ? gpuMemoryFromApp(headers["x-omacvm-gpu-memory"]) : nil
       answer(200, gpuMemoryAnswer(fromApp ?? gpuMemoryText(vm)))
+    case .theme(let b):
+      // The Touch ID panel's colours: only from a VM with Touch ID on (its key on the Mac).
+      guard touchIDKey(vm) != nil else { return refuse(PolicyError(403, "off", "Touch ID is off for this VM")) }
+      let name = vmKeyName(type: vm.type, name: vm.name)
+      if let e = touchIDThemes.admit(name, now: Date()) { return refuse(e) }
+      switch parseTouchIDTheme(b) {
+      case .failure(let e): return refuse(e)
+      case .success(let t):
+        guard touchIDThemes.save(t, for: name) else { return refuse(PolicyError(500, "not-kept", "the Mac could not keep the theme")) }
+        answer(200, ["ok": true, "dark": t.dark], "theme \(t.background.hex) \(t.dark ? "dark" : "light")")
+      }
     case .job(let id):
       guard let j = job(id), j.vm == vmKey(vm) else { return refuse(PolicyError(404, "not-found", "no such job")) }
       answer(200, jobAnswer(j))
@@ -483,6 +525,54 @@ final class Control {
     if let vm = q.sync(execute: { vms.vm(at: peer) }) { return ("vm " + vm, true) }
     return ("address " + peer, false)
   }
+
+  /// Touch ID (touchid.swift): the VM that asks, found as for the control
+  /// centre's requests, and its Touch ID key and checked nonce. `key` nil:
+  /// the feature is off for that VM (no key on the Mac). The nonce is also
+  /// given back with an error once the signature checked out, so the
+  /// refusal can be signed.
+  func touchIDCaller(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data)
+      -> (vm: VMEntry?, key: String?, nonce: String?, error: PolicyError?) {
+    let cli: String
+    switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return (nil, nil, nil, e) }
+    let vm: VMEntry
+    let found: Result<VMEntry, PolicyError>
+    if peer == relayPeer || fromThisMac(fd, peer: peer) {
+      guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
+            let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
+        return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"))
+      }
+      found = vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false })
+    } else {
+      found = vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false })
+    }
+    switch found { case .success(let v): vm = v; case .failure(let e): return (nil, nil, nil, lookingAgain(e)) }
+    guard let key = touchIDKey(vm) else { return (vm, nil, nil, nil) }
+    let checked = q.sync { () -> Result<String, AuthFailure> in
+      let r = verifyControlAuth(header: headers["x-omacvm-auth"], key: key, vm: vmKeyName(type: vm.type, name: vm.name),
+                                method: method, path: path, proto: headers["x-omacvm-proto"] ?? "", body: body,
+                                now: Date(), nonces: &nonces, label: touchIDRequestLabel)
+      keepNonces()
+      return r
+    }
+    switch checked {
+    case .success(let n): return (vm, key, n, nil)
+    case .failure(let f): return (vm, key, f.nonce, f.error)
+    }
+  }
+
+  /// The VM's Touch ID key on the Mac (lib/mac.sh touchid_key_ensure), only
+  /// when this user's alone; nil: Touch ID is off for it.
+  func touchIDKey(_ vm: VMEntry) -> String? {
+    let path = omacvmSupport + "/vm-keys/" + touchIDKeyName(type: vm.type, name: vm.name)
+    var st = stat()
+    guard lstat(path, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == getuid(), st.st_mode & 0o077 == 0, st.st_size < 256,
+          let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+    return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// How many VMs this Mac has set up (the dialog names the VM when more than one).
+  func setUpVMCount() -> Int { q.sync { vms.list.filter { $0.setup }.count } }
 
   /// An address the cache does not have was turned away for the limits: a
   /// VM that just started may be one, so look again (at most once a minute).
@@ -663,6 +753,34 @@ final class Control {
     try? jsonData(o).write(to: URL(fileURLWithPath: settingsPath), options: .atomic)
   }
 
+  // ---- Magic Mouse swipe: Gestures' own setting, read at each swipe ----
+  private func mouseSwipeNow() -> Int {
+    CFPreferencesAppSynchronize(gesturesDomain)
+    return mouseSwipeFingers(stored: CFPreferencesCopyAppValue("MouseSwipeFingers" as CFString, gesturesDomain))
+  }
+
+  private func setMouseSwipe(_ n: Int) {
+    CFPreferencesSetAppValue("MouseSwipeFingers" as CFString, (n == 3 ? 3 : 4) as CFNumber, gesturesDomain)
+    CFPreferencesAppSynchronize(gesturesDomain)
+  }
+
+  /// A Magic Mouse connected now (Bluetooth or USB), looked for as the app does.
+  private func magicMouseConnected() -> Bool {
+    for cls in ["AppleMultitouchDevice", "IOHIDDevice"] {
+      var it: io_iterator_t = 0
+      guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(cls), &it) == KERN_SUCCESS else { continue }
+      defer { IOObjectRelease(it) }
+      while case let s = IOIteratorNext(it), s != 0 {
+        defer { IOObjectRelease(s) }
+        func num(_ k: String) -> Int? {
+          (IORegistryEntryCreateCFProperty(s, k as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.intValue
+        }
+        if isMagicMouse(vendor: num("VendorID"), product: num("ProductID"), family: num("Family ID")) { return true }
+      }
+    }
+    return false
+  }
+
   private func lastResult() -> [String: Any] {
     guard let d = try? Data(contentsOf: URL(fileURLWithPath: updatesPath)),
           let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return [:] }
@@ -759,9 +877,10 @@ final class Control {
     if Date().timeIntervalSince(at) > 7 * 86400 { checkFeed() }
   }
 
-  private func updatesAnswer(_ version: String) -> [String: Any] {
+  private func updatesAnswer(_ version: String, _ cli: String) -> [String: Any] {
     let r = lastResult()
-    var a: [String: Any] = ["checks_enabled": updateChecks(), "omacvm": version,
+    // mac_app: the Mac's omacvm is OmacVM.app's copy (the app updates it: app-update).
+    var a: [String: Any] = ["checks_enabled": updateChecks(), "omacvm": version, "mac_app": macIsAppCopy(cli),
                             "checked_at": r["checked_at"] ?? NSNull(), "ok": r["ok"] ?? false,
                             "offline": r["offline"] ?? false, "unsigned": r["unsigned"] ?? false,
                             "error": r["error"] ?? NSNull(), "manifest": NSNull()]

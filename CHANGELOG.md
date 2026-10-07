@@ -3,6 +3,112 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.2
+
+- Touch ID in the VM (experimental, off by default; turn it on in the
+  control centre or with `omacvm enable touch-id`): sudo, polkit prompts
+  and 1Password's "Unlock using system authentication" in Omarchy ask the
+  Mac's Touch ID first; the password
+  keeps working, and comes at once when the Mac is locked, another app is
+  in front or the Mac has no Touch ID. The Mac asks every time, shows the
+  command and its terminal, and gives the VM only yes or no. Only for the
+  person at the VM's screen: never over SSH or for a program without a
+  terminal. Parallels, UTM, VMware Fusion and OmacVM.app (there through
+  its own port: shut the VM down and start it again once after turning it
+  on) (ADR 0041). In OmacVM.app the Mac asks in its own panel in your
+  Omarchy theme, centred on the VM's window, with a fingerprint that
+  traces, turns green and draws a check (or shakes red); no click needed.
+  Parallels, UTM and Fusion keep macOS's own dialog.
+- The Mac's camera in ffmpeg (and other apps that go by the frame times):
+  a recording was all black, and `ffmpeg -t 10` ended at once. A new reader
+  gets the last frame first, and that frame carried the time of the
+  camera's last use, maybe an hour back; ffmpeg filled the hour with copies
+  of it. The frames now carry a clock that stops while no app reads, so the
+  next frame follows right after. Browsers and `v4l2-ctl` worked before and
+  still do. If the camera service restarted while an app read the camera
+  (an update, say), it could get stuck restarting every 2 seconds on the
+  rest of a half-read frame; it now skips that and goes on.
+- Mission Control from the escape combo (pressed twice): Esc often did not
+  close it, because the VM took the key, and ⌃⌥ Esc in it did nothing or
+  gave the keyboard to Finder. It took up to three presses to get back into
+  the VM. Now Esc closes Mission Control and the VM gets no Esc, and one
+  ⌃⌥ Esc closes it and goes back into the VM.
+- OmacVM.app: when the VM's desktop stops drawing because its graphics
+  reached the most one VM may use (three quarters of the Mac's memory), the
+  window now says so. It said "macOS ran short of memory", also when macOS
+  still had memory (seen on an 8 GB MacBook Air with a browser full of WebGL).
+- Updates in one step. `u` in the control centre checks, then updates what
+  is older: with OmacVM.app on the Mac, the app first (it shuts the VM down
+  cleanly, updates, restarts and starts the VM again; one confirm, "save your
+  work"), then the VM's part right after the restart. The top line says
+  what: "Update available: 3.0.2 (Mac app and this VM) · u updates". No
+  more U, then c, then i. The app's window gets **Check Now** and "Update to
+  X…". From 3.0.0 or 3.0.1, update the app once by hand (shut the VM down, then
+  OmacVM › Check for Updates…): the one-step update works from 3.0.2 on.
+- The control centre shows an update while it runs: step n of N with a bar
+  and the latest log line (also on the Updates screen); through OmacVM.app
+  the four steps (the Mac gets the app, the VM shuts down, the app installs
+  and starts the VM again, the VM updates). At the end "Updated to X" or the
+  error with the next step, the list at once, and R restarts the VM for the
+  kernel, memory and keyboard changes.
+- Error texts say the next step: "update OmacVM.app first: u in the control
+  centre does it, or Check Now in OmacVM on the Mac" instead of
+  "OmacVM.app is older than this release".
+- Switching a feature (control centre, `omacvm enable` or `disable`) no
+  longer makes the screens flicker. A switch ran the whole VM side again:
+  Hyprland's config files were rewritten and reloaded, and the displays
+  moved several times (seen with a 6K display when WebGPU was switched on).
+  Now a switch installs only that feature's part, plus parts this OmacVM
+  changed. The whole VM side still runs when the VM has another OmacVM
+  version or its Graphics setting changed. Any apply now rewrites
+  Hyprland's files only when they change, and the Mesa build for WebGPU
+  runs at the lowest priority.
+- OmacVM.app: after *Later* on "The VM's desktop stopped drawing", the app
+  menu has *Restart the Desktop…* until the desktop restarts. Before, there
+  was no way back: the screen stayed black until the VM was shut down.
+- OmacVM.app: Omarchy's scale panel offers 1.25 and 1.6 on notched Macs
+  too (full screen leaves a few black rows at the bottom). On every Mac the
+  VM window now resizes in 20 point steps.
+- OmacVM.app: Quit in the VM's window right after the VM starts (while it
+  still boots) shuts it down cleanly. The Mac pressed the VM's power button
+  once, the VM was not listening yet, and it was stopped after a minute.
+  In the first 2 minutes after a start or restart the button is now pressed
+  again every 10 seconds, up to 40 seconds; qemu.log says each step. A
+  hidden VM in full screen (test runs) no longer quits by itself.
+- OmacVM.app: the sound is in step with the picture in videos (YouTube in
+  Chromium, Firefox, mpv). The VM never knew how late the Mac plays its
+  sound (QEMU's buffers, 110-150 ms, plus the Mac's output: about 13 ms
+  wired, 170 ms with AirPods), so the sound came that much after the
+  picture. The app now tells the VM, at the start and whenever the Mac's
+  output changes, and PipeWire passes it on to the players. Measured on
+  the Mac mini (wired, Chromium): the sound 125-164 ms late before, 0 to
+  42 ms after. Not a 3.0.0 change: `audioClassic` (the old sound timing)
+  was as late. Fine-tuning:
+  `defaults write org.omacvm.app audioDelayExtraMs -int N`
+  (troubleshooting 28).
+- Control centre: a Magic Mouse swipe row (3 or 4 fingers) while the Mac
+  has a Magic Mouse, on every route.
+- OmacVM.app with its VMs folder on another drive: downloads go there too
+  (`.downloads` in that folder), not to the Mac's own disk.
+- Omanotch: with the bar hidden (Super+Shift+Space) the notch strip shows
+  the wallpaper's rows right above the VM's picture again, as one picture
+  over the whole MacBook screen. Since 3.0.0 NOTCH sits right above the
+  built-in display in OmacVM.app (#130); the wallpaper patch no longer
+  found its display there, and every output drew its own copy: the strip
+  a zoomed piece of the image's middle. Background patch v6 finds the
+  display in both places. In a window (no strip on screen) the VM's
+  wallpaper is now laid out the same way, so it sits a little lower and
+  larger than in 3.0.0.
+- Omanotch: no more box of the old bar (the clock's last digits) at the
+  strip's end after hiding the bar while the pointer was at the top edge.
+  notchcast froze the pixels around a cursor that was not on NOTCH at all.
+- Omanotch: at fractional scales (such as 1.6) the strip trims the extra
+  rounding rows at its top only, so its bottom row meets the display's top
+  row and the wallpaper runs through without a step.
+- Omanotch: the first session of a new VM on a MacBook with a notch no
+  longer blinks. The top of the screen went black for a frame every 2
+  seconds until the VM restarted (the 3.0.1 known issue, also in 3.0.0).
+
 ## 3.0.1
 
 - OmacVM.app: the globe (fn) key pressed on its own goes to the VM, no

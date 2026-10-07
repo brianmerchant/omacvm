@@ -14,6 +14,8 @@
 #   features_real PROBE [DIR]     FV as the VM really is where a feature can drift;
 #                                 DRIFT: what the record had wrong
 #   features_record_fix IP [DIR]  writes DRIFT into the record and the VM's copy
+#   feature_switch_parts INSTALLED DIGESTS "SWITCHED" "ALL"
+#                                 the parts a feature switch installs, or status 1
 #
 # The record of a VM's features (docs: tracks/control-centre.md, "Feature
 # state truth"): an OmacVM.app VM's folder has it in its features file (the
@@ -192,6 +194,40 @@ features_record_fix() {
       if grep -q \"^\$k=\" \$f; then sed \"s/^\$k=.*/\$k=\$v/\" \$f > \$f.omacvm-new; cat \$f.omacvm-new > \$f; rm -f \$f.omacvm-new
       else echo \"\$k=\$v\" >> \$f; fi
     done" < /dev/null >/dev/null 2>&1
+}
+
+# feature_switch_parts INSTALLED DIGESTS "SWITCHED..." "ALL...": the VM side
+# a feature switch runs (apply.sh), as a comma list for guest/install.sh
+# --only: the switched features and every feature whose part this copy has
+# with another digest than the VM. INSTALLED: the VM's
+# /etc/omacvm/installed.json; DIGESTS: manifest.py digests of this copy.
+# Status 1 (the whole VM side runs) when the VM's core part differs or it
+# does not say. Running all of it on each switch rewrote Hyprland's config
+# files, reloaded Hyprland and restarted the display agent: the displays
+# flickered for a while (2026-10-06, WebGPU switched on with a 6K display).
+feature_switch_parts() {
+  python3 -c '
+import json, sys
+def parts(text):
+    try:
+        p = json.loads(text).get("parts")
+    except (ValueError, AttributeError):
+        return {}
+    return p if isinstance(p, dict) else {}
+def digest(p, k):
+    v = p.get(k)
+    return v.get("digest") if isinstance(v, dict) else None
+old, new = parts(sys.argv[1]), parts(sys.argv[2])
+core = digest(new, "core")
+if not core or digest(old, "core") != core:
+    sys.exit(1)
+names = sys.argv[4].split()
+want = set(sys.argv[3].split()) | {k for k in names if k in new and digest(old, k) != digest(new, k)}
+out = [k for k in names if k in want]
+if not out:
+    sys.exit(1)
+print(",".join(out))
+' "$@"
 }
 
 # JSON string (for the --json outputs).

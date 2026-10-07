@@ -163,9 +163,15 @@ app_links_stale() {
   local l x k n v out=""
   l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
   [[ -n $l ]] || return 0
-  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
+  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera touch-id:Touch\ ID; do
     k=${x%%:*} n=${x#*:} v=on
     [[ " $2 " == *" $k=off "* ]] && v=off
+    # Touch ID is off unless named on (its port is there only then); an app
+    # whose line does not name it never serves it.
+    if [[ $k == touch-id ]]; then
+      [[ " $2 " == *" $k=on "* ]] || v=off
+      [[ ", $l, " == *", Touch ID "* ]] || l+=", Touch ID off"
+    fi
     [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
   done
   echo "$out"
@@ -268,7 +274,8 @@ app_create() {
   for kv in "$@"; do
     v=${kv#*=}; printf "%s='%s'\n" "${kv%%=*}" "${v//$q/$q\\$q$q}"
   done > "$dir/vm.env"
-  /bin/bash "$a/Contents/Resources/scripts/$script" "$dir"
+  # The downloads go to the drive of the VMs folder, as in the app.
+  OMACVM_VMS_ROOT=$(dirname "$dir") /bin/bash "$a/Contents/Resources/scripts/$script" "$dir"
 }
 
 app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
@@ -277,7 +284,7 @@ app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
 # downloads (the app looks with its version, not this omacvm's).
 app_prebuilt_lookup() {
   local out
-  out=$(/bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
+  out=$(OMACVM_VMS_ROOT=$(app_vms_root) /bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
   read -r PB_TAG PB_SIZE PB_OMARCHY PB_VERSION <<<"$out"
   [[ $PB_TAG =~ ^[A-Za-z0-9._-]{1,80}$ && $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_OMARCHY =~ ^[!-~]{1,80}$ &&
      ${PB_VERSION:-} =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]

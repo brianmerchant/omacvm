@@ -385,6 +385,44 @@ own 12 and the 16 unknown places) leaves the other VMs and the relay all
 theirs. Long requests (`POST /wallpaper` with its 120 s body,
 `GET /wifi/password` waiting on the dialog) at most two at once per VM (429).
 
+### Touch ID (`/omacvm/touchid`, feature `touch-id`)
+
+The VM's sudo and polkit ask the Mac's Touch ID first (ADR 0041; off by
+default, `omacvm enable touch-id`). The VM's PAM client
+(`guest/omacvm-touchid`, root) posts `{"kind", "user", "detail", "tty", "action"}`
+signed with the VM's Touch ID key (`vm-keys/<vm>.touchid` on the Mac,
+`/etc/omacvm/touchid-key` in the VM) under the label
+`omacvm-touchid-request 1`; the answer, signed back
+(`omacvm-touchid-answer 1`), is `{"result": "yes"}` or `{"result": "no",
+"reason": ...}`. No key on the Mac: 403 `off`, no dialog. The Bridge asks
+macOS with a fresh `LAContext` each time, biometrics only;
+`"touch_id_password_fallback": true` in `config.json` also offers the Mac's
+password (macOS then also takes an Apple Watch's approval). It says no
+without a dialog when the Mac is locked, the VM's app is not in front or
+the Mac has no Touch ID; one dialog at a time, per VM one request every
+2 s and 10 a minute; after 3 misses (cancelled, failed, not answered) no
+for 60 s, then 5 min, then 30 min, until a yes. The log has the VM, the
+kind and the result, never the command. In the VM the client asks only
+for the person at the VM's screen (logind's display session; sudo from a
+terminal of theirs, not over SSH) and only for a sudo command it can show
+whole. OmacVM.app's VMs ask through the virtio port `org.omacvm.auth` (only
+with `touch-id=on` at the VM's start); the app passes the request on to
+the relay socket with the relay key and the VM's name, the guest's
+signature along, and the signed answer back unchanged (`AuthRelay`).
+
+For OmacVM.app's VMs the Mac asks in a panel in the VM's Omarchy theme
+(from 3.0.2), shown by QEMU, the VM window's own process: macOS reads the
+finger only for the app in front. The Bridge decides as always, then sends
+the panel's words and the VM's theme to the app in an interim
+`103 Touch ID Panel` answer on the relay connection and gets the panel's end
+back as one line (`touchIDAskAppPanel`); it signs the final answer.
+macOS's dialog stays for Parallels, UTM and Fusion, the password fallback,
+`"touch_id_panel": false` in `config.json`, and whenever the panel could not
+show. The VM sends its theme with `POST /omacvm/theme` (control key; only
+with Touch ID on; `#rrggbb` colours checked for contrast:
+`touchid_theme.swift`), kept per VM in `touchid-theme/`. Tests:
+`tests/run.sh`; the panel itself: `swift run touchid-panel-tests` in app/app.
+
 ### Not built: Wi-Fi control
 
 `POST /power`, `/join`, `/disconnect` answer `501`. Design: CoreWLAN

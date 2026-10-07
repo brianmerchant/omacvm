@@ -477,7 +477,8 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   (`org.omacvm.app.test`) and copies it over `~/Applications/OmacVM Test.app`; its helpers in
   `Contents/Helpers` are "OmacVM Test Bridge" (`org.omacvm.test.bridge`, port 47931,
   `~/Library/Application Support/omacvm-test-bridge`) and "OmacVM Test Gestures" (`org.omacvm.test.gestures`,
-  port 47930, settings domain `org.omacvm.test.gestures`). Start a helper with `open` (so macOS checks its own
+  port 47930, settings domain `org.omacvm.test.gestures`). Its VMs reach Omanotch on 47911 only: a test Omanotch
+  (src/omanotch/mac build, `port` 47911, `bridgeDir` omacvm-test-bridge) on a Mac without the user's. Start a helper with `open` (so macOS checks its own
   grant, not the Terminal's); small tools without a bundle run as children of your shell (the Terminal's grants).
   Never `src/mac/install.sh` from a test: that installs over the user's helpers.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest

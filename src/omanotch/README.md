@@ -52,8 +52,10 @@ have shown.
    off screen. It is not gone, though — your clicks are pressed on that hidden
    copy, so Omarchy opens its panels (clock, audio, network, …) on the visible
    display, right below the notch. The wallpaper is patched the same way: it is
-   laid out once across the strip and the display, so with the bar hidden
-   (Super+Shift+Space) the image runs straight through the notch strip.
+   laid out once across the strip and the display (as one screen, the strip
+   on top), so with the bar hidden (Super+Shift+Space) the image runs straight
+   through the notch strip, wherever NOTCH sits (over the display's top edge
+   or, in OmacVM.app, right above it).
    Omarchy's display panel gets a patched copy too (`omanotch.monitor`), so
    `NOTCH` is not listed there as a display to scale or switch off.
 3. **Streaming only what changes.** `notchcast`, a small C program in the VM,
@@ -123,7 +125,8 @@ Mac app — `defaults write ch.gillesgoetsch.omanotch <key> <value>`, then
 | `vmInterfacePrefixes` | `bridge`, `vnic` | VM network interfaces the Mac listens on … |
 | `vmSubnets` | `192.168.64.0/24`, `10.211.55.0/24`, `10.37.129.0/24` | … if their network is one of these (UTM, Parallels shared, Parallels host-only); guests are accepted only from that network |
 | `listenHost` | *(automatic)* | listen on this one IPv4 address instead |
-| `port` | `47811` | |
+| `port` | `47811` | OmacVM's test identity ("OmacVM Test") sends its VMs to `47911`: a test Omanotch sets `port` 47911 and `bridgeDir` |
+| `bridgeDir` | `omacvm-bridge` | the folder in `~/Library/Application Support` with the Bridge's token; `omacvm-test-bridge` for a test Omanotch |
 | `flush` | `false` | `true`: the bar is exactly as tall as the camera housing, as in OmacVM.app's notch-strip mode; the few points of the strip below it show the wallpaper. `false`: the bar fills the strip (macOS's menu bar height). Taken up within two seconds, no restart needed |
 
 VM — `systemctl --user edit notchcast`, `Environment=…`:

@@ -202,6 +202,10 @@ static CGWindowID otherWin, vmWin;
 // combo in macOS brings it back). Main thread, and the event tap (also on it).
 static pid_t winVMPid, leftWinPid;
 static CGWindowID winVMWin, leftWinWin;
+// The last full-screen VM's app is in front but shows no window on this
+// Space: its Space is not the one shown (Mission Control closed on a desktop,
+// or the Space changed with it in front). Main thread.
+static int vmOffSpace;
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
@@ -639,8 +643,14 @@ static void rearmTap(const char *why) {
 // combo may go back to (other). Main thread.
 static void noteCameFrom(int changed);
 static void frontChanged(pid_t pid, int net, int front, const char *title, CGWindowID win, int other) {
+  // The last full-screen VM in front with no window on this Space (win 0):
+  // still full screen, on its own Space, which is not shown. The combo goes
+  // back into it; it is no VM in a window (air-matrix O4: after Mission
+  // Control + Esc on Desktop 1 the combo gave the keyboard to Finder and it
+  // took three presses to get back).
+  int offSpace = net >= 0 && !front && pid > 0 && pid == vmPid && !win;
   // OmacVM.app's launcher has the VMs' process name too: only QEMU counts.
-  int winVM = net == NET_APP && !front && pid > 0 && isQemuFn(pid);
+  int winVM = net == NET_APP && !front && pid > 0 && !offSpace && isQemuFn(pid);
   // Each OmacVM VM is its own QEMU process with its own tap: a different pid
   // in front (tapVM is 0 while no VM is) may have put its tap ahead of ours.
   // In a window too: the combo is ours there as well.
@@ -662,6 +672,7 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
   }
   winVMPid = winVM ? pid : 0;
   winVMWin = winVM ? win : 0;
+  vmOffSpace = offSpace;
   // In that VM again, or a full-screen VM in front (the newer one to go back to).
   if (pid == leftWinPid || front) leftWinPid = 0;
   // Where the way out of the next full-screen VM goes back to.
@@ -712,7 +723,9 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   char title[sizeof frontTitle] = "";
   if (front) windowTitle(pid, title, sizeof title);
   int other = isOther(pid, net, name, net < 0 && pid > 0 && ns_is_regular(pid));
-  if (other || (net == NET_APP && !front)) win = frontWindow(pid);
+  // A VM app not full screen: its window here, 0 when it shows none on this
+  // Space (its full-screen VM on a Space not shown).
+  if (other || (net >= 0 && !front)) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
   if (t) {
     // Every 0.2 s while a VM app is in front, else every 2 s; the slow look
@@ -891,7 +904,8 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 enum { COMBO_PASS, COMBO_LEAVE, COMBO_CAPTURE, COMBO_ENTER, COMBO_WINDOW_OUT, COMBO_WINDOW_BACK };
 
 // haveVM: a full-screen VM to go back to, and its app is not the one in front
-// (Parallels, UTM or Fusion in a window keep the combo, as before). winVM: an
+// (Parallels, UTM or Fusion in a window keep the combo, as before) or it is,
+// with no window on this Space (vmOffSpace: its Space not shown). winVM: an
 // OmacVM VM in front in a window. winBack: the windowed VM the combo left,
 // still there and not in front (newer than any full-screen VM left).
 static int comboAction(int vmFront, int esc, int haveVM, int winVM, int winBack) {
@@ -1268,6 +1282,29 @@ static int windowsOf(pid_t pid, CGRect *out, int cap) {
   return k;
 }
 
+// Mission Control is showing: the Dock then has a window over a whole display
+// below its own level (layer 18 on macOS 26; its normal window sits at the
+// Dock level, 20, and its backdrops below 0). macOS gives no call for it. In
+// Mission Control the Space shortcut and app switches do nothing, macOS keeps
+// the app from before in front, and the Spaces list names Desktop 1 as shown.
+static int missionControlOpen(void) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+  if (!wins) return 0;
+  CGDirectDisplayID ds[16]; uint32_t nd = 0; CGGetActiveDisplayList(16, ds, &nd);
+  int dockLevel = (int)CGWindowLevelForKey(kCGDockWindowLevelKey), found = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && !found; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int layer = -1; CGRect r; char owner[32] = "";
+    CFStringRef name = CFDictionaryGetValue(w, kCGWindowOwnerName);
+    if (!name || !CFStringGetCString(name, owner, sizeof owner, kCFStringEncodingUTF8) || strcmp(owner, "Dock")) continue;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    if (layer <= 0 || layer >= dockLevel || !CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r)) continue;
+    for (uint32_t d = 0; d < nd && !found; d++) found = CGRectEqualToRect(CGRectIntegral(r), CGRectIntegral(CGDisplayBounds(ds[d])));
+  }
+  CFRelease(wins);
+  return found;
+}
+
 // The front app on a display now: the owner of its topmost normal window that
 // is not `skip`'s (the VM), with that window. 0: none (the desktop).
 static pid_t topAppOn(CGRect b, pid_t skip, CGWindowID *win) {
@@ -1360,6 +1397,7 @@ static void (*saveSignFn)(void) = saveSwipeSign;
 static CFDictionaryRef (*hotkeysFn)(void) = readHotkeys;
 static int (*keyFn)(Hotkey) = postHotkey;
 static CGEventFlags (*heldFn)(void) = heldNow;
+static int (*missionControlOpenFn)(void) = missionControlOpen;
 static double verifyAfter = 0.8;   // s: a Space's animation is over by then
 static double cameFromEvery = 0.5; // s: the Spaces read at most this often for the same app
 
@@ -1486,9 +1524,12 @@ static double doublePress = 0.4;     // s between the two presses (the offline t
 int ns_open_mission_control(void);
 static int (*missionAppFn)(void) = ns_open_mission_control;
 static int movesCancelled;           // the first press's steps not posted yet are dropped
+static double mcClosedAt = -1;       // when we last closed Mission Control (its shortcut toggles it)
+static double mcClosing = 1.0;       // s it may still be listed while it closes (the offline test sets its own)
 static double lastComboAt = -1;
 
 static void missionControl(void) {
+  mcClosedAt = -1;   // opened again: the next close is a real one
   Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
   if (k.enabled && keyFn(k)) {
     logf_("escape combo: pressed twice: Mission Control (macOS's shortcut)");
@@ -1724,7 +1765,67 @@ static void leaveVM(void) {
 // combo left) moves back to the VM's Space when it is right beside it; else,
 // or if that does not land, the VM's window comes to the front (macOS shows
 // its Space).
-static void enterVM(void) {
+static void enterVMNow(int mayCloseMC);
+static void enterVM(void) { enterVMNow(1); }
+
+// The VM's Space shows on some display.
+static int vmSpaceShown(void) {
+  uint64_t s = windowSpaceFn(vmWin);
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
+  for (int i = 0; s && i < nd; i++) if (ds[i].current == s) return 1;
+  return 0;
+}
+
+// Mission Control open (the combo pressed twice, then once more in it): the
+// Space shortcut and app switches do nothing there, so it took presses that
+// did nothing, or gave the keyboard to Finder (air-matrix O4). Its own
+// shortcut (or the app) closes it, back to the Space it was opened from: the
+// VM's after a double press in the VM. Another Space -> the usual way in.
+// Mission Control still closing (or the VM's Space not listed yet): look
+// again a few times before the usual way in, whose Space move would go one
+// Space too far once macOS lands on the VM's.
+static void afterMissionControl(int looks) {
+  if (movesCancelled) return;
+  if (vmSpaceShown()) {
+    if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
+    return;
+  }
+  if (looks < LATE_LOOKS) { afterLook(^{ afterMissionControl(looks + 1); }); return; }
+  enterVMNow(0);
+}
+
+// Its shortcut toggles it: posted only while it is still open and not
+// already being closed by us (its close animation still lists it), else a
+// second close would open it again.
+static int closeMissionControlOnce(const char *why) {
+  double now = monoNow();
+  if ((mcClosedAt >= 0 && now - mcClosedAt < mcClosing) || !missionControlOpenFn()) return 0;
+  mcClosedAt = now;
+  Hotkey k = hotkey(HOTKEY_MISSION_CONTROL);
+  int byKey = k.enabled && keyFn(k), ok = byKey || missionAppFn();
+  logf_("%s: closing Mission Control (%s)", why, byKey ? "macOS's shortcut" : ok ? "the app" : "macOS refused!");
+  return 1;
+}
+
+static void closeMissionControlThenEnter(void) {
+  whenKeysUp(^{
+    if (movesCancelled) return;
+    closeMissionControlOnce("escape combo: Mission Control is open");
+    after(^{ afterMissionControl(0); });
+  }, 50);
+}
+
+// Esc in Mission Control while OmacVM's QEMU is the app in front: QEMU's own
+// event tap (full grab) took it for the VM, so Mission Control stayed open
+// and the VM got an Esc (the Air, air-matrix O4). Ours sees it first:
+// Mission Control's own shortcut closes it instead, back to the Space it was
+// opened from.
+static void closeMissionControl(void) {
+  whenKeysUp(^{ closeMissionControlOnce("Esc in Mission Control (the VM would have taken it)"); }, 50);
+}
+
+static void enterVMNow(int mayCloseMC) {
+  if (mayCloseMC && missionControlOpenFn()) { closeMissionControlThenEnter(); return; }
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
   uint64_t vmSpace = windowSpaceFn(vmWin);
@@ -1770,7 +1871,7 @@ static void enterWindow(void) {
 static void later(void (*f)(void)) { pendingSteps++; dispatch_async(dispatch_get_main_queue(), ^{ pendingSteps--; f(); }); }
 
 // ---- event tap: drop macOS gestures while capturing; escape combo ----
-static int swallowEscUp;
+static int swallowEscUp, escClosedMC;
 
 static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u) {
   (void)p; (void)u;
@@ -1783,16 +1884,39 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
     int combo = escapeCombo(kc, f);
+    // vmOffSpace (no VM window on this Space, as in Mission Control) first:
+    // an Esc in a windowed VM never pays for the window list.
+    if (kc == ESC_KEYCODE && escClosedMC) {   // the rest of that Esc: held (repeats) and its up
+      if (type == kCGEventKeyUp) { escClosedMC = 0; swallowEscUp = 0; return NULL; }
+      if (CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat)) return NULL;
+      escClosedMC = 0;
+    }
+    if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo && !frontIsVM && vmOffSpace && appPid > 0 && appPid == vmPid &&
+        !(f & (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift)) &&
+        CGEventGetIntegerValueField(e, kCGEventSourceStateID) == kCGEventSourceStateHIDSystemState &&
+        !CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) && isQemuFn(vmPid) && missionControlOpenFn()) {
+      escClosedMC = 1;   // its repeats and its up too: QEMU must not see half a key
+      later(closeMissionControl);
+      return NULL;
+    }
     // A plain Esc going down: the combo's Esc up we meant to eat went elsewhere
     // (QEMU's tap ahead of ours takes it when Ctrl or Option comes up first),
     // so this press keeps its own up.
     if (kc == ESC_KEYCODE && type == kCGEventKeyDown && !combo) swallowEscUp = 0;
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     int act = combo
-              ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin),
+              ? comboAction(frontIsVM, escaped, alive(vmPid) && (vmPid != appPid || vmOffSpace) && vmWindowFn(vmPid, vmWin),
                             winVMPid > 0 && winVMPid == appPid,
                             alive(leftWinPid) && leftWinPid != appPid && vmWindowFn(leftWinPid, leftWinWin))
               : COMBO_PASS;
+    // In Mission Control (no VM in front there) with a full-screen VM to go
+    // back to: back into it, whatever macOS says is in front (enterVM closes
+    // Mission Control first). Asked only for a combo from the keyboard.
+    if (combo && !frontIsVM && type == kCGEventKeyDown && act != COMBO_ENTER && act != COMBO_WINDOW_BACK &&
+        CGEventGetIntegerValueField(e, kCGEventSourceStateID) == kCGEventSourceStateHIDSystemState &&
+        !CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) &&
+        alive(vmPid) && vmWindowFn(vmPid, vmWin) && missionControlOpenFn())
+      act = COMBO_ENTER;
     if (act == COMBO_PASS) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
         // UTM, VMware Fusion and OmacVM.app (without Accessibility for it) keep

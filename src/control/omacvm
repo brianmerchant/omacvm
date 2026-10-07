@@ -104,6 +104,13 @@ def notify() -> int:
     from omacvm_cc.controller import Controller
     from omacvm_cc.local import cache_file
 
+    from omacvm_cc.local import take_resume
+
+    # OmacVM.app restarted this VM for an update: the control centre opens and
+    # does this VM's part (it takes the marker; nothing is asked again).
+    if take_resume(remove=False):
+        subprocess.Popen(["omarchy-launch-or-focus-tui", "omacvm", "--window"], start_new_session=True)
+        return 0
     c = Controller()
     try:
         c.hello = c.bridge.hello()
@@ -129,7 +136,7 @@ def notify() -> int:
     n = sum(1 for r in c.rows() if r.update)
     r = subprocess.run(["notify-send", "-a", "OmacVM", "-A", "open=Open", "-i", "system-software-update",
                         f"OmacVM {m['version']} is out",
-                        f"{n} feature{'s' if n != 1 else ''} change. Open OmacVM to install it."],
+                        f"{n} feature{'s' if n != 1 else ''} change. Open OmacVM and press u to update."],
                        capture_output=True, text=True)
     if r.stdout.strip() == "open":
         subprocess.Popen(["omarchy-launch-or-focus-tui", "omacvm", "--window"], start_new_session=True)

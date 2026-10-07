@@ -8,7 +8,7 @@
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, no-idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video, vulkan, x86-apps) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -192,7 +192,8 @@ if system; then
     ufw delete allow from 192.168.77.1 to any port 22 proto tcp >/dev/null 2>&1 || true
   fi
 else
-  log "repair: $(tr , ' ' <<<"${ONLY:1:-1}")"
+  # A repair, or a feature switch (apply.sh): the rest stays as it is.
+  log "only: $(tr , ' ' <<<"${ONLY:1:-1}")"
 fi
 # Network cards without a link: their routes are skipped at once. OmacVM.app
 # moves a running VM between its two cards (fast network <-> QEMU's user
@@ -336,6 +337,8 @@ if want vulkan && [[ $TYPE == app ]]; then
   elif [[ -e /opt/omacvm-mesa ]]; then
     log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove || not_set_up vulkan "Vulkan (off)"
   fi
+  # The driver check after each boot follows the switch (a switch runs only this step).
+  "$R/app/guest/venus/timer.sh" || true
 fi
 # x86 apps: box64, built once in the VM as a pacman package. Every route.
 if want x86-apps; then
@@ -396,6 +399,14 @@ elif [[ ${F[external-brightness]} == on ]]; then
 elif grep -qs '^# omacvm-ddcutil' "$DDC"; then
   log "external display brightness: off"
   rm -f "$DDC" && rm -rf "/run/user/$(id -u "$U")/omarchy-brightness-display-ddc"
+fi
+# Touch ID for sudo, polkit and 1Password (ADR 0041): the keys come from omacvm apply.
+if want touch-id; then
+  if [[ ${F[touch-id]} == on ]]; then
+    log "Touch ID (sudo, polkit, 1Password)"; "$R/bridge/guest/touchid.sh" on "$U" || not_set_up touch-id "Touch ID"
+  elif [[ -e /usr/lib/omacvm/omacvm-touchid || -e /etc/omacvm/touchid-key ]]; then
+    log "Touch ID: off"; "$R/bridge/guest/touchid.sh" off "$U"
+  fi
 fi
 # The control centre (omacvm in Omarchy): on, or gone again.
 if want control-centre; then

@@ -119,6 +119,12 @@ SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/
   { echo "launcher build failed" >&2; exit 1; }
 LAUNCHER=$ROOT/app/.build/release/OmacVM
 [[ -x $LAUNCHER ]] || { echo "launcher build failed" >&2; exit 1; }
+# Touch ID's panel, which QEMU loads (omacvm-cocoa-touchid-panel.patch, ADR 0041).
+SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/mc/clang \
+  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none --product OmacVMTouchIDPanel 2>&1 | { grep -v '^\[' || true; } ||
+  { echo "Touch ID panel build failed" >&2; exit 1; }
+TOUCHID_PANEL=$ROOT/app/.build/release/libOmacVMTouchIDPanel.dylib
+[[ -f $TOUCHID_PANEL ]] || { echo "Touch ID panel build failed" >&2; exit 1; }
 
 ICON=$ROOT/.build/OmacVM.icns
 if [[ ! -f $ICON ]]; then
@@ -136,6 +142,10 @@ install -m755 "$LAUNCHER" "$C/MacOS/OmacVM"
 install -m644 "$ICON" "$C/Resources/OmacVM.icns"
 ditto "$RT/qemu-gpu-runtime" "$C/Resources/runtime"
 mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/OmacVM"
+install -m644 "$TOUCHID_PANEL" "$C/Resources/runtime/lib/OmacVMTouchIDPanel.dylib"
+install_name_tool -id @rpath/OmacVMTouchIDPanel.dylib "$C/Resources/runtime/lib/OmacVMTouchIDPanel.dylib"
+mkdir -p "$C/Resources/fonts"
+install -m644 "$ROOT/fonts/JetBrainsMono-Regular.ttf" "$ROOT/fonts/JetBrainsMono-Bold.ttf" "$ROOT/fonts/OFL.txt" "$C/Resources/fonts/"
 # The app starts QEMU through this link, so macOS counts it as this app: one
 # icon in the Dock (DockIdentity.swift). The kernel still names it OmacVM.
 ln -s ../Resources/runtime/bin/OmacVM "$C/MacOS/OmacVM-VM"
