@@ -312,10 +312,12 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
  
     uint32_t max_draw_buffers;
     uint32_t max_texture_buffer_size;
-@@ -10319,6 +10330,40 @@ vrend_resource_estimated_size(const struct vrend_rende
+@@ -10317,6 +10328,40 @@ vrend_resource_estimated_size(const struct vrend_rende
+       total = budget_mul(total, MAX2(args->nr_samples, 1));
+    }
     return MAX2(total, VREND_RESOURCE_MIN_CHARGE);
- }
- 
++}
++
 +/*
 + * OmacVM: the desktop reserve (virgl-gpu-guard-desktop-reserve.patch, rules in
 + * virgl_gpu_guard.h). The budget's last part is kept for the desktop's contexts
@@ -348,11 +350,9 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
 +                 (unsigned long long)((budget - apps) >> 20),
 +                 vrend_state.desktop_names ? vrend_state.desktop_names : "");
 +   }
-+}
-+
+ }
+ 
  static void vrend_resource_budget_read(void)
- {
-    const char *env = getenv("OMACVM_GPU_MEMORY_MB");
 @@ -10342,6 +10387,7 @@ static void vrend_resource_budget_read(void)
                   (unsigned long long)(budget >> 20), from);
     else
@@ -474,7 +474,7 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
     vrend_memory.lost++;
     vrend_memory_status_write(true);
  }
-@@ -10722,19 +10801,30 @@ uint64_t virgl_gpu_budget_in_use(void)
+@@ -10722,21 +10801,32 @@ uint64_t virgl_gpu_budget_in_use(void)
     return __atomic_load_n(&vrend_state.resource_bytes, __ATOMIC_RELAXED);
  }
  
@@ -501,8 +501,8 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
                                           __ATOMIC_RELAXED, __ATOMIC_RELAXED));
 -   return 0;
 +   return v;
-+}
-+
+ }
+ 
 +/* Venus memory is an app's: it stops below the desktop reserve. */
 +uint64_t virgl_gpu_budget_charge(uint64_t bytes, bool display)
 +{
@@ -510,9 +510,11 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
 +       VIRGL_GPU_GUARD_REFUSED)
 +      return 0;
 +   return __atomic_add_fetch(&vrend_state.resource_refusals, 1, __ATOMIC_RELAXED);
- }
- 
++}
++
  void virgl_gpu_budget_uncharge(uint64_t bytes)
+ {
+    uint64_t used = __atomic_load_n(&vrend_state.resource_bytes, __ATOMIC_RELAXED);
 @@ -10789,14 +10879,29 @@ static bool vrend_resource_charge(struct vrend_resourc
                                    const struct vrend_renderer_resource_create_args *args)
  {
@@ -578,27 +580,44 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
     gr->budget_bytes = size;
     vrend_memory_changed();
     /* the peak is read here, on the renderer thread, and includes Venus memory */
-@@ -10833,6 +10961,13 @@ bool vrend_renderer_resource_refused_by_budget(void)
- bool vrend_renderer_resource_refused_by_budget(void)
- {
-    return vrend_state.resource_refused_last;
+@@ -10827,6 +10955,15 @@ static void vrend_resource_uncharge(struct vrend_resou
+    virgl_gpu_budget_uncharge(gr->budget_bytes);
+    gr->budget_bytes = 0;
+    vrend_memory_changed();
 +}
 +
++/* OmacVM: a context lost from outside its own commands (an attach) that is still the
++ * current one would run its next commands: vrend_hw_switch_context looks at in_error
++ * only when it switches. Switch away, so its next submit is refused. */
++static void vrend_context_lost_now(struct vrend_context *ctx)
++{
++   if (vrend_state.current_ctx == ctx)
++      vrend_renderer_force_ctx_0();
+ }
+ 
+ /* OmacVM: did the last vrend_renderer_resource_create fail on the memory budget? */
+@@ -10835,6 +10972,13 @@ bool vrend_renderer_resource_refused_by_budget(void)
+    return vrend_state.resource_refused_last;
+ }
+ 
 +/* OmacVM: was the last vrend_renderer_resource_create made for the desktop only?
 + * 0 no, 1 past the apps' share, 2 while macOS is short of memory. */
 +int vrend_renderer_resource_desktop_only(void)
 +{
 +   return vrend_state.resource_desktop_only_last;
- }
- 
++}
++
  /*
-@@ -10851,7 +10986,53 @@ void vrend_renderer_context_refused_resource(struct vr
+  * OmacVM: the guest's kernel makes a resource without waiting for the answer, so an
+  * app whose resource the budget refused goes on as if it had it, and its context is
+@@ -10851,7 +10995,55 @@ void vrend_renderer_context_refused_resource(struct vr
                 ctx->debug_name, res_handle,
                 (unsigned long long)(virgl_gpu_budget_in_use() >> 20),
                 (unsigned long long)(vrend_state.resource_budget >> 20));
 +   vrend_memory.lost_why_next = "guard";
 +   vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, res_handle);
 +   vrend_memory.lost_why_next = NULL;
++   vrend_context_lost_now(ctx);
 +}
 +
 +/*
@@ -643,10 +662,11 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
 +   }
     vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, res_handle);
 +   vrend_memory.lost_why_next = NULL;
++   vrend_context_lost_now(ctx);
  }
  
  static struct vrend_resource *
-@@ -10890,6 +11071,8 @@ vrend_renderer_resource_create(const struct vrend_rend
+@@ -10890,6 +11082,8 @@ vrend_renderer_resource_create(const struct vrend_rend
     int ret;
  
     vrend_state.resource_refused_last = false;
@@ -655,7 +675,7 @@ for the desktop only: an app that takes it is lost, Hyprland keeps it), mode def
     gr = vrend_resource_create(args);
     if (!gr)
        return NULL;
-@@ -15836,7 +16019,10 @@ int vrend_renderer_pipe_resource_create(struct vrend_c
+@@ -15836,7 +16030,10 @@ int vrend_renderer_pipe_resource_create(struct vrend_c
                                          const struct vrend_renderer_resource_create_args *args)
  {
     struct vrend_resource *res;

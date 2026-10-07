@@ -246,7 +246,10 @@ static int alive(int ctx_id, const uint32_t *status)
 
 static int lost(int ctx_id, const uint32_t *status)
 {
-   return status[0] == VIRGL_RESET_STATUS_GUILTY && submit_nothing(ctx_id) != 0;
+   int refused = submit_nothing(ctx_id) != 0;
+   if (status[0] != VIRGL_RESET_STATUS_GUILTY || !refused)
+      printf("   (context %d: status %u, commands %s)\n", ctx_id, status[0], refused ? "refused" : "taken");
+   return status[0] == VIRGL_RESET_STATUS_GUILTY && refused;
 }
 
 /* A 4 MB texture for context CTX_ID: made, then attached to it, as the guest's kernel
@@ -541,13 +544,17 @@ static int run_reserve(void)
 {
    char text[64] = "";
    uint32_t h[16] = {0};
+   /* every context first: each status buffer is a resource too (4 KB), and past the
+    * apps' share a new one would already be for the desktop only */
    uint32_t *app = named_context(2, 901, "chromium"), *desk = named_context(3, 902, "Hyprland"),
-            *bar = named_context(4, 903, "quickshell");
-   check(alive(2, app) && alive(3, desk) && alive(4, bar), "chromium, Hyprland and quickshell, all alive");
+            *bar = named_context(4, 903, "quickshell"), *ff = named_context(5, 904, "firefox"),
+            *app2 = named_context(6, 905, "chromium");
+   check(alive(2, app) && alive(3, desk) && alive(4, bar) && alive(5, ff) && alive(6, app2),
+         "chromium, Hyprland, quickshell, firefox and a second chromium, all alive");
    settle();
    check(status_value("apps_mb", NULL, 0) == 48 && status_value("reserve_mb", NULL, 0) == 16,
          "a 64 MB budget: apps_mb=48, reserve_mb=16 (a quarter, the most a reserve takes)");
-   /* three status buffers of 4 KB are in use: 11 textures of 4 MB fit into the apps' 48 MB */
+   /* five status buffers of 4 KB are in use: 11 textures of 4 MB fit into the apps' 48 MB */
    int n = 0;
    while (n < 11 && (h[n] = tex_for(2)))
       n++;
@@ -558,21 +565,21 @@ static int run_reserve(void)
    check(lost(2, app), "chromium attaches it: chromium is lost, told GUILTY");
    check(alive(3, desk) && alive(4, bar), "Hyprland and quickshell keep drawing");
    check(status_value("lost_last", text, sizeof text) == 0 && !strcmp(text, "chromium"), "lost_last=chromium");
+   check(alive(5, ff) && alive(6, app2), "the other apps keep drawing");
    check(status_value("lost_why", text, sizeof text) == 0 && !strcmp(text, "guard"),
          "lost_why=guard (the apps' share)");
    check(status_value("refused", NULL, 0) == 1, "refused=1");
-   /* 48 MB + 12 KB in use: the desktop goes on into its reserve */
+   /* 48 MB + 20 KB in use: the desktop goes on into its reserve */
    uint32_t d1 = tex_for(3), d2 = tex_for(4), d3 = tex_for(3);
    check(d1 && d2 && d3 && alive(3, desk) && alive(4, bar),
          "Hyprland and quickshell make three more of 4 MB from the reserve and keep drawing");
    check(tex2d(1024, 1024, 1) == 0, "past the whole 64 MB budget nothing is made, for the desktop neither");
    /* an import: a buffer the desktop took first stays the desktop's */
-   uint32_t *ff = named_context(5, 904, "firefox");
    virgl_renderer_ctx_attach_resource(5, d1);
    check(alive(5, ff), "firefox attaching a buffer Hyprland already took (an import) loses nothing");
    uint32_t ds[] = { d1, d2, d3 };
    unref(ds, 3);
-   /* 48 MB + 16 KB in use: a new one is for the desktop only; freed before any context
+   /* 48 MB + 20 KB in use: a new one is for the desktop only; freed before any context
     * takes it, it is forgotten */
    uint32_t f = tex2d(1024, 1024, 1);
    check(f != 0, "with the apps' share full, another texture is made for the desktop only");
@@ -590,8 +597,7 @@ static int run_reserve(void)
          "lost_recent_why=guard,guard");
    virgl_renderer_context_destroy(2);
    unref(h, n);
-   /* the app's textures are gone: a new app gets its share again */
-   uint32_t *app2 = named_context(6, 905, "chromium");
+   /* the app's textures are gone: the other chromium gets its share again */
    uint32_t again = tex_for(6);
    check(again != 0 && alive(6, app2), "chromium again after the old one ended: its textures fit");
    virgl_renderer_resource_unref(again);
