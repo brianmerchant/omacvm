@@ -403,8 +403,8 @@ the VM's SSH on `127.0.0.1:<port>`.
 
 ## Fast network (experimental, off by default)
 
-`omacvm enable fast-network --vm NAME`, or **Fast network (experimental) ›
-Turn On…** on the VM's screen in the app, puts the VM on macOS's own VM
+`omacvm enable fast-network --vm NAME`, or the **Fast network
+(experimental)** switch on the VM's screen in the app, puts the VM on macOS's own VM
 network (vmnet, shared mode, as Parallels and UTM) instead of QEMU's user
 network.
 The VM gets an address of its own on a network of its own, `192.168.77.0/24`
@@ -512,7 +512,7 @@ longer goes through one QEMU thread. Measured: see
   address. So two running app VMs with the same name (an APFS clone before
   `omacvm apply` renames it), one on each network, push each other out of
   Gestures every 2 s: give clones their own name.
-- `omacvm disable fast-network` (or **Turn Off…**) goes back at the next start; when none of
+- `omacvm disable fast-network` (or the switch) goes back at the next start; when none of
   your app VMs has the fast network any more it also removes the service
   (a VM still running on it then moves to the user network at once).
   `omacvm uninstall` removes it for your Mac user, and from the Mac when no
@@ -626,9 +626,9 @@ What is missing before it can become the default: [below](#fast-network-not-done
 
 ## Mac folder (off by default)
 
-**Mac folder › Choose…** in the VM's settings shares one folder of the Mac
-with the VM. From the VM's next start it is at `~/Mac` in Omarchy. **Turn
-Off** stops it from the next start.
+The **Mac folder** switch in the VM's settings asks for a folder and shares
+it with the VM (**Choose…** picks another). From the VM's next start it is at
+`~/Mac` in Omarchy. Switched off, it stops from the next start.
 
 - The VM can read and change everything in that folder, as your Mac user,
   and nothing outside it. Share a project folder: the app refuses your home

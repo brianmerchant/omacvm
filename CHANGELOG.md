@@ -21,6 +21,12 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
+- OmacVM.app's VM window is compact and fits a 13-inch MacBook without
+  scrolling (it was about 890 points tall); on a smaller screen it stops at
+  the screen and scrolls. Settings sit in two columns, on/off settings are
+  switches, and the long explanations moved behind an (i). Disk is one row
+  with **Change…**. USB devices now have their own switch, off by default
+  (a VM that already had devices keeps them).
 
 ## 3.0.3
 
