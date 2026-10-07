@@ -256,8 +256,15 @@ VM runs, and goes back by itself when a new version does not start
   next time the app opens.
 - **A drive that is not connected**: the app says so ("SD4TB is not
   connected") instead of offering a new VM, and builds nothing there (a
-  leftover empty /Volumes/NAME folder counts as not connected). A VM whose
-  files went missing says which, and does not start.
+  leftover empty /Volumes/NAME folder counts as not connected). Plug it in
+  and the window shows its VMs again by itself. A VM whose files went
+  missing says which, and does not start.
+- **A drive that drops off while its VM runs** (unplugged, a loose cable,
+  ejected by force): the VM's disk goes with it, so the VM cannot go on or
+  shut down. The app stops it at once (what the VM had not saved is lost,
+  as at a power cut) and the window shows the VM as unavailable: "The
+  drive with your VMs (SD4TB) is gone. Reconnect it and start the VM
+  again." Start comes back when the drive does.
 - **2.9 and older** kept the VMs hidden in
   `~/Library/Application Support/OmacVM/VMs`. They keep working there; the
   app offers once to move them to ~/OmacVM (Storage › Move later too).
@@ -333,8 +340,11 @@ one VM at a time: the build stops at the start while another one runs.
   macOS may leave the other display on its desktop after you come back to
   OmacVM. Swipe to OmacVM's Space on that display (Control-arrow or
   Mission Control); the pointer goes to Omarchy again once its window shows.
-- The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
-  it checks for them before a build and offers to install them.
+- The app does not need Xcode's Command Line Tools or Homebrew: it carries
+  OmacVM's Mac helpers (Bridge, Gestures, Omanotch) ready made, a python3
+  for its scripts and the small Swift programs they ask (is there a notch,
+  the clock format, free space). macOS never asks to install the developer
+  tools for it, also not from "omacvm in Terminal".
 - Instant resume (save the VM when you quit, continue where you were at the
   next start): QEMU cannot save a VM that uses the Mac's GPU, so Quit still
   shuts Omarchy down and the next start boots it
@@ -938,7 +948,20 @@ memory or after refused allocations.
 
 Only a runaway VM meets the one fixed guard: all graphics memory together
 at most three quarters of the Mac's memory (`OMACVM_GPU_MEMORY_MB` in
-QEMU's environment sets another, 0 turns it off; for tests).
+QEMU's environment sets another, 0 turns it off; for tests). Its last part
+is kept for the VM's desktop, Hyprland, the bar (quickshell) and the lock
+screen (hyprlock): a
+sixteenth of the Mac's memory, 512 MB to 2 GB (8 GB Mac: apps up to 5.5 GB
+of 6 GB; 16 GB: 11 of 12 GB; 64 GB: 46 of 48 GB). An app past that share,
+or an app that wants a big new buffer while macOS is short of memory, loses
+its own GPU context; the desktop goes on into its part (macOS's pressure
+does not hold the desktop back, only the guard) and keeps drawing. The VM
+shows a note: "chromium stopped drawing", and why. On a MacBook Air with
+8 GB a browser with big WebGL pages reached the guard while macOS still
+said normal, and before this the next buffer refused was often Hyprland's
+(a black VM). `OMACVM_GPU_MEMORY_RESERVE_MB` sets the desktop's part (0:
+none) and `OMACVM_GPU_MEMORY_DESKTOP` its contexts (comma-separated
+process names; for tests).
 
 **When a buffer is refused**, the app that wanted it loses its GPU context
 (the VM's graphics driver cannot hand back an "out of memory" for it). A

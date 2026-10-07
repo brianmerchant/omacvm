@@ -133,9 +133,9 @@ onoff() { (( $1 )) && echo on || echo off; }
 mac_specs
 # Free space as Finder counts it (macOS frees caches and purgeable files when
 # needed; df leaves those out), else df's.
-free_gb=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' 2>/dev/null)
+free_gb=$(mac_tool mac-free-gb 2>/dev/null)
 [[ $free_gb =~ ^[0-9]+$ && $free_gb -gt 0 ]] || free_gb=$(df -g "$HOME" | awk 'END { print $4 }')
-NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
+NOTCH=$(mac_tool mac-notch 2>/dev/null || echo none)
 [[ -n $OMANOTCH ]] || { [[ $NOTCH == notch ]] && OMANOTCH=1 || OMANOTCH=0; }
 
 if (( ! JSON )); then
@@ -143,15 +143,6 @@ if (( ! JSON )); then
   (( YES )) || prereq_screen
 fi
 
-# What the build needs: Xcode's command line tools (installed after asking).
-# Homebrew's tools wait for the route question below. A plan or a dry run
-# only reports.
-if (( DRY )); then
-  have_xcode_tools || needs_person "Xcode's command line tools are missing: xcode-select --install"
-else
-  ensure_xcode_tools
-  ensure_swift_works
-fi
 # A build peaks at about 25 GB (download, temporary installer, new disk); a
 # finished VM takes 10-12 GB and grows as it is used.
 (( free_gb >= 30 )) || needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free)"
@@ -169,6 +160,19 @@ if [[ -z $TYPE ]]; then
     "Parallels Desktop|near-native speed, every display · paid"
   case $pick in 0) TYPE=app ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=parallels ;; esac
   say "    Comparison: $README_ROUTES"
+fi
+# What the build needs: Xcode's command line tools (installed after asking),
+# except for OmacVM.app run from the app's own omacvm ("omacvm in Terminal",
+# the control centre): the app carries python3, the Swift answers and its Mac
+# helpers ready made (src/lib/tools.sh). Homebrew's tools wait for the route.
+# A plan or a dry run only reports.
+if [[ $TYPE == app ]] && ! have_xcode_tools && _tools_own_resources >/dev/null && tools_python >/dev/null; then
+  :
+elif (( DRY )); then
+  have_xcode_tools || needs_person "Xcode's command line tools are missing: xcode-select --install"
+else
+  ensure_xcode_tools
+  ensure_swift_works
 fi
 # The app itself: installed now (after asking) when it is missing.
 (( DRY )) || ensure_vm_app "$TYPE"
@@ -330,7 +334,7 @@ fi
 default_dir() { case $TYPE in parallels) echo "$HOME/Parallels" ;; fusion) echo "$FUSION_DIR" ;; utm) echo "UTM's library" ;; app) app_vms_root ;; esac; }
 free_gb_at() {   # free GB on the drive of a folder, as Finder counts it
   local g
-  g=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: CommandLine.arguments[1]).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' "$1" 2>/dev/null)
+  g=$(mac_tool mac-free-gb "$1" 2>/dev/null)
   [[ $g =~ ^[0-9]+$ && $g -gt 0 ]] || g=$(df -g "$1" | awk 'END { print $4 }')
   echo "$g"
 }

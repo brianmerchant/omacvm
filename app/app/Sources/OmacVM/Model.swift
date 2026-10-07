@@ -167,9 +167,7 @@ struct VMConfig: Equatable {
     /// the Finder). Nil when all is there.
     var filesProblem: String? {
         guard let folder = location else { return nil }
-        if let drive = Storage.missingDrive(for: folder) {
-            return "\(drive) is not connected. \(name) is on it (\(Storage.short(folder))): connect it, then start again."
-        }
+        if let drive = Storage.missingDrive(for: folder) { return Storage.driveGoneText(drive) }
         let fm = FileManager.default
         guard fm.fileExists(atPath: folder.path) else {
             return "\(name)'s folder is gone: \(Storage.short(folder)). Put it back there, or into the VMs folder."
@@ -357,7 +355,19 @@ enum Mac {
 
     static var timeZone: String { TimeZone.current.identifier }
 
-    /// Xcode's Command Line Tools: the build compiles OmacVM's Mac helpers.
+    /// What the build's scripts need on the Mac: a python3, and Swift for
+    /// Mac helpers built from source. The app carries both ready made
+    /// (build-app.sh: Resources/python, Helpers, Resources/tools), so only a
+    /// copy without them (a development run) needs Xcode's Command Line Tools.
+    /// Never runs /usr/bin/python3: on a Mac without the tools it asks to
+    /// install them.
+    static var buildToolsReady: Bool {
+        FileManager.default.isExecutableFile(atPath: Paths.resources.appendingPathComponent("python/bin/python3").path)
+            || commandLineToolsInstalled
+    }
+
+    /// Xcode's Command Line Tools (xcode-select -p first, which never asks
+    /// macOS to install them).
     static var commandLineToolsInstalled: Bool {
         func ok(_ tool: String, _ args: [String]) -> Bool {
             let p = Process()

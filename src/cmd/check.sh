@@ -366,8 +366,11 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   if [[ -s $gm && -n $(gmv in_use_mb) ]]; then
     use=$(gmv in_use_mb) peak=$(gmv peak_mb) refused=$(gmv refused) pressure=$(gmv pressure)
     what="$(gb "$use") now (peak $(gb "$peak")), from the Mac on top of the VM memory; macOS memory pressure $pressure"
+    # 3.0.5: the guard's last part is the desktop's (virgl-gpu-guard-desktop-reserve.patch).
+    reserve=$(gmv reserve_mb)
+    [[ ${reserve:-0} != 0 ]] && what="$what; apps up to $(gb "$(gmv apps_mb)"), the last $(gb "$reserve") kept for the desktop"
     if (( ${refused:-0} > 0 )); then
-      bad "graphics memory" "$what; $refused allocation(s) refused this run ($(grep -o -e 'budget of [0-9]* MB reached' -e 'macOS is short of memory' "$miclog" | sort -u | paste -sd, - | sed 's/,/, /g')): an app may have lost its GPU context"
+      bad "graphics memory" "$what; $refused allocation(s) refused this run ($(grep -o -e 'budget of [0-9]* MB reached' -e 'macOS is short of memory' -e "past the apps' share" "$miclog" | sort -u | paste -sd, - | sed 's/,/, /g')): an app may have lost its GPU context"
     else ok "graphics memory" "$what"; fi
   elif [[ -n $budget ]]; then
     peak=$(grep -o 'guest GPU memory in use: [0-9]* MB' "$miclog" | tail -1 | grep -o '[0-9]*')
@@ -611,7 +614,7 @@ elif pgrep -xq omanotch; then
   # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
   [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
   ok "Omanotch (Mac)" "running, bar height: $h"
-elif [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
+elif [[ ${notch:=$(mac_tool mac-notch 2>/dev/null || echo none)} != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
 else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?
@@ -685,7 +688,7 @@ FEATURE=""
 if [[ $TYPE == app ]]; then
   # OmacVM.app's full screen is macOS's own, in its own Space, below the notch;
   # Omanotch fills the strip beside it.
-  if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  if [[ ${notch:=$(mac_tool mac-notch 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
   elif [[ $(feat omanotch off) == on ]]; then skip "notch strip (app)" "full screen in its own Space; Omanotch fills the strip"
   else skip "notch strip (app)" "full screen in its own Space; the strip stays black (Omanotch is off for this VM: omacvm enable omanotch)"; fi
 fi

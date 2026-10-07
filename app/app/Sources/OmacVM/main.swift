@@ -181,6 +181,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.config = c
             state.screen = .ready
             startVM()
+        } else if let drive = Storage.missingDrive(for: folder) {
+            state.message = Storage.driveGoneText(drive)
+            showWindow()
         } else {
             state.message = "The VM at \(folder.path) could not be started again after the update: start it here."
             showWindow()
@@ -357,11 +360,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         r.userNetwork = userNetwork
         r.onExit = { [weak self, weak r] status in
             guard let self else { return }
-            let fellBack = r?.venusFallback
+            let fellBack = r?.venusFallback, driveGone = r?.driveGone
             let userNetwork = r?.userNetwork
             self.runner = nil
             // An update with a VM restart: it installs now; the new app starts the VM.
             if !self.quitting, Updater.shared.vmEndedForRestart() { return }
+            // The drive with the VM's folder went away (Runner.driveLost): the
+            // window shows the VM as unavailable until the drive is back
+            // (AppState.drivesChanged). No quit, no OpenGL start.
+            if let driveGone, !self.quitting {
+                self.state.driveGone(driveGone)
+                self.showWindow()
+                return
+            }
             // Vulkan showed nothing (Runner.watchVenusStart, or QEMU stopped
             // at once): start once more on OpenGL. keep: from now on OpenGL
             // until Vulkan is chosen again; else for that start only. The
