@@ -343,6 +343,22 @@ for f in json.load(open(sys.argv[1]))["features"]:
 }
 names=$(/usr/bin/python3 -c 'import json,sys; print(" ".join(f["name"] for f in json.load(open(sys.argv[1]))["features"]))' "$OUT/features.json" 2>/dev/null)
 [[ -n $names ]] || res features FAIL "omacvm features --json gave nothing: $(tail -2 "$OUT/features.err")"
+if want prepare && [[ -n $names ]]; then
+  # A VM from elsewhere (a clone of a kept test VM) may have switches off that a new VM has on;
+  # the control centre needs its own switch and the Bridge. As a person would: omacvm enable.
+  need=$(/usr/bin/python3 -c '
+import json, sys
+print(" ".join(f["name"] for f in json.load(open(sys.argv[1]))["features"]
+               if str(f.get("default")).lower() in ("true", "on") and f.get("available") and not f.get("on")))' "$OUT/features.json")
+  if [[ -n $need ]]; then
+    log "prepare: omacvm enable $need (limit 30 min)"
+    # Word splitting on purpose: one feature name per word.
+    # shellcheck disable=SC2086
+    if tmo 1800 "$CLI" enable $need --vm "$VM" --yes > "$OUT/prepare-enable.log" 2>&1; then res prepare-features ok "turned on as a new VM has them: $need"
+    else res prepare-features FAIL "omacvm enable $need: $(tail -2 "$OUT/prepare-enable.log" | tr '\n' ' ')"; fi
+    "$CLI" features --vm "$VM" --json > "$OUT/features.json" 2> "$OUT/features.err"
+  fi
+fi
 BASE=$(cat "$VMD/features" 2>/dev/null)
 
 baseline() {   # TAG: the control centre comes up linked; no row fails; the Mac reaches the VM

@@ -108,10 +108,14 @@ def table(text: str) -> list[tuple[int, str]]:
     head = next((i for i, l in enumerate(lines) if "FEATURE" in l), -1)
     found = {}
     for i in range(head + 1, len(lines)):
+        # The row's own title comes first on its line (a note may name another feature).
+        hits = []
         for t in TITLES:
-            if re.search(r"(^|\s)" + re.escape(t) + r"(\s{2,}|\s*│|\s*$)", lines[i]) and i not in found:
-                found[i] = t
-                break
+            m = re.search(r"(^|\s)" + re.escape(t) + r"(\s{2,}|\s*│|\s*$)", lines[i])
+            if m:
+                hits.append((m.start(), -len(t), t))
+        if hits:
+            found[i] = min(hits)[2]
     return sorted(found.items())
 
 
@@ -160,8 +164,13 @@ def goto(title: str) -> dict:
         if cur == want:
             return {"rows": names}
         if cur is None:
+            # The cursor's colour is not readable here: from the top, then trust the count.
             keys(*(["k"] * (len(rows) + 2)))
             keys(*(["j"] * want))
+            time.sleep(0.3)
+            if cursor_line(screen(ansi=True)) < 0:
+                return {"rows": names, "cursor": "counted"}
+            continue
         else:
             keys(*((["j"] * (want - cur)) if want > cur else (["k"] * (cur - want))))
         time.sleep(0.3)
