@@ -167,9 +167,7 @@ struct VMConfig: Equatable {
     /// the Finder). Nil when all is there.
     var filesProblem: String? {
         guard let folder = location else { return nil }
-        if let drive = Storage.missingDrive(for: folder) {
-            return "\(drive) is not connected. \(name) is on it (\(Storage.short(folder))): connect it, then start again."
-        }
+        if let drive = Storage.missingDrive(for: folder) { return Storage.driveGoneText(drive) }
         let fm = FileManager.default
         guard fm.fileExists(atPath: folder.path) else {
             return "\(name)'s folder is gone: \(Storage.short(folder)). Put it back there, or into the VMs folder."
