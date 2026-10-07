@@ -55,5 +55,92 @@
   "parallels": {
    "geekbench-gpu-opencl": "not available (no OpenCL or Vulkan)"
   }
+ },
+ "power": {
+  "sources": {
+   "main": "2026-10-03 round on the MacBook Pro 16\" M4 Max (macOS 15.7.4, 100 Wh), one 3-minute run per load, power-suite.sh; OmacVM.app was the preview build. Mac video is the SDR run.",
+   "301": "2026-10-07, OmacVM.app 3.0.1, median of 3 per row, on the charger: MacBook Pro (100 Wh) and MacBook Air M2 8 GB, macOS 26.6.2 (52.6 Wh)"
+  },
+  "battery_wh": 100,
+  "watts": {
+   "mac": {
+    "idle": 6.1,
+    "light": 6.6,
+    "video": 8.0,
+    "cpu": 75.3,
+    "gpu": 35.6
+   },
+   "app": {
+    "idle": 6.2,
+    "light": 6.8,
+    "video": 21.3,
+    "cpu": 71.0,
+    "gpu": 27.2
+   },
+   "utm": {
+    "video": 39.2,
+    "cpu": 61.3,
+    "gpu": 29.1
+   },
+   "fusion": {
+    "idle": 5.5,
+    "light": 5.9,
+    "video": 20.4,
+    "cpu": 73.9,
+    "gpu": 37.3
+   },
+   "parallels": {
+    "idle": 5.7,
+    "light": 7.3,
+    "video": 24.2,
+    "cpu": 72.2,
+    "gpu": 27.4
+   }
+  },
+  "missing": {
+   "utm": {
+    "idle": "left out: measured again (#32)",
+    "light": "left out: measured again (#32)"
+   }
+  },
+  "round": {
+   "title": "OmacVM.app 3.0.1, 2026-10-07",
+   "subtitle": "Median of 3, macOS measured in the same hour. One scale for these rows.",
+   "rows": [
+    {
+     "mac": "MacBook Pro M4 Max, 100 Wh",
+     "wh": 100,
+     "load": "idle",
+     "app": 5.85,
+     "macos": 6.8
+    },
+    {
+     "mac": "MacBook Pro M4 Max, 100 Wh",
+     "wh": 100,
+     "load": "light",
+     "app": 8.27,
+     "macos": 7.71
+    },
+    {
+     "mac": "MacBook Air M2 8 GB, 52.6 Wh",
+     "wh": 52.6,
+     "load": "idle",
+     "app": 5.37,
+     "macos": 4.54
+    },
+    {
+     "mac": "MacBook Air M2 8 GB, 52.6 Wh",
+     "wh": 52.6,
+     "load": "light",
+     "app": 5.61,
+     "macos_missing": "not run (compared with macOS idle)"
+    }
+   ]
+  },
+  "note": [
+   "The whole Mac, display included, from the battery's own telemetry; brightness 50 %; each VM alone in full screen.",
+   "Top: one 3-minute run per load, OmacVM.app a preview build; each load has its own scale. Hours: battery capacity over the draw.",
+   "UTM idle and reading left out: the run gave 15.2 and 19.3 W, a later check about 5 W (#32)."
+  ]
  }
 }

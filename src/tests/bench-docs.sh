@@ -7,6 +7,9 @@
 #   never longer than a released bar of another app in its group
 # - the chart's alt texts in README.md and docs/compare.md give the app's
 #   numbers the SVG gives
+# - the power chart (docs/images/power.svg) is chart.py --panel power's output, its
+#   hours are the battery over the watts, and README.md's alt text gives every
+#   number in it
 # - "not released yet" never names a release
 # - the CHANGELOG names what build-kosmickrisp.sh needs
 set -uo pipefail
@@ -70,6 +73,33 @@ for page in ("README.md", "docs/compare.md"):
     diff = {b: (want[b], got.get(b)) for b in want if got.get(b) != want[b]}
     expect(f"{page}: chart alt text matches the SVG for OmacVM.app", not diff,
            ", ".join(f"{b}: SVG {w}, alt {g}" for b, (w, g) in diff.items()))
+
+# 3b. The power chart: chart.py's output, hours that follow from the watts, every number in README's alt text.
+psvg = read("docs/images/power.svg")
+sub = re.search(r'font-size="13" fill="#908caa" text-anchor="middle">([^<]*)</text>', psvg)
+out = f"{tmp}/power.svg"
+subprocess.run([sys.executable, f"{R}/src/bench/chart.py", "--panel", "power", f"{R}/docs/benchmarks/chart.json", out,
+                sub.group(1) if sub else ""], check=True)
+expect("chart.py --panel power gives the committed power SVG", open(out, encoding="utf-8").read() == psvg,
+       "run src/bench/chart.py --panel power docs/benchmarks/chart.json docs/images/power.svg \"<subtitle>\"")
+pw = data["power"]
+gone = [f"{route} {load} {v} W" for route, loads in pw["watts"].items() for load, v in loads.items()
+        if f"{v:.1f} W · {pw['battery_wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
+for r in pw["round"]["rows"]:
+    gone += [f"{r['mac']} {r['load']} {v} W" for v in (r["app"], r.get("macos"))
+             if v is not None and f"{v:.2f} W · {r['wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
+expect("power SVG shows every watt figure with its hours (battery over the draw)", not gone, ", ".join(gone))
+expect("power: UTM idle is left out or marked", "idle" not in pw["watts"].get("utm", {}) or "#32" in psvg)
+pdesc = re.search(r'<desc id="d">(.*?)</desc>', psvg, re.S).group(1)
+pairs = re.compile(r"(\d+\.\d+) W \((\d+\.\d+) h\)")
+want = pairs.findall(pdesc)
+alt = re.search(r'<img src="[^"]*power\.svg" alt="([^"]*)"', read("README.md"))
+got = pairs.findall(alt.group(1) if alt else "")
+expect(f"README.md: power chart alt text gives the SVG's {len(want)} numbers in order", got == want and len(want) > 0,
+       f"SVG {['/'.join(p) for p in want]}, alt {['/'.join(p) for p in got]}")
+expect("README.md: the battery line links to the power chart",
+       re.search(r"Optimized for battery\*\*<br>[^|]*\]\(#power-draw\)", read("README.md")) is not None
+       and '<a name="power-draw"></a>' in read("README.md"))
 
 # 4. "Not released yet" with a version in brackets is a promise the release may not keep.
 for page in ("README.md", "docs/compare.md", "docs/benchmarks/README.md"):

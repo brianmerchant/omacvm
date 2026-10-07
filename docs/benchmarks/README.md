@@ -220,6 +220,13 @@ cd ~/bench
   ([OmacVM.app 3.0.1](#omacvmapp-301-2026-10-07)). Numbers from a
   build that is not released yet are listed under `"unreleased"`; the chart
   stripes those bars and tags them.
+- The power chart in the README (`docs/images/power.svg`) comes from the
+  `"power"` part of `chart.json`:
+  `chart.py --panel power docs/benchmarks/chart.json docs/images/power.svg "<subtitle>"`.
+  Top: the 2026-10-03 round below (watts per load, hours on 100 Wh), UTM's
+  idle and reading left out (see the notes there). Under it: the 3.0.1 rounds
+  of 2026-10-07 ([Power, OmacVM.app 3.0.1](#power-omacvmapp-301-2026-10-07)).
+  `src/tests/bench-docs.sh` checks the SVG and the README's alt text.
 - GPU compute in the chart: OmacVM.app with the vulkan feature (Venus on
   MoltenVK, OpenCL through rusticl; experimental in 3.0.0). Geekbench 7 GPU OpenCL,
   one locked batch on 2026-10-04: Mac 95,380
