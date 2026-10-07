@@ -68,7 +68,8 @@ print(sinks[0] if sinks else "")'
   local hold=/run/systemd/system/omacvm-vdecd.service.d/zz-vdec-wireplumber-test.conf
   mkdir -p "${hold%/*}"
   printf '[Unit]\nConditionPathExists=/run/omacvm-vdec-test-never\n' > "$hold"
-  trap 'rm -f "$hold"; systemctl daemon-reload' EXIT
+  # shellcheck disable=SC2064
+  trap "rm -f '$hold'; systemctl daemon-reload" EXIT
   systemctl daemon-reload
   us systemctl --user restart wireplumber; sleep 2
   local s; s=$(linked)
@@ -87,7 +88,8 @@ print(sinks[0] if sinks else "")'
     st=$(systemctl is-active omacvm-vdecd); [[ $st == active ]] && break; sleep 1
   done
   if [[ $st == active ]]; then
-    ok "the decoder's device started omacvm-vdecd ($( [[ -s /run/omacvm-vdec/status ]] && echo ready || echo "not ready yet: $(/usr/local/share/omacvm/vdec/guest/vdecd.sh why 2>/dev/null)"))"
+    for ((i = 0; i < 20; i++)); do [[ -s /run/omacvm-vdec/status ]] && break; sleep 1; done
+    ok "the decoder's device started omacvm-vdecd ($( [[ -s /run/omacvm-vdec/status ]] && echo "ready: $(tr '\n' ' ' < /run/omacvm-vdec/status)" || echo "not ready within 20 s"))"
   else bad "omacvm-vdecd not started when the decoder came ($st; is TAG+=\"systemd\" in /etc/udev/rules.d/70-omacvm-vdec.rules?)"; fi
   [[ $daemon == active || $daemon == activating ]] && systemctl start omacvm-vdecd
   return 0
