@@ -120,6 +120,16 @@ the VM ("chromium stopped drawing").
 
 Consequences: on any Mac the desktop has room for a few more screens'
 worth of buffers (a 5K offscreen buffer is 21 MB, a 6K one 81 MB) after
-apps are stopped; the app that took the memory is the one that stops. A
-lost app's resource stays charged until the app lets go of it (a browser's
-GPU process ends and comes back). Still bounded by the guard.
+apps are stopped; the app that took the memory is the one that stops. The
+resource that cost the app its context gives its memory back at once, and so
+does anything the lost app makes past its share afterwards: the VM's stock
+Mesa is not told about the loss, and a lost Chromium went on making 5K
+buffers in a loop (in a first version they stayed and filled the desktop's
+part). Still bounded by the guard.
+
+Checked in a VM (MacBook Pro, 3.0.3 runtime, guard set to 3 GB, Chromium
+windows of WebGL pages with 512 MB of textures, then a scale change with the
+memory full): with 3.0.3's virglrenderer Hyprland and quickshell lost their
+contexts and the screen went black; with this patch only Chromium was lost,
+the desktop took up to 140 MB of its part for the scale change, and a new
+Chromium window drew after the old ones were closed.

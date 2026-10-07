@@ -507,8 +507,9 @@ static int run_critical(void)
    check(pipe_buffer(3, 64 * MB, 12) == 0, "Hyprland's own 64 MB pipe buffer is made");
    check(alive(3, desk), "and Hyprland keeps drawing");
    settle();
-   check(status_value("in_use_mb", NULL, 0) == 64 + 64 + 64 + 64,
-         "in_use_mb=256 (two 64 MB textures, 8 MB texture + 5K screen, Hyprland's buffer)");
+   check(status_value("in_use_mb", NULL, 0) == 64 + 64 + 64,
+         "in_use_mb=192 (Hyprland's 64 MB texture, 8 MB texture + 5K screen, Hyprland's buffer; "
+         "chromium's gave its memory back)");
    virgl_renderer_context_destroy(4);
    virgl_renderer_context_destroy(3);
    virgl_renderer_context_destroy(2);
@@ -559,27 +560,39 @@ static int run_reserve(void)
    while (n < 11 && (h[n] = tex_for(2)))
       n++;
    check(n == 11 && alive(2, app), "chromium makes 11 textures of 4 MB (44 MB) and keeps drawing");
-   h[n] = tex2d(1024, 1024, 1);
-   check(h[n] != 0, "the 12th (past the apps' 48 MB) is made, for the desktop only");
+   h[n] = tex2d(2048, 2048, 1);           /* 16 MB: the status file follows in 8 MB steps */
+   check(h[n] != 0, "a 16 MB 12th (past the apps' 48 MB) is made, for the desktop only");
    virgl_renderer_ctx_attach_resource(2, h[n++]);
    check(lost(2, app), "chromium attaches it: chromium is lost, told GUILTY");
    check(alive(3, desk) && alive(4, bar), "Hyprland and quickshell keep drawing");
    check(status_value("lost_last", text, sizeof text) == 0 && !strcmp(text, "chromium"), "lost_last=chromium");
    check(alive(5, ff) && alive(6, app2), "the other apps keep drawing");
+
    check(status_value("lost_why", text, sizeof text) == 0 && !strcmp(text, "guard"),
          "lost_why=guard (the apps' share)");
    check(status_value("refused", NULL, 0) == 1, "refused=1");
-   /* 48 MB + 20 KB in use: the desktop goes on into its reserve */
-   uint32_t d1 = tex_for(3), d2 = tex_for(4), d3 = tex_for(3);
-   check(d1 && d2 && d3 && alive(3, desk) && alive(4, bar),
-         "Hyprland and quickshell make three more of 4 MB from the reserve and keep drawing");
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 44, "the 12th gave its memory back: in_use_mb=44");
+   /* chromium's driver was not told (no status buffer read) and goes on: what it makes past
+    * the share is dropped at once, no second loss */
+   uint32_t more = tex2d(2048, 2048, 1);
+   check(more != 0, "the lost chromium makes another texture: for the desktop only");
+   virgl_renderer_ctx_attach_resource(2, more);
+   settle();
+   check(status_value("in_use_mb", NULL, 0) == 44 && status_value("lost", NULL, 0) == 1 &&
+         status_value("refused", NULL, 0) == 2,
+         "dropped at once: in_use_mb=44, still lost=1, refused=2");
+   /* 44 MB + 20 KB in use: the desktop goes on into its reserve */
+   uint32_t d1 = tex_for(3), d2 = tex_for(4), d3 = tex_for(3), d4 = tex_for(4);
+   check(d1 && d2 && d3 && d4 && alive(3, desk) && alive(4, bar),
+         "Hyprland and quickshell make four more of 4 MB from the reserve and keep drawing");
    check(tex2d(1024, 1024, 1) == 0, "past the whole 64 MB budget nothing is made, for the desktop neither");
    /* an import: a buffer the desktop took first stays the desktop's */
    virgl_renderer_ctx_attach_resource(5, d1);
    check(alive(5, ff), "firefox attaching a buffer Hyprland already took (an import) loses nothing");
-   uint32_t ds[] = { d1, d2, d3 };
-   unref(ds, 3);
-   /* 48 MB + 20 KB in use: a new one is for the desktop only; freed before any context
+   uint32_t ds[] = { d1, d2, d3, d4, more };
+   unref(ds, 5);
+   /* 44 MB + 20 KB in use: a new one is for the desktop only; freed before any context
     * takes it, it is forgotten */
    uint32_t f = tex2d(1024, 1024, 1);
    check(f != 0, "with the apps' share full, another texture is made for the desktop only");
