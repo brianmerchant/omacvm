@@ -59,9 +59,12 @@
  "power": {
   "sources": {
    "main": "2026-10-03 round on the MacBook Pro 16\" M4 Max (macOS 15.7.4, 100 Wh), one 3-minute run per load, power-suite.sh; OmacVM.app was the preview build. Mac video is the SDR run.",
-   "301": "2026-10-07, OmacVM.app 3.0.1, median of 3 per row, on the charger: MacBook Pro (100 Wh) and MacBook Air M2 8 GB, macOS 26.6.2 (52.6 Wh)"
+   "301": "2026-10-07, OmacVM.app 3.0.1, median of 3 per row, on the charger: MacBook Pro (macOS 15.7.4, 100 Wh) and MacBook Air M2 8 GB (macOS 26.6.2, 52.6 Wh)"
   },
   "battery_wh": 100,
+  "labels": {
+   "app": "OmacVM.app preview"
+  },
   "watts": {
    "mac": {
     "idle": 6.1,
@@ -105,7 +108,8 @@
   },
   "round": {
    "title": "OmacVM.app 3.0.1, 2026-10-07",
-   "subtitle": "Median of 3, macOS measured in the same hour. One scale for these rows.",
+   "subtitle": "Median of 3, macOS measured in the same session. One scale for these rows.",
+   "app_label": "OmacVM.app 3.0.1",
    "rows": [
     {
      "mac": "MacBook Pro M4 Max, 100 Wh",
@@ -133,7 +137,7 @@
      "wh": 52.6,
      "load": "light",
      "app": 5.61,
-     "macos_missing": "not run (compared with macOS idle)"
+     "macos_missing": "no reading run"
     }
    ]
   },

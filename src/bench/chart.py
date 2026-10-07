@@ -326,10 +326,12 @@ def power_panel(src, out, subtitle=""):
     one scale for all its rows."""
     data = json.load(open(src))["power"]
     watts, missing, wh = data["watts"], data.get("missing", {}), data["battery_wh"]
-    routes = [r for r in ROUTES if r[0] in watts or r[0] in missing] + [MACOS]
+    labels = data.get("labels", {})  # e.g. {"app": "OmacVM.app preview"}: the build the round ran
+    routes = [(n, labels.get(n, rl), c) for n, rl, c in ROUTES if n in watts or n in missing] + [MACOS]
     loads = [l for l in POWER_LOADS if any(l[0] in watts.get(r[0], {}) for r in routes)]
     rnd = data.get("round")
     rows = rnd["rows"] if rnd else []
+    rapp = rnd.get("app_label", "OmacVM.app") if rnd else ""
     app_col = ROUTES[0][2]
 
     def fmt(v, cap, digits=1):
@@ -358,7 +360,7 @@ def power_panel(src, out, subtitle=""):
         desc.append(f"{label} ({what}): " + ", ".join(parts))
     for r in rows:
         parts = []
-        for rl, v in (("OmacVM.app 3.0.1", r["app"]), ("macOS", r.get("macos"))):
+        for rl, v in ((rapp, r["app"]), ("macOS", r.get("macos"))):
             if v is None:
                 parts.append(f"{rl} {r.get('macos_missing', 'not measured')}")
             else:
@@ -422,7 +424,7 @@ def power_panel(src, out, subtitle=""):
         names = dict((k, l) for k, l, _ in POWER_LOADS)
         for r in rows:
             label(y, 2 * rpitch, names[r["load"]], [r["mac"]])
-            bar_row(y + (rpitch - bar) / 2, r["app"], r["wh"], app_col, "OmacVM.app 3.0.1", scale, True, 2)
+            bar_row(y + (rpitch - bar) / 2, r["app"], r["wh"], app_col, rapp, scale, True, 2)
             by = y + rpitch + (rpitch - bar) / 2
             if r.get("macos") is None:
                 s.append(text(left, by + 11, "– macOS: " + r.get("macos_missing", "not measured"), 11, MUTED, MONO))
