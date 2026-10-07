@@ -460,19 +460,28 @@ Status: built (`touch-id-302`, 2026-10-06). Touch ID stays opt-in and off
 by default; this only changes what the Mac shows once it is on.
 
 ![The panel, Tokyo Night](../images/touchid-panel.png)
+![The panel, Flexoki Light](../images/touchid-panel-light.png)
 
 ### What
 
 For OmacVM.app's VMs the Mac asks in its own panel instead of macOS's
-dialog: a 280 pt square with square corners, centred on the VM's window, in
-the VM's Omarchy theme: "Touch ID in Omarchy", one plain line saying what
-asks, the verified command in JetBrains Mono, the fingerprint glyph (five
-strokes, round caps), a state line ("Touch ID or Esc"), Cancel. The glyph
-follows the chosen "Ridge" design: while it waits it breathes; on a finger
-the ridges trace in the accent colour from the core outwards, then turn
-green, fade from the outside in and a check draws (done); a finger it does
-not know or a lockout turns them red, they jolt and the panel shakes. With
-"Reduce motion" on, only colours and fades change.
+dialog: a 280 pt square centred on the VM's window, framed and coloured as
+Omarchy frames its own password prompt for the VM's theme (3.0.4: its
+background, text and accent, a 2 pt border in Hyprland's active border
+colours, a gradient too, and Hyprland's rounding): "Touch ID in Omarchy",
+one plain line saying what asks, the verified command, the fingerprint
+glyph (five strokes, round caps), a state line ("Touch ID or Esc"), Cancel
+(an Omarchy control). All text is JetBrains Mono. The glyph follows the
+chosen "Ridge" design: while it waits it breathes; a finger it does not
+know or a lockout turns it red, it jolts, the panel shakes and its border
+turns the error colour (0.6 s); a yes shows the green check in its place.
+
+Nothing waits for the panel (3.0.4): the yes goes to the VM the moment
+macOS says the finger matched, the keyboard and pointer go back to the VM
+in the same moment, and the check stays only 90 ms (none with "Reduce
+motion"), with no fade. 3.0.2 and 3.0.3 played a trace and a drawn check
+for 1.6 s, and QEMU kept the guest's input until the panel closed, so
+typing right after the yes went nowhere.
 
 Parallels, UTM and VMware Fusion keep macOS's own dialog.
 
@@ -539,11 +548,20 @@ a signed yes or no, and never reaches the panel's socket or the relay.
 
 The VM sends its colours with `POST /omacvm/theme` (signed with its control
 key; only with Touch ID on; at most 512 bytes, one a second): `background`,
-`foreground`, `accent`, `error`, `success` (colors.toml `green`), `muted`
-(colors.toml `muted`, the panel's lines), plus Hyprland's border and
-rounding (still accepted, not drawn: the panel is square). Guest:
-`omacvm-touchid-theme` from a user path unit on
-`~/.local/state/omarchy/current/theme` and once at login. Mac rules:
+`foreground`, `accent`, `error` (shell.toml `[polkit]`: background, text,
+accent, text-error; else colors.toml), `success` (colors.toml `green`),
+`muted` (colors.toml `muted`, for the 3.0.2/3.0.3 panels), and the border
+(the prompt's own when the theme gives one, else Hyprland's
+`general:col.active_border`, one colour or a gradient with its angle) and
+`decoration:rounding`. The Bridge passes all of it to the panel in the 103
+(3.0.4; before, only the colours). Guest: `omacvm-touchid-theme` from a
+user path unit on `~/.local/state/omarchy/current`, once its files have
+been quiet for 0.8 s (at most 3 s); at each login; and at once when Touch
+ID is turned on (touchid.sh clears its record of the last send, which
+also holds the boot). The Mac keeps the last good theme per VM, also while
+Touch ID is off, so the panel follows the VM's last known theme until a
+new one comes (3.0.2 and 3.0.3 deleted it on off and did not send it again
+on on: the user's light VM got a dark panel). Mac rules:
 `#rrggbb` only; text under 4.5:1 on its background refuses the whole theme
 (all 22 stock themes pass, lowest rose-pine 6.7:1); accent, error and
 success under 3:1 become the text colour (success: catppuccin-latte),
@@ -568,16 +586,24 @@ always the bundled JetBrains Mono (OFL 1.1), never one the VM names.
 
 ### Tests
 
-- `swift run touchid-panel-tests` (app/app): theme, glyph paths, words that
-  fit (shown whole, else macOS's dialog), keys, how an evaluation ends, placement, the
-  view drawn off screen (never on screen, no `LAContext`).
+- `swift run touchid-panel-tests` (app/app): theme and frame (the 103's
+  border and rounding through the app to the panel), glyph paths, words that
+  fit (shown whole, else macOS's dialog), keys, how an evaluation ends and
+  how long each end stays, placement, the view drawn off screen (never on
+  screen, no `LAContext`). `--live OUT.json` (a test Mac's screen, never
+  CI): the real controller and window with a stand-in that ends on cue,
+  timing the answer, the input going back and the panel leaving the screen.
 - `swift run auth-tests`: the prompt and answer lines, the interim 103, the
   relay with a Bridge that asks for the panel, the client going away during
   the panel, the panel's socket (show, close, no panel).
 - `src/bridge/mac/tests/run.sh`: the theme's rules with the 22 stock themes
   (with green and muted), the app panel's answer lines (never a yes from
   junk), the decider passing the app's panel on.
-- pytest: the guest sender with `success` and `muted`.
+- pytest: the guest sender with `success` and `muted`, Omarchy's prompt
+  colours (`[polkit]` accent, the prompt's own gradient border, Hyprland's
+  token), a light theme without shell.toml (Flexoki Light), sending once
+  per change and boot and again after on/off, the wait for a switch to
+  settle.
 - MacBook Air (macOS 26.6.2, Touch ID, 2026-10-06 23:04-23:20; the test
   app's QEMU and dylib, its test Bridge, the relay as Runner runs it, a
   guest stand-in; no finger at night). The panel came from QEMU (its pid,

@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.4 (unreleased)
+
+- Touch ID in OmacVM.app: the panel now looks like Omarchy's own password
+  prompt in your theme, light themes too: its colours, a border in
+  Hyprland's border colours and its rounding. It follows a theme switch
+  within a second, and comes in your VM's last theme at once after Touch ID
+  was turned off and on (before, that sent it back to the dark default).
+- Touch ID is faster: after a yes the VM goes on the moment your finger
+  matches, and the panel is gone at once (a 90 ms check, none with Reduce
+  Motion), with your keyboard back in the VM in the same moment. Before,
+  the panel played 1.6 s of animation and held your keys meanwhile.
+
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
