@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- The test app OmacVM Test.app: its own `omacvm`, run by hand from a shell,
+  now works as the test app (its own Bridge and Gestures), as when the app
+  runs it. Before, it set up the normal helpers from the test app. The
+  Bridge also counts a re-signed copy of the test app as the test app, as
+  the app and Gestures do.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
