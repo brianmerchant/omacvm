@@ -1,4 +1,7 @@
-// touchid-panel-tests --live OUT.json: the panel's timing on a real screen,
+// touchid-panel-tests --show OUT.txt: the panel on a real screen in Tokyo
+// Night, Flexoki Light and a rounded gradient theme, 4 s each, for
+// screenshots (a line with its window id in OUT.txt as each shows). touchid-panel-tests --live OUT.json: the
+// panel's timing on a real screen,
 // with a stand-in that ends each evaluation on cue instead of a finger (no
 // LocalAuthentication, nothing asks). Needs a logged-in GUI session (a test
 // Mac, never in CI): a plain window plays the VM's, the panel shows over it.
@@ -58,13 +61,53 @@ final class PanelWatch: @unchecked Sendable {
     func stop() { lock.withLock { running = false } }
 }
 
-func runLive(_ out: String) -> Never {
+/// The VM's stand-in window and the app made active (show() asks for that).
+func liveApp() -> NSApplication {
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
     let vm = NSWindow(contentRect: NSRect(x: 160, y: 160, width: 960, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
     vm.title = "touchid-panel-tests live (the VM's window)"
     vm.makeKeyAndOrderFront(nil)
     app.activate(ignoringOtherApps: true)
+    return app
+}
+
+func runShow(_ out: String) -> Never {
+    let app = liveApp()
+    FileManager.default.createFile(atPath: out, contents: nil)
+    let log = FileHandle(forWritingAtPath: out)
+    let themes: [(String, [String: Any])] = [
+        ("tokyo-night", ["background": "#1a1b26", "foreground": "#a9b1d6", "accent": "#7aa2f7", "error": "#f7768e", "success": "#9ece6a",
+                         "border": ["#7aa2f7"], "radius": 0]),
+        ("flexoki-light", ["background": "#fffcf0", "foreground": "#100f0f", "accent": "#205ea6", "error": "#d14d41", "success": "#879a39",
+                           "border": ["#205ea6"], "radius": 0]),
+        ("rounded-gradient", ["background": "#101315", "foreground": "#cacccc", "accent": "#7aa2f7", "error": "#f7768e", "success": "#9ece6a",
+                              "border": ["#33ccff", "#00ff99"], "border_angle": 45, "radius": 10]),
+    ]
+    let controller = PanelController(evaluator: { CueEvaluator(.cancelled, after: 3600) })
+    var i = 0
+    func next() {
+        guard i < themes.count else { exit(0) }
+        guard app.isActive else { app.activate(ignoringOtherApps: true); DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { next() }; return }
+        let (name, theme) = themes[i]
+        i += 1
+        let p = TouchIDPanelPrompt.parse(["title": "Touch ID in Omarchy", "line": "sudo in pts/1 wants to run", "box": "pacman -Syu",
+                                          "timeout": 30, "theme": theme] as [String: Any])!
+        controller.show(p) { _ in }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+            let id = list.first { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() && ($0[kCGWindowLayer as String] as? Int) == 28 }?[kCGWindowNumber as String]
+            log?.write(Data("show \(name) window \(id.map { "\($0)" } ?? "none")\n".utf8))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { controller.cancel(); DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { next() } }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { next() }
+    app.run()
+    exit(1)
+}
+
+func runLive(_ out: String) -> Never {
+    let app = liveApp()
     let watch = PanelWatch()
     let prompt = TouchIDPanelPrompt(title: "Touch ID in Omarchy", line: "sudo in pts/1 wants to run", box: "pacman -Syu", timeout: 30, colors: [:])
     // (end, reduce motion), 5 runs each.

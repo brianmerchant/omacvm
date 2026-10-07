@@ -2,7 +2,7 @@
 // LAContext or a finger: the theme, the glyph, the words that fit, the keys,
 // how an evaluation ends, where it goes, and the panel drawn off screen.
 //   cd app/app && swift run touchid-panel-tests [<png dir>]
-//   swift run touchid-panel-tests --live OUT.json   (timing on a real screen, Live.swift)
+//   swift run touchid-panel-tests --live OUT.json | --show OUT.txt   (a real screen, Live.swift)
 // Exit 0 when all pass. CI runs it on every pull request.
 import AppKit
 import Foundation
@@ -16,6 +16,7 @@ for f in ["JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf"] {
 }
 
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--live" { runLive(CommandLine.arguments[2]) }
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--show" { runShow(CommandLine.arguments[2]) }
 
 var failures = 0
 func expect(_ ok: Bool, _ what: String, line: Int = #line) {
