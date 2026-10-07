@@ -24,8 +24,10 @@ UB=$'\033[1m'; UD=$'\033[2m'; UR=$'\033[0m'; UACC=$'\033[36m'; UOK=$'\033[32m'; 
 
 ui_cols() { local c; c=$(tput cols 2>/dev/null < "$TTY"); echo "${c:-80}"; }
 
-# Restore the cursor whatever happens (Ctrl-C in a list included).
-ui_restore() { (( UI_FANCY )) || return 0; { printf '\033[?25h' > "$TTY"; stty echo icanon < "$TTY"; } 2>/dev/null || true; }
+# Restore the cursor whatever happens (Ctrl-C in a list included). A spinner
+# still drawing (Ctrl-C during ui_spin) goes first: a frame drawn after this
+# would land on the shell's prompt.
+ui_restore() { ui_spin_ticker_stop; (( UI_FANCY )) || return 0; { printf '\033[?25h' > "$TTY"; stty echo icanon < "$TTY"; } 2>/dev/null || true; }
 trap 'ui_restore' EXIT
 trap 'ui_restore; echo; exit 130' INT
 
@@ -179,7 +181,16 @@ ui_step() { printf '\n\033[1;36m[%s/%s]\033[0m \033[1m%s\033[0m\n' "$1" "$2" "$3
 # ui_spin_stop: stops the command ui_spin is running, and all it started (for
 # an EXIT trap: a script's background jobs ignore Ctrl-C and would go on).
 UI_FRAMES='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-UI_SPIN_PID=""
+UI_SPIN_PID="" UI_SPIN_TICKER=""
+# ui_spin_ticker_stop: the spinner's drawing loop goes, and is gone before
+# anything else is drawn. KILL: it holds nothing, and a TERM a parent made us
+# ignore would leave this waiting for a job that keeps running.
+ui_spin_ticker_stop() {
+  [[ -n ${UI_SPIN_TICKER:-} ]] || return 0
+  kill -KILL "$UI_SPIN_TICKER" 2>/dev/null || true
+  wait "$UI_SPIN_TICKER" 2>/dev/null || true
+  UI_SPIN_TICKER=""
+}
 ui_spin() {
   local msg=$1; shift
   local out rc pid i=0 t0=$SECONDS e
@@ -195,12 +206,18 @@ ui_spin() {
     "$@" > "$out" 2>&1 &
     pid=$!; UI_SPIN_PID=$pid
     printf '\033[?25l' > "$TTY"
-    while kill -0 "$pid" 2>/dev/null; do
-      e=$(( SECONDS - t0 ))
-      printf '\r\033[2K  %s%s%s %s %s%dm %02ds%s' "$UACC" "${UI_FRAMES:i % 10:1}" "$UR" "$(ui_fit "$msg")" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR" > "$TTY"
-      i=$(( i + 1 )); sleep 0.1
-    done
+    # The spinner is its own background loop and this shell waits in wait,
+    # which Ctrl-C always stops. (Drawn from here, between short commands such
+    # as sleep, bash 3.2 dropped a Ctrl-C that came just as one of them ended
+    # by itself, and the step went on.)
+    ( while kill -0 "$pid" 2>/dev/null && kill -0 $$ 2>/dev/null; do
+        e=$(( SECONDS - t0 ))
+        printf '\r\033[2K  %s%s%s %s %s%dm %02ds%s' "$UACC" "${UI_FRAMES:i % 10:1}" "$UR" "$(ui_fit "$msg")" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR" > "$TTY"
+        i=$(( i + 1 )); sleep 0.1
+      done ) &
+    UI_SPIN_TICKER=$!
     wait "$pid" && rc=0 || rc=$?
+    ui_spin_ticker_stop
     printf '\r\033[2K\033[?25h' > "$TTY"
   fi
   UI_SPIN_PID=""
@@ -214,6 +231,7 @@ ui_spin() {
 ui_tree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do ui_tree "$c"; done; echo "$1"; }
 ui_spin_stop() {
   local pids p i
+  ui_spin_ticker_stop
   [[ -n $UI_SPIN_PID ]] || return 0
   pids=$(ui_tree "$UI_SPIN_PID"); UI_SPIN_PID=""
   kill -TERM $pids 2>/dev/null || true
