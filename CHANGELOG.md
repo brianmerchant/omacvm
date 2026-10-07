@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
+  Gestures took the other app's VMs as its own too: both captured the
+  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
+  VMs of its own app (told by the VM's code signature), as the Bridge
+  does since 3.0.1.
+
 ## 3.0.4 (unreleased)
 
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
@@ -21,12 +29,6 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
-- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
-  Gestures took the other app's VMs as its own too: both captured the
-  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
-  VMs of its own app (told by the VM's code signature), as the Bridge
-  does since 3.0.1.
-
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
