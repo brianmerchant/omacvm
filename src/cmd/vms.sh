@@ -4,8 +4,9 @@
 # --app-only: only OmacVM.app's VMs (the Bridge runs this through the app, so a
 # VMs folder on an external drive can be read: src/bridge/mac/control.swift).
 # --json: {"omacvm", "vms": [{"name", "type", "state", "ip", "omacvm",
-# "reachable", "setup", "features": {NAME: true|false}, "dir", "note"}]}; omacvm = the version in the
-# VM (null: none, or stopped), reachable = OmacVM's SSH key gets in, setup =
+# "reachable", "setup", "features": {NAME: true|false}, "dir", "note", "why"}]}; omacvm = the version in the
+# VM (null: none, or stopped), reachable = OmacVM's SSH key gets in (why: the
+# reason when a running VM is not, one line, else null), setup =
 # OmacVM set it up from this Mac (its SSH host key is remembered, or OmacVM built it);
 # state "unknown": UTM runs but does not answer this terminal (not allowed to
 # control UTM yet, or over SSH), with note "UTM data not readable" when UTM's
@@ -36,13 +37,20 @@ first=1
 (( JSON )) || printf '  %-24s %-10s %-8s %-15s %s\n' VM APP STATE ADDRESS OMACVM
 while IFS=$'\t' read -r name type state note; do
   [[ -n $name ]] || continue
-  ip=""; version=""; reach=false; feats=""; setup=false; dir=""; TYPE=""
+  ip=""; version=""; reach=false; feats=""; setup=false; dir=""; TYPE=""; why=""
   [[ $type == app ]] && dir=$(app_dir "$name" 2>/dev/null)
   if [[ $state == running ]]; then
     ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) || ip=""
     vm_pin "$name" "$type"
     { [[ -s $OMA_PIN ]] || vm_marked "$name" "$type"; } && setup=true
-    if [[ -n $ip ]] && probe=$(vm_probe "$ip") && [[ -n $probe ]]; then
+    if [[ -z $ip ]]; then
+      if [[ $type == app && -n $dir ]]; then why="no address: $(app_no_address "$dir")"
+      else why="no address (its app gives none: still starting, or no network)"; fi
+    elif ! probe=$(vm_probe "$ip") || [[ -z $probe ]]; then
+      if hostkey_changed "$ip" 2>/dev/null; then why="$ip answers with another SSH host key (rebuilt? omacvm apply --vm \"$name\" --reset-host-key)"
+      else why="OmacVM's SSH key did not get in at $ip"; fi
+    fi
+    if [[ -n $ip && -z $why ]]; then
       reach=true
       version=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
       if [[ -n $version ]]; then
@@ -56,10 +64,11 @@ while IFS=$'\t' read -r name type state note; do
     fi
   fi
   if (( JSON )); then
-    printf '%s\n  {"name": %s, "type": "%s", "state": "%s", "ip": %s, "omacvm": %s, "reachable": %s, "setup": %s, "features": %s, "dir": %s, "note": %s}' \
+    printf '%s\n  {"name": %s, "type": "%s", "state": "%s", "ip": %s, "omacvm": %s, "reachable": %s, "setup": %s, "features": %s, "dir": %s, "note": %s, "why": %s}' \
       "$( ((first)) || echo ,)" "$(json_str "$name")" "$type" "$state" "$( [[ -n $ip ]] && json_str "$ip" || echo null)" \
       "$( [[ -n $version ]] && json_str "$version" || echo null)" "$reach" "$setup" "$( [[ -n $feats ]] && echo "{$feats}" || echo null)" \
-      "$( [[ -n $dir ]] && json_str "$dir" || echo null)" "$( [[ -n $note ]] && json_str "$note" || echo null)"
+      "$( [[ -n $dir ]] && json_str "$dir" || echo null)" "$( [[ -n $note ]] && json_str "$note" || echo null)" \
+      "$( [[ -n $why ]] && json_str "$why" || echo null)"
   else
     if [[ $state == unknown && -n $note ]]; then what="($UTM_UNREADABLE_HINT)"
     elif [[ $state == unknown ]]; then what="($UTM_NO_ANSWER)"

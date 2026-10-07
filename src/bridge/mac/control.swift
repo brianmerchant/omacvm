@@ -481,7 +481,7 @@ final class Control {
               ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
               // Set up by OmacVM (its SSH host key is remembered), and that key answered at that address just now.
               setup: strictBool(v["setup"]) ?? false, dir: v["dir"] as? String ?? "",
-              reachable: strictBool(v["reachable"]) ?? false)
+              reachable: strictBool(v["reachable"]) ?? false, why: v["why"] as? String ?? "")
     }
   }
 
@@ -565,7 +565,9 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return (nil, nil, nil, PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's auth port"))
       }
-      found = vmForApp(name, vmList(cli, every: VMListCache.appEvery) { if case .success = vmForApp(name, $0) { return true }; return false })
+      // Touch ID needs no SSH to the VM: one the Mac cannot reach just now still gets it.
+      found = vmForApp(name, vmList(cli, every: VMListCache.appEvery) { if case .success = vmForApp(name, $0, ssh: false) { return true }; return false },
+                       ssh: false)
     } else {
       found = vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false })
     }
@@ -680,7 +682,11 @@ final class Control {
     guard fd >= 0 else { return nil }
     defer { close(fd) }
     // omacvm writes its exit code there, also when the Bridge restarts meanwhile (an update).
-    guard let pid = spawn(argv, env: cliEnvironment(extra: ["OMACVM_JOB_STATUS": j.rcPath, "OMACVM_PROGRESS": "json"]), out: fd, app: app) else { return nil }
+    // A job that installs or updates the fast network's service (enable
+    // fast-network, its repair): macOS's password dialog on the Mac, as the
+    // app's own button shows it; there is no terminal to ask in.
+    let env = cliEnvironment(extra: ["OMACVM_JOB_STATUS": j.rcPath, "OMACVM_PROGRESS": "json", "OMACVM_ADMIN_PROMPT": "gui"])
+    guard let pid = spawn(argv, env: env, out: fd, app: app) else { return nil }
     j.pid = pid
     let meta: [String: Any] = ["id": id, "vm": j.vm, "action": j.action, "features": j.features,
                                "started": isoFormat.string(from: j.started), "pid": Int(pid)]

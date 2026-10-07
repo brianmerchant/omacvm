@@ -198,6 +198,8 @@ struct VMEntry: Equatable {
   var dir: String = ""
   /// OmacVM's SSH key got in at that address just now (`omacvm vms`).
   var reachable: Bool = true
+  /// Why not (`omacvm vms`' "why", one line), when it runs and is not reachable.
+  var why: String = ""
 }
 
 // ---- OmacVM.app's VMs: their CLI runs go through the app ----
@@ -301,8 +303,8 @@ func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError>
   switch hits.count {
   case 1: return .success(hits[0])
   case 0:
-    if vms.contains(where: { $0.state == "running" && $0.setup && $0.ip == peer }) {
-      return .failure(PolicyError(409, "unknown-vm", unreachableText))
+    if let v = vms.first(where: { $0.state == "running" && $0.setup && $0.ip == peer }) {
+      return .failure(PolicyError(409, "unknown-vm", unreachableText(v.why)))
     }
     return .failure(PolicyError(409, "unknown-vm", "no running VM that OmacVM set up has this address"))
   default: return .failure(PolicyError(409, "ambiguous-vm", "more than one VM has this address: nothing runs"))
@@ -310,19 +312,31 @@ func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError>
 }
 
 /// An OmacVM.app VM, named by the app (which knows which VM's control port a
-/// request came through; the guest never names it): running and set up.
-func vmForApp(_ name: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError> {
+/// request came through; the guest never names it): running and set up, and
+/// reachable over SSH when the request needs that (`ssh`: the control
+/// centre's checks and jobs do; Touch ID only needs the VM's key, and the app
+/// vouches that the request came from that VM).
+func vmForApp(_ name: String, _ vms: [VMEntry], ssh: Bool = true) -> Result<VMEntry, PolicyError> {
   let hits = vms.filter { $0.type == "app" && $0.name == name }
   guard let v = hits.first, hits.count == 1 else { return .failure(PolicyError(409, "unknown-vm", "no such OmacVM.app VM")) }
-  guard v.state == "running", v.setup else {
-    return .failure(PolicyError(409, "unknown-vm", "this VM is not running, or OmacVM did not set it up"))
-  }
-  guard v.reachable else { return .failure(PolicyError(409, "unknown-vm", unreachableText)) }
+  guard v.state == "running" else { return .failure(PolicyError(409, "unknown-vm", notRunningText)) }
+  guard v.setup else { return .failure(PolicyError(409, "unknown-vm", notSetUpText(v.name))) }
+  guard v.reachable || !ssh else { return .failure(PolicyError(409, "unknown-vm", unreachableText(v.why))) }
   return .success(v)
 }
 
-/// A VM that runs and that OmacVM set up, but OmacVM's SSH did not get in just now.
-let unreachableText = "the Mac cannot reach this VM just now (it runs, but SSH from the Mac did not answer)"
+let notRunningText = "the Mac's list of VMs has this VM as not running"
+func notSetUpText(_ name: String) -> String {
+  "OmacVM on the Mac did not set this VM up (on the Mac: omacvm apply --vm \"\(name)\" lets it in)"
+}
+
+/// A VM that runs and that OmacVM set up, but OmacVM's SSH did not get in
+/// just now: why (`omacvm vms`), at most one short line of it.
+func unreachableText(_ why: String) -> String {
+  let w = String(why.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7f }.prefix(240))
+    .trimmingCharacters(in: .whitespaces)
+  return "the Mac cannot reach this VM: " + (w.isEmpty ? "it runs, but SSH from the Mac did not answer" : w)
+}
 
 /// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
 /// 32 hex digits of SHA-256("<type>/<name>").
@@ -979,7 +993,7 @@ struct VMListCache {
     if let version {
       list = list.map { v in
         Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup, dir: v.dir,
-                                     reachable: v.reachable) : v
+                                     reachable: v.reachable, why: v.why) : v
       }
     }
     if running { again = true; return false }
