@@ -105,8 +105,10 @@ Only OmacVM.app? Its window's "omacvm in Terminal" Install adds the command.
 - One of the apps: OmacVM.app (`omacvm` downloads it), UTM 5 (beta), VMware
   Fusion 13 or Parallels Desktop 19, or newer. How to get each:
   [docs/routes/](docs/routes/).
-- Xcode Command Line Tools. For UTM, Fusion and Parallels also
-  [Homebrew](https://brew.sh) with `zstd` and `e2fsprogs`.
+- For UTM, Fusion and Parallels: Xcode Command Line Tools and
+  [Homebrew](https://brew.sh) with `zstd` and `e2fsprogs`. OmacVM.app needs
+  neither: it brings what it runs on the Mac. (`install.sh` asks for the
+  Command Line Tools once, for git.)
 
 `omacvm` checks all of this first, and installs what is missing or waits for you.
 
