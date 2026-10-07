@@ -420,9 +420,10 @@ prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install i
   local t0 rc
   t0=$(date +%s)
   # As the desktop user, as the control centre's "o" runs it; sudo without a password only meanwhile
-  # (verifypw=any: its sudo -v too, as src/vm/omarchy-install.sh does).
+  # (verifypw=any: its sudo -v too, as src/vm/omarchy-install.sh does). "n" to anything it still asks:
+  # omarchy-update -y asks about orphaned packages all the same (gum confirm, Omarchy 4.0.3).
   gssh 'U=$(sed -n "s/^OMACVM_USER=//p" /etc/omacvm/env); printf "Defaults:%s verifypw=any\n%s ALL=(ALL) NOPASSWD: ALL\n" "$U" "$U" > /etc/sudoers.d/99-omacvm-e2e; chmod 440 /etc/sudoers.d/99-omacvm-e2e
-    runuser -u "$U" -- env HOME="/home/$U" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c "source /usr/share/omarchy/default/bash/env-bootstrap; omarchy-update -y" > /var/tmp/omacvm-e2e-update.log 2>&1
+    yes n 2>/dev/null | runuser -u "$U" -- env HOME="/home/$U" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c "source /usr/share/omarchy/default/bash/env-bootstrap; omarchy-update -y" > /var/tmp/omacvm-e2e-update.log 2>&1
     rc=$?; rm -f /etc/sudoers.d/99-omacvm-e2e; tail -3 /var/tmp/omacvm-e2e-update.log; exit $rc' > "$OUT/${PFX}omarchy-update.txt" 2>&1
   rc=$?
   if (( rc == 0 )) && tmo 1800 "$CLI" apply --vm "$VM" --yes > "$OUT/${PFX}apply.log" 2>&1 && gssh "pacman -Q python-textual" >/dev/null 2>&1; then
