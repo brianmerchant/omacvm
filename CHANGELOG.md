@@ -5,6 +5,9 @@ in more words.
 
 ## 3.0.4 (unreleased)
 
+- A new OmacVM.app VM on a Mac that never had OmacVM's Bridge, with Gestures
+  turned off at setup: the build stopped at "Adding OmacVM to the VM" (no
+  Bridge token yet). The token is now made for the VM's first setup too.
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
   Settings while it ran could freeze the Mac's keyboard and clicks (the
   pointer still moved) until the helper was killed. Gestures now removes
