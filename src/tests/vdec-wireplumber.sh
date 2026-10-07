@@ -3,13 +3,15 @@
 # WirePlumber runs and no omacvm-vdecd is ready to open it (the module built
 # by DKMS at the first boot of a new kernel, loaded after the desktop
 # started). WirePlumber 0.5 hung on that V4L2 device and linked no sound;
-# 50-omacvm-vdec.conf has it leave the decoder alone.
+# 50-omacvm-vdec.conf has it leave the decoder alone. And the decoder's
+# device starts omacvm-vdecd when it comes late (70-omacvm-vdec.rules).
 #   src/tests/vdec-wireplumber.sh                  offline: the rule matches the
 #                                                  module's device, install.sh
 #                                                  puts it in place before it
 #                                                  loads the module, restarts
 #                                                  WirePlumber once and not during
-#                                                  a call, off removes it
+#                                                  a call, off removes it; the
+#                                                  device starts the daemon
 #   src/tests/vdec-wireplumber.sh --vm NAME [--vm-type TYPE]
 #                                                  in a running OmacVM.app VM with
 #                                                  chromium-video on and the user
@@ -17,7 +19,9 @@
 #                                                  WirePlumber started again, the
 #                                                  decoder loaded without its
 #                                                  daemon; a stream must be linked
-#                                                  to the sound card before and after
+#                                                  to the sound card before and
+#                                                  after; loaded again, the device
+#                                                  starts the daemon by itself
 #   src/tests/vdec-wireplumber.sh --in-vm          the same, as root inside the VM
 # Exits 1 when a check fails.
 set -uo pipefail
@@ -59,6 +63,13 @@ print(sinks[0] if sinks else "")'
     [[ $daemon == active ]] && systemctl start omacvm-vdecd
     echo "skip: an app has the decoder open (close Chromium's videos)"; return 0
   fi
+  # The decoder without its daemon: the device would start it now
+  # (70-omacvm-vdec.rules), so a runtime drop-in holds it down meanwhile.
+  local hold=/run/systemd/system/omacvm-vdecd.service.d/zz-vdec-wireplumber-test.conf
+  mkdir -p "${hold%/*}"
+  printf '[Unit]\nConditionPathExists=/run/omacvm-vdec-test-never\n' > "$hold"
+  trap 'rm -f "$hold"; systemctl daemon-reload' EXIT
+  systemctl daemon-reload
   us systemctl --user restart wireplumber; sleep 2
   local s; s=$(linked)
   if [[ -n $s ]]; then ok "sound linked without the decoder ($s)"; else bad "sound not linked even without the decoder"; fi
@@ -66,7 +77,20 @@ print(sinks[0] if sinks else "")'
   s=$(linked)
   if [[ -n $s ]]; then ok "sound linked after the decoder came without its daemon ($s)"
   else bad "sound not linked after the decoder came: WirePlumber hangs on /dev/video* (is /etc/wireplumber/wireplumber.conf.d/50-omacvm-vdec.conf there?)"; fi
+  # Late again, now free to start: nobody but the device starts the daemon.
+  rm -f "$hold"; systemctl daemon-reload
+  systemctl stop omacvm-vdecd 2>/dev/null
+  modprobe -r omacvm_vdec 2>/dev/null
+  modprobe omacvm_vdec; udevadm settle 2>/dev/null
+  local i st=inactive
+  for ((i = 0; i < 20; i++)); do
+    st=$(systemctl is-active omacvm-vdecd); [[ $st == active ]] && break; sleep 1
+  done
+  if [[ $st == active ]]; then
+    ok "the decoder's device started omacvm-vdecd ($( [[ -s /run/omacvm-vdec/status ]] && echo ready || echo "not ready yet: $(/usr/local/share/omacvm/vdec/guest/vdecd.sh why 2>/dev/null)"))"
+  else bad "omacvm-vdecd not started when the decoder came ($st; is TAG+=\"systemd\" in /etc/udev/rules.d/70-omacvm-vdec.rules?)"; fi
   [[ $daemon == active || $daemon == activating ]] && systemctl start omacvm-vdecd
+  return 0
 }
 
 offline() {
@@ -96,6 +120,13 @@ offline() {
      sed -n '/^wp_restart() {$/,/^}$/p' "$inst" | grep -q 'in_call && return 1'; then
     ok "WirePlumber restarts only for a new rule, not during a call"
   else bad "install.sh: wp_restart must restart only for a new rule (wp_new) and not during a call (in_call)"; fi
+  local rule=$G/70-omacvm-vdec.rules line
+  line=$(grep -v '^#' "$rule" | grep 'KERNEL=="omacvm-vdec"')
+  if [[ $line == *'SUBSYSTEM=="misc"'* && $line == *'TAG+="systemd"'* &&
+        $line == *'ENV{SYSTEMD_WANTS}+="omacvm-vdecd.service"'* ]] &&
+     grep -q "^ConditionPathExists=/dev/$drv$" "$G/omacvm-vdecd.service"; then
+    ok "the decoder's device (/dev/$drv, misc) starts omacvm-vdecd when it comes"
+  else bad "70-omacvm-vdec.rules: the misc device $drv must start omacvm-vdecd (TAG+=\"systemd\", SYSTEMD_WANTS)"; fi
   # off removes it: the rm list of the off branch names $WP.
   if sed -n '/^if \[\[ \$ON == off \]\]/,/^fi$/p' "$inst" | grep -q '"\$WP"'; then ok "off removes the rule"
   else bad "off does not remove the rule"; fi
@@ -109,12 +140,12 @@ case ${1:-} in
     VM=${2:-}
     # shellcheck disable=SC2034
     if [[ ${3:-} == --vm-type ]]; then TYPE=${4:-}; else TYPE=""; fi
-    [[ -n $VM ]] || { sed -n '7,20s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+    [[ -n $VM ]] || { sed -n '8,25s/^# \{0,1\}//p' "$0" >&2; exit 2; }
     source "$R/src/lib/mac.sh"
     source "$R/src/lib/vm.sh"
     resolve_vm
     [[ -n $IP ]] || { echo "vdec-wireplumber: '$VM' is not running" >&2; exit 1; }
     gssh "$IP" "bash -s -- --in-vm" < "$0"; exit $? ;;
-  *) sed -n '7,20s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+  *) sed -n '8,25s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
 esac
 exit $fail

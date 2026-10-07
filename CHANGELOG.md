@@ -10,6 +10,9 @@ in more words.
   WirePlumber was restarted. WirePlumber hung on Chromium's video decoder
   when it came late; it now leaves the decoder alone. `omacvm apply`
   restarts WirePlumber once for this, never during a call.
+- Chromium video after a kernel update: when the decoder came late, its
+  service stayed down until the next start and videos played on the CPU.
+  The decoder now starts its service when it comes.
 
 ## 3.0.3
 
