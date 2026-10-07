@@ -72,7 +72,7 @@ jobs:
       - name: Control centre tests (state, redaction, Textual Pilot against a fake Mac)
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
+          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest pyte
           cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
 
       - name: Bridge's control centre and Touch ID requests (allow-list, limits, manifest signatures, LocalAuthentication mocked)
