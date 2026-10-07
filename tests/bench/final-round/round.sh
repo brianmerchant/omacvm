@@ -1,7 +1,8 @@
 #!/bin/bash
 # The whole final round in one command, on the quiet Mac, inside a time budget.
-#   round.sh [--dir DIR] [--budget MINUTES] [--skip STEPS] [--only STEPS] [--no-wait-idle] [--dry-run]
-#   round.sh --plan [--budget MINUTES]          the steps, their times and what the budget leaves out
+#   round.sh [--dir DIR] [--budget MINUTES] [--skip STEPS] [--only STEPS] [--drop TESTS] [--no-wait-idle] [--dry-run]
+#   round.sh --plan [--budget MINUTES] [--drop TESTS]   the steps, their times and what the budget leaves out
+#   --drop glmark2,vkmark: those tests left out of every GPU step (the lowest-value rows, dropped first)
 #   round.sh --fullscreen TARGET [--keep]       start that Bench VM in full screen, check its width, stop it (no numbers)
 #   round.sh --summary [--dir DIR]              table, chart.json, gpu.svg and gpu.png from what is there
 #   round.sh --prepare-rc2                      before the round: the RC2's Bench VM (see below)
@@ -19,8 +20,8 @@
 # and DIR/chart.json, chart.py -> DIR/gpu.svg and DIR/gpu.png.
 #
 # Budget (default 180 min): the GPU steps come first. Idle windows get one
-# length for every system, fixed at the start (10 min, down to 5 when the
-# budget is short); when the round runs late, idle rows are dropped (noted),
+# length for every system, fixed at the start (3 min); each test stops at
+# 15 min per system (TEST_CAP in common.sh, the runs it finished kept); when the round runs late, idle rows are dropped (noted),
 # never shortened. RC2's OpenGL rows run only when there is time to spare.
 #
 # --prepare-rc2 (RC2_APP and RC2_SRC, the RC2's source tree, set): an APFS clone
@@ -34,22 +35,25 @@
 # unset: the RC2 steps are skipped with a note), RC2_VM ("Bench OmacVM RC2",
 # its Graphics setting on Vulkan), RC2_PORT, RC2_APP_ENV ("K=V ..." for the
 # app's environment), RC2_LABEL (its name in the chart, default from its
-# version + " · Vulkan"); UTM_VM, UTM_IP, FUSION_VMX, PARALLELS_VM; WALLPAPER (default:
+# version + " · Vulkan"); APP_LABEL (the app's name in the chart, e.g. "OmacVM
+# 3.0.0 · Vulkan" when APP_291 is another build); UTM_VM, UTM_IP, FUSION_VMX, PARALLELS_VM; WALLPAPER (default:
 # the Mac's current desktop picture); GEEKBENCH_SCORES (a {url: score} file;
 # default: read from Geekbench's pages at the end, FETCH_GEEKBENCH=0 skips it). The steps' times: EST_<step> (minutes).
+# FINAL_ROUND_MAC_TESTS / FINAL_ROUND_VM_TESTS: the tests of the Mac's and the VMs' steps (mac.sh / vm.sh --only).
 set -uo pipefail
 FR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$FR/../../.." && pwd)
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-DIR=~/bench/final-$(date +%Y%m%d) BUDGET="" SKIP="" ONLY="" WAIT_IDLE=1 DRY=0 MODE=round FS_TARGET="" KEEP=0
+DIR=~/bench/final-$(date +%Y%m%d) BUDGET="" SKIP="" ONLY="" DROP="" WAIT_IDLE=1 DRY=0 MODE=round FS_TARGET="" KEEP=0
 while [ $# -gt 0 ]; do
   case $1 in
     --dir) DIR=$2; shift 2 ;;
     --budget) BUDGET=$2; shift 2 ;;
     --skip) SKIP=$2; shift 2 ;;
     --only) ONLY=$2; shift 2 ;;
+    --drop) DROP=$2; shift 2 ;;
     --no-wait-idle) WAIT_IDLE=0; shift ;;
     --dry-run) DRY=1; shift ;;
     --plan) MODE=plan; shift ;;
@@ -63,6 +67,7 @@ done
 
 APP_291=${APP_291:-$HOME/Applications/OmacVM Bench 2.9.1.app}
 APP_VM=${APP_VM:-Bench OmacVM} APP_PORT=${APP_PORT:-52224}
+APP_LABEL=${APP_LABEL:-}
 RC2_APP=${RC2_APP:-} RC2_LABEL=${RC2_LABEL:-} RC2_VM=${RC2_VM:-Bench OmacVM RC2} RC2_PORT=${RC2_PORT:-52225} RC2_APP_ENV=${RC2_APP_ENV:-}
 UTM_VM=${UTM_VM:-Bench UTM} PARALLELS_VM=${PARALLELS_VM:-Bench Parallels}
 FUSION_VMX=${FUSION_VMX:-$HOME/Virtual Machines.localized/Bench Fusion.vmwarevm/Bench Fusion.vmx}
@@ -91,15 +96,23 @@ fusion-gpu fusion gpu 27
 fusion-idle fusion idle 6
 parallels-gpu parallels gpu 27
 parallels-idle parallels idle 6"
-UP_MIN=3 DOWN_MIN=1 IDLE_MAX=600 IDLE_MIN=300 SETTLE=${FINAL_ROUND_SETTLE:-45}
+# Idle windows: 3 min each, the same for every system (user, 2026-10-05 21:57).
+UP_MIN=3 DOWN_MIN=1 IDLE_MAX=${FINAL_ROUND_IDLE_MAX:-180} IDLE_MIN=${FINAL_ROUND_IDLE_MIN:-180} SETTLE=${FINAL_ROUND_SETTLE:-45}
 # glmark2's scenes at 5 s instead of 10 (the same for every VM; the score is
 # the mean fps, so it barely moves): 3 runs in 9 minutes, not 18.
 export GLMARK2_DURATION=${GLMARK2_DURATION:-5}
+# Minutes a dropped test saves in a VM's GPU step (glmark2: 3 runs of 34 scenes at 5 s;
+# vkmark: 3 runs where there is Vulkan, seconds elsewhere).
+drop_min() { case $1:$2 in glmark2:*-gpu|glmark2:rc2-gl) echo 9 ;; vkmark:app-gpu|vkmark:rc2-vulkan) echo 3 ;; *) echo 0 ;; esac; }
 est() {   # step -> minutes (EST_<step> overrides, "-" as "_")
-  local v; v=$(eval echo "\${EST_$(echo "$1" | tr '-' '_'):-}")
+  local v d m; v=$(eval echo "\${EST_$(echo "$1" | tr '-' '_'):-}")
   [ -n "$v" ] && { echo "$v"; return; }
-  echo "$STEPS" | awk -v s="$1" '$1 == s { print $4 }'
+  m=$(echo "$STEPS" | awk -v s="$1" '$1 == s { print $4 }')
+  [ "$1" = mac-gpu ] || for d in ${DROP//,/ }; do m=$(( m - $(drop_min "$d" "$1") )); done
+  echo "$m"
 }
+# A GPU step's tests, without the dropped ones.
+tests_of() { local t out=""; for t in ${1//,/ }; do listed "$DROP" "$t" || out="$out,$t"; done; echo "${out#,}"; }
 field() { echo "$STEPS" | awk -v s="$1" -v f="$2" '$1 == s { print $f }'; }
 listed() { case ,$1, in *,$2,*) return 0 ;; esac; return 1; }
 wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 app
@@ -109,6 +122,18 @@ wanted() {   # step: in --only (if given), not in --skip, RC2 only with an RC2 a
   return 0
 }
 
+# A desktop Mac (Mac mini, Studio): no battery, so no idle-power rows (the
+# rule of the rounds: idle power is a laptop's number), and its one display
+# instead of a built-in one. FINAL_ROUND_IDLE_DESKTOP=1 keeps the idle rows
+# (macOS still reports SystemPowerIn on an M4 Mac mini).
+# grep -c, not -q: under pipefail an early grep exit can fail the pipe (SIGPIPE).
+desktop_mac() { [ "$(ioreg -rw0 -c AppleSmartBattery 2>/dev/null | grep -c '"BatteryInstalled" = No')" -gt 0 ]; }
+NO_IDLE=""
+if desktop_mac && [ "${FINAL_ROUND_IDLE_DESKTOP:-0}" != 1 ]; then
+  NO_IDLE=$(echo "$STEPS" | awk '$3 == "idle" { print $1 }' | paste -sd, -)
+  SKIP="${SKIP:+$SKIP,}$NO_IDLE"
+fi
+
 STATE=$DIR/steps.state LOG=$DIR/round.log
 [ "$MODE" = plan ] || { mkdir -p "$DIR/failed" && touch "$STATE"; } || die "cannot write $DIR"
 log() { echo "$(date +%T) $*" | tee -a "$LOG" >&2; }
@@ -117,7 +142,7 @@ mark() { echo "$1 $2 $(date +%FT%T) ${3:-}" >> "$STATE"; }   # step status [why]
 pending() { [ "$(status "$1")" != "done" ]; }
 
 # The idle windows: one length for every system, from the budget at the start.
-idle_seconds() {   # budget minutes -> seconds per idle window, 5 to 10 min
+idle_seconds() {   # budget minutes -> seconds per idle window, IDLE_MIN to IDLE_MAX
   local gpu=0 n=0 targets="" s t k
   while read -r s t k _; do
     wanted "$s" || continue
@@ -132,13 +157,14 @@ idle_seconds() {   # budget minutes -> seconds per idle window, 5 to 10 min
 
 if [ "$MODE" = plan ]; then
   b=${BUDGET:-180}; i=$(idle_seconds "$b")
-  echo "budget $b min; idle windows ${i}s each (+$((SETTLE + 30))s settle)"
+  echo "budget $b min; idle windows ${i}s each (+$((SETTLE + 30))s settle)${DROP:+; dropped: $DROP}"
   while read -r s t k m; do
     if wanted "$s"; then w=run; else w="not run"; fi
+    m=$(est "$s")
     [ "$k" = idle ] && m=$(( (i + SETTLE + 30 + 59) / 60 ))
     printf '  %-15s %-10s %-5s %3s min  %s\n' "$s" "$t" "$k" "$m" "$w"
   done <<<"$STEPS"
-  tot=$(while read -r s t k m; do wanted "$s" || continue; [ "$k" = idle ] && m=$(( (i + SETTLE + 30 + 59) / 60 )); [ "$k" = extra ] || echo "$m"; done <<<"$STEPS" | awk '{ t += $1 } END { print t }')
+  tot=$(while read -r s t k m; do wanted "$s" || continue; m=$(est "$s"); [ "$k" = idle ] && m=$(( (i + SETTLE + 30 + 59) / 60 )); [ "$k" = extra ] || echo "$m"; done <<<"$STEPS" | awk '{ t += $1 } END { print t }')
   n=$(for t in app app-rc2 utm fusion parallels; do echo "$STEPS" | awk -v t="$t" '$2 == t { print $1 }' | while read -r s; do wanted "$s" && echo "$t"; done | head -1; done | grep -c .)
   echo "  + ${UP_MIN} min start and ${DOWN_MIN} min stop per VM ($n VMs); RC2 steps need RC2_APP"
   echo "  total about $(( tot + n * (UP_MIN + DOWN_MIN) )) min without the extra step; over the budget, the idle rows of the last systems are dropped first"
@@ -149,7 +175,11 @@ fi
 # ---------- the Mac and its desktop ----------
 hid_idle() { ioreg -c IOHIDSystem | awk '/HIDIdleTime/ { print int($NF / 1000000000); exit }'; }
 displays() { system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Resolution:'; }
-builtin_only() { [ "$(displays)" = 1 ] && system_profiler SPDisplaysDataType 2>/dev/null | grep -q 'Built-in'; }
+# One display: the built-in one on a laptop; on a desktop Mac, its one display.
+builtin_only() {
+  [ "$(displays)" = 1 ] || return 1
+  [ "$(system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Built-in')" -gt 0 ] || desktop_mac
+}
 picture() {   # the Mac's desktop picture (the round's wallpaper everywhere)
   [ -n "${WALLPAPER:-}" ] && { echo "$WALLPAPER"; return; }
   osascript -e 'tell application "System Events" to get picture of current desktop' 2>/dev/null
@@ -166,7 +196,7 @@ gs() { gsi "$@" </dev/null; }
 widths() { gs "$1" 'U=$(id -nu 1000); sig=$(ls -t /run/user/1000/hypr 2>/dev/null | head -1)
   sudo -u $U env XDG_RUNTIME_DIR=/run/user/1000 HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl monitors -j 2>/dev/null |
   python3 -c "import json,sys; print(\" \".join(str(m[\"width\"]) for m in json.load(sys.stdin)))"' 2>/dev/null; }
-wide() { local w x; w=$(widths "$1"); [ -n "$w" ] || return 1; for x in $w; do [ "$x" -ge 3000 ] || return 1; done; }
+wide() { local w x; w=$(widths "$1"); [ -n "$w" ] || return 1; for x in $w; do [ "$x" -ge "${FINAL_ROUND_MIN_GUEST_WIDTH:-3000}" ] || return 1; done; }
 wait_desktop() {   # host [seconds]: SSH and the user's Hyprland session
   local i n=$(( ${2:-300} / 5 ))
   for ((i = 0; i < n; i++)); do gs "$1" 'ls /run/user/1000/hypr' >/dev/null 2>&1 && return 0; sleep 5; done
@@ -206,6 +236,8 @@ vm_up() {   # target: start it in full screen, wait for its desktop, check the w
       open -n --env OMACVM_TEST_PASTEBOARD=org.omacvm.bench-test ${envs[@]+"${envs[@]}"} "$app" --args --start --vm "$name" -startFullScreen YES || return 1
       HOST=127.0.0.1:$([ "$t" = app ] && echo "$APP_PORT" || echo "$RC2_PORT") ;;
     utm)
+      # UTM takes no orders over SSH (macOS's Automation permission is the terminal app's).
+      [ -n "${SSH_CONNECTION:-}" ] && { log "utm: UTM takes no orders over SSH: run the round in Terminal on this Mac"; return 1; }
       open -a UTM; sleep 5
       "$UTMCTL" start "$name" >/dev/null 2>&1 || { log "utm: utmctl start failed"; return 1; }
       for ((i = 0; i < 60; i++)); do HOST=$("$UTMCTL" ip-address "$name" 2>/dev/null | grep -E '^[0-9]+\.' | head -1); [ -n "$HOST" ] && break; sleep 5; done
@@ -278,13 +310,14 @@ run_step() {   # step
   # Settle: nothing from the start or the last test still warm in the numbers.
   sleep $SETTLE
   case $s in
-    mac-gpu) bash "$FR/mac.sh" "$out" ;;
+    mac-gpu) bash "$FR/mac.sh" --only "$(tests_of "${FINAL_ROUND_MAC_TESTS:-throughput,vkpeak,geekbench,cpu,speedometer,browser,webgpu}")" "$out" ;;
     mac-idle) hide_apps; bash "$FR/idle-power.sh" mac --seconds "$IDLE_S" --settle 30 \
                 --desktop "macOS desktop, $(basename "$PIC") (the same picture as in the VMs), apps hidden" "$out" ;;
     *-gpu|rc2-vulkan|rc2-gl)
-      local only=throughput,vkpeak,geekbench,vkmark,glmark2,browser
+      local only=${FINAL_ROUND_VM_TESTS:-throughput,vkpeak,geekbench,cpu,speedometer,vkmark,glmark2,browser,webgpu}
       [ "$s" = rc2-vulkan ] && only=vkpeak,geekbench,vkmark
       [ "$s" = rc2-gl ] && only=throughput,glmark2
+      only=$(tests_of "$only")
       OMACVM_APP=$(app_of "$t") bash "$FR/vm.sh" "$t" --vm "$(name_of "$t")" "root@$HOST" --only "$only" "$out" ;;
     *-idle)
       bash "$FR/vm.sh" "$t" --vm "$(name_of "$t")" "root@$HOST" --desktop "$PIC" >/dev/null &&
@@ -304,7 +337,7 @@ gate() {   # target pattern, seconds
   local why i
   for ((i = 0; i <= $2; i += 30)); do
     why=$(OUT=$DIR/x bash -c ". '$FR/common.sh'; preflight_why '$1'" 2>/dev/null)
-    builtin_only || why="${why:+$why; }an external display is connected (the round uses the built-in display only)"
+    builtin_only || why="${why:+$why; }more than one display is connected (the round uses one: the built-in display, or a desktop Mac's only one)"
     [ -z "$why" ] && return 0
     [ $i -lt "$2" ] && sleep 30
   done
@@ -321,6 +354,7 @@ summary() {
   [ -n "${GEEKBENCH_SCORES:-}" ] && gb=(--geekbench-scores "$GEEKBENCH_SCORES")
   [ "${FETCH_GEEKBENCH:-1}" = 0 ] && [ -z "${GEEKBENCH_SCORES:-}" ] && gb=()
   [ -n "$RC2_LABEL" ] && lb=(--label "app-rc2=$RC2_LABEL")
+  [ -n "$APP_LABEL" ] && lb+=(--label "app=$APP_LABEL")
   python3 "$FR/summarize.py" "${fl[@]}" ${gb[@]+"${gb[@]}"} ${lb[@]+"${lb[@]}"} --json "$DIR/chart.json" > "$DIR/table.md" ||
     { log "summary: Geekbench scores not read, without them"; python3 "$FR/summarize.py" "${fl[@]}" ${lb[@]+"${lb[@]}"} --json "$DIR/chart.json" > "$DIR/table.md"; } ||
     { log "summary: summarize.py failed"; return 1; }
@@ -430,7 +464,12 @@ DEADLINE=$(cat "$DIR/deadline") IDLE_S=$(cat "$DIR/idle-seconds")
 SIM=""   # the dry run's clock: each step takes its estimate
 now() { if [ -n "$SIM" ]; then echo "$SIM"; else date +%s; fi; }
 left() { echo $(( (DEADLINE - $(now)) / 60 )); }
-log "round in $DIR: budget until $(date -r "$DEADLINE" +%H:%M) ($(left) min), idle windows ${IDLE_S}s, wallpaper $PIC"
+log "round in $DIR: budget until $(date -r "$DEADLINE" +%H:%M) ($(left) min), idle windows ${IDLE_S}s, test cap $(. "$FR/common.sh" >/dev/null 2>&1; echo "$TEST_CAP")s${DROP:+, dropped: $DROP}, wallpaper $PIC"
+[ -n "$DROP" ] && echo "$(date +%FT%T) $DROP" >> "$DIR/dropped"
+if [ -n "$NO_IDLE" ]; then
+  log "a desktop Mac (no battery): no idle-power rows"
+  for s in $(echo "$NO_IDLE" | tr ',' ' '); do pending "$s" && mark "$s" skipped "a desktop Mac: no idle-power rows"; done
+fi
 if [ -z "$RC2_APP" ]; then
   log "RC2_APP not set: the OmacVM 3.0.0 RC2 rows are skipped"
   for s in rc2-vulkan rc2-gl; do pending "$s" && mark "$s" skipped "RC2_APP not set"; done
