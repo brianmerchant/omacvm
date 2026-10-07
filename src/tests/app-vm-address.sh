@@ -166,5 +166,19 @@ check "nothing said (sshd closed it at once: PerSourcePenalties, OpenSSH 10.5 in
 ssh -o BatchMode=yes -o ConnectTimeout=3 -o LogLevel=ERROR -p 1 root@127.0.0.1 true 2> "$E" < /dev/null
 check "a real refused connection" "nothing takes SSH at 127.0.0.1:1 (the VM is starting, or its SSH stopped)" "$(ssh_failure_why 127.0.0.1:1 "$E")"
 check "omacvm vms never scans a VM's host keys" 0 "$(grep -c 'ssh-keyscan\|hostkey_changed' "$R/src/cmd/vms.sh")"
+# wait_ssh (apply, build, check: waiting for a VM that boots) tells another
+# host key from ssh's own words, and never scans the keys on each try.
+SCANS=$T/scans; : > "$SCANS"
+ssh-keyscan() { echo scan >> "$SCANS"; }
+hostkey_error() { echo "hostkey_error" >&2; }
+gssh() { echo "Host key verification failed." >&2; return 255; }
+rc=0; (wait_ssh 127.0.0.1:1 30) 2>/dev/null || rc=$?
+check "wait_ssh: another host key -> 3 at once" 3 "$rc"
+gssh() { echo "ssh: connect to host 127.0.0.1 port 1: Connection refused" >&2; return 255; }
+die() { echo "die: $*" >&2; exit 1; }
+rc=0; (wait_ssh 127.0.0.1:1 0) 2>/dev/null || rc=$?
+check "wait_ssh: no SSH -> it gives up (die)" 1 "$rc"
+check "wait_ssh: no key scans" 0 "$(wc -l < "$SCANS" | tr -d ' ')"
+unset -f ssh-keyscan gssh
 
 exit $fail
