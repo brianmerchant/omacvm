@@ -284,10 +284,13 @@ final class Runner {
 
     /// The path the network took at the last start (FastNetwork).
     private(set) var network = FastNetwork.Choice(vmnet: false, mac: FastNetwork.defaultMAC, record: "slirp off")
+    /// This start on QEMU's user network although the fast network is on, and
+    /// why (its service needs an update the person did not make now).
+    var userNetwork: String?
 
     private func networkArguments() -> [String] {
         let c = config
-        let choice = FastNetwork.choose(for: c)
+        let choice = FastNetwork.choose(for: c, userNetwork: userNetwork)
         network = choice
         if choice.vmnet {
             // vmnet (shared, its own 192.168.77.0/24: the Mac is .1) through omacvm-netd; QEMU

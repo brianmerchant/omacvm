@@ -42,8 +42,9 @@ enum ControlRun {
 
     /// The run, or why not. `ownCLI`: this app's omacvm
     /// (Contents/Resources/omacvm/omacvm), compared as real paths; it runs
-    /// by its real path. From `environment` only OMACVM_PROGRESS=json and a
-    /// job status file of the Bridge's shape (jobs/<16 hex>.rc) are kept.
+    /// by its real path. From `environment` only OMACVM_PROGRESS=json,
+    /// OMACVM_ADMIN_PROMPT=gui and a job status file of the Bridge's shape
+    /// (jobs/<16 hex>.rc) are kept.
     static func plan(args: [String], ownCLI: String, environment: [String: String], user: User, test: Bool,
                      realPath: (String) -> String? = ControlRun.realPath) -> Result<([String], [String: String]), Refusal> {
         guard args.count >= 2, let cli = realPath(args[0]), let own = realPath(ownCLI), cli == own else {
@@ -56,6 +57,9 @@ enum ControlRun {
         var env = ["PATH": path, "HOME": user.home, "USER": user.name, "LOGNAME": user.name,
                    "LANG": "en_US.UTF-8", "TERM": "dumb", "TMPDIR": user.tmp]
         if environment["OMACVM_PROGRESS"] == "json" { env["OMACVM_PROGRESS"] = "json" }
+        // A job that installs or updates the fast network's service asks for
+        // the password in macOS's own dialog (src/net/mac/install.sh as_root).
+        if environment["OMACVM_ADMIN_PROMPT"] == "gui" { env["OMACVM_ADMIN_PROMPT"] = "gui" }
         if let st = environment["OMACVM_JOB_STATUS"] {
             guard isJobStatus(st) else { return .failure(Refusal(why: "not a job status file of the Bridge's")) }
             env["OMACVM_JOB_STATUS"] = st

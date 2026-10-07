@@ -24,7 +24,9 @@ enum FastNetwork {
         let record: String
     }
 
-    static func choose(for c: VMConfig) -> Choice {
+    /// `userNetwork`: this start takes QEMU's user network anyway, and why
+    /// (the service needs an update and the person chose not to now).
+    static func choose(for c: VMConfig, userNetwork: String? = nil) -> Choice {
         let file = c.folder.appendingPathComponent("fast-network")
         guard let text = try? String(contentsOf: file, encoding: .utf8) else {
             return Choice(vmnet: false, mac: defaultMAC, record: "slirp off")
@@ -36,6 +38,7 @@ enum FastNetwork {
             if m.range(of: "^52:54:00(:[0-9a-f]{2}){3}$", options: .regularExpression) != nil { mac = m }
         }
         func slirp(_ why: String) -> Choice { Choice(vmnet: false, mac: mac, record: "slirp \(why)") }
+        if let why = userNetwork { return slirp(why) }
         if let why = serviceProblem() { return slirp("\(why) (omacvm enable fast-network)") }
         // A LAN or VPN on the same addresses: vmnet would refuse (and each
         // refusal costs macOS's vmnet service for good, see omacvm-netd.c).
@@ -65,6 +68,54 @@ enum FastNetwork {
         return nil
     }
 
+    // MARK: the service after an app update
+
+    /// The service for this app, as src/net/mac/install.sh --status says:
+    /// ok (also an older build of the same protocol: an app update needs no
+    /// new install), old (another protocol or another app's), missing, down,
+    /// stopped; nil when the script could not say. Runs a script that checks
+    /// code signatures: never on the main thread.
+    static func serviceStatus() -> String? {
+        guard let r = runScript(["--status", "--app", Bundle.main.bundlePath], gui: false), r.status == 0 else { return nil }
+        let first = r.out.split(separator: "\n").first.map(String.init) ?? ""
+        return ["ok", "old", "missing", "down", "stopped"].contains(first) ? first : nil
+    }
+
+    /// What the app says about a service that is not ok (serviceStatus), or
+    /// nil when it is: the question's title, why, its button and what the
+    /// button does ("Update it now").
+    static func serviceNeeds(_ status: String?) -> (title: String, why: String, button: String, action: String)? {
+        switch status {
+        case "old":
+            return ("The fast network needs an update",
+                    "OmacVM was updated, and the fast network's service on this Mac is from another version of the app.",
+                    "Update…", "Update it now")
+        case "missing":
+            return ("The fast network needs its service",
+                    "The fast network's service is not installed on this Mac (or not for this Mac user).",
+                    "Install…", "Install it now")
+        case "down":
+            return ("The fast network's service is not running",
+                    "The fast network's service is installed, but macOS does not run it.", "Repair…", "Repair it now")
+        case "stopped":
+            return ("The fast network stopped",
+                    "macOS's VM network failed too often in a row, so the fast network stopped trying until the Mac restarts.",
+                    "Try Again…", "Try again now")
+        default:
+            return nil
+        }
+    }
+
+    /// The record of a start on the user network because the service was not
+    /// updated (logs/network; omacvm check shows it).
+    static func notUpdated(_ why: String) -> String {
+        "the fast network's service was not updated (\(why)): Update… under Fast network in OmacVM, or omacvm enable fast-network"
+    }
+
+    /// Installs or updates the service for this app (macOS asks for an
+    /// administrator's password once). nil when it worked, else why not.
+    static func updateService() -> String? { runInstaller([]) }
+
     // MARK: the app's Fast Network button
 
     /// The VM uses the fast network from its next start (its fast-network file).
@@ -84,7 +135,9 @@ enum FastNetwork {
     /// person presses the button. Blocks until done; nil when it worked, else
     /// what went wrong (nothing changed then).
     static func turnOn(_ c: VMConfig) -> String? {
-        if serviceProblem() != nil, let err = runInstaller([]) { return err }
+        // The installer does nothing (and asks nothing) when the service
+        // serves this app already; else it installs or updates it.
+        if let err = runInstaller([]) { return err }
         let file = c.folder.appendingPathComponent("fast-network")
         if isOn(c) { record(c, on: true); return nil }
         let b = (0..<3).map { _ in String(format: "%02x", Int.random(in: 0...255)) }
@@ -105,14 +158,15 @@ enum FastNetwork {
         if new != text { try? new.write(to: url, atomically: true, encoding: .utf8) }
     }
 
-    /// Turns it off for VM `c`, and takes the service off this Mac user when
-    /// no other VM of theirs has the fast network (password once). The VM
-    /// moves to QEMU's user network within seconds if it runs on vmnet.
-    static func turnOff(_ c: VMConfig) -> String? {
+    /// Turns it off for VM `c` from its next start, and takes the service off
+    /// this Mac user when no other VM of theirs has the fast network and no
+    /// VM runs on it (`vmnetInUse`: a VM of this app runs on it now, and keeps
+    /// it until it shuts down) (password once).
+    static func turnOff(_ c: VMConfig, vmnetInUse: Bool = false) -> String? {
         let others = ((try? FileManager.default.contentsOfDirectory(at: Paths.vmsRoot, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.standardizedFileURL != c.folder.standardizedFileURL }
             .compactMap { VMConfig.load(from: $0) }.filter { isOn($0) }
-        if others.isEmpty, FileManager.default.fileExists(atPath: daemonPlist), let err = runInstaller(["--remove"]) {
+        if others.isEmpty, !vmnetInUse, FileManager.default.fileExists(atPath: daemonPlist), let err = runInstaller(["--remove"]) {
             return err
         }
         do { try FileManager.default.removeItem(at: c.folder.appendingPathComponent("fast-network")) } catch {
@@ -125,27 +179,40 @@ enum FastNetwork {
     /// src/net/mac/install.sh from the app's copy of OmacVM, for this app,
     /// with macOS's password dialog. nil when it worked, else its message.
     private static func runInstaller(_ args: [String]) -> String? {
-        let script = Paths.resources.appendingPathComponent("omacvm/src/net/mac/install.sh")
-        guard FileManager.default.isExecutableFile(atPath: script.path) else {
-            return "this app has no fast network installer (\(script.path))"
+        guard let r = runScript(args.isEmpty ? ["--app", Bundle.main.bundlePath] : args, gui: true) else {
+            return "this app has no fast network installer (\(installer.path))"
         }
+        if r.status == 0 { return nil }
+        if r.status == 4 { return "Cancelled: nothing changed." }
+        let text = r.err.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.split(separator: "\n").last.map(String.init) ?? "the installer failed (\(r.status))"
+    }
+
+    private static var installer: URL { Paths.resources.appendingPathComponent("omacvm/src/net/mac/install.sh") }
+
+    /// The app's copy of src/net/mac/install.sh with `args` (`gui`: macOS's
+    /// password dialog when it needs root). nil when it could not run.
+    private static func runScript(_ args: [String], gui: Bool) -> (status: Int32, out: String, err: String)? {
+        guard FileManager.default.isExecutableFile(atPath: installer.path) else { return nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [script.path] + (args.isEmpty ? ["--app", Bundle.main.bundlePath] : args)
+        p.arguments = [installer.path] + args
         var env = ProcessInfo.processInfo.environment
-        env["OMACVM_ADMIN_PROMPT"] = "gui"
+        if gui { env["OMACVM_ADMIN_PROMPT"] = "gui" } else { env.removeValue(forKey: "OMACVM_ADMIN_PROMPT") }
         p.environment = env
         p.standardInput = FileHandle.nullDevice
-        let err = Pipe()
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out
         p.standardError = err
-        p.standardOutput = FileHandle.nullDevice
-        do { try p.run() } catch { return error.localizedDescription }
-        let data = err.fileHandleForReading.readDataToEndOfFile()
+        do { try p.run() } catch { return nil }
+        // Both pipes at once: a full one would stop the script.
+        var o = Data(), e = Data()
+        let g = DispatchGroup()
+        DispatchQueue.global().async(group: g) { o = out.fileHandleForReading.readDataToEndOfFile() }
+        e = err.fileHandleForReading.readDataToEndOfFile()
+        g.wait()
         p.waitUntilExit()
-        if p.terminationStatus == 0 { return nil }
-        if p.terminationStatus == 4 { return "Cancelled: nothing changed." }
-        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.split(separator: "\n").last.map(String.init) ?? "the installer failed (\(p.terminationStatus))"
+        return (p.terminationStatus, String(decoding: o, as: UTF8.self), String(decoding: e, as: UTF8.self))
     }
 
     /// The fast network's addresses: 192.168.77.0/24, the Mac is .1.
