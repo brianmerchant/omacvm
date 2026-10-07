@@ -43,6 +43,15 @@ in more words.
   had it; in 3.0 that window is left only for tests). macOS 26 draws that
   line with a window's shadow; borderless windows now have none. macOS's
   own full screen, which 3.0 uses, never had the line.
+- Touch ID in OmacVM.app: the panel now looks like Omarchy's own password
+  prompt in your theme, light themes too: its colours, a border in
+  Hyprland's border colours and its rounding. It follows a theme switch
+  within a second, and comes in your VM's last theme at once after Touch ID
+  was turned off and on (before, that sent it back to the dark default).
+- Touch ID is faster: after a yes the VM goes on the moment your finger
+  matches, and the panel is gone at once (a 90 ms check, none with Reduce
+  Motion), with your keyboard back in the VM in the same moment. Before,
+  the panel played 1.6 s of animation and held your keys meanwhile.
 
 ## 3.0.3
 
