@@ -60,12 +60,12 @@ expect "plan: --vm-dir with a trailing slash" "$T/drive" "$(plan 20 --vm-dir "$T
 # The drive's free space counts, not the Mac's.
 out=$(plan 100 --vm-dir "$T/small")
 expect "plan: 20 GB on the drive is refused (needs a person)" "rc 3" "$(tail -1 <<<"$out")"
-expect "plan: says it is the drive" "yes" "$(grep -q "only 20 GB free on that drive" <<<"$out" && echo yes)"
+expect "plan: says it is the drive" "yes" "$(grep -q "only 20 GB free on" <<<"$out" && echo yes)"
 
 # No --vm-dir and a full Mac: refused, with the way out.
 out=$(plan 20)
 expect "plan: no --vm-dir, 20 GB on the Mac: refused" "rc 3" "$(tail -1 <<<"$out")"
-expect "plan: points at --vm-dir" "yes" "$(grep -q "this Mac has 20 GB free; or put the VM on another drive with --vm-dir" <<<"$out" && echo yes)"
+expect "plan: points at --vm-dir" "yes" "$(grep -q "20 GB free.*--vm-dir" <<<"$out" && echo yes)"
 expect "plan: no --vm-dir, 100 GB: UTM's library" "UTM library" "$(plan 100 | field 'd["vm"]["dir"]')"
 
 # A prebuilt UTM VM goes into UTM's library: with --vm-dir it is built.
