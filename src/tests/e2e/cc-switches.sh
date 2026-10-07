@@ -412,12 +412,38 @@ read_features() {
   names=$(/usr/bin/python3 -c 'import json,sys; print(" ".join(f["name"] for f in json.load(open(sys.argv[1]))["features"]))' "$OUT/${PFX}features.json" 2>/dev/null)
   [[ -n $names ]] || res features FAIL "omacvm features --json gave nothing: $(tail -2 "$OUT/${PFX}features.err")"
 }
+# Omanotch: the test identity's VMs reach only a test Omanotch on 47911 (never the person's).
+test_omanotch() { lsof -nP -iTCP:47911 -sTCP:LISTEN >/dev/null 2>&1; }
+prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install its packages (pkg-add refuses a partial update)
+  gssh "pacman -Q python-textual" >/dev/null 2>&1 && return 0
+  log "the VM's packages are older than the mirrors: omarchy update -y, then omacvm apply (limit 45 min)"
+  local t0 rc
+  t0=$(date +%s)
+  # As the desktop user, as the control centre's "o" runs it; sudo without a password only meanwhile.
+  gssh 'U=$(sed -n "s/^OMACVM_USER=//p" /etc/omacvm/env); echo "$U ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/99-omacvm-e2e; chmod 440 /etc/sudoers.d/99-omacvm-e2e
+    runuser -u "$U" -- env HOME="/home/$U" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c "source /usr/share/omarchy/default/bash/env-bootstrap; omarchy-update -y" > /var/tmp/omacvm-e2e-update.log 2>&1
+    rc=$?; rm -f /etc/sudoers.d/99-omacvm-e2e; tail -3 /var/tmp/omacvm-e2e-update.log; exit $rc' > "$OUT/${PFX}omarchy-update.txt" 2>&1
+  rc=$?
+  if (( rc == 0 )) && tmo 1800 "$CLI" apply --vm "$VM" --yes > "$OUT/${PFX}apply.log" 2>&1 && gssh "pacman -Q python-textual" >/dev/null 2>&1; then
+    res system-update ok "omarchy update -y + omacvm apply in $(( $(date +%s) - t0 )) s (a kept VM older than the mirrors)"
+  else
+    res system-update FAIL "omarchy update exit $rc; python-textual $(gssh 'pacman -Q python-textual' 2>&1 | head -1) ($OUT/${PFX}omarchy-update.txt, ${PFX}apply.log)"
+  fi
+}
 features_as_new() {   # what a new VM has on that this one has off (a clone of a kept VM): on, as a person would
   local need
   need=$(/usr/bin/python3 -c '
 import json, sys
 print(" ".join(f["name"] for f in json.load(open(sys.argv[1]))["features"]
                if str(f.get("default")).lower() in ("true", "on") and f.get("available") and not f.get("on")))' "$OUT/${PFX}features.json")
+  if ! test_omanotch; then
+    need=$(tr ' ' '\n' <<<"$need" | grep -vx omanotch | tr '\n' ' ')
+    if [[ $(feat on omanotch) == true ]]; then
+      tmo 600 "$CLI" disable omanotch --vm "$VM" --yes > "$OUT/${PFX}omanotch-off.log" 2>&1
+      res omanotch skip "no test Omanotch on 47911 on this Mac (the person's is never used): Omanotch off for this VM"
+    fi
+  fi
+  need=${need% }
   [[ -n $need ]] || return 0
   log "omacvm enable $need (limit 30 min)"
   # One feature name per word.
@@ -432,7 +458,18 @@ start_pass() {   # start the VM, the control centre's driver into it, the featur
   else res start FAIL "the VM did not come up: $(vminfo)"; return 1; fi
   gpush /var/lib/omacvm-e2e/guest-cc.py < "$HERE/guest-cc.py" || res tools FAIL "could not copy guest-cc.py into the VM"
   read_features
-  features_as_new
+  if want prepare; then
+    local before; before=$(cat "$VMD/features" 2>/dev/null)
+    prepare_system
+    features_as_new
+    # What changed while it ran reaches the Mac from the next start (OmacVM.app's links): start it again.
+    if [[ $(cat "$VMD/features" 2>/dev/null) != "$before" ]] || [[ -s $OUT/${PFX}omarchy-update.txt ]]; then
+      log "start again (the switches set up while it ran apply from a start)"
+      if stop_vm && start_vm && reachable 90; then res restart ok "$(vminfo)"
+      else res restart FAIL "the VM did not come back: $(vminfo)"; return 1; fi
+      gpush /var/lib/omacvm-e2e/guest-cc.py < "$HERE/guest-cc.py"
+    fi
+  fi
   BASE=$(cat "$VMD/features" 2>/dev/null)
 }
 

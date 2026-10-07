@@ -3,7 +3,9 @@
 control centre (`omacvm`) in tmux as the desktop user, driven with real key
 presses, read from the terminal's screen. tmux runs in the user's service
 manager (systemd-run --user), as a terminal on the desktop does, so Touch ID's
-PAM client sees a local session.
+PAM client sees a local session. `omacvm --here`: the same control centre as
+in its own window, in this terminal. Targets are session names (Omarchy's
+tmux counts windows from 1).
 
   guest-cc.py start [S]               the cc in a fresh tmux; waits until it says "Mac linked" (S s, 90)
   guest-cc.py screen                  the screen now
@@ -60,13 +62,13 @@ def tmux(*args: str, check: bool = False) -> subprocess.CompletedProcess:
 
 
 def screen(target: str = "cc", ansi: bool = False) -> str:
-    r = tmux("capture-pane", "-p", *(["-e"] if ansi else []), "-t", f"{target}:0")
+    r = tmux("capture-pane", "-p", *(["-e"] if ansi else []), "-t", target)
     return r.stdout if r.returncode == 0 else ""
 
 
 def keys(*k: str, target: str = "cc", gap: float = 0.08) -> None:
     for x in k:
-        tmux("send-keys", "-t", f"{target}:0", x)
+        tmux("send-keys", "-t", target, x)
         time.sleep(gap)
 
 
@@ -224,7 +226,7 @@ def cmd_start(a: list[str]) -> None:
     r = subprocess.run(["systemd-run", "--user", "-M", f"{USER}@", "--collect", f"--unit={UNIT}", "-p", "Type=forking",
                         "-E", f"TMUX_TMPDIR={RUN}", "-E", "TERM=xterm-256color", "-E", "LANG=en_US.UTF-8",
                         "tmux", "-L", SOCK, "new-session", "-d", "-s", "cc", "-x", str(COLS), "-y", str(LINES),
-                        "/usr/local/bin/omacvm"], capture_output=True, text=True)
+                        "/usr/local/bin/omacvm", "--here"], capture_output=True, text=True)
     if r.returncode != 0:
         out(False, error="systemd-run tmux failed", detail=(r.stdout + r.stderr)[-800:])
     ok, text, seen = watch(lambda s: "FEATURE" in s and ("Mac linked" in s or "needs the Mac" in s), secs)
