@@ -120,13 +120,15 @@ final class Runner {
               "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=6,chardev=ctl0,name=org.omacvm.control"]
         // Touch ID (docs/adr/0041): the VM's PAM client asks through it, the
-        // app passes it on to OmacVM Bridge (AuthRelay). Only for a VM with
-        // touch-id on at this start: other VMs keep their device list. A
-        // port on vser0 moves no PCI device; the VM finds it by its name.
-        if links.touchID {
-            a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
-                  "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
-        }
+        // app passes it on to OmacVM Bridge (AuthRelay). Every VM has it from
+        // its start, whatever the setting, so turning Touch ID on later works
+        // at once (3.0.3: only with touch-id on at the start, so one more
+        // restart). While Touch ID is off nothing in the VM opens it (no PAM
+        // line, no client; root's alone by udev rule) and the Bridge has no
+        // key for the VM: it answers "off". A port on vser0 moves no PCI
+        // device; the VM finds it by its name.
+        a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
         // The fast network: an empty PCIe slot for the user network's NIC
         // should vmnet fail while the VM runs (useUserNetwork). Last,
         // so no other device moves.
@@ -314,8 +316,7 @@ final class Runner {
         try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
         let p = Process()
         p.executableURL = Paths.qemu
-        // What of the Mac this start may use (its features), read once: the
-        // Touch ID port in the arguments and its relay below agree.
+        // What of the Mac this start may use (its features), read once.
         links = MacLinks.load(folder: c.folder)
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
@@ -356,8 +357,10 @@ final class Runner {
         env["OMACVM_DESKTOP_LOST"] = desktop.lost.path
         env["OMACVM_DESKTOP_RESTART_REQUEST"] = desktop.requestName
         // Touch ID's panel in QEMU's own window process (omacvm-cocoa-touchid-panel.patch):
-        // macOS reads the finger only for the app in front.
-        if links.touchID, let panel = Paths.touchIDPanel {
+        // macOS reads the finger only for the app in front. Loaded for every
+        // VM, as the port: it only listens on the app's private socket, and
+        // shows only what the Bridge verified (Touch ID on, a finger asked).
+        if let panel = Paths.touchIDPanel {
             try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
             env["OMACVM_TOUCHID_PANEL"] = panel.path
             env["OMACVM_TOUCHID_PANEL_SOCKET"] = c.touchIDPanelSocket.path
@@ -476,7 +479,8 @@ final class Runner {
         }
         audioDelay.start()
         audioLatency = audioDelay
-        if links.touchID { startAuth() }
+        // Touch ID's port, relayed for every VM (the Bridge decides on or off per request).
+        startAuth()
         // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
         Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
         // Grow or Compact asked for in the window (VMDisk), once the guest answers.
@@ -768,7 +772,7 @@ final class Runner {
     private var auth: AuthRelay?
 
     private func startAuth() {
-        let path = config.authSocket.path, name = config.name
+        let path = config.authSocket.path, name = config.name, folder = config.folder
         let panelPath = config.touchIDPanelSocket.path
         let panel: AuthRelay.Panel? = Paths.touchIDPanel == nil ? nil : { prompt, gone in
             guard let fd = try? NativeBridgeSocket.connectSecure(path: panelPath, label: "Touch ID panel") else {
@@ -789,6 +793,8 @@ final class Runner {
                     },
                                           headers: { NativeControlBridge.relayHeaders(vmName: name) },
                                           panel: panel,
+                                          // The features as they are now: on works at once, off is refused here.
+                                          enabled: { MacLinks.load(folder: folder).touchID },
                        log: { FileHandle.standardError.write(Data("[auth] \($0)\n".utf8)) })
                     DispatchQueue.main.sync { self?.auth = relay }
                     try? relay.run()

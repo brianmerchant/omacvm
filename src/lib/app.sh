@@ -9,7 +9,9 @@
 #   app_dir NAME        the VM's folder
 #   app_features_write DIR FEATURES  the VM's features, for the app's Mac links
 #   app_links_stale DIR FEATURES on|off  links that differ from this start of the VM
-#   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address)
+#   app_touchid_port DIR                 this start of the VM has Touch ID's port
+#   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address,
+#                       from the MAC the running QEMU has: app_vm_mac)
 #   app_any_fast_network  one of the VMs has the fast network on
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
@@ -159,22 +161,30 @@ app_features_write() {
 # the features. "on": the features that are on but closed to the VM until its
 # next start; "off": the ones that are off but still served. As "Bridge,
 # camera"; nothing for an app from before the line. A feature not named is on.
+# Touch ID is apart: app_touchid_port.
 app_links_stale() {
   local l x k n v out=""
   l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
   [[ -n $l ]] || return 0
-  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera touch-id:Touch\ ID; do
+  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
     k=${x%%:*} n=${x#*:} v=on
     [[ " $2 " == *" $k=off "* ]] && v=off
-    # Touch ID is off unless named on (its port is there only then); an app
-    # whose line does not name it never serves it.
-    if [[ $k == touch-id ]]; then
-      [[ " $2 " == *" $k=on "* ]] || v=off
-      [[ ", $l, " == *", Touch ID "* ]] || l+=", Touch ID off"
-    fi
     [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
   done
   echo "$out"
+}
+
+# app_touchid_port DIR: whether this start of the VM has Touch ID's port
+# (org.omacvm.auth). From 3.0.4 every start has it ("Touch ID port on" in
+# the Mac links line), so turning Touch ID on needs no restart; 3.0.2 and
+# 3.0.3 added it only with touch-id on at the start ("Touch ID on"). Off is
+# never stale: without the Mac's key the Bridge says "off" to the port.
+# Status 0 yes, 1 no (a restart adds it), 2 not known (no VM log).
+app_touchid_port() {
+  local l
+  l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
+  [[ -n $l ]] || return 2
+  [[ ", $l, " == *", Touch ID port on, "* || ", $l, " == *", Touch ID on, "* ]]
 }
 
 app_dir() {
@@ -187,14 +197,22 @@ app_dir() {
 
 # The fast network (feature fast-network): the app writes which network each
 # start took to logs/network ("vmnet", or "slirp" and why); the VM's MAC
-# address is in its fast-network file. On vmnet the VM has an address of its
-# own (macOS's DHCP server hands it out), and SSH goes there (port 22), its
-# host key checked as always.
+# address is in its fast-network file, which says how the NEXT start goes
+# (turning the fast network off removes it while the VM keeps running on
+# vmnet). On vmnet the VM has an address of its own (macOS's DHCP server
+# hands it out), and SSH goes there (port 22), its host key checked as always.
 app_net() { awk 'NR == 1 { print $1 }' "$1/logs/network" 2>/dev/null; }   # DIR -> vmnet|slirp
-app_vmnet_ip() {   # DIR -> the VM's address on vmnet's network (lease_ip, src/lib/mac.sh)
+app_vm_mac() {   # DIR [PID] -> the MAC address of the VM's vmnet NIC: the running
+  # QEMU's own (its virtio-net-pci on netdev "fast", app Runner.swift), else the fast-network file's
+  local m=""
+  [[ -n ${2:-} ]] && m=$(ps -p "$2" -o args= 2>/dev/null | tr ' ' '\n' |
+    sed -n 's/^virtio-net-pci,\(.*,\)\{0,1\}netdev=fast,\(.*,\)\{0,1\}mac=\([0-9A-Fa-f:]\{17\}\).*/\3/p' | head -1)
+  [[ -n $m ]] || m=$(sed -n 's/^mac=//p' "$1/fast-network" 2>/dev/null | head -1)
+  [[ -n $m ]] && echo "$m"
+}
+app_vmnet_ip() {   # DIR [PID] -> the VM's address on vmnet's network (lease_ip, src/lib/mac.sh)
   local m
-  m=$(sed -n 's/^mac=//p' "$1/fast-network" 2>/dev/null)
-  [[ -n $m ]] && m=$(lease_ip "$m") && [[ $m =~ ^192\.168\.77\.[0-9]+$ ]] && echo "$m"
+  m=$(app_vm_mac "$1" "${2:-}") && m=$(lease_ip "$m") && [[ $m =~ ^192\.168\.77\.[0-9]+$ ]] && echo "$m"
 }
 
 app_any_fast_network() {   # one of this user's app VMs has the fast network on
@@ -210,8 +228,10 @@ app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
   p=$(app_env "$d" SSH_PORT); [[ $p =~ ^[0-9]+$ ]] || return 1
   for ((i = 0; i <= ${2:-0}; i += 2)); do
     pid=$(app_pid_dir "$d")
-    if [[ -n $pid && $(app_net "$d") == vmnet ]]; then
-      ip=$(app_vmnet_ip "$d") && { echo "$ip"; return 0; }
+    # On vmnet: its own address. Else, or when the app moved it to QEMU's
+    # own network meanwhile (vmnet gone): 127.0.0.1:SSH_PORT.
+    if [[ -n $pid && $(app_net "$d") == vmnet ]] && ip=$(app_vmnet_ip "$d" "$pid"); then
+      echo "$ip"; return 0
     elif [[ -n $pid ]] && lsof -nP -a -p "$pid" -iTCP@127.0.0.1:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
       echo "127.0.0.1:$p"; return 0
     fi

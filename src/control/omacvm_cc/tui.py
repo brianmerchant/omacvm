@@ -21,11 +21,11 @@ from textual.screen import ModalScreen, Screen
 from textual.theme import Theme
 from textual.widgets import DataTable, Static, TextArea
 
-from . import collect, look, report, system
+from . import collect, look, report, system, touchid_ready
 from . import state as S
 from .bridge import BridgeError
 from .controller import ACTION_FOR, Controller, local_time
-from .local import (drop_resume, log_tail, restart_needed, take_resume, write_restart_needed,
+from .local import (drop_resume, log_tail, next_start, restart_needed, take_resume, write_restart_needed,
                     write_resume)
 
 # Job polls (one a second) that may fail in a row before the job counts as
@@ -1304,7 +1304,13 @@ class ControlCentre(App):
             self.call_from_thread(self.refresh_all)
         elif job.state == "done":
             self.last_result = ""
-            self.call_from_thread(self.notify, f"{what}: done", timeout=6)
+            if action == "enable" and "touch-id" in features:
+                # Works at once (3.0.4), or the one restart an older app's VM needs; an app's own switch.
+                self.last_result = touchid_ready.text("touch-id" in next_start(self.c.local.vm_type, {"touch-id": True}),
+                                                      touchid_ready.apps_off())
+                self.call_from_thread(self.notify, self.last_result, timeout=12)
+            else:
+                self.call_from_thread(self.notify, f"{what}: done", timeout=6)
         elif lost:
             self.last_result = (f"{what}: the Mac stopped answering about it (it may still finish there; "
                                 f"on the Mac, {self.on_the_mac('features')} shows how it went).")
