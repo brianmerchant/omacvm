@@ -30,6 +30,15 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
+- No sound after a kernel update: in OmacVM.app VMs with Chromium video on,
+  the first start after a new kernel could leave every app silent until
+  WirePlumber was restarted. WirePlumber hung on Chromium's video decoder
+  when it came late; it now leaves the decoder alone. `omacvm apply`
+  restarts WirePlumber once for this, never during a call.
+- Chromium video after a kernel update: when the decoder came late, its
+  service stayed down until the next start and videos played on the CPU.
+  The decoder now starts its service when it comes.
+
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
