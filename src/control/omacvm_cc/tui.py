@@ -994,7 +994,7 @@ class ControlCentre(App):
             return f"{head} This VM went back to its features from before ({again}; ! reports the problem)."
         return f"{head} On the Mac, {self.on_the_mac('apply')} puts this VM right ({again}; ! reports the problem)."
 
-    def toggle(self, r: S.Row) -> None:
+    def toggle(self, r: S.Row, asked_again: bool = False) -> None:
         if r.feature.name == "graphics":
             self.choose_graphics()
             return
@@ -1006,6 +1006,12 @@ class ControlCentre(App):
             return
         if r.status is S.Status.UNAVAILABLE:
             self.notify(f"{r.feature.title}: {r.note}", severity="warning")
+            return
+        if not asked_again and self.mac_may_be_back():
+            # The last look found the Mac away (its Bridge restarting, the VM
+            # just started): ask it once more now, then switch, instead of a
+            # press that does nothing until the next look 5 s later.
+            self.ask_again_then_toggle(r)
             return
         if not self.can_ask():
             return
@@ -1030,6 +1036,18 @@ class ControlCentre(App):
             return
         self.push_screen(ConfirmScreen(f"{r.feature.title}: {'on' if turn_on else 'off'}", "\n".join(texts)),
                          lambda yes: yes and self.run_job(ACTION_FOR[turn_on], list(plan)))
+
+    def mac_may_be_back(self) -> bool:
+        """The last look did not reach the Mac, or the Mac did not list (or
+        reach) this VM: worth one more look before a switch says no."""
+        e = self.c.mac_error
+        return self.c.active_job() is None and e is not None and (e.kind == "offline" or e.code == "unknown-vm")
+
+    @work(thread=True, exclusive=True, group="ask-again")
+    def ask_again_then_toggle(self, r: S.Row) -> None:
+        self.c.refresh_mac()
+        self.call_from_thread(self.refresh_all)
+        self.call_from_thread(self.toggle, r, True)
 
     def brings_mac_version(self) -> str:
         """On a VM older than the Mac, a switch-off or a repair brings all of
