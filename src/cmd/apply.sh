@@ -535,4 +535,25 @@ if [[ $TYPE == parallels ]]; then
     parallels_shortcuts_alert
   fi
 fi
+# Touch ID turned on by this run: whether it works now, and an app that needs
+# its own switch for it (omacvm-touchid-apps in the VM: 1Password). Asked
+# from the VM itself, so "ready" means its key and PAM line are there.
+if on touch-id && [[ ${PREV[$(feature_index touch-id)]} != on ]] && (( TOKEN && NAMED )); then
+  tid=$(gssh "$IP" "test -s /etc/omacvm/touchid-key && grep -qs 'pam_exec.so .*omacvm-touchid' /etc/pam.d/sudo && echo ready
+    if [ -x /usr/lib/omacvm/omacvm-touchid-apps ]; then
+      sudo -u '$U' env HOME=\"\$(getent passwd '$U' | cut -d: -f6)\" /usr/lib/omacvm/omacvm-touchid-apps 2>/dev/null
+    fi" < /dev/null 2>/dev/null || true)
+  if [[ $(head -1 <<<"$tid") != ready ]]; then
+    info "Touch ID: not set up in the VM (see above); the password keeps working"
+  elif [[ $TYPE == app ]] && td=$(app_dir "$VM" 2>/dev/null) && app_running_dir "$td" &&
+       { rc=0; app_touchid_port "$td" || rc=$?; (( rc == 1 )); }; then
+    # Started by OmacVM.app 3.0.3 or older: the port comes with the next start.
+    info "Touch ID: on - restart the VM once to finish (shut it down, then start it again)"
+  else
+    info "Touch ID is ready: try sudo -v in an Omarchy terminal"
+  fi
+  while IFS=$'\t' read -r _ st title text; do
+    if [[ $st == off && -n $title ]]; then info "Touch ID: $title: $text"; fi
+  done < <(tail -n +2 <<<"$tid")
+fi
 log "done$( [[ -n $had && $had != "$now" ]] && echo " (OmacVM $had -> $now)"): kernel, memory and keyboard changes apply after a reboot of the VM"
