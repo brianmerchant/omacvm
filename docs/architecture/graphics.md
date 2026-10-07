@@ -389,7 +389,12 @@ Rules:
   `logs/gpu-memory` for the app and `omacvm check`. A desktop takes
   1.1 GB at 4K to 3.1 GB at 8K, up to 6.2 GB for a moment while the scale
   changes (every screen-sized buffer is made again). QEMU's log notes each
-  new peak in 512 MB steps.
+  new peak in 512 MB steps. The budget's last part (512 MB to 2 GB) is the
+  desktop's (`virgl-gpu-guard-desktop-reserve.patch`): the guest's kernel
+  makes a resource before it names its context, so one past the apps'
+  share (or one macOS has no room for) is made for the desktop only and the
+  first GL context that attaches it decides: Hyprland, quickshell or hyprlock keep
+  it, an app's context is lost. Venus memory is an app's.
 
 ## 6. Vulkan: Venus (built: `gpu-venus`)
 
