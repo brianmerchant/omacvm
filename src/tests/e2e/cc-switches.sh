@@ -26,6 +26,7 @@
 #     --only LIST        steps (comma list): prepare,baseline,switches,fastnet,touchid,graphics,
 #                        updates,window,update (default: all; update needs --previous)
 #     --slow             also the slow switches (thp-kernel, x86-apps: builds in the VM)
+#     --features LIST    only these switches (comma list; while working on a fix: never counts for the gate)
 #     --out DIR          results (default ~/omacvm-e2e/<time>): summary.tsv, result.json, logs
 #     --owner NAME       lock owner name (default cc-e2e)
 #     --keep-vm          keep a VM this run cloned (default: deleted at the end)
@@ -43,7 +44,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$HERE/../../.." && pwd)
 
-VM=""; CLONE=""; NEWAPP=""; PREV=""; ONLY=""; SLOW=0; OUT=""; OWNER=cc-e2e; KEEP=0
+VM=""; CLONE=""; NEWAPP=""; PREV=""; ONLY=""; SLOW=0; OUT=""; OWNER=cc-e2e; KEEP=0; FEATS=""
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -52,14 +53,16 @@ while (( $# )); do
     --previous) PREV=$2; shift 2 ;;
     --only) ONLY=",$2,"; shift 2 ;;
     --slow) SLOW=1; shift ;;
+    --features) FEATS=",$2,"; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
     --owner) OWNER=$2; shift 2 ;;
     --keep-vm) KEEP=1; shift ;;
-    *) sed -n '20,36s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+    *) sed -n '19,37s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
-[[ -n $VM ]] || { sed -n '20,36s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[[ -n $VM ]] || { sed -n '19,37s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 ONLY_ARG=${ONLY:-all}
+[[ -n $FEATS ]] && ONLY_ARG="$ONLY_ARG features$FEATS"
 want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
 
 APP="$HOME/Applications/OmacVM Test.app"
@@ -425,6 +428,7 @@ step_switches() {
   log "switches (limit 90 min)"
   local n title s on other g rc
   for n in $names; do
+    [[ -z $FEATS || $FEATS == *",$n,"* ]] || continue
     case $n in
       fast-network|touch-id|control-centre) continue ;;   # their own steps
       thp-kernel|x86-apps) (( SLOW )) || { res "switch-$n" skip "slow (a build in the VM): --slow"; continue; } ;;
@@ -444,6 +448,7 @@ step_switches() {
     switch_one "$n" "$on"
     restore_base
   done
+  [[ -z $FEATS || $FEATS == *",control-centre,"* ]] || return 0
   # The control centre itself: off closes it (asked first); the Mac brings it back.
   bmark
   s=$(cc toggle "OmacVM control centre" off 600)
