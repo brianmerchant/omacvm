@@ -230,12 +230,14 @@ for r in '"wallpaper" "off, but' '"Bridge" "off, but' '"camera" "off, but' '"bat
 done
 
 # ---------- the Mac side ----------
-# omacvm apply: Gestures and the token only with gestures on.
+# omacvm apply: Gestures only with gestures on; the token with gestures on or
+# a feature that needs the Bridge (also with --no-mac: OmacVM.app's first apply).
 mac=$(grep -E 'skip-gestures\)|bridge_token_ensure; fi' "$R/src/cmd/apply.sh")
 [[ $(wc -l <<<"$mac") == *2 ]] || { echo "FAIL apply.sh gestures lines not found"; exit 1; }
-apply() {   # TYPE GESTURES -> the installer's gestures argument and whether the token goes in
-  ( TYPE=$1 G=$2 TOKEN=1 args=() tok=no
+apply() {   # TYPE GESTURES [BRIDGE] -> the installer's gestures argument and whether the token goes in
+  ( TYPE=$1 G=$2 B=${3:-off} TOKEN=1 args=() tok=no
     on() { [[ $1 == gestures && $G == on ]]; }
+    needs_bridge() { [[ $B == on ]]; }
     bridge_token_ensure() { tok=yes; }
     eval "$mac"
     echo "${args[*]:-none} token=$tok" )
@@ -243,6 +245,7 @@ apply() {   # TYPE GESTURES -> the installer's gestures argument and whether the
 for t in utm fusion app; do
   expect "$t, gestures off: Mac side skips Gestures" "--skip-gestures token=no" "$(apply $t off)"
   expect "$t, gestures on: Mac side installs Gestures" "none token=yes" "$(apply $t on)"
+  expect "$t, gestures off, Bridge features on: the token" "--skip-gestures token=yes" "$(apply $t off on)"
 done
 
 # OmacVM.app: apply writes the VM's features into its folder, the app opens

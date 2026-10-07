@@ -26,6 +26,9 @@ in more words.
   running QEMU. After the Bridge starts, or a VM does, the first request
   waits a few seconds for a fresh look at the VMs instead of minutes, and
   a VM the Mac cannot reach is told so instead of "not running".
+- A new OmacVM.app VM on a Mac that never had OmacVM's Bridge, with Gestures
+  turned off at setup: the build stopped at "Adding OmacVM to the VM" (no
+  Bridge token yet). The token is now made for the VM's first setup too.
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
   Settings while it ran could freeze the Mac's keyboard and clicks (the
   pointer still moved) until the helper was killed. Gestures now removes
@@ -42,6 +45,25 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
+- No sound after a kernel update: in OmacVM.app VMs with Chromium video on,
+  the first start after a new kernel could leave every app silent until
+  WirePlumber was restarted. WirePlumber hung on Chromium's video decoder
+  when it came late; it now leaves the decoder alone. `omacvm apply`
+  restarts WirePlumber once for this, never during a call.
+- Chromium video after a kernel update: when the decoder came late, its
+  service stayed down until the next start and videos played on the CPU.
+  The decoder now starts its service when it comes.
+- Ctrl-C during a step with a spinner in `omacvm build` (such as the
+  prebuilt image's unpack) always stops it; one that came just as the
+  spinner drew could be lost, and the step went on. A prebuilt image could
+  now and then fail to unpack with "could not unpack the image (free disk
+  space?)" although nothing was wrong. Closing the control centre while a
+  job ran could end with a Python error; it closes cleanly now.
+- OmacVM.app on macOS 26: no light 1 pt line around the screen when the VM's
+  window is borderless over a whole display (2.9.1's notch full screen
+  had it; in 3.0 that window is left only for tests). macOS 26 draws that
+  line with a window's shadow; borderless windows now have none. macOS's
+  own full screen, which 3.0 uses, never had the line.
 
 ## 3.0.3
 
