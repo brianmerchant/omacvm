@@ -60,7 +60,13 @@ Mac without a notch).
 - The fast network's service for the test app: `src/net/mac/install.sh
   --app ~/Applications/"OmacVM Test.app"` once (an administrator's password);
   without it the fast network steps are BLOCKED.
-- `OMACVM_SIGN_ID` (the Developer ID) for the update path.
+- `OMACVM_SIGN_ID` (the Developer ID) for the update path. A test Mac whose
+  SSH session cannot reach the Developer ID in its keychain (the Mac mini)
+  gets the test app built and signed on the release Mac: `OMACVM_E2E_APP`
+  for `remote.sh`, or `--app` with a copied build.
+- Runs from a copy of the checkout, never one being edited (bash reads a
+  script as it goes). `OMACVM_E2E_LOCKS`: the lock folders to hold, a colon
+  list (default: the mini's VM lock and the test identity's).
 
 ## Run it
 
