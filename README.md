@@ -14,8 +14,6 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 
 <p align="center">Using a coding agent? <a href="docs/agents.md">Copy the prompt for it</a>.</p>
 
-<p align="center"><b>New in 3.0.0:</b> OmacVM.app updates itself, a control centre in Omarchy, a prebuilt VM for the app, a Graphics setting with Vulkan, Chromium video on the Mac's media engine, full screen in a Space of its own on every display, Magic Mouse swipes, VMs on any drive, a boot splash and less power when idle. <a href="CHANGELOG.md">What changed</a>.</p>
-
 <p align="center">
   <img src="docs/images/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
 </p>

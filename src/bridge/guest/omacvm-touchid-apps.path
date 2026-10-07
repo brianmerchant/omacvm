@@ -1,0 +1,10 @@
+[Unit]
+Description=OmacVM: look again when 1Password is installed (Touch ID)
+
+[Path]
+# 1Password's polkit action: the last step of omarchy-install-1password, part of the AUR package.
+PathChanged=/usr/share/polkit-1/actions/com.1password.1Password.policy
+Unit=omacvm-touchid-apps.service
+
+[Install]
+WantedBy=default.target

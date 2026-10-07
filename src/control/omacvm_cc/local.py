@@ -39,6 +39,20 @@ def installed_file() -> str:
     return os.environ.get("OMACVM_INSTALLED", "/etc/omacvm/installed.json")
 
 
+def auth_port() -> str:
+    """OmacVM.app's Touch ID port (root's alone; it is there or not)."""
+    return os.environ.get("OMACVM_AUTH_PORT", "/dev/virtio-ports/org.omacvm.auth")
+
+
+def next_start(vm_type: str, on: dict[str, bool]) -> set[str]:
+    """The features that are on but in use only from the VM's next start:
+    Touch ID on an OmacVM.app VM without its port (turned on while the VM
+    ran; the app adds the port when it starts the VM)."""
+    if vm_type == "app" and on.get("touch-id") and not os.path.lexists(auth_port()):
+        return {"touch-id"}
+    return set()
+
+
 def check_socket() -> str:
     return os.environ.get("OMACVM_CHECK_SOCKET", "/run/omacvm/check.sock")
 

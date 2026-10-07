@@ -1,0 +1,91 @@
+#!/usr/bin/python3 -I
+"""omacvm-touchid-apps: apps in this VM that ask polkit only when their own
+switch is on, and whether it is (ADR 0041, addendum 3.0.4). Touch ID answers
+sudo and polkit; such an app keeps asking for its own password until the
+person turns that switch on in the app. Reads only; never changes an app's
+settings. Runs as the desktop user.
+
+  omacvm-touchid-apps            one line per installed app:
+                                 app<TAB>on|off<TAB>title<TAB>what to do
+  omacvm-touchid-apps --notify   a desktop notice for an app whose switch is
+                                 off, once per app until Touch ID is turned on
+                                 again (touchid.sh clears the marks)
+
+1Password (8.10.38 and newer): "security.authenticatedUnlock.enabled" in
+~/.config/1Password/settings/settings.json, Settings > Security > "Unlock
+using system authentication". The file holds only settings changed from
+their defaults (off). 1Password signs sensitive settings (the file's
+"authTags") and resets one without a signature at its next start, so a
+true without one counts as off; a file from before signatures has no
+authTags at all.
+"""
+import json
+import os
+import subprocess
+import sys
+
+E = os.environ
+HOME = os.path.expanduser("~")
+ROOT = E.get("OMACVM_TOUCHID_APPS_ROOT", "")   # tests: another / for the app's files
+CONFIG = E.get("XDG_CONFIG_HOME") or HOME + "/.config"
+STATE = (E.get("XDG_STATE_HOME") or HOME + "/.local/state") + "/omacvm"
+NOTIFY = E.get("OMACVM_NOTIFY_SEND", "notify-send")
+
+ONEPASSWORD_FILES = ("/usr/share/polkit-1/actions/com.1password.1Password.policy",   # omarchy-install-1password, the AUR package
+                     "/opt/1Password/1password", "/usr/share/applications/1password.desktop")
+ONEPASSWORD_KEY = "security.authenticatedUnlock.enabled"
+ONEPASSWORD_OFF = "turn on Settings › Security › Unlock using system authentication to use Touch ID"
+
+
+def onepassword_on(path: str) -> bool:
+    try:
+        with open(path, encoding="utf-8") as f:
+            s = json.load(f)
+    except (OSError, ValueError):
+        return False   # no file (nothing changed yet) or unreadable: the default, off
+    if not isinstance(s, dict) or s.get(ONEPASSWORD_KEY) is not True:
+        return False
+    tags = s.get("authTags")
+    return tags is None or (isinstance(tags, dict) and bool(tags.get(ONEPASSWORD_KEY)))
+
+
+def apps() -> list:
+    """(app, on, title, text) for each app installed here."""
+    out = []
+    if any(os.path.exists(ROOT + p) for p in ONEPASSWORD_FILES):
+        on = onepassword_on(CONFIG + "/1Password/settings/settings.json")
+        out.append(("1password", on, "1Password", "uses Touch ID" if on else ONEPASSWORD_OFF))
+    return out
+
+
+def notify() -> int:
+    for app, on, title, text in apps():
+        mark = f"{STATE}/touchid-hint-{app}"
+        if on or os.path.exists(mark):
+            continue
+        try:
+            r = subprocess.run([NOTIFY, "-a", "OmacVM", "-i", app, "Touch ID", f"{title}: {text}."],
+                               capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode != 0:
+            continue   # no notification daemon yet: the next login or install tries again
+        os.makedirs(STATE, exist_ok=True)
+        with open(mark, "w", encoding="utf-8") as f:
+            f.write("shown\n")
+    return 0
+
+
+def main(args: list) -> int:
+    if args == ["--notify"]:
+        return notify()
+    if args:
+        print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
+        return 2
+    for app, on, title, text in apps():
+        print(f"{app}\t{'on' if on else 'off'}\t{title}\t{text}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
