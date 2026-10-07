@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- Omanotch: when something moved the hidden NOTCH output after it was in
+  place (a Hyprland config reload with an older rule, another `hyprctl
+  eval`), the strip beside the notch could stay wrong for up to 30 s.
+  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
+  does not take is sent again with growing waits, at most every 30 s once
+  it keeps failing, and never more than 4 times in 30 s.
+
 ## 3.0.4 (unreleased)
 
 - Taking OmacVM Gestures' Accessibility or Input Monitoring away in System
@@ -21,13 +30,6 @@ in more words.
 - Touch ID turned on while an OmacVM.app VM runs: the control centre says
   "on from the VM's next start: shut it down, then start it again" instead
   of a red x.
-- Omanotch: when something moved the hidden NOTCH output after it was in
-  place (a Hyprland config reload with an older rule, another `hyprctl
-  eval`), the strip beside the notch could stay wrong for up to 30 s.
-  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
-  does not take is sent again with growing waits, at most every 30 s once
-  it keeps failing, and never more than 4 times in 30 s.
-
 ## 3.0.3
 
 - Touch ID: the Mac's panel in OmacVM.app shows a sudo command or polkit
