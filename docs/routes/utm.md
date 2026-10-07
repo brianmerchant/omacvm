@@ -73,8 +73,8 @@ bookmark. That is what `--vm-dir` uses:
 What you need:
 
 - **About 30 GB free on the drive** (the build checks it and stops before
-  anything is made). The Mac's own disk needs only a little room, so this
-  also works on a Mac with a small, full disk.
+  anything is made). The VM, its installer and the work files all go
+  there, not on the Mac's own disk.
 - The drive formatted **APFS or Mac OS Extended** (Disk Utility can erase it
   as APFS). exFAT and FAT drives are refused.
 - The drive connected before you open UTM, and never unplugged while the VM
