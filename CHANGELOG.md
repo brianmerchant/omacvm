@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- The Mac's battery in the VM (UTM, VMware Fusion, OmacVM.app): Omarchy's
+  battery panel now shows the real watts and the time left. The Mac never
+  sent the battery's current, so UPower guessed watts from charge steps:
+  0, then numbers from 1 to over 200 W (85 W at 85 % looked like the
+  percentage), and no time left while the guess was 0. The Mac now sends
+  current and power, and the VM's battery module (1.1.0, rebuilt by
+  `omacvm update`) shows them as `current_now` and `power_now`. Needs both
+  sides updated; `omacvm check` says which one is missing. No charge limit
+  in macOS: the module says 100 % instead of nothing.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
