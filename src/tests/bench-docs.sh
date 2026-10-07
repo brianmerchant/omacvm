@@ -8,8 +8,9 @@
 # - the chart's alt texts in README.md and docs/compare.md give the app's
 #   numbers the SVG gives
 # - the power chart (docs/images/power.svg) is chart.py --panel power's output, its
-#   hours are the battery over the watts, and README.md's alt text gives every
-#   number in it
+#   hours are the battery over the watts, README.md's alt text gives every
+#   number in it, and it shows one round only (the README shows only the latest
+#   results; older rounds stay in docs/benchmarks)
 # - the GPU progress chart (docs/images/gpu-progress.svg) is chart.py --panel
 #   progress's output, docs/benchmarks/README.md's alt text gives every number
 #   in it, its medians are the ones that page's table gives, and README.md
@@ -87,13 +88,14 @@ subprocess.run([sys.executable, f"{R}/src/bench/chart.py", "--panel", "power", f
 expect("chart.py --panel power gives the committed power SVG", open(out, encoding="utf-8").read() == psvg,
        "run src/bench/chart.py --panel power docs/benchmarks/chart.json docs/images/power.svg \"<subtitle>\"")
 pw = data["power"]
+dg = pw.get("digits", 1)
 gone = [f"{route} {load} {v} W" for route, loads in pw["watts"].items() for load, v in loads.items()
-        if f"{v:.1f} W · {pw['battery_wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
-for r in pw["round"]["rows"]:
+        if f"{v:.{dg}f} W · {pw['battery_wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
+for r in pw.get("round", {}).get("rows", []):
     gone += [f"{r['mac']} {r['load']} {v} W" for v in (r["app"], r.get("macos"))
              if v is not None and f"{v:.2f} W · {r['wh'] / v:.1f} h" not in re.sub(r"</text>\s*<text[^>]*>", " · ", psvg)]
 expect("power SVG shows every watt figure with its hours (battery over the draw)", not gone, ", ".join(gone))
-expect("power: UTM idle is left out or marked", "idle" not in pw["watts"].get("utm", {}) or "#32" in psvg)
+expect("power chart shows one round only, no second round of an older version", "round" not in pw)
 pdesc = re.search(r'<desc id="d">(.*?)</desc>', psvg, re.S).group(1)
 pairs = re.compile(r"(\d+\.\d+) W \((\d+\.\d+) h\)")
 want = pairs.findall(pdesc)

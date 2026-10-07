@@ -162,7 +162,7 @@ src/bench/power-suite.sh --vm root@<vm-ip> ~/bench/power-fusion.jsonl  # one VM 
 |---|---|
 | idle | nothing: the desktop as you leave it |
 | light | Chrome scrolling a long text page, like reading (`src/bench/pages/reading.html`) |
-| video | YouTube 4K in Chrome (`video-bench.py`, below) |
+| video | YouTube 4K in Chrome (`video-bench.py`, below); in a VM also in Omarchy's Chromium |
 | cpu | every CPU core busy |
 | gpu | WebGL Aquarium with 30,000 fish in Chrome |
 
@@ -171,8 +171,8 @@ src/bench/power-suite.sh --vm root@<vm-ip> ~/bench/power-fusion.jsonl  # one VM 
   `AppleSmartBattery`, the average draw of the whole Mac, display included.
   macOS updates it about every 45 seconds, so each window starts and ends on an
   update (3 minutes plus up to a minute).
-- **Battery life** is the battery's capacity over that draw: for this MacBook
-  Pro 16" M4 Max, 100 Wh. On the charger the numbers are the same: the Mac
+- **Battery life** is the battery's capacity over that draw: 52.6 Wh for the
+  MacBook Air M2 in the README's chart, 100 Wh for the MacBook Pro 16" M4 Max. On the charger the numbers are the same: the Mac
   reports what the system uses, not what the charger delivers.
 - **Keep it quiet:** only the VM under test runs, its app in full screen on the
   built-in display, the same brightness for every run, no other apps, Bluetooth
@@ -187,10 +187,12 @@ src/bench/video-bench.py --port 9222 --seconds 60   # Chrome started with --remo
 
 It plays a 4K video (YouTube's embed player inside a small local page, which
 YouTube needs), and reads from Chrome's media events which decoder plays it:
-`VideoToolboxVideoDecoder` on the Mac and `VaapiVideoDecoder` in a VM mean
-hardware; `Dav1dVideoDecoder`, `VpxVideoDecoder` or `FFmpegVideoDecoder` mean
-the CPU. It also reports the resolution, frames per second and dropped frames.
-On the Mac: AV1 3840x2160 at 60 fps in hardware, 0 % dropped.
+`VideoToolboxVideoDecoder` on the Mac and `VaapiVideoDecoder` or
+`V4L2VideoDecoder` (OmacVM.app's chromium-video) in a VM mean hardware;
+`Dav1dVideoDecoder`, `VpxVideoDecoder` or `FFmpegVideoDecoder` mean the CPU.
+It also reports the resolution, frames per second and dropped frames. On
+the MacBook Pro M4 Max: AV1 3840x2160 at 60 fps in hardware, 0 % dropped; the
+MacBook Air M2 has no AV1 decoder, so YouTube sends it VP9.
 
 ## Report and chart
 
@@ -223,9 +225,10 @@ cd ~/bench
 - The power chart in the README (`docs/images/power.svg`) comes from the
   `"power"` part of `chart.json`:
   `chart.py --panel power docs/benchmarks/chart.json docs/images/power.svg "<subtitle>"`.
-  Top: the 2026-10-03 round below (watts per load, hours on 100 Wh), UTM's
-  idle and reading left out (see the notes there). Under it: the 3.0.1 rounds
-  of 2026-10-07 ([Power, OmacVM.app 3.0.1](#power-omacvmapp-301-2026-10-07)).
+  It shows one round only, the latest: the MacBook Air M2 round of
+  2026-10-07 ([Results, MacBook Air M2](#results-macbook-air-m2-2026-10-07)),
+  watts per load and hours on 52.6 Wh, which browser and decoder played the
+  video, and Aquarium's frame rate. Older rounds stay on this page.
   `src/tests/bench-docs.sh` checks the SVG and the README's alt text.
 - The GPU progress chart on this page (`docs/images/gpu-progress.svg`)
   comes from the `"gpu_progress"` part of `chart.json`:
@@ -247,6 +250,147 @@ scores from the page. Geekbench's site turns away plain downloads, so curl
 does not work. Your results are public on Geekbench's site.
 
 ## Results
+
+### Results, MacBook Air M2 (2026-10-07)
+
+Every route on one Mac on one day: the round behind the README's power
+chart. MacBook Air M2, 8 GB, macOS 26.6.2, the built-in 60 Hz display with
+a notch. Each VM had 4 CPUs and 4 GB, sat on the same external SSD, ran
+Omarchy 4.0.3rc4-2 and Google Chrome 155, and ran alone in native full
+screen on the built-in display at scale 2 (about 2940x1846 beside the
+notch). Every other VM app and its background service was quit.
+
+| Route | Version | The VM |
+|---|---|---|
+| OmacVM.app | 3.0.3 (a test build of the v3.0.3 tag) | made by the app from the 3.0.0 image, guest updated to 3.0.3, kernel 7.2.8, Graphics Automatic (OpenGL) |
+| UTM | 5.0.6, settings as `omacvm build` sets them | full build, kept on the SSD with `omacvm build --vm-dir` ([#248](https://github.com/gillesgoetsch/omacvm/pull/248)), kernel 7.2.9, ANGLE on Metal |
+| VMware Fusion | 26.0.1, defaults | full build, kernel 7.2.9 |
+| Parallels Desktop | 27.0.2 Pro trial, defaults | full build, kernel 7.2.9 |
+| macOS | 26.6.2 | Google Chrome 155 on the Mac, 8 cores |
+
+How it ran:
+
+- **A quiet Mac.** Only Finder and Tailscale (the SSH link) besides the
+  route. No desktop widgets, a still wallpaper, True Tone, Night Shift and
+  automatic brightness off, no screensaver, no display or system sleep
+  (`caffeinate`). On the charger, at 93 to 100 %.
+- **Brightness 50 %**, set and read back at the start and the end of every
+  window. A window that read anything else, or saw a sleep, would have been
+  thrown away and repeated. None was: all 90 power windows and 57 browser
+  and glmark2 runs read 0.500 both times.
+- **Power** comes from `power.sh` (the battery's telemetry, the whole Mac,
+  display included): 30 seconds to settle, then a 3-minute window that
+  starts and ends on a battery update. The loads took turns, 3 rounds, with
+  3 minutes to cool down between rounds (the Air has no fan). 12 of the 90
+  windows ended after 187 to 234 seconds instead of about 240, when the
+  battery's update came sooner.
+- **Hours** are 52.6 Wh, the Air M2's design capacity, over the draw. This
+  Air's battery holds 89 % of that now (4057 of 4563 mAh), so this Mac gets
+  about a tenth less.
+- **Browser tests** ran in Google Chrome 155 (155.0.8059.39 in the VMs,
+  .40 on the Mac) through `bench.sh`, the same 1470x923 page at 2x
+  everywhere. Median of 3.
+- **Not run:** Geekbench 7 CPU. Its Linux preview runs out of memory in a
+  4 GB VM (Multi-Core, Photo Editor).
+
+Power of the whole Mac in watts, median of 3 (range), and hours on 52.6 Wh:
+
+| Load | OmacVM.app 3.0.3 | UTM | VMware Fusion | Parallels | macOS |
+|---|---|---|---|---|---|
+| Idle | 6.13 (6.05-6.17), 8.6 h | 6.30 (6.30-6.33), 8.3 h | 6.21 (6.18-6.26), 8.5 h | 6.17 (6.14-6.25), 8.5 h | 5.20 (5.02-5.34), 10.1 h |
+| Reading: Chrome scrolling `reading.html` | 6.11 (6.03-6.13), 8.6 h | 7.43 (7.43-7.45), 7.1 h | 6.82 (6.76-6.83), 7.7 h | 6.68 (6.63-6.69), 7.9 h | 5.48 (5.29-5.56), 9.6 h |
+| YouTube 4K, the browser that played it best (below) | 10.10 (10.09-10.20), 5.2 h | 16.46 (16.38-16.59), 3.2 h | 16.14 (16.10-16.25), 3.3 h | 16.78 (16.50-16.82), 3.1 h | 6.07 (5.98-6.28), 8.7 h |
+| Every core busy (the VM's 4, the Mac's 8) | 21.01 (20.97-21.05), 2.5 h | 16.95 (16.90-17.06), 3.1 h | 18.16 (18.08-18.19), 2.9 h | 18.01 (17.90-18.10), 2.9 h | 19.69 (19.36-20.09), 2.7 h |
+| WebGL Aquarium, 30,000 fish | 17.11 (17.07-17.20), 3.1 h, 19 fps | 18.15 (17.83-18.15), 2.9 h, 21 fps | 20.64 (20.62-20.95), 2.5 h, 25 fps | 17.43 (17.37-17.90), 3.0 h, 17 fps | 17.34 (17.22-17.48), 3.0 h, 60 fps |
+
+YouTube 4K is Big Buck Bunny, VP9 3840x2160 at 60 fps, SDR, played by
+`video-bench.py`. Every route played it at 60 fps. Each route ran it in
+Omarchy's Chromium 153 as installed and in Google Chrome 155; the chart
+takes the one that dropped fewer frames (Parallels: a tie, so the lower
+draw). Bold: the chart's row. Watts, median of 3:
+
+| Route | Browser | Decoder | Dropped frames | Watts |
+|---|---|---|---|---|
+| **OmacVM.app** | **Chromium, chromium-video on (the default)** | **V4L2VideoDecoder: the Mac's media engine** | **2.6 %** | **10.10** |
+| OmacVM.app | Chromium, chromium-video off | VpxVideoDecoder (CPU) | 0.1 % | 16.45 |
+| OmacVM.app | Google Chrome | VaapiVideoDecoder: the Mac's media engine | 20.0 % | 8.97 |
+| **UTM** | **Chromium** | **VpxVideoDecoder (CPU)** | **0.8 %** | **16.46** |
+| UTM | Google Chrome | VpxVideoDecoder (CPU) | 2.5 % | 19.05 |
+| **VMware Fusion** | **Google Chrome** | **VpxVideoDecoder (CPU)** | **10.6 %** | **16.14** |
+| VMware Fusion | Chromium | VpxVideoDecoder (CPU) | 42.0 % | 17.24 |
+| **Parallels** | **Chromium** | **VpxVideoDecoder (CPU)** | **1.8 %** | **16.78** |
+| Parallels | Google Chrome | VpxVideoDecoder (CPU) | 1.8 % | 16.90 |
+| **macOS** | **Google Chrome** | **VideoToolboxVideoDecoder (hardware)** | **0.0 %** | **6.07** |
+
+Browser and graphics tests, median of 3 (range):
+
+| Test | OmacVM.app 3.0.3 | UTM | VMware Fusion | Parallels | macOS |
+|---|---|---|---|---|---|
+| Speedometer 3.1 | 30.4 (30.1-30.4) | 26.0 (25.3-26.3) | 28.5 (27.5-28.9) | 29.7 (29.6-29.8) | 47.1 (46.7-47.1) |
+| WebGL Aquarium, 30,000 fish (fps) | 18.8 (15.4-18.8) | 22.1 (22.0-22.1) | 36.5 (28.9-38.0) | 21.1 (16.4-21.2) | 60.0 (60.0-60.0) |
+| Basemark Web 3.0 | 1357 (1349-1537) | 1704 (1496-1739) | 1359 (1274-1362) | 1378 (1353-1584) | 1872 (1842-1960) |
+| glmark2 | 1790 (1774-1840) | 756 (755-758) | 378 (378-379) | 2020 (2005-2080) | no macOS version |
+
+Before quoting these:
+
+- **Every core busy** loads the VM's 4 CPUs (400 % for the VM) and all 8
+  cores on macOS. At the same 400 %, OmacVM.app draws 3 to 4 W more than the
+  other VMs. We have not found why yet.
+- **Aquarium** reaches the display's 60 Hz on macOS, so 60 fps is the
+  display's limit, not the Mac's. In the VMs each route draws its own frame
+  rate, so the WebGL watts are not an efficiency number. Fusion draws the
+  most frames (36.5 fps in the browser test, 25 in the power windows) and
+  the most watts.
+- **OmacVM.app's Google Chrome** plays the video on the media engine too,
+  at 8.97 W, but drops a fifth of the frames on this Air (59.7 fps). The
+  chart uses Omarchy's Chromium, the app's default.
+- **Fusion** started the VM at scale 1 in full screen. We set scale 2 with
+  Omarchy's own `omarchy-hyprland-monitor-scaling 2`, like the other routes.
+  Two of Fusion's browser rounds were run again: Chrome took over 30 seconds
+  to start after glmark2, and `bench.sh` left that Chrome open when it gave
+  up.
+- **UTM idle** was 6.30 W here, like the others. The 15.2 W from the
+  2026-10-03 MacBook Pro round ([#32](https://github.com/gillesgoetsch/omacvm/issues/32))
+  did not show on the Air.
+- Parallels' background service (idle, 0 % CPU) was still running during
+  the UTM windows. It was off for the macOS and Fusion routes.
+- The OmacVM.app VM runs kernel 7.2.8 (the 3.0.0 image), the others 7.2.9
+  (full builds).
+
+Raw runs, in round order. Watts:
+
+- OmacVM.app 3.0.3: idle 6.05, 6.13, 6.17; reading 6.13, 6.03, 6.11;
+  YouTube 4K in Chromium with chromium-video 10.20, 10.10, 10.09, without
+  16.54, 16.38, 16.45, in Google Chrome 8.99, 8.75, 8.97; every core 21.01,
+  21.05, 20.97; Aquarium 17.07, 17.11, 17.20.
+- UTM: idle 6.33, 6.30, 6.30; reading 7.43, 7.43, 7.45; YouTube 4K in
+  Chromium 16.59, 16.38, 16.46, in Google Chrome 19.27, 19.02, 19.05; every
+  core 17.06, 16.90, 16.95; Aquarium 18.15, 17.83, 18.15.
+- VMware Fusion: idle 6.26, 6.18, 6.21; reading 6.76, 6.82, 6.83; YouTube
+  4K in Google Chrome 16.10, 16.25, 16.14, in Chromium 17.35, 17.24, 17.21;
+  every core 18.16, 18.19, 18.08; Aquarium 20.95, 20.62, 20.64.
+- Parallels: idle 6.25, 6.14, 6.17; reading 6.68, 6.63, 6.69; YouTube 4K in
+  Chromium 16.50, 16.78, 16.82, in Google Chrome 16.90, 17.01, 16.88; every
+  core 17.90, 18.10, 18.01; Aquarium 17.37, 17.43, 17.90.
+- macOS: idle 5.34, 5.20, 5.02; reading 5.56, 5.48, 5.29; YouTube 4K 6.28,
+  6.07, 5.98; every core 19.69, 19.36, 20.09; Aquarium 17.34, 17.48, 17.22.
+
+Browser and graphics tests:
+
+- OmacVM.app 3.0.3: Speedometer 30.4, 30.1, 30.4; Aquarium 18.8, 15.4,
+  18.8; Basemark 1357, 1349, 1537; glmark2 1840, 1790, 1774.
+- UTM: Speedometer 25.3, 26.0, 26.3; Aquarium 22.1, 22.1, 22.0; Basemark
+  1704, 1739, 1496; glmark2 756, 755, 758.
+- VMware Fusion: Speedometer 27.5, 28.5, 28.9; Aquarium 28.9, 36.5, 38.0;
+  Basemark 1274, 1359, 1362; glmark2 378, 378, 379.
+- Parallels: Speedometer 29.6, 29.8, 29.7; Aquarium 16.4, 21.1, 21.2;
+  Basemark 1378, 1353, 1584; glmark2 2080, 2020, 2005.
+- macOS: Speedometer 46.7, 47.1, 47.1; Aquarium 60.0, 60.0, 60.0; Basemark
+  1872, 1960, 1842.
+
+### MacBook Pro M4 Max, every route (2026-10-03)
+
+The README's power chart showed this round before the MacBook Air round above replaced it.
 
 2026-10-03, MacBook Pro 16" M4 Max, macOS 15.7.4, 16 CPUs and 48 GB per VM, in
 full screen on the built-in display (3456x2160 at 120 Hz), Google Chrome 154,
