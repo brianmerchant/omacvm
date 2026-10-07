@@ -274,6 +274,9 @@ off".
   request every 2 s, 10 a minute; after 3 misses in a row (`cancelled`,
   `failed` or `timeout`) a pause of `rate`: 60 s, then 5 min, then 30 min,
   until a yes. So a VM that keeps dialogs up for nobody stops after three.
+  The VM's client asks once more 2.2 s after a `rate` (3.0.4): `sudo -v`
+  and then `pkexec` or 1Password at once both get Touch ID, and the Mac's
+  spacing stays; a second `rate` (a real pause) means the password.
   A dialog not answered in 30 s is invalidated (`timeout`); a client that
   disconnects invalidates it too.
 - The Mac's state (screen locked, app in front) is read on the main thread.

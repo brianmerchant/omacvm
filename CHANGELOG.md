@@ -14,7 +14,8 @@ in more words.
   centre and once from a terminal), and the first Touch ID request after
   the Bridge or the VM started no longer falls to the password: the Bridge
   takes an OmacVM.app VM's request by name, and waits for its VM list for
-  Parallels, UTM and Fusion. Turning it on ends with "Touch ID is ready:
+  Parallels, UTM and Fusion. A polkit prompt (pkexec, 1Password) right
+  after `sudo` uses Touch ID too instead of saying "too many tries". Turning it on ends with "Touch ID is ready:
   try sudo -v" (and 1Password's own switch, if it is off). When it still
   uses the password, the prompt says why ("the Mac is still starting",
   "OmacVM Bridge on the Mac does not answer", ...), the VM's journal keeps

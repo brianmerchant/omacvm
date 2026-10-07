@@ -72,6 +72,16 @@ run no-not-front; expect "VM not in front: password" 1 "$rc"
 expect "VM not in front: said" "Touch ID not available (VM not in front), use your password" "$(tail -1 "$T/out")"
 journaled "VM not in front: in the journal" "sudo for vincent: the password (VM not in front)"
 run no-locked; expect "Mac locked: said" "Touch ID not available (Mac locked), use your password" "$(tail -1 "$T/out")"
+# sudo -v, then pkexec at once: the Bridge says "rate" (2 s between a VM's requests), the client asks once more.
+rm -f "$T/bridge/rated"; s=$(ms); OMACVM_TOUCHID_RATE_WAIT=0.3 run rate-once; took=$(( $(ms) - s ))
+expect "rate once: asked again, let in" 0 "$rc"
+expect "rate once: two requests" 2 "$(wc -l < "$T/bridge/requests" | tr -d ' ')"
+expect "rate once: the prompt line once" "Touch ID on your Mac, or wait for the password prompt" "$(cat "$T/out")"
+journaled "rate once: the journal" "sudo for vincent: Touch ID yes"
+if (( took >= 300 )); then ok "rate once: waited (${took} ms)"; else bad "rate once: no wait (${took} ms)"; fi
+OMACVM_TOUCHID_RATE_WAIT=0.3 run no-rate; expect "rate twice (a real pause): password" 1 "$rc"
+expect "rate twice: only one more try" 2 "$(wc -l < "$T/bridge/requests" | tr -d ' ')"
+expect "rate twice: said" "Touch ID not available (too many tries), use your password" "$(tail -1 "$T/out")"
 run off; expect "off on the Mac (unsigned, as the Bridge sends it): password" 1 "$rc"
 expect "off on the Mac: said" "Touch ID not available (Touch ID off), use your password" "$(tail -1 "$T/out")"
 run off-other; expect "another unsigned refusal: its reason not believed, never silent" \
@@ -195,6 +205,9 @@ expect "app: asks on the screen" "Touch ID on your Mac, or wait for the password
 asked "app: the same request" '{"user":"vincent","kind":"sudo","detail":"pacman -Syu","tty":"pts/3"}'
 expect "app: the token added by the app, not the VM" "Bearer $(cat "$T/bridge/token")" "$(tail -1 "$T/bridge/requests" | python3 -c 'import json,sys; print(json.load(sys.stdin)["auth"])')"
 expect "app: one request, then a cancel the app ignores" "cancel=1 touchid=1 " "$(port_ops)"
+rm -f "$T/bridge/rated"; : > "$T/bridge/port-ops"; OMACVM_TOUCHID_RATE_WAIT=0.3 run rate-once
+expect "app: rate once: asked again over the port, let in" 0 "$rc"
+expect "app: rate once: two requests" "cancel=2 touchid=2 " "$(port_ops)"
 if (( took < 1500 )); then ok "app: answered in ${took} ms"; else bad "app: took ${took} ms"; fi
 mv "$T/token.off" "$T/etc/touchid-token"
 run no-not-front; expect "app: VM not in front: said" "Touch ID not available (VM not in front), use your password" "$(tail -1 "$T/out")"

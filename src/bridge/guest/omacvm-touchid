@@ -89,13 +89,25 @@ QUIET = ("cancelled", "failed", "timeout")
 LOG = E.get("OMACVM_TOUCHID_LOG", "")   # tests: the journal's lines go here
 PING = 0.5             # OmacVM.app's port: the app drops the request when the pings stop
 ACK_TIMEOUT = 2.0      # ... and says within this that it relays
+# The Bridge takes one request per VM every 2 s (touchid_policy.swift's
+# TouchIDLimiter) and answers "rate" to a closer one, also right after a yes:
+# `sudo -v; pkexec ...` or 1Password right after sudo. One more try after the
+# wait, then the password (a real pause after misses or 10 a minute stays).
+RATE_WAIT = float(E.get("OMACVM_TOUCHID_RATE_WAIT", "2.2"))
+AGAIN = -1             # answered(): "rate", ask once more after RATE_WAIT
 
 
 class Deadline(Exception):
     pass
 
 
+SAID = set()
+
+
 def say(s):
+    if s in SAID:   # a second try says nothing new
+        return
+    SAID.add(s)
     print(s, flush=True)
 
 
@@ -396,7 +408,7 @@ def port_write(fd, line, wait):
     return True
 
 
-def over_port(key, data):
+def over_port(key, data, last=True):
     """OmacVM.app: the request on org.omacvm.auth, pings while the Mac's
     dialog is up, the answer for this nonce (older lines are skipped)."""
     try:
@@ -467,7 +479,7 @@ def over_port(key, data):
                     answer = base64.b64decode(o.get("body", ""), validate=True)
                 except (ValueError, TypeError):
                     return password(WHY["answer"])
-                return answered(key, nonce, status, answer, o.get("answer", ""))
+                return answered(key, nonce, status, answer, o.get("answer", ""), last)
             if len(buf) > 16384:
                 buf = b""
     finally:
@@ -541,7 +553,7 @@ def request():
     env = env_file()
     data = json.dumps(body, separators=(",", ":")).encode()
     if env.get("OMACVM_VM_TYPE") == "app":
-        return over_port(key, data)
+        return twice(lambda last: over_port(key, data, last))
     try:
         token = secret("touchid-token")
     except (OSError, ValueError):
@@ -565,6 +577,20 @@ def request():
         return password(WHY["proof"])
 
     say("Touch ID on your Mac, or wait for the password prompt")
+    return twice(lambda last: over_http(key, data, token, host, last))
+
+
+def twice(ask):
+    """ask(last) once, and once more after RATE_WAIT when the Mac said "rate"."""
+    rc = ask(False)
+    if rc != AGAIN:
+        return rc
+    journal(f"{WHAT}: the Mac said wait (2 s between requests): asking again in {RATE_WAIT:g} s")
+    time.sleep(RATE_WAIT)
+    return ask(True)
+
+
+def over_http(key, data, token, host, last):
     path = "/omacvm/touchid"
     nonce, auth = signed(key, data)
     c = http.client.HTTPConnection(host, PORT, timeout=CONNECT_TIMEOUT)
@@ -582,11 +608,12 @@ def request():
         return password(WHY["bridge"])
     finally:
         c.close()
-    return answered(key, nonce, status, answer, got)
+    return answered(key, nonce, status, answer, got, last)
 
 
-def answered(key, nonce, status, answer, got):
-    """Exit code for the Bridge's answer (status, body bytes, X-OmacVM-Answer)."""
+def answered(key, nonce, status, answer, got, last=True):
+    """Exit code for the Bridge's answer (status, body bytes, X-OmacVM-Answer);
+    AGAIN for a signed "rate" when this was not the last try."""
     try:
         o = json.loads(answer)
     except ValueError:
@@ -607,6 +634,8 @@ def answered(key, nonce, status, answer, got):
         journal(f"{WHAT}: Touch ID yes")
         return 0
     reason = o.get("reason") if status == 200 else o.get("code")
+    if status == 200 and reason == "rate" and not last:
+        return AGAIN
     if status == 200 and reason in QUIET:
         journal(f"{WHAT}: the password (Touch ID {reason} on the Mac)")
         return 1

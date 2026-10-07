@@ -56,6 +56,10 @@ class H(http.server.BaseHTTPRequestHandler):
         nonce, m = f[2], self.mode()
         if m == "yes":
             self.send(200, {"result": "yes"}, (key, nonce))
+        elif m == "rate-once":   # the 2 s between a VM's requests: "rate" once, then yes
+            first = not os.path.exists(f"{D}/rated")
+            open(f"{D}/rated", "w").close()
+            self.send(200, {"result": "no", "reason": "rate"} if first else {"result": "yes"}, (key, nonce))
         elif m.startswith("no-"):
             self.send(200, {"result": "no", "reason": m[3:]}, (key, nonce))
         elif m == "unsigned":
