@@ -3,6 +3,11 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.5 (unreleased)
+
+- Touch ID is no longer marked experimental (control centre, `omacvm
+  features`, README): it is a regular feature, still off until you turn it on.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps

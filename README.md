@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | 🎮 **Real GPU performance**<br>Keeps up with your display's refresh, up to 120 Hz. Graphics in OmacVM.app: OpenGL, Vulkan (KosmicKrisp on macOS 26+) or Automatic, which is OpenGL. Vulkan adds WebGPU in Chromium. Graphics memory grows with what the Mac can spare. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
 | 👆 **Mac trackpad and Magic Mouse gestures**<br>2, 3 and 4 finger swipes and pinch zoom, optional macOS-like momentum scrolling. Magic Mouse swipes count as 3 or 4 fingers, your pick. | 💾 **Your VMs where you want them**<br>OmacVM.app's Storage moves them to another folder or drive and shows their sizes. |
 | ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, ⌘ F10–F12 take Omarchy's screenshots, macOS shortcuts stay out of the way. In OmacVM.app the globe (fn) key opens Omarchy's emoji picker. | 🎨 **Theme, wallpaper and boot splash**<br>Your Omarchy theme and wallpaper carry over to macOS; OmacVM.app shows Omarchy's logo from the first frame. |
-| 🔑 **Touch ID for sudo and 1Password**<br>Experimental, off by default: sudo, polkit and 1Password (with its own switch on) in Omarchy ask the Mac's Touch ID, in an Omarchy-styled panel in OmacVM.app, in macOS's own dialog on the other apps. Your password keeps working; only for the VM in front. | 🧪 **Experiments, off until you turn them on**<br>x86 Linux apps through box64 on every route. In OmacVM.app: USB devices, a fast network (VPN included) and GPU compute (OpenCL, WebGPU in Firefox). |
+| 🔑 **Touch ID for sudo and 1Password**<br>Off until you turn it on: sudo, polkit and 1Password (with its own switch on) in Omarchy ask the Mac's Touch ID, in an Omarchy-styled panel in OmacVM.app, in macOS's own dialog on the other apps. Your password keeps working; only for the VM in front. | 🧪 **Experiments, off until you turn them on**<br>x86 Linux apps through box64 on every route. In OmacVM.app: USB devices, a fast network (VPN included) and GPU compute (OpenCL, WebGPU in Firefox). |
 | 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. Sound holds on a busy Mac. | 🔋 **Optimized for battery**<br>[Measured power draw](#power-draw) on every route; an idle OmacVM.app VM wakes the Mac half as often. |
 | 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups, in finer steps (32, Option: 64), for external displays too. | 🎛️ **Control centre in Omarchy**<br>`omacvm` in the VM opens a floating window: features on or off, updates, report a problem. From the Mac too: *Features…* in OmacVM.app. |
 | 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
@@ -74,7 +74,7 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
-| Touch ID for sudo, polkit and 1Password (experimental) | ✅ | ✅ | ✅ | ✅ |
+| Touch ID for sudo, polkit and 1Password | ✅ | ✅ | ✅ | ✅ |
 | Control centre in Omarchy | ✅ | ✅ | ✅ | ✅ |
 | Prebuilt VM (5 min) | ✅ | ✅ | ✅ | ✅ |
 | x86 Linux apps (experimental, slower) | ✅ | ✅ | ✅ | ✅ |
