@@ -132,9 +132,9 @@ Play/pause, next and previous go to the VM's players (OmacVM.app). Brightness
 keys change the display the VM is on (below).
 
 OmacVM.app's VM takes ⌘ Tab, ⌘ Space and macOS's screenshot keys only when
-macOS lets OmacVM read the keyboard (System Settings › Privacy & Security ›
-Input Monitoring and Accessibility). When it does not, the VM's window says
-so with an Allow… button, and `omacvm check` warns ("VM keyboard").
+macOS lets OmacVM control the computer (System Settings › Privacy & Security ›
+Accessibility; Input Monitoring is not enough). When it does not, the VM's
+window says so with an Allow… button, and `omacvm check` warns ("VM keyboard").
 
 <p align="center">
   <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Escape opens the lock and moves the monitor one Space over to macOS with macOS's own animation; the VM stays full screen in its Space and the trackpad and keys belong to macOS. Pressed again, the monitor moves back into the VM, captured again. A setting chooses the monitor under the pointer or all monitors. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">

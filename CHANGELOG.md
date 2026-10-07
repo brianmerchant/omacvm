@@ -31,6 +31,13 @@ in more words.
   cannot reach this VM: ..." with why (no address, the fast network down,
   SSH refused), or that OmacVM did not set the VM up. Touch ID for an
   OmacVM.app VM no longer needs the Mac to reach the VM over SSH.
+- OmacVM.app's keyboard note asked for the wrong permission. The VM's
+  key tap (⌘ Tab, ⌘ Space, ⌘ ⇧ 4 to Omarchy) needs Accessibility; Input
+  Monitoring is not enough, but Allow… opened Input Monitoring, and with
+  it on the note stayed red even after Accessibility was turned on. Now
+  the note names only Accessibility, Allow… opens that pane, the (i)
+  has the steps, and once it is allowed the note says "allowed, takes
+  effect at the next VM start" at once.
 - VMware Fusion: setting up a new VM stopped at "failed during: VMware
   Fusion" (3.0.0 to 3.0.3). The first Hyprland build ran from a copy that
   could not install its build tools, and the VMware Tools build then

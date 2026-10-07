@@ -122,7 +122,8 @@ Delete test VMs when you're done.
 ## Pull requests
 
 - **One concern per PR.** A fix and a cleanup are two PRs.
-- **CI must pass.** The `check` workflow runs on every PR.
+- **CI must pass.** The `check` workflow runs on every PR. A PR from a fork
+  runs on GitHub's macOS 15 runner once a maintainer approves the run.
 - **Plain commits.** One change per commit. The first line says what changes
   for the user: `Gestures: pinch works again after sleep`. No essays, no
   marketing words. `git log` shows the style.
