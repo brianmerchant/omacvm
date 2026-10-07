@@ -772,7 +772,7 @@ final class Runner {
     private var auth: AuthRelay?
 
     private func startAuth() {
-        let path = config.authSocket.path, name = config.name
+        let path = config.authSocket.path, name = config.name, folder = config.folder
         let panelPath = config.touchIDPanelSocket.path
         let panel: AuthRelay.Panel? = Paths.touchIDPanel == nil ? nil : { prompt, gone in
             guard let fd = try? NativeBridgeSocket.connectSecure(path: panelPath, label: "Touch ID panel") else {
@@ -793,6 +793,8 @@ final class Runner {
                     },
                                           headers: { NativeControlBridge.relayHeaders(vmName: name) },
                                           panel: panel,
+                                          // The features as they are now: on works at once, off is refused here.
+                                          enabled: { MacLinks.load(folder: folder).touchID },
                        log: { FileHandle.standardError.write(Data("[auth] \($0)\n".utf8)) })
                     DispatchQueue.main.sync { self?.auth = relay }
                     try? relay.run()

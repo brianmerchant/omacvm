@@ -731,12 +731,14 @@ off by default; this is about the moment a person turns it on.
 - Off stays off: no PAM line and no client in the VM, so nothing opens the
   port; the udev rule keeps it root's alone also while off (`touchid.sh
   off` writes it on app VMs; without it the kernel's default is 0600 root
-  too); the Bridge has no key for the VM and answers `403 off` (no dialog,
-  no panel: the panel shows only a prompt the Bridge sends after it
-  verified the request with the VM's key). A process with root in the VM
-  can send requests while off and gets `off`, as a request from a Parallels
-  VM with the feature off does; the relay's 0.2 s and the Bridge's refusal
-  log limits hold. The panel's socket is in the app's private run folder
+  too). The app reads the VM's features per request (`AuthRelay`'s
+  `enabled`): off, it answers `403 off` itself, as the Bridge would
+  (unsigned: neither has a key then), and nothing reaches the Bridge. On,
+  it relays at once, no restart. Behind it the Bridge still has no key
+  for a VM with Touch ID off and answers `off` (no dialog, no panel: the
+  panel shows only a prompt the Bridge sends after it verified the request
+  with the VM's key). A process with root in the VM can send requests
+  while off and gets `off`; the relay's 0.2 s limit holds. The panel's socket is in the app's private run folder
   (0600), as before.
 - The Bridge takes an OmacVM.app VM's Touch ID request by the name the app
   sends when this Mac has that VM's Touch ID key (`touchIDRelayVM`), without
@@ -789,6 +791,9 @@ the VM's next start".
 
 ### Tests
 
+- `swift run auth-tests`: Touch ID off in the VM's features: the app answers
+  `403 off`, the Bridge is never asked; turned on while the relay runs: the
+  next request is relayed.
 - `src/tests/mac-install.sh`: the stamp and `helpers_src_sum` are the same
   with `LANG=en_US.UTF-8` and without (both differed before).
 - `src/bridge/mac/tests/run.sh` (touchid): `touchIDRelayVM` with an empty
