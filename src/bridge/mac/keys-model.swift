@@ -138,7 +138,7 @@ struct KeyTap {
 
   mutating func check(_ i: TapInputs, at now: Double) -> TapAction {
     let again = rearm.front(i.omacvmPid)
-    let may = guardTap.mayCreate(i.perms) && policy.mayCreate(at: now)
+    let may = mayCreate(i.perms, at: now)
     if let t = i.tap {
       if guardTap.lost(i.perms) { return .remove(.permission) }
       if t == .disabled { policy.disabled(at: now); return .remove(policy.parked ? .parked : .disabled) }
@@ -150,6 +150,9 @@ struct KeyTap {
     }
     return i.capture && i.active && i.vmFront && may ? .create(nil) : .none
   }
+
+  /// True: a tap could be made now (permissions, no hold-off, not parked).
+  func mayCreate(_ perms: TapPermissions, at now: Double) -> Bool { guardTap.mayCreate(perms) && policy.mayCreate(at: now) }
 
   mutating func created(_ with: TapPermissions) { guardTap.created(with); rearm.worked() }
   mutating func createFailed() -> Bool { rearm.failed() }

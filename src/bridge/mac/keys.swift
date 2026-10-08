@@ -217,6 +217,9 @@ final class MediaKeys {
   private var askedAX = false
   private var createFailing = false      // main thread: a first tap could not be made (logged once)
   private var tapOK = false              // main thread: the last "media keys: event tap|waiting|cannot" line says it works (omacvm check)
+  private var slowPerms = MediaKeys.slowPermsNow()   // main thread: Input Monitoring + "control the computer", asked off it
+  private var askingSlow = false         // main thread
+  private var activity: NSObjectProtocol?   // main thread: no App Nap while a tap exists (#290)
   private let work = DispatchQueue(label: "omacvm-bridge.keys")
   private(set) var vmInFront = false
   private let vmKeys = VMKeys()
@@ -230,7 +233,10 @@ final class MediaKeys {
     if !config.captureKeys { return "Media keys: off (macOS handles them)" }
     if !AXIsProcessTrusted() { return "Media keys: waiting for Accessibility permission" }
     if keyTap.policy.parked { return "Media keys: paused (macOS kept disabling the event tap)" }
-    if tap == nil { return "Media keys: armed (no VM in front)" }
+    if tap == nil {
+      return keyTap.policy.mayCreate(at: ProcessInfo.processInfo.systemUptime)
+        ? "Media keys: armed (no VM in front)" : "Media keys: paused for a moment (macOS disabled the event tap)"
+    }
     return vmInFront ? "Media keys: going to the VM" : "Media keys: armed (no VM in front)"
   }
 
@@ -244,12 +250,34 @@ final class MediaKeys {
     log("permissions: \(p)")
   }
 
+  /// AXIsProcessTrusted is answered in the process. The two CGPreflight calls
+  /// ask tccd each time (about 5 ms each, longer when tccd is busy): they are
+  /// asked off the main thread, which runs the tap's callback, and their last
+  /// answer is used (as in the Gestures helper). A change runs check() again.
   private func permissionsNow() -> TapPermissions {
+    refreshSlowPerms()
+    return AXIsProcessTrusted() ? slowPerms.union(.accessibility) : slowPerms
+  }
+
+  private static func slowPermsNow() -> TapPermissions {
     var p: TapPermissions = []
-    if AXIsProcessTrusted() { p.insert(.accessibility) }
     if CGPreflightListenEventAccess() { p.insert(.inputMonitoring) }
     if CGPreflightPostEventAccess() { p.insert(.postEvent) }
     return p
+  }
+
+  private func refreshSlowPerms() {
+    guard !askingSlow else { return }
+    askingSlow = true
+    DispatchQueue.global(qos: .utility).async {
+      let p = MediaKeys.slowPermsNow()
+      DispatchQueue.main.async { [self] in
+        askingSlow = false
+        guard p != slowPerms else { return }
+        slowPerms = p
+        check()
+      }
+    }
   }
 
   func start() {
@@ -281,6 +309,7 @@ final class MediaKeys {
   private func removeTap() {
     guard let t = tap else { return }
     watchdog.watch(nil)
+    if let activity { ProcessInfo.processInfo.endActivity(activity); self.activity = nil }
     CGEvent.tapEnable(tap: t, enable: false)
     if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes); CFRunLoopSourceInvalidate(source) }
     CFMachPortInvalidate(t)
@@ -300,6 +329,7 @@ final class MediaKeys {
     logPermissions(perms)
     let front = NSWorkspace.shared.frontmostApplication
     let kind = VMApp.of(front)
+    let uptime = ProcessInfo.processInfo.systemUptime
     // An OmacVM.app VM, also when LaunchServices names no executable for QEMU.
     let now: TapNow? = tap.map { !CFMachPortIsValid($0) ? .invalid : CGEvent.tapIsEnabled(tap: $0) ? .enabled : .disabled }
     let inputs = TapInputs(capture: config.captureKeys, vmFront: kind != nil,
@@ -313,7 +343,7 @@ final class MediaKeys {
       tapOK = false
       log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)")
     }
-    switch keyTap.check(inputs, at: ProcessInfo.processInfo.systemUptime) {
+    switch keyTap.check(inputs, at: uptime) {
     case .none: break
     case .remove(let why):
       removeTap()
@@ -335,7 +365,8 @@ final class MediaKeys {
     case .create(let why): install(again: why, perms)
     }
     // omacvm check reads the last line: with no VM in front there is no tap, and that is fine.
-    if tap == nil, !tapOK, !createFailing, config.captureKeys, perms.contains(.accessibility), !keyTap.policy.parked {
+    // Not while a tap may not be made (a hold-off, parked, a permission): the warning stays.
+    if tap == nil, !tapOK, !createFailing, config.captureKeys, keyTap.mayCreate(perms, at: uptime) {
       tapOK = true
       log("media keys: event tap armed (made while a VM is in front)")
     }
@@ -377,6 +408,12 @@ final class MediaKeys {
     tap = t
     source = s
     watchdog.watch(t)
+    // A napping Bridge runs its main thread (the tap's callback) at background
+    // priority, behind a busy VM: not while it holds a tap.
+    if activity == nil {
+      activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+                                                       reason: "media-key event tap")
+    }
     keyTap.created(perms)
     createFailing = false
     if !tapOK || why != nil { tapOK = true; log(why.map { "media keys: event tap created again (\($0))" } ?? "media keys: event tap installed") }
@@ -601,7 +638,7 @@ final class TapWatchdog {
     guard stalled else { return }
     CGEvent.tapEnable(tap: t, enable: false)
     log("media keys: the main thread did not answer for \(TapWatch.limit) s: event tap disabled (macOS passes every key and click on)")
-    if CGEvent.tapIsEnabled(tap: t) {
+    if CFMachPortIsValid(t), CGEvent.tapIsEnabled(tap: t) {
       log("media keys: the event tap could not be disabled: quitting so it goes (launchd starts the Bridge again)")
       _exit(75)
     }

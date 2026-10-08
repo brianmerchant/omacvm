@@ -62,6 +62,7 @@ k.created(all)
 check(k.check(tapInputs(tap: .disabled), at: 10) == .remove(.disabled),
       "tap #290: macOS disabled it on timeout: removed, never enabled again")
 check(k.check(tapInputs(), at: 11) == .none, "tap #290: ... no new one during the hold-off")
+check(!k.mayCreate(all, at: 11), "tap #290: ... and not 'armed' then: omacvm check keeps the warning")
 check(k.check(tapInputs(), at: 12.5) == .create(nil), "tap #290: ... a new one after it")
 k.created(all)
 check(k.check(tapInputs(tap: .disabled), at: 20) == .remove(.disabled), "tap #290: disabled a second time: removed")
