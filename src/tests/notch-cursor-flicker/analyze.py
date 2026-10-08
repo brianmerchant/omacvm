@@ -72,7 +72,10 @@ for i in range(nf):
     if t < t_start:
         rows.append((i, t, None, None, 0, 0, "", ""))
         continue
-    x0, x1, y0, y1 = span(t, 0.040, 0.010)   # where the cursor may be drawn now
+    # where the cursor may be drawn now: the guest draws its pointer about
+    # 50 ms behind the hand (Air, slow moves over the VM: median 48 ms, max
+    # 68 ms), so a cursor where the hand was within the last 70 ms is live
+    x0, x1, y0, y1 = span(t, 0.070, 0.010)
     bl = clusters(diff[i])
     live = [b for b in bl if b[0] <= x1 + 22 and b[2] >= x0 - 6 and b[1] <= y1 + 26 and b[3] >= y0 - 6]
     stray = [b for b in bl if b not in live and b[4] >= 25]
