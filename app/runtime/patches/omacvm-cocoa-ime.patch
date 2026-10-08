@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return bool_with_bql(^{
          return [self handleEventLocked:event];
      });
-@@ -8465,8 +8480,801 @@
+@@ -8465,8 +8480,810 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -178,8 +178,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +{
 +    [omacvm_ime_marked release];
 +    omacvm_ime_marked = [s length] ? [s copy] : nil;
- }
- 
++}
++
 +/* Chosen text, in pieces of at most OMACVM_IME_MAX_TEXT bytes (whole characters). */
 +static void omacvm_ime_commit(NSString *text)
 +{
@@ -273,6 +273,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                        @"segs": segs });
 +}
 +
++/* The guest's field that marked and chosen text goes to: there, not a password field. */
++static bool omacvm_ime_field(void)
++{
++    return omacvm_ime.hello && omacvm_ime.focus && !omacvm_ime.password;
++}
++
 +static bool omacvm_ime_window_key(void)
 +{
 +    return [NSApp isActive] && omacvm_is_our_window([NSApp keyWindow]) && !omacvm_touchid_up;
@@ -280,14 +286,17 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +/*
 + * After any change: the window's keyboard, the guest's focus, the Mac's
-+ * input source. Leaving the input method's keys drops what it had marked
-+ * (the guest's preedit goes too).
++ * input source. The guest's field gone (another field, a password field,
++ * the module gone): what was marked goes, in the guest too. Only the keys
++ * gone (another input source, another window or app in front): the input
++ * method's context is deactivated, and the input method keeps or commits
++ * what it marked, as in a Mac app.
 + */
 +static void omacvm_ime_update(void)
 +{
 +    omacvm_ime.window_key = omacvm_ime_window_key();
 +    bool active = omacvm_ime_active(&omacvm_ime);
-+    if (!active && omacvm_ime_marked) {
++    if (omacvm_ime_marked && !omacvm_ime_field()) {
 +        omacvm_ime_set_marked(nil);
 +        [omacvm_ime_ctx discardMarkedText];
 +        omacvm_ime_write(@{ @"t": @"cancel" });
@@ -485,8 +494,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    r = [[cocoaView window] frame];
 +    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
-+}
-+
+ }
+ 
 +/* The key the input method has now goes to the VM as a key, QEMU's way. */
 +static void omacvm_ime_send_key(void)
 +{
@@ -793,7 +802,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        omacvm_ime_send_key();
 +        return;
 +    }
-+    if ([s length] && omacvm_ime_text_focus(&omacvm_ime)) {
++    if ([s length] && omacvm_ime_field()) {
 +        omacvm_ime_commit(s);
 +    } else if (was) {
 +        omacvm_ime_write(@{ @"t": @"cancel" });
@@ -823,7 +832,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        }
 +        return;
 +    }
-+    if (omacvm_ime_text_focus(&omacvm_ime)) {
++    if (omacvm_ime_field()) {
 +        omacvm_ime_preedit(s, selectedRange, attr);
 +    }
 +}
@@ -834,7 +843,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    NSString *s = [[omacvm_ime_marked retain] autorelease];
 +
 +    omacvm_ime_set_marked(nil);
-+    if ([s length] && omacvm_ime_text_focus(&omacvm_ime)) {
++    if ([s length] && omacvm_ime_field()) {
 +        omacvm_ime_commit(s);
 +    }
 +}
@@ -889,7 +898,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9598,7 @@
+@@ -8790,6 +9607,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
