@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.5 (unreleased)
+## 3.0.5
 
 - OmacVM.app's VM window is compact and fits a 13-inch MacBook without
   scrolling (it was up to about 900 points tall); on a smaller screen it
