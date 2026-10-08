@@ -211,6 +211,7 @@ run_api_test("test-video-encode", ("VideoToolbox", "CoreMedia", "CoreVideo", "Co
 # and with the low-latency constant QP session (encoders that refuse the QP range)
 run_api_test("test-video-encode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"),
              env={"OMACVM_VIDEO_ENCODE_BASE_QP": "1"})
+run_api_test("test-upload-pbo")
 run_api_test("test-context-loss")
 run_api_test("test-transform-feedback")
 run_api_test("test-gpu-ranges", oracle=True)
