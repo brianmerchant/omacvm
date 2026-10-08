@@ -73,19 +73,27 @@ cat > "$T/bin/timeout" <<'EOF'
 #!/bin/bash
 [[ $X86_RUNS == yes && $(head -c 4 "$2") == $'\x7fELF' ]] && echo x86_64
 EOF
+# The build folder (mktemp -d /var/tmp/...) in the test's own folder: another
+# copy of this test (another CI runner on the same Mac) builds in /var/tmp too.
+cat > "$T/bin/mktemp" <<'EOF'
+#!/bin/bash
+a=("$@"); n=$((${#a[@]} - 1)); a[n]=${a[n]/#\/var\/tmp\//$VARTMP/}
+d=$(/usr/bin/mktemp "${a[@]}") || exit 1
+echo "mktemp $d" >> "$CALLS"; echo "$d"
+EOF
 chmod +x "$T/bin/"*
 
 # INSTALLED/PACKAGER: omacvm-box64; BOX64/BOX64_PACKAGER: a package named box64
 # (by hand, or OmacVM's from before the rename)
 run() {   # ARGS... ; env: INSTALLED PACKAGER BOX64 BOX64_PACKAGER REGISTERED MISSING MAKEPKG PKGADD BINFMT_RESTART X86_RUNS
-  rm -rf "$T/root" "$S"; mkdir -p "$T/root/proc/sys/fs/binfmt_misc" "$T/root/var/log" "$T/root/tmp" "$S"
+  rm -rf "$T/root" "$S"; mkdir -p "$T/root/proc/sys/fs/binfmt_misc" "$T/root/var/log" "$T/root/tmp" "$S" "$T/vartmp"
   [[ -n ${INSTALLED:-} ]] && echo "$INSTALLED" > "$S/omacvm-box64.ver"
   echo "${PACKAGER:-OmacVM <omacvm@users.noreply.github.com>}" > "$S/omacvm-box64.packager"
   [[ -n ${BOX64:-} ]] && echo "$BOX64" > "$S/box64.ver"
   echo "${BOX64_PACKAGER:-someone <a@b>}" > "$S/box64.packager"
   [[ ${REGISTERED:-no} == yes ]] && echo enabled > "$T/root/proc/sys/fs/binfmt_misc/box64"
   : > "$T/calls"
-  OUT=$(V=$V CALLS=$T/calls S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
+  OUT=$(V=$V CALLS=$T/calls VARTMP=$T/vartmp S=$S BINFMT=$T/root/proc/sys/fs/binfmt_misc OMACVM_X86_ROOT=$T/root \
     MISSING=${MISSING:-} MAKEPKG=${MAKEPKG:-ok} PKGADD=${PKGADD:-ok} OMACVM_PKG_ADD=$T/bin/pkg-add BINFMT_RESTART=${BINFMT_RESTART:-works} X86_RUNS=${X86_RUNS:-yes} \
     PATH="$T/bin:$PATH" bash "$R/src/x86/guest/install.sh" "$@" 2>&1); CODE=$?
 }
@@ -135,7 +143,8 @@ expect "on, fresh VM: fuse2 through pkg-add, before pacman -U" "pkg-add --asdeps
 expect "on, fresh VM: build tools removed after" yes "$(called "pacman -Rns --noconfirm cmake python")"
 expect "on, fresh VM: binfmt rule registered" yes "$(registered)"
 expect "on, fresh VM: last line" "x86 apps: box64 $V runs x86_64 programs and AppImages" "$(tail -1 <<<"$OUT")"
-expect "on, fresh VM: build folder gone" "" "$(ls -d /var/tmp/omacvm-box64.* 2>/dev/null | while read -r d; do [[ $d -nt $T/calls ]] && echo "$d"; done)"
+expect "on, fresh VM: built in a folder of its own" yes "$(called "mktemp $T/vartmp/omacvm-box64.")"
+expect "on, fresh VM: build folder gone" "" "$(ls -d "$T"/vartmp/omacvm-box64.* 2>/dev/null)"
 
 INSTALLED=0.4.2-1 REGISTERED=yes run on
 expect "on, older: rebuilt" "0 yes" "$CODE $(called "pacman -U")"
