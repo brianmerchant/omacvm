@@ -280,6 +280,9 @@ jobs:
       - name: An older omacvm never takes a newer VM back (version order, apply/enable/disable/update stop first)
         run: src/tests/version-guard.sh
 
+      - name: install.sh's checkout follows the releases, not a main behind them (#291)
+        run: src/tests/follow-release.sh
+
       - name: The test app's own omacvm run by hand is the test identity
         run: src/tests/app-cli-identity.sh
 

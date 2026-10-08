@@ -4,7 +4,8 @@
 # builds one). From GitHub in one line:
 #   curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash
 # From a clone: ./install.sh (links that clone instead). --no-start: only install.
-# A branch or tag instead of main (also switches an existing ~/.omacvm):
+# ~/.omacvm follows OmacVM's releases (`omacvm update` takes it to the newest).
+# A branch or tag instead (also switches an existing ~/.omacvm; then it stays there):
 #   curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | OMACVM_REF=<branch or tag> bash
 set -euo pipefail
 REPO=https://github.com/gillesgoetsch/omacvm.git
@@ -78,6 +79,8 @@ if [[ -z $here ]]; then
   fi
   # A clone that failed half-way (no .git) is OmacVM's own leftover: start over.
   [[ -d $here && ! -d $here/.git ]] && rm -rf "$here"
+  # Without OMACVM_REF it follows OmacVM's releases (#291), as OmacVM.app
+  # does: src/lib/follow-release.sh moves it to the newest one.
   if [[ -d $here/.git && -n ${OMACVM_REF:-} ]]; then
     [[ -z $(git -C "$here" status --porcelain --untracked-files=no) ]] ||
       { echo "$here has local changes: not switching it to $OMACVM_REF" >&2; exit 1; }
@@ -89,8 +92,24 @@ if [[ -z $here ]]; then
       git -C "$here" fetch -q origin "+refs/tags/$OMACVM_REF:refs/tags/$OMACVM_REF"
       git -C "$here" checkout -q --detach "refs/tags/$OMACVM_REF"
     fi
-  elif [[ -d $here/.git ]]; then say "updating $here"; git -C "$here" pull -q --ff-only
-  else say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"; fi
+    git -C "$here" config omacvm.follow ref
+  elif [[ -d $here/.git ]]; then
+    say "updating $here"
+    git -C "$here" config omacvm.follow release
+    # A checkout from before 3.0.9 has no follow-release.sh: main brings it.
+    if [[ ! -f $here/src/lib/follow-release.sh ]]; then
+      git -C "$here" symbolic-ref -q HEAD >/dev/null || git -C "$here" checkout -q main
+      git -C "$here" pull -q --ff-only
+    fi
+  else
+    say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"
+    git -C "$here" config omacvm.follow "$([[ -n ${OMACVM_REF:-} ]] && echo ref || echo release)"
+  fi
+  if [[ -f $here/src/lib/follow-release.sh ]]; then
+    frc=0; out=$(bash "$here/src/lib/follow-release.sh" "$here") || frc=$?
+    [[ -n $out ]] && echo "    $out"
+    (( frc != 2 )) || exit 1
+  fi
 fi
 
 # On the PATH, so "omacvm" works right away in this terminal too: Homebrew's

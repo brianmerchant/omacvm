@@ -137,7 +137,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   OmacVM.app (`omacvm --version` says so too). Nothing was changed. Run the
   app's own (`~/Applications/OmacVM.app/Contents/Resources/omacvm/omacvm`,
   or its "omacvm in Terminal" link), or bring the old one up to date with
-  `omacvm update`. `--allow-downgrade` takes the VM back on purpose.
+  `omacvm update` (from 3.0.9 it follows the releases; an install from
+  before that which says "already up to date": run the install command at
+  the top of the README again, #291). `--allow-downgrade` takes the VM back
+  on purpose.
 - **Scrolling feels too fast or slow in one app**: Chromium-based apps get their
   own factor; tell us the app (window class from `hyprctl clients`) in an
   issue. The scroll momentum's settings are in `src/gestures/guest/omacvm-gestures`
