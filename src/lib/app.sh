@@ -348,8 +348,20 @@ app_other_running() {   # NAME -> another app VM that runs (the app runs one at 
 app_start() {
   # -n: a new launcher passes the request on when one already runs. The app
   # app_bundle finds, not any copy LaunchServices knows (an older one, say).
+  # The test identity: only a test app that keeps to its own VMs folder
+  # (OmacVMTestVMs in its Info.plist, 3.0.6). An older one looks in ~/OmacVM
+  # and, not finding NAME, started the person's own VM; and never "whatever
+  # app macOS knows by the id" (the installed OmacVM).
   local a
-  if a=$(app_bundle); then open -n "$a" --args --start --vm "$1" || return 1
+  if a=$(app_bundle); then
+    if [[ ${OMACVM_TEST_IDENTITY:-} == 1 && $(defaults read "$a/Contents/Info" OmacVMTestVMs 2>/dev/null) != 1 ]]; then
+      echo "$a is a test app from before 3.0.6 (it may start another VM for a name it does not find): build it again; $1 not started" >&2
+      return 1
+    fi
+    open -n "$a" --args --start --vm "$1" || return 1
+  elif [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+    echo "no OmacVM Test.app here (in ~/Applications, /Applications or running this omacvm): $1 not started" >&2
+    return 1
   else open -n -b org.omacvm.app --args --start --vm "$1" || return 1; fi
   app_ip "$1" 60
 }

@@ -126,6 +126,25 @@ enum TestVMs {
         return "the test identity's VMs folder \(custom) is a folder of the installed OmacVM: not used"
     }
 
+    /// Why a test build (any bundle id but the release one: the test
+    /// identity, a self-update test build, a lane's copy) must not start,
+    /// update or resize the VM in FOLDER (nil: it may): a VM of the installed
+    /// app, whatever led to it (a start request, Update VM, Disk, a restart
+    /// after an update).
+    static func startProblem(folder: URL, testBuild: Bool, production: [URL]) -> String? {
+        guard testBuild, isProduction(folder, production: production) else { return nil }
+        return "\(folder.path) is a VM of the installed OmacVM: a test build does not start or change it."
+    }
+
+    /// A test build hands a start (or a restart-update) to a launcher that
+    /// runs already only when that is this same copy: another copy (an older
+    /// build) may not know these rules and start another VM.
+    static func handOverProblem(testBuild: Bool, mine: URL, other: URL?) -> String? {
+        guard testBuild else { return nil }
+        if let other, sameOrInside(mine, other) && sameOrInside(other, mine) { return nil }
+        return "another copy of this app runs (\(other?.path ?? "macOS does not say where")): quit it first. Nothing was started."
+    }
+
     /// Why a destructive test hook must not act on the VM in FOLDER (nil: it
     /// may): the VM must exist, sit directly in OWNROOT, the VMs folder the
     /// test build was given in its own setting, and be in no folder of the

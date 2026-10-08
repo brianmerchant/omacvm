@@ -15,7 +15,11 @@ in more words.
   app's), its VMs go into ~/OmacVM Test VMs; `omacvm` with the test identity
   agrees. Test hooks that change a VM (the disk size, forcing a VM off for
   an update) act only on a VM in the folder the test build was given, and
-  the test build never starts a VM of the installed app. On 2026-10-07 a
+  no test build (any bundle id but the release one) starts, updates (Update
+  VM) or resizes a VM of the installed app. A test build hands a start only
+  to its own copy when one runs already, and `omacvm` with the test identity
+  starts a VM only through a test app from 3.0.6 on (`OmacVMTestVMs` in its
+  Info.plist), never through the installed app. On 2026-10-07 a
   test run with a lost setting started a person's VM and made its disk
   smaller.
 - Tests: the e2e harnesses save and restore the test app's settings with

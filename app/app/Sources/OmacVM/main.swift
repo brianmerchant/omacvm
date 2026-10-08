@@ -70,6 +70,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
                 return
             }
+            // A test build hands a start or a restart only to its own copy: an
+            // older copy may start another VM for a name it does not find.
+            if args.contains("--start") || args.contains("--update-restart"),
+               let why = TestVMs.handOverProblem(testBuild: TestHooks.allowed(bundleID: id),
+                                                 mine: Bundle.main.bundleURL, other: other.bundleURL) {
+                FileHandle.standardError.write(Data("OmacVM: \(why)\n".utf8))
+                NSApp.terminate(nil)
+                return
+            }
             // Test builds (self-update-test.sh): an update with a VM restart, as Shut Down and Update does.
             if args.contains("--update-restart"), TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
                 DistributedNotificationCenter.default().postNotificationName(
@@ -378,9 +387,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
-        // The test identity never starts a VM of the installed app.
-        if TestIdentity.isOn, TestVMs.isProduction(state.config.folder, production: Paths.productionVMsRoots) {
-            let why = "\(state.config.folder.path) is a VM of the installed OmacVM: the test build does not start it."
+        // A test build never starts a VM of the installed app.
+        if let why = Paths.startProblem(state.config.folder) {
             FileHandle.standardError.write(Data("OmacVM: \(why)\n".utf8))
             state.message = why
             showWindow()

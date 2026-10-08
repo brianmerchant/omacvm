@@ -57,6 +57,13 @@ enum Paths {
                             production: productionVMsRoots)
     }
 
+    /// Why this build must not start or change the VM in FOLDER (nil: it may):
+    /// a test build never touches a VM of the installed app (TestVMs.startProblem).
+    static func startProblem(_ folder: URL) -> String? {
+        TestVMs.startProblem(folder: folder, testBuild: TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier),
+                             production: productionVMsRoots)
+    }
+
     /// Up to 2.9 the VMs were in this hidden folder. The app still finds them
     /// there until they are moved (it offers that once).
     static let legacyVMsRoot = VMsFolder.home.appendingPathComponent(VMsFolder.oldPath)

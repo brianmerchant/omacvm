@@ -689,6 +689,8 @@ struct ReadyView: View {
             InfoButton(topic: "Update VM", text: "This app has OmacVM \(app). Update VM starts the VM without a window, updates OmacVM in it and its helpers on the Mac (a few minutes) and shuts it down. Your files and settings in Omarchy stay.")
             Spacer()
             Button("Update VM") {
+                // A test build never updates a VM of the installed app.
+                if let why = Paths.startProblem(state.config.folder) { state.message = why; return }
                 state.message = nil
                 state.creator.update(config: state.config)
                 state.screen = .building

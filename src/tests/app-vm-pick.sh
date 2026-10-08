@@ -45,6 +45,14 @@ case "hook":     // hook HOME FOLDER|- OWNROOT|-
     let prod = TestVMs.productionRoots(custom: nil, others: [], homes: [URL(fileURLWithPath: a[1])])
     out(TestVMs.hookProblem(folder: a[2] == "-" ? nil : URL(fileURLWithPath: a[2]),
                             ownRoot: a[3] == "-" ? nil : a[3], production: prod) == nil ? "acts" : "refused")
+case "start":    // start HOME FOLDER TESTBUILD(0|1) PROD_CUSTOM|-
+    let pc = a[4] != "-" ? a[4] : nil
+    let prod = TestVMs.productionRoots(custom: pc, others: [], homes: [URL(fileURLWithPath: a[1])])
+    out(TestVMs.startProblem(folder: URL(fileURLWithPath: a[2]), testBuild: a[3] == "1", production: prod) == nil
+        ? "starts" : "refused")
+case "handover": // handover TESTBUILD(0|1) MINE OTHER|-
+    out(TestVMs.handOverProblem(testBuild: a[1] == "1", mine: URL(fileURLWithPath: a[2]),
+                                other: a[3] == "-" ? nil : URL(fileURLWithPath: a[3])) == nil ? "hands over" : "refused")
 default: exit(2)
 }
 EOF
@@ -103,6 +111,19 @@ expect "hook: a folder without vm.env" refused "$("$P" hook "$H" "$H/omacvm-benc
 expect "hook: a test VM in its own folder" acts "$("$P" hook "$H" "$H/omacvm-bench-vms/M-disk" "$H/omacvm-bench-vms")"
 expect "hook: same, the setting with a slash" acts "$("$P" hook "$H" "$H/omacvm-bench-vms/M-disk" "$H/omacvm-bench-vms/")"
 
+# Any test build (the test identity, a self-update test build, a lane's copy)
+# never starts, updates or resizes a VM of the installed app, however it got there.
+expect "start: test build, the person's VM" refused "$("$P" start "$H" "$H/OmacVM/Omarchy" 1 -)"
+expect "start: test build, a VM in the installed app's own setting" refused "$("$P" start "$H" "/Volumes/Ext/VMs/Work" 1 /Volumes/Ext/VMs)"
+expect "start: test build, a VM on a gone drive of the installed app" refused "$("$P" start "$H" "/Volumes/Gone/VMs/Work" 1 /Volumes/Gone/VMs)"
+expect "start: test build, a test VM" starts "$("$P" start "$H" "$H/omacvm-bench-vms/M-disk" 1 -)"
+expect "start: the installed app, its own VM" starts "$("$P" start "$H" "$H/OmacVM/Omarchy" 0 -)"
+# Two copies open: a test build hands a start only to its own copy (an older one may fall back).
+expect "hand over: test build, same copy" "hands over" "$("$P" handover 1 "$T/a/OmacVM Test.app" "$T/a/OmacVM Test.app/")"
+expect "hand over: test build, another copy" refused "$("$P" handover 1 "$T/a/OmacVM Test.app" "$T/b/OmacVM Test.app")"
+expect "hand over: test build, copy unknown" refused "$("$P" handover 1 "$T/a/OmacVM Test.app" -)"
+expect "hand over: the installed app, another copy" "hands over" "$("$P" handover 0 "$T/a/OmacVM.app" "$T/b/OmacVM.app")"
+
 # The omacvm command agrees for the test identity (src/lib/app.sh).
 cli_root() { HOME=$H OMACVM_TEST_IDENTITY=1 bash -c 'source "$1/src/lib/app.sh"; app_vms_root' _ "$R"; }
 cli_roots() { HOME=$H OMACVM_TEST_IDENTITY=1 bash -c 'source "$1/src/lib/app.sh"; app_vms_roots' _ "$R" | tr '\n' '|'; }
@@ -120,6 +141,31 @@ defaults write "$OMACVM_APP_ID" vmsRoot "$H/omacvm-bench-vms"
 expect "omacvm, test, its own folder: used" "$H/omacvm-bench-vms" "$(cli_root)"
 defaults write "$OMACVM_APP_ID" otherVMsRoots -array "$H/OmacVM" "$T/older tests"
 expect "omacvm, test: no folder of the installed app, no old place" "$H/omacvm-bench-vms|$T/older tests|" "$(cli_roots)"
+# omacvm start, test identity: only a test app that knows its own VMs folder
+# (OmacVMTestVMs), never by bundle id (that may be the installed OmacVM).
+mkdir -p "$T/bin"; printf '#!/bin/bash\necho "open $*" >> "%s/opened"\n' "$T" > "$T/bin/open"; chmod +x "$T/bin/open"
+fake_app() {   # DIR MARKER(0|1)
+  mkdir -p "$1/Contents/Resources/scripts" "$1/Contents/Resources/runtime"; : > "$1/Contents/Resources/scripts/create-vm.sh"
+  defaults write "$1/Contents/Info" CFBundleIdentifier org.omacvm.app.test
+  [[ $2 == 1 ]] && defaults write "$1/Contents/Info" OmacVMTestVMs -bool true
+  return 0
+}
+cli_start() {   # APP|- : status and what was opened
+  rm -f "$T/opened"
+  local rt=; [[ $1 != - ]] && rt=$1/Contents/Resources/runtime
+  HOME=$H PATH="$T/bin:$PATH" OMACVM_TEST_IDENTITY=1 OMACVM_APP_RUNTIME=$rt bash -c \
+    'source "$1/src/lib/app.sh"; app_ip() { echo 127.0.0.1:1; }; app_start T-vm >/dev/null 2>&1; echo "rc $?"' _ "$R"
+  cat "$T/opened" 2>/dev/null || echo "nothing opened"
+}
+fake_app "$T/old/OmacVM Test.app" 0; fake_app "$T/new/OmacVM Test.app" 1
+expect "omacvm start, test identity, a test app from before 3.0.6: refused" "rc 1|nothing opened|" "$(cli_start "$T/old/OmacVM Test.app" | tr '\n' '|')"
+expect "omacvm start, test identity, a test app with OmacVMTestVMs: opened" "rc 0|open -n $T/new/OmacVM Test.app --args --start --vm T-vm|" \
+  "$(cli_start "$T/new/OmacVM Test.app" | tr '\n' '|')"
+others=0
+for a in /Applications/*.app; do [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app.test ]] && others=1; done
+if (( others )); then echo "skip omacvm start, no test app: /Applications has one on this Mac"
+else expect "omacvm start, test identity, no test app: never open -b (the installed OmacVM)" "rc 1|nothing opened|" "$(cli_start - | tr '\n' '|')"; fi
+
 # The installed app's own rules are unchanged.
 defaults delete "$OMACVM_APP_ID" >/dev/null 2>&1
 expect "omacvm, installed app, no setting: ~/OmacVM" "$H/OmacVM" "$(HOME=$H bash -c 'source "$1/src/lib/app.sh"; app_vms_root' _ "$R")"

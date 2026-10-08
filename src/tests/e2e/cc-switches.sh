@@ -308,6 +308,8 @@ bridge_start() {   # the test Bridge with its log here (as src/mac/install.sh st
 start_vm() {
   local i
   for ((i = 0; i < 60; i++)); do [[ -z $(qemu_pid) ]] && break; sleep 1; done
+  # Before every start: VM is a test VM in the test app's own VMs folder (test-vms.sh).
+  (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") >/dev/null || return 1
   # The VM's clipboard on a pasteboard of its own, never the Mac's (STANDARDS 25).
   local hide=()
   (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1 --env OMACVM_BACKGROUND=1)
