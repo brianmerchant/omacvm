@@ -46,6 +46,15 @@ chmod 600 "$KEYRING_FILE"
 chmod 644 "$DEFAULT_FILE"
 '
 
+# CMD as USER, without a login session. runuser opens a PAM session, and in
+# the prebuilt first boot (before systemd-user-sessions.service) pam_systemd
+# then waits 2 minutes for a user manager that cannot start yet.
+as_user() {   # USER CMD...
+  local u=$1 g; shift
+  g=$(id -g "$u") || return 1
+  setpriv --reuid="$u" --regid="$g" --init-groups -- "$@"
+}
+
 case ${1:-} in
   status)
     [[ -n ${2:-} ]] || { echo "usage: guest/default-keyring.sh status HOME" >&2; exit 2; }
@@ -64,12 +73,12 @@ case ${1:-} in
     from=""
     for s in "${OMACVM_OMARCHY_DIR:-/usr/share/omarchy}" "$H/.local/share/omarchy"; do
       [[ -f $s/install/user/default-keyring.sh ]] || continue
-      runuser -u "$U" -- env HOME="$H" bash "$s/install/user/default-keyring.sh" >/dev/null 2>&1 || true
+      as_user "$U" env HOME="$H" bash "$s/install/user/default-keyring.sh" >/dev/null 2>&1 || true
       from="Omarchy's $s/install/user/default-keyring.sh"; break
     done
     if [[ -z $(default_keyring "$H") ]]; then
       from="OmacVM's copy of Omarchy's step"
-      runuser -u "$U" -- env HOME="$H" bash -c "$OMARCHY_COPY" || true
+      as_user "$U" env HOME="$H" bash -c "$OMARCHY_COPY" || true
     fi
     n=$(default_keyring "$H")
     [[ -n $n ]] || { echo "could not make it in $H/.local/share/keyrings" >&2; exit 1; }
