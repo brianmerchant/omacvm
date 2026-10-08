@@ -144,6 +144,9 @@ expect "omacvm, test: no folder of the installed app, no old place" "$H/omacvm-b
 # omacvm start, test identity: only a test app that knows its own VMs folder
 # (OmacVMTestVMs), never by bundle id (that may be the installed OmacVM).
 mkdir -p "$T/bin"; printf '#!/bin/bash\necho "open $*" >> "%s/opened"\n' "$T" > "$T/bin/open"; chmod +x "$T/bin/open"
+# The apps open on this Mac (ps -axo comm=): only the ones a case lists in $T/ps, never this Mac's
+# own (a test app another test runs here would make app_boot_app refuse).
+printf '#!/bin/bash\ncat "%s/ps" 2>/dev/null\n' "$T" > "$T/bin/ps"; chmod +x "$T/bin/ps"
 fake_app() {   # DIR MARKER(0|1)
   mkdir -p "$1/Contents/Resources/scripts" "$1/Contents/Resources/runtime"; : > "$1/Contents/Resources/scripts/create-vm.sh"
   defaults write "$1/Contents/Info" CFBundleIdentifier org.omacvm.app.test
@@ -161,6 +164,11 @@ fake_app "$T/old/OmacVM Test.app" 0; fake_app "$T/new/OmacVM Test.app" 1
 expect "omacvm start, test identity, a test app from before 3.0.6: refused" "rc 1|nothing opened|" "$(cli_start "$T/old/OmacVM Test.app" | tr '\n' '|')"
 expect "omacvm start, test identity, a test app with OmacVMTestVMs: opened" "rc 0|open -n $T/new/OmacVM Test.app --args --start --vm T-vm|" \
   "$(cli_start "$T/new/OmacVM Test.app" | tr '\n' '|')"
+fake_app "$T/other/OmacVM Test.app" 1
+echo "$T/other/OmacVM Test.app/Contents/MacOS/OmacVM" > "$T/ps"
+expect "omacvm start, test identity, another copy of the test app open: refused" "rc 1|nothing opened|" \
+  "$(cli_start "$T/new/OmacVM Test.app" | tr '\n' '|')"
+rm -f "$T/ps"
 others=0
 for a in /Applications/*.app; do [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app.test ]] && others=1; done
 if (( others )); then echo "skip omacvm start, no test app: /Applications has one on this Mac"
