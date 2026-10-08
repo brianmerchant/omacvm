@@ -14,7 +14,8 @@ in more words.
   only when it is named with `--vm`; without it they say so (exit 3).
   omacvm takes OmacVM.app by its name before any other copy (a renamed
   install next, test, bench, RC and lane copies last), and never starts a
-  VM with an app older than the OmacVM the VM has.
+  VM with an app older than the OmacVM the VM has, nor while another copy
+  of the app is open (that copy would take the start).
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
   Gestures took the other app's VMs as its own too: both captured the
   trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the

@@ -21,7 +21,8 @@
 #   app_bundle          the installed OmacVM.app (any name it was installed under;
 #                       the app whose bundled omacvm runs first, then OmacVM.app,
 #                       then another name, test/bench/lane copies last)
-#   app_boot_app NAME   the app that may start that VM: never one older than its OmacVM
+#   app_boot_app NAME   the app that may start that VM: never one older than its OmacVM,
+#                       never while another copy of the app is open
 #   app_create [--prebuilt] DIR KEY=VALUE...  a new VM in DIR through the app's
 #                       own create script (the password on stdin), as when built
 #                       in the app; --prebuilt: from a prebuilt image
@@ -328,6 +329,16 @@ app_boot_app() {
     echo "omacvm: '$1' has OmacVM $v; $a is ${av:-of no known version}: an older app never starts a newer VM. Update OmacVM.app (omacvm update), then try again" >&2
     return 1
   fi
+  # A copy of the app that is open already takes the start request (a second
+  # launcher hands it over, main.swift): only when it is this one.
+  local p r
+  while IFS= read -r p; do
+    r=${p%/Contents/MacOS/OmacVM}
+    [[ $r != "$p" ]] && app_ours "$r" || continue
+    [[ $(cd -P "$r" 2>/dev/null && pwd) == "$(cd -P "$a" && pwd)" ]] && continue
+    echo "omacvm: $r is open and would start '$1' instead of $a: quit it, then try again" >&2
+    return 1
+  done < <(ps -axo comm= 2>/dev/null)
   echo "$a"
 }
 

@@ -29,6 +29,8 @@ printf '#!/bin/bash\necho none\n' > "$B/swift"
 printf '#!/bin/bash\nexit 0\n' > "$B/sleep"   # app_ip's wait for an address: at once
 printf '#!/bin/bash\necho "$*" >> "%s/ssh"\nexit 255\n' "$T" > "$B/ssh"
 printf '#!/bin/bash\nexit 1\n' > "$B/utmctl"
+# ps: the app launchers that are open (the file "launchers"), else the real one.
+printf '#!/bin/bash\nif [[ "$*" == "-axo comm=" ]]; then cat "%s/launchers" 2>/dev/null; exit 0; fi\nexec /bin/ps "$@"\n' "$T" > "$B/ps"
 chmod +x "$B"/*
 
 mkapp() {   # NAME VERSION [ID]
@@ -99,6 +101,16 @@ check "apply (no --vm): exit 3" 3 "$rc"
 out=$(om enable gestures --vm Omarchy --yes)
 check "enable --vm: started through OmacVM.app" "-n $H/Applications/OmacVM.app --args --start --vm Omarchy" "$(started)"
 rm -f "$T/opened"
+
+# Another copy is open: it would take the start request (main.swift hands it over).
+echo "$H/Applications/OmacVM Bench 2.9.1.app/Contents/MacOS/OmacVM" > "$T/launchers"
+out=$(om enable gestures --vm Omarchy --yes); rc=$?
+check "another copy open: nothing started" none "$(started)"
+check "another copy open: exit 3, names it" "3 yes" "$rc $(grep -q 'OmacVM Bench 2.9.1.app is open' <<<"$out" && echo yes || echo no)"
+echo "$H/Applications/OmacVM.app/Contents/MacOS/OmacVM" > "$T/launchers"
+out=$(om enable gestures --vm Omarchy --yes)
+check "the same app open: started through it" "-n $H/Applications/OmacVM.app --args --start --vm Omarchy" "$(started)"
+rm -f "$T/opened" "$T/launchers"
 
 # Only an app older than the VM's OmacVM: never started with it.
 rm -rf "$H/Applications/OmacVM.app"

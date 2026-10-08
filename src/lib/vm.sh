@@ -172,7 +172,7 @@ ssh_setup_command() {
 }
 
 # resolve_vm [start|soft]: VM (name) -> TYPE and IP. No name: "Omarchy", else
-# the only running VM. A stopped VM keeps IP empty (VM_STATE says so). Only
+# the only running VM. A stopped VM keeps IP empty. Only
 # "start" starts one, and only one the caller named (--vm): a command that
 # changes a VM. A VM picked by default is never started, so a command run
 # without --vm never boots the person's VM (exit 3 says so). Exits 2 when it
@@ -212,7 +212,6 @@ resolve_vm() {
   if [[ $state == running ]]; then
     IP=$(vm_find_ip "$VM" "$TYPE" 30 2>/dev/null) || IP=""
   fi
-  VM_STATE=${state:-stopped}
   if [[ -z $IP && ${1:-} == start ]]; then
     local other
     if (( ! named )); then
