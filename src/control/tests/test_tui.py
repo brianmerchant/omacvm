@@ -1437,3 +1437,201 @@ def test_mouse_swipe_look_from_before_a_switch_is_dropped(world):
     world.mouse_swipe = None
     c.refresh_mac()
     assert c.mouse_swipe is None
+
+
+# ---- after a job (Mac mini, 3.0.6, 2026-10-08) ----
+
+@pytest.fixture
+def slow_world(tmp_path, monkeypatch):
+    """A fake Mac and check socket whose answers can be made as slow as the
+    real ones: guest/check.sh about 6 s, the Mac's status after a job 3 s."""
+    mac, checks = FakeMac(), FakeChecks()
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path).items():
+        monkeypatch.setenv(k, v)
+    yield mac, checks
+    mac.stop()
+    checks.stop()
+
+
+def _switch_on_in_env(name):
+    """What the Mac's job does to this VM: its env says NAME is on."""
+    from omacvm_cc.state import env_key
+
+    def done(job):
+        p = os.environ["OMACVM_ENV"]
+        with open(p) as f:
+            lines = [l for l in f.read().splitlines() if not l.startswith(env_key(name) + "=")]
+        with open(p, "w") as f:
+            f.write("\n".join(lines + [env_key(name) + "=on"]) + "\n")
+        done.at = time.monotonic()
+    done.at = 0.0
+    return done
+
+
+def test_a_switch_shows_on_its_row_within_a_second(slow_world):
+    """Touch ID on said done at once, but its check mark came 5-10 s later:
+    the row waited for the VM's checks and the Mac's status. It follows the
+    VM's env as soon as the job ends; the checks come in after."""
+    mac, checks = slow_world
+    ended = _switch_on_in_env("no-idle-lock")
+    mac.on_job_end = ended
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.vm_checks is not None)
+            assert rows(a)["no-idle-lock"].status.value == "off"
+            mac.hello_delay, checks.delay = 2.5, 3.0   # about as slow as the mini's after a job
+            _move_to(a, "no-idle-lock")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: ended.at > 0)
+            assert await settle(pilot, lambda: rows(a)["no-idle-lock"].status.value == "works", 8)
+            took = time.monotonic() - ended.at
+            assert took < 1.5, f"the check mark came {took:.1f} s after the job"
+            # The VM's checks and the Mac's answer still come in afterwards.
+            n = sum(1 for m, p, _ in mac.requests if p == "/omacvm/status")
+            assert await settle(pilot, lambda: sum(1 for m, p, _ in mac.requests if p == "/omacvm/status") > n, 10)
+    asyncio.run(go())
+
+
+def test_a_repair_sets_old_checks_aside_until_new_ones_come(slow_world):
+    """After a repair that worked, the failure from before the job does not
+    show as now; the next check result counts again (still failing here)."""
+    mac, checks = slow_world
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.vm_checks is not None)
+            assert rows(a)["camera"].status.value == "failing"
+            checks.delay = 2.0
+            _move_to(a, "camera")
+            await pilot.press("r")
+            assert await settle(pilot, lambda: a.c.jobs and not any(j.active for j in a.c.jobs.values()))
+            assert await settle(pilot, lambda: rows(a)["camera"].status.value == "works", 1.5)
+            assert await settle(pilot, lambda: rows(a)["camera"].status.value == "failing", 10)
+    asyncio.run(go())
+
+
+def test_a_look_from_before_a_job_end_keeps_its_checks_aside(slow_world):
+    """A look of the VM's checks or the Mac's status that started before a job
+    ended may say what was before it: it does not bring the old checks back."""
+    import threading
+    from omacvm_cc import state as S
+    from omacvm_cc.controller import Controller
+    mac, checks = slow_world
+    c = Controller()
+    c.refresh_mac()
+    c.refresh_vm_checks()
+    assert any(x.feature == "camera" for x in c.vm_checks)
+    checks.delay, mac.hello_delay = 1.0, 1.0
+    looks = [threading.Thread(target=c.refresh_vm_checks), threading.Thread(target=c.refresh_mac)]
+    for t in looks:
+        t.start()
+    time.sleep(0.3)
+    c.job_ended(S.Job("j1", "reinstall", ("camera",), "done"))
+    for t in looks:
+        t.join()
+    assert "camera" in c.stale_vm and "camera" in c.stale_mac
+    checks.delay, mac.hello_delay = 0.0, 0.0
+    c.refresh_vm_checks()
+    c.refresh_mac()
+    assert not c.stale_vm and not c.stale_mac
+
+
+def test_old_package_list_says_why_and_offers_omarchy_update(slow_world, monkeypatch):
+    """WebGPU and GPU compute on failed on the mini without a reason, and
+    "space tries again" could not work: the VM's package list was older than
+    the mirrors. Now the reason and the one way on, and omarchy update is
+    offered (in its own window, only on yes)."""
+    mac, _ = slow_world
+    from omacvm_cc import tui
+    opened = []
+    monkeypatch.setattr(tui.system, "open_window", lambda: opened.append(1) or True)
+    with open(os.environ["OMACVM_ENV"], "a") as f:
+        f.write("OMACVM_VM_TYPE=app\n")
+    # src/cmd/apply.sh what_failed's text for the mini's job log (src/tests/vulkan-feature.sh).
+    mac.job_end = ("rolled-back", "WebGPU and GPU compute was not set up: Omarchy's package list is older than "
+                                  "the mirrors (omarchy update first)")
+    mac.job_extra = {"failed_part": "vulkan"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "vulkan" in rows(a))
+            _move_to(a, "vulkan")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            assert a.last_result == (
+                "WebGPU and GPU compute on: WebGPU and GPU compute was not set up: Omarchy's package list is older "
+                "than the mirrors. This VM went back to its features from before. Run omarchy update in the VM "
+                "first (o on Updates, U), then space again (! reports the problem)."), a.last_result
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))
+            assert a.screen.title_text == "Update the VM's system first" and "omarchy update" in a.screen.text
+            await pilot.press("n")
+            await pilot.pause(0.2)
+            assert not opened
+    asyncio.run(go())
+
+    async def again():   # y opens it
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "vulkan" in rows(a))
+            _move_to(a, "vulkan")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen), 10)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: bool(opened))
+    asyncio.run(again())
+
+
+def test_other_failures_still_say_try_again(slow_world):
+    mac, _ = slow_world
+    mac.job_end = ("rolled-back", "the Mac's clock was not set up: timedatectl failed")
+    mac.job_extra = {"failed_part": "mac-clock"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            _move_to(a, "autologin")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            assert "space tries again" in a.last_result and "omarchy update" not in a.last_result
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            assert not isinstance(a.screen, ConfirmScreen)
+    asyncio.run(go())
+
+
+def test_graphics_row_fits_and_details_say_it_all(tmp_path, monkeypatch):
+    """The mini's Graphics row was cut off ("... until it is built (Om"):
+    the row says it short, enter shows the whole of it."""
+    from textual.widgets import DataTable
+    from omacvm_cc.tui import DetailsScreen
+    mac, checks = FakeMac(version="2.9.0"), FakeChecks()
+    mac.graphics = {"graphics": "vulkan", "next_start": "opengl", "this_start": "", "driver_ready": False,
+                    "waiting_for_driver": True,
+                    "summary": "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))"}
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path, "OMACVM_VM_TYPE=app\n").items():
+        monkeypatch.setenv(k, v)
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(80, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.graphics() == "vulkan")
+            await pilot.pause(0.2)
+            cell = str(a.screen.query_one(DataTable).get_cell("graphics", "note"))
+            assert cell == "Vulkan: OpenGL until r builds it", cell
+            _move_to(a, "graphics")
+            await pilot.press("enter")
+            assert await settle(pilot, lambda: isinstance(a.screen, DetailsScreen))
+            await pilot.pause(0.2)
+            body = str(a.screen.query_one("#body").render())
+            assert "runs on OpenGL" in body and "until the driver is built" in body.replace("\n", " ").replace("  ", " ")
+            assert "OmacVM in the VM" not in body
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()
