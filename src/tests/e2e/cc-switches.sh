@@ -567,12 +567,20 @@ switch_one() {   # NAME on|off: one press in the control centre, and every check
   cc toggle "$title" "$to" 900; s=$CCS
   b=$(bproblems); g=$(guest_feature "$n"); m=$(mac_feature "$n")
   job=$(bsince | grep -E "job [^ ]+ \((enable|disable) [^)]*\b$n\b" | tail -1 | sed 's/^.*control: //')
-  ccok || why+="cc: $s; "
   reachable 60 || why+="not reachable: $(vminfo); "
   [[ -n $b ]] && why+="Bridge: $b; "
   [[ $g == "$to" ]] || why+="the VM's /etc/omacvm/env says ${g:-nothing}; "
   [[ $m == "$to" ]] || why+="the VM folder's features says ${m:-nothing}; "
   [[ $s == *already* || $job == *"ended 0"* ]] || why+="no job ended 0 in the Bridge's log (${job:-none}); "
+  # A Mac with a notch but no test Omanotch on 47911 (the person's own is never used): the switch
+  # works, and the row rightly says notchcast has nothing to connect to.
+  if ! ccok; then
+    if [[ -z $why && $n == omanotch && $to == on && $s == *"notchcast is not connected"* ]] && ! test_omanotch; then
+      res "switch-$n-$to" skip "switched (job ended 0), the row says failing: no test Omanotch on 47911 on this Mac (the person's is never used)"
+      return 0
+    fi
+    why="cc: $s; $why"
+  fi
   if [[ -z $why ]]; then res "switch-$n-$to" ok "$(( $(date +%s) - t0 )) s; $job"
   else res "switch-$n-$to" FAIL "$why(screen: $CCJ)"; fi
 }

@@ -52,7 +52,8 @@ skip), `result.json` (what the gate reads: the app's commit, `pass`), the
 screens (`cc-N-*.json`), `run.log`. FAIL: the product is wrong. BLOCKED: this
 Mac cannot run the step until a person does something once (below). Both
 fail the gate; a skip says why the step does not apply here (Omanotch on a
-Mac without a notch).
+Mac without a notch, or on a Mac with a notch but no test Omanotch on port
+47911: the person's own is never used).
 
 ## The test Mac, once
 
