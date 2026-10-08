@@ -50,21 +50,21 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -843,6 +844,14 @@
-     }
-     return changed;
+@@ -845,6 +846,14 @@
  }
-+
-+/*
+ 
+ /*
 + * OmacVM mac-ime (further down): on only for a VM with the feature on
 + * (OMACVM_IME_SOCKET); set once at the start, main thread.
 + */
 +static bool omacvm_ime_on;
 +static bool omacvm_ime_key(NSEvent *event);
 +static bool omacvm_ime_globe(void);
- 
- /*
++
++/*
   * Main thread, every key and click event before QEMU's own handling (the
+  * logic is omacvm_globe_tap_step). True: the event is used up. While the VM
+  * does not have the globe key a 0xb3 goes nowhere, as before.
 @@ -897,7 +906,9 @@
          }
      }
@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return bool_with_bql(^{
          return [self handleEventLocked:event];
      });
-@@ -8465,8 +8480,783 @@
+@@ -8465,8 +8480,792 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -128,6 +128,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +static NSString *omacvm_ime_source_before;   /* ... and the one before */
 +static bool omacvm_ime_was_active;
 +static int omacvm_ime_said;
++/* OMACVM_IME_DEBUG=1: every line both ways in qemu.log (with what is typed: tests only). */
++static bool omacvm_ime_debug;
 +
 +static void omacvm_ime_connect(void);
 +
@@ -142,6 +144,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    json = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
 +    if (!json) {
 +        return;
++    }
++    if (omacvm_ime_debug) {
++        fprintf(stderr, "omacvm-ime: mac: %.*s\n", (int)[json length], (const char *)[json bytes]);
 +    }
 +    d = [NSMutableData dataWithData:json];
 +    [d appendBytes:"\n" length:1];
@@ -299,8 +304,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                        "go to the VM as keys");
 +        }
 +    }
- }
- 
++}
++
 +static void omacvm_ime_source_changed(void)
 +{
 +    TISInputSourceRef src = TISCopyCurrentKeyboardInputSource();
@@ -570,6 +575,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +/* One line from the guest's module. Anything unexpected is dropped. */
 +static void omacvm_ime_line(const char *line, size_t len, void *opaque)
 +{
++    if (omacvm_ime_debug) {
++        fprintf(stderr, "omacvm-ime: guest: %.*s\n", (int)len, line);
++    }
 +    @autoreleasepool {
 +        id obj = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:line length:len]
 +                                                 options:0 error:nil];
@@ -671,8 +679,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    if (n > 0) {
 +        omacvm_ime_lines_feed(&omacvm_ime_lines, buf, (size_t)n, omacvm_ime_line, NULL);
 +    }
-+}
-+
+ }
+ 
 +static void omacvm_ime_connect(void)
 +{
 +    static int tries;
@@ -727,6 +735,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        return;
 +    }
 +    omacvm_ime_on = true;
++    omacvm_ime_debug = getenv("OMACVM_IME_DEBUG") && !strcmp(getenv("OMACVM_IME_DEBUG"), "1");
 +    omacvm_ime_ctx = [[NSTextInputContext alloc] initWithClient:cocoaView];
 +    omacvm_ime_hotkeys_load();
 +    [[NSDistributedNotificationCenter defaultCenter]
@@ -871,7 +880,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9580,7 @@
+@@ -8790,6 +9589,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
