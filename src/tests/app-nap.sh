@@ -64,6 +64,10 @@ check "it is the last cocoa patch (its context is QEMU's own cocoa_main)" \
 # which holds an idle-sleep assertion), and it is kept (retained, manual reference counting).
 check "activity keeps idle system sleep" grep -qF '+        beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$P"
 check "no activity that blocks idle sleep" bash -c "! grep -qE '^\+.*NSActivity(UserInitiated|IdleSystemSleepDisabled)([^A]|$)' '$P'"
+# Nor one that keeps the display on or asks for latency-critical timers (more wakeups on battery).
+check "no activity that blocks display sleep or is latency critical" \
+  bash -c "! grep -qE '^\+.*(NSActivityIdleDisplaySleepDisabled|NSActivityLatencyCritical|IOPMAssertion)' '$P'"
+check "the patch starts exactly one activity" test "$(grep -c '^+.*beginActivityWithOptions:' "$P")" -eq 1
 check "activity is retained" grep -qF 'reason:@"the virtual machine runs"] retain];' "$P"
 # It starts before [NSApp run] in cocoa_main: from then on the window can be hidden.
 check "cocoa_main starts it before the run loop" \
