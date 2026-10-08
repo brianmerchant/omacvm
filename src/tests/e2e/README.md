@@ -99,3 +99,18 @@ on a fix; such a run never counts for the gate.
 lets the release go out without the gate. The reason, the time, M and who go
 into the release output folder's `e2e-override.log`; publish and after say
 it again.
+
+## Stale frames after focus changes (`stale-frames/`)
+
+`stale-frames/stale-frames.sh --vm NAME` checks #167 (window borders left
+half drawn after a focus change) on a running test VM. Each round changes
+the focus between two windows (Hyprland's dispatcher, a uinput tablet
+crossing into the other window, or quick changes back and forth), waits for
+the border animation, and takes the guest's scanout buffer (`scanout-read.c`:
+TRANSFER_FROM_HOST of the plane's framebuffer, no frame asked for) and the VM
+window on the Mac (ScreenCaptureKit, also on another Space). Then `grim
+/dev/null` makes Hyprland draw the whole output again and both are taken
+again. Any pixel below the bar that changed is a stale frame: in the guest's
+buffer, or on the Mac. A grim screenshot cannot show this itself: Hyprland's
+screencopy damages the whole output first. `src/tests/stale-frames-diff.sh`
+tests the comparison offline (CI).
