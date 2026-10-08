@@ -278,6 +278,52 @@ Basemark the same within its noise; WebGL 1 and 2 conformance identical.
 `OMACVM_VIRGL_PROGRAM_CACHE=0` binds on every draw again. Test:
 `test-program-binds`.
 
+Vertex binds (`virgl-legacy-vertex-cache.patch`): Apple's GL 4.1 has no
+`ARB_vertex_attrib_binding`, so vrend takes its legacy vertex path, which never
+cleared `vbo_dirty`. Every draw therefore selected the shaders again (three
+shader key fills and compares) and sent `glBindBuffer`,
+`glVertexAttrib*Pointer` and `glVertexAttribDivisor` for every attribute and
+`glBindBuffer(GL_ELEMENT_ARRAY_BUFFER)`; Apple's GL then rebuilt its vertex
+state in the draw. Now the legacy path clears `vbo_dirty` like the GL 4.3 path,
+and each sub context (one VAO each) records its last vertex setup: program,
+vertex elements, and each element's buffer name, stride and offset. A draw with
+the same setup skips the calls, and the element buffer is bound only when it
+changes. An attribute with stride 0 (its value is read from the buffer) is
+never skipped. `vrend_vertex_state_gen` drops every record when the VAO may
+have changed outside a draw: an index buffer bound to its own target (transfer,
+map, create), a buffer deleted (its GL name can come back), vertex elements
+freed, a video command; a draw the GL refused keeps no record. A static check
+in `run-regressions.py` fails the build when a GL call that changes VAO state
+or frees a buffer is in a function that does not tell the cache and is not
+reviewed. The selects on every draw had hidden missing dirty flags, now set:
+unbinding the vertex elements or the rasterizer, a framebuffer change that
+stops half way, and a sampler view slot whose shader key bits (emulated
+rectangle, buffer swizzle) change. `OMACVM_VIRGL_SELECT_CACHE=0` selects on
+every draw again, `OMACVM_VIRGL_VERTEX_CACHE=0` sets the attributes and index
+buffer on every draw again (both 0: the GL calls of before);
+`OMACVM_VIRGL_CACHE_STATS=1` logs draws, selects and skips every 10 s. Test:
+`test-vertex-binds` (run as is and with each switch at 0).
+
+Index ranges (`virgl-index-range-cache.patch`): the range check reads every
+indexed draw's indices back from the GL buffer (`glGetBufferSubData`) to find
+the largest index; at Aquarium 30k fish that was ~31,000 read-backs a frame
+and 9 % of the render thread. Each index buffer now keeps its last four
+ranges (offset, count, index size, primitive restart) together with its write
+count. Every write vrend makes to a buffer from the CPU (transfers, inline
+writes, copy transfers, video encode output) goes through one helper that
+bumps the count, so an older range no longer counts. Buffers the GPU writes
+(buffer copies, stream output, storage buffers, images, atomic counters,
+query results) or the guest can map (blob, persistent or coherent storage)
+are marked when they are written, bound or mapped and read back on every
+draw from then on; the mark is never cleared. (A GPU write runs in its own
+GL context's order; another GL context could read the indices back before it
+lands.) Only plain GL buffers are cached, and a read the GL refused is
+not kept. `index-range-writes.py` fails the build when a GL call that can
+write a buffer is added without that review. `OMACVM_VIRGL_INDEX_RANGE_CACHE=0`
+reads back on every draw again; `OMACVM_VIRGL_CACHE_STATS=1` logs the hit rate
+every 10 s. Tests: `test-index-range-cache` (switch on and off),
+`mutate-index-range-cache.py` (manual: every check taken out alone fails it).
+
 ### Where the time goes
 
 - Light frames (glmark2, the desktop): the fence round trip. Fixed above.
@@ -394,7 +440,10 @@ Rules:
   makes a resource before it names its context, so one past the apps'
   share (or one macOS has no room for) is made for the desktop only and the
   first GL context that attaches it decides: Hyprland, quickshell or hyprlock keep
-  it, an app's context is lost. Venus memory is an app's.
+  it, an app's context is lost. Venus memory is an app's. The lost app's buffer
+  keeps an empty 1x1 stand-in (`virgl-gpu-guard-dropped-placeholder.patch`):
+  if the app already handed it to Hyprland, Hyprland still finds it and shows
+  an empty window instead of losing its own context.
 
 ## 6. Vulkan: Venus (built: `gpu-venus`)
 

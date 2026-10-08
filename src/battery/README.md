@@ -33,12 +33,24 @@ IOKit power sources ─┬─ OmacVM Bridge (UTM, Fusion) ── GET /battery, "
   other way; nothing in the VM can change the Mac.
 - `omacvm-battery` (Python) writes it as one line to the module's `state`
   file (root only): `present=1 status=discharging capacity=57 ac=0
-  time_to_empty=8100 …`, or `present=0 ac=1` on a Mac without a battery.
-  A line is taken whole or not at all. When the Mac's side goes away, the
+  time_to_empty=8100 … current_now=-573000 power_now=7042170`, or
+  `present=0 ac=1` on a Mac without a battery. A line is taken whole or not
+  at all, so `current_now`/`power_now` go only to module 1.1.0 or newer
+  (`/sys/module/omacvm_battery/version`); a 1.0.0 module would refuse the
+  whole line. When the Mac's side goes away, the
   agent marks the battery's state unknown and systemd starts it again.
-- The module (`module/`, DKMS `omacvm-battery/1.0.0`) shows BAT0 (a Li-ion
+- The module (`module/`, DKMS `omacvm-battery/1.1.0`) shows BAT0 (a Li-ion
   battery, "Apple Mac Battery") and ADP0 (the charger). BAT0 appears with
   the first snapshot that has a battery.
+- Watts and time left: the Mac sends the battery's current (AppleSmartBattery's
+  `Amperage`, mA, below 0 while discharging) and power (current x voltage).
+  The module shows them as `current_now` (µA, below 0 only while
+  discharging) and `power_now` (µW). UPower takes its rate from
+  `current_now` and works out time left from it. Without them (module or
+  Mac side before 3.0.6) UPower guesses a rate from charge steps 15-120 s
+  apart: a few watts to hundreds, or 0 with no time left.
+- No charge limit in macOS: `charge_control_end_threshold` says 100.
+  UPower 1.91 still shows its own default (75-80 %) as the threshold there.
 - `/etc/UPower/UPower.conf.d/90-omacvm-battery.conf`: `CriticalPowerAction=Ignore`
   (UPower takes it only with `AllowRiskyCriticalPowerAction=true`).
 
@@ -55,7 +67,7 @@ pacman's DKMS hook builds the module for the new kernel before the reboot.
 
 | What | Where |
 |---|---|
-| module source | `/usr/src/omacvm-battery-1.0.0/` (DKMS), built into `/usr/lib/modules/<kernel>/updates/dkms/` |
+| module source | `/usr/src/omacvm-battery-1.1.0/` (DKMS), built into `/usr/lib/modules/<kernel>/updates/dkms/` |
 | loaded at boot | `/etc/modules-load.d/omacvm-battery.conf` |
 | agent | `/usr/local/bin/omacvm-battery`, `omacvm-battery.service` |
 | app port | `/dev/virtio-ports/org.omacvm.battery` (root only, `70-omacvm-battery.rules`) |
@@ -67,6 +79,13 @@ cat /sys/devices/platform/omacvm-battery/state
 journalctl -u omacvm-battery
 omacvm-bridge battery          # UTM, Fusion: what the Bridge sends
 ```
+
+## Tests
+
+`src/tests/battery.sh` (offline, CI): both Mac snapshots from ioreg-like
+readings (signed current, also as ioreg's unsigned wrap), the agent's line
+per module version, the module on a stand-in for the kernel, and the three
+in a row. `--live` also prints this Mac's snapshot.
 
 ## Tested
 

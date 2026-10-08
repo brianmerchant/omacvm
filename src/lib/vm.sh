@@ -172,10 +172,14 @@ ssh_setup_command() {
 }
 
 # resolve_vm [start|soft]: VM (name) -> TYPE and IP. No name: "Omarchy", else
-# the only running VM. With "start", a stopped VM is started; without, IP stays
-# empty for it. Exits 2 when it cannot tell which VM ("soft": returns 1).
+# the only running VM. A stopped VM keeps IP empty. Only
+# "start" starts one, and only one the caller named (--vm): a command that
+# changes a VM. A VM picked by default is never started, so a command run
+# without --vm never boots the person's VM (exit 3 says so). Exits 2 when it
+# cannot tell which VM ("soft": returns 1).
 resolve_vm() {
-  local running list state
+  local running list state named=0
+  [[ -n ${VM:-} ]] && named=1
   # once: it can take 15 s while UTM does not answer. A named VM of another
   # app (--vm NAME --vm-type app): UTM is left out, its data never read.
   if [[ -n ${VM:-} && -n ${TYPE:-} && $TYPE != utm ]]; then list=$(vms_list no-utm); else list=$(vms_list); fi
@@ -210,9 +214,15 @@ resolve_vm() {
   fi
   if [[ -z $IP && ${1:-} == start ]]; then
     local other
+    if (( ! named )); then
+      echo "omacvm: '$VM' is off, and it was not named: start it, or pass --vm \"$VM\" to have it started" >&2
+      exit 3
+    fi
     if [[ $TYPE == app ]] && other=$(app_other_running "$VM"); then
       die "OmacVM.app runs one VM at a time: stop '$other' first"
     fi
+    # Never with an app older than the VM's OmacVM, or none (app_boot_app says why).
+    [[ $TYPE != app ]] || app_boot_app "$VM" >/dev/null || exit 3
     log "starting '$VM'" >&2
     IP=$(vm_boot "$VM" "$TYPE") || die "'$VM' did not get an address"
     wait_ssh "$IP" 300

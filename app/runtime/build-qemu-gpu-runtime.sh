@@ -775,6 +775,13 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tes
   "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
   -framework OpenGL -o "$display_tests/test-boot-splash-fade"
 "$display_tests/test-boot-splash-fade"
+# The logo layer holds its display link (a link only the run loop held was
+# freed inside its -invalidate: QEMU aborted with the window not visible).
+awk '/^- \(void\)(makeLink|dropLink)$/ { on = 1 } on { print } on && /^}$/ { on = 0; print "" }' \
+  "$source_dir/ui/cocoa.m" > "$display_tests/link.inc"
+cc -fno-objc-arc -Wall -Wextra -Werror -I"$display_tests" "$native_dir/Tests/display/test-boot-splash-link.m" \
+  -framework Cocoa -framework QuartzCore -o "$display_tests/test-boot-splash-link"
+"$display_tests/test-boot-splash-link"
 # OmacVM: full screen is always macOS's own, in a Space of its own (beside the
 # notch too: Omanotch fills the strip); a display the escape combo moved off
 # the VM's Space is not pulled back by the VM's other window.
@@ -835,6 +842,19 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-permissio
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-borderless-no-rim.patch"
 "$native_dir/Tests/display/test-borderless-rim.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a borderless window keeps its shadow and macOS 26's rim (test-borderless-rim.sh)"
+# Up into Omanotch's strip in full screen below a notch: the guest's pointer goes
+# into its hidden NOTCH output at once (one cursor at the edge, no flicker).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park.patch"
+"$native_dir/Tests/display/test-notch-park.sh"
+grep -q '\[self omacvmParkInNotch:event view:self output:0\];' "$source_dir/ui/cocoa.m" && \
+  grep -q '\[cocoaView omacvmParkInNotch:e view:self output:output\];' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m does not park the guest's pointer in NOTCH (notch-park patch)"
+# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
+# locked, another Space) macOS slowed the whole VM to a few percent.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
+grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -1089,6 +1109,15 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-set-type-without-e
 # OmacVM: a draw binds its GL program only when it changed (Apple's GL rebuilds its draw state
 # on every glUseProgram; WebGL pages with one draw per object paid that on each draw).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-use-program-cache.patch"
+# OmacVM: a lost app's dropped buffer keeps an empty 1x1 stand-in, so the compositor that shows it
+# is not lost too (a black VM); the log names the apps' share when an app stops there.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-gpu-guard-dropped-placeholder.patch"
+# OmacVM: on Apple's GL (no ARB_vertex_attrib_binding) a draw sets its vertex attributes
+# and index buffer, and selects its shaders, only when they changed.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-legacy-vertex-cache.patch"
+# OmacVM: an index buffer's index range is read back once per write, not on every indexed
+# draw (the range check read the same indices tens of thousands of times a frame).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-index-range-cache.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
