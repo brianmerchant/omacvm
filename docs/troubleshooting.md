@@ -10,6 +10,13 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 ## Common problems
 
 - **First stop**: `omacvm check` names what is wrong and what to do.
+- **A feature does not switch on: "Omarchy's package list is older than the
+  mirrors"**: the VM's system was not updated for a while, and the packages
+  the feature needs are no longer on the mirrors in those versions. OmacVM
+  never updates one package alone (a partial update can leave a black screen,
+  [27](#27-all-routes-black-screen-after-an-update-or-an-omacvm-job)). Update
+  the VM's system first with omarchy update (the control centre offers it:
+  y, or U then o), then switch the feature on again.
 - **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
   show it. System Settings › Menu Bar (on older macOS: Control Center) ›
   Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
@@ -814,3 +821,32 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Where:** `app/runtime/patches/virgl-videotoolbox-encode-async.patch`,
   `virgl-transfer-upload-pbo.patch`, `src/app/guest/hyprpicker/`; tests
   `app/runtime/Tests/virgl/test-video-encode.c`, `test-upload-pbo.c`.
+
+## 33. app: Mac input methods (experimental): keys arrive as plain letters, or the candidate window is in the wrong place
+
+- **Symptom:** with `mac-ime` on and an input method (Pinyin, Kotoeri,
+  2-Set Korean) selected on the Mac, typing in a text field in Omarchy
+  gives plain letters and no candidate window; or the candidate window
+  shows at the bottom left of the window instead of at the text cursor.
+- **Cause and fix:**
+  - Plain letters right after `omacvm enable mac-ime`: the port comes with
+    the VM's next start. Shut the VM down and start it again;
+    `omacvm check --vm NAME` says "on from the VM's next start" until then.
+  - Plain letters after an update of the VM's Fcitx5: the module must be
+    built for it. `omacvm apply --vm NAME` builds it again; the check says
+    "built for Fcitx5 X, the VM has Y".
+  - Plain letters in one app only: it does not reach an input method. GTK
+    apps need the GTK line from the next login (log out and in once);
+    Chromium and Electron apps need `--enable-wayland-ime`, which OmacVM
+    adds to `~/.config/chromium-flags.conf` and `electron-flags.conf` when
+    the files exist (restart the app).
+  - Plain letters in a password field: on purpose.
+  - The candidate window at the window's corner: the app does not tell the
+    input method where its cursor is (Chromium, Electron, foot, alacritty,
+    XWayland apps). Click into the field first: the window then opens at
+    the click. Qt and GTK apps and kitty give the cursor.
+- **Where:** `src/ime/guest/` (the Fcitx5 module, its VM step),
+  `app/runtime/patches/omacvm-cocoa-ime.patch`; QEMU's log
+  (`logs/qemu.log` in the VM folder) has "cocoa: mac-ime: ..." lines, the
+  VM's Fcitx5 log `journalctl --user -u omarchy-fcitx5` has "omacvm-ime"
+  lines.

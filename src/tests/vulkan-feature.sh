@@ -77,6 +77,49 @@ expect "build.sh refuses vulkan=on" yes \
 expect "enable/disable run apply with --transaction" yes \
   "$(grep -qF 'APPLY_ARGS+=(--transaction)' <(sed -n '/^# Strict for the features it switches/,$p' "$R/src/cmd/features.sh") && echo yes)"
 
+# A switch that fails says why (Mac mini, 2026-10-08: "WebGPU and GPU
+# compute was not set up", nothing more, and the control centre's "space
+# tries again" could not work). The guest's lines as on the mini: pkg-add
+# found the package list older than the mirrors.
+wf=$(awk '/^why_not\(\) \{/ {on = 1} on {print} on && /^}$/ {n++; if (n == 2) exit}' "$R/src/cmd/apply.sh")
+[[ $wf == *'what_failed() {'* ]] || { echo "FAIL why_not/what_failed not found in src/cmd/apply.sh"; exit 1; }
+failed() {   # ONLY GUEST-LINES... -> what apply says failed
+  ( ONLY=$1; shift; GI_LOG=$T/gi.log; printf '%s\n' "$@" > "$GI_LOG"
+    FTITLE=("WebGPU and GPU compute"); feature_index() { [[ $1 == vulkan ]] && echo 0; }
+    failed_part() { echo "$1|$2"; }
+    eval "$wf"; what_failed )
+}
+mini=("==> WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
+      $'\033[1mOmacVM: spirv-llvm-translator libclc not installed: the VM\'s package list is older than the mirrors (they no longer have those versions). Update the system with omarchy update, then omacvm apply\033[0m\r'
+      "OmacVM Venus extras: pacman could not install Mesa's libraries"
+      "==> Vulkan (GL is as it was): not set up (see above)"
+      "guest/install.sh: vulkan was not set up (see above)")
+expect "old package list: the reason, and omarchy update first" \
+  "vulkan|WebGPU and GPU compute was not set up: Omarchy's package list is older than the mirrors (omarchy update first)" \
+  "$(failed vulkan "${mini[@]}")"
+expect "a partial update refused: omarchy update first too" \
+  "vulkan|WebGPU and GPU compute was not set up: its packages need newer versions of what the VM has (omarchy update first)" \
+  "$(failed vulkan "OmacVM: libclc not installed: it goes with newer versions of what the VM has (llvm-libs 22.1.8-1 -> 23.1.0-1); alone it would be a partial update, which can break the desktop. Update the system with omarchy update, then omacvm apply" \
+     "guest/install.sh: vulkan was not set up (see above)")"
+expect "another reason of a switched part: its own line" \
+  "vulkan|WebGPU and GPU compute was not set up: curl: (6) Could not resolve host: archive.mesa3d.org" \
+  "$(failed vulkan "OmacVM: curl: (6) Could not resolve host: archive.mesa3d.org" "guest/install.sh: vulkan was not set up (see above)")"
+expect "pkg-add's other line (pacman does not find them) is not 'update first'" \
+  "vulkan|WebGPU and GPU compute was not set up: libclc not installed: pacman does not find them (no network, or an old package list: update the system with omarchy update, then omacvm apply)" \
+  "$(failed vulkan "OmacVM: libclc not installed: pacman does not find them (no network, or an old package list: update the system with omarchy update, then omacvm apply)" "guest/install.sh: vulkan was not set up (see above)")"
+expect "an update (every part): no other part's line as the reason" \
+  "vulkan|WebGPU and GPU compute was not set up" \
+  "$(failed "" "OmacVM: something about the camera" "guest/install.sh: vulkan was not set up (see above)")"
+expect "no reason line: as before" \
+  "vulkan|WebGPU and GPU compute was not set up" \
+  "$(failed vulkan "==> Vulkan (GL is as it was): not set up (see above)" "guest/install.sh: vulkan was not set up (see above)")"
+expect "a system step that stopped on an old list says so too" \
+  "|the VM side stopped at: packages: Omarchy's package list is older than the mirrors (omarchy update first)" \
+  "$(failed "" "${mini[1]}" "guest/install.sh: failed during: packages")"
+# pkg-add's exit 3 lines end the way apply.sh looks for.
+expect "pkg-add's exit 3 lines end with omarchy update, then omacvm apply" 2 \
+  "$(grep -c 'Update the system with omarchy update, then omacvm apply" >&2$' "$R/src/guest/pkg-add")"
+
 # The app reads the VM's vulkan file for its Venus device options.
 expect "Runner.swift reads the vulkan file" yes \
   "$(grep -q 'appendingPathComponent("vulkan")' "$R/app/app/Sources/OmacVM/Runner.swift" && echo yes)"

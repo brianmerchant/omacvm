@@ -19,4 +19,5 @@ fast-network	net/**
 chromium-video	vdec/**
 vulkan	app/guest/venus/**
 x86-apps	x86/**
+mac-ime	ime/**
 core	**

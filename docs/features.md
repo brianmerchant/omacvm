@@ -29,6 +29,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **WebGPU and GPU compute** *(experimental, OmacVM.app, off by default)* | WebGPU (Firefox, and Chromium from its "Chromium (WebGPU)" menu entry) and OpenCL (darktable, ffmpeg's OpenCL filters, Geekbench GPU) on the Mac's GPU: `omacvm enable vulkan`, then restart the VM. WebGPU in Chromium also works with Graphics set to Vulkan alone. The VM builds a Mesa for it the first time (about 3 minutes, a 140 MB download) ([how](routes/app.md)) |
 | **USB devices** *(experimental, OmacVM.app, off by default)* | Switch **USB devices (experimental)** on in the app's VM window. Then, when you plug in a device while the VM runs, OmacVM asks: connect it to the VM or keep it on the Mac? Your answer is for that plug-in only, unless you check **Always do this for this device**. **Devices…** lists the remembered devices: change what happens next time, or forget them. Nothing connects by itself. Only devices macOS doesn't use itself can go to the VM (debug probes, SDR sticks, logic analysers, phones in fastboot); keyboards, security keys, USB disks and serial adapters stay with the Mac and are never asked about ([details](usb.md)) |
 | **x86 Linux apps** *(experimental, off by default)* | x86_64 Linux programs and AppImages run in the VM through box64, which translates them to ARM: `omacvm enable x86-apps`. Slower than native ARM apps; the VM builds box64 the first time (a few minutes). ([details](#x86-linux-apps)) |
+| **Mac input methods** *(experimental, OmacVM.app, off by default)* | Type Chinese, Japanese, Korean and other languages in Omarchy with your Mac's own input methods (Pinyin, Kotoeri, 2-Set Korean and the rest): the Mac's candidate window opens at the text cursor in the VM, and the text you choose goes into the VM's text field. Keys, Cmd shortcuts and Hyprland's binds stay as they are; password fields get plain keys. `omacvm enable mac-ime`, the control centre, or **Mac input methods (experimental)** in the app's VM window while the VM runs; then shut the VM down and start it again once. Requested and scoped by [@Vocllum](https://github.com/Vocllum) ([#273](https://github.com/gillesgoetsch/OmacVM/issues/273)) ([details](#mac-input-methods)) |
 | **Touch ID** *(off by default)* | sudo in Omarchy's terminals, polkit prompts and 1Password's "Unlock using system authentication" ask the Mac's Touch ID first. The Mac says what is asked ("sudo in pts/1 wants to run pacman -Syu"), and the VM gets only yes or no. On OmacVM.app it asks in a panel in your Omarchy theme over the VM's window (no click needed); on Parallels, UTM and Fusion in macOS's own dialog. Only for the person at the VM's screen with the VM in front: over SSH, from a program without a terminal, with the Mac locked or another app in front, the password prompt comes at once. Your password always works. Apps that unlock through polkit use it only with their own switch on: 1Password: Settings › Security › Unlock using system authentication (OmacVM says so once while it is off, and in the control centre's Touch ID details); Bitwarden: Settings › Security › Unlock with system authentication; KeePassXC 2.8 (beta): quick unlock, on by default. `omacvm enable touch-id` or the control centre ([how](adr/0041-touch-id.md)): it works at once, on every route, and ends with "Touch ID is ready: try sudo -v". When it falls back to the password it says why in the prompt; `omacvm check` says what is missing. A VM that OmacVM.app 3.0.3 or older started has no Touch ID port yet: shut it down and start it again once (the update to 3.0.4 does that; a restart inside the VM is not enough; the control centre says "from the next start" until then) |
 | **Storage** *(OmacVM.app)* | VMs live in `~/OmacVM` or a folder you pick, an external drive too; the app moves them for you. Storage in the app's window shows the VM's size; **All VMs…** lists every VM with its size, Show in Finder and Delete. **Downloaded images** are the Omarchy images the app downloaded to set up VMs: **Remove…** frees that space (your VMs keep everything, a new VM downloads them again, the Mac's Downloads folder is not touched) ([where things are](routes/app.md#where-things-are)) |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
@@ -208,6 +209,66 @@ It is **experimental**: tuned on one Mac, by feel and by measurement, over 29
 rounds. The whole story, with every measurement and the analysis scripts, is in
 [experiments/trackpad-scrolling.md](experiments/trackpad-scrolling.md).
 Switch it off with `omacvm disable scroll-momentum`, on again with `omacvm enable scroll-momentum`.
+
+## Mac input methods
+
+*Experimental, OmacVM.app only, off by default. Requested and scoped by
+[@Vocllum](https://github.com/Vocllum) in
+[#273](https://github.com/gillesgoetsch/OmacVM/issues/273). Design:
+[ADR 0043](adr/0043-mac-ime.md).*
+
+With it on, the input method you use on the Mac also types in Omarchy:
+focus a text field in the VM, pick your input method in the Mac's menu
+bar (or with its shortcut), type, and the Mac's candidate window opens at
+the VM's text cursor. What you are composing shows underlined in the
+field, the text you choose lands there. Keys keep working as before:
+Cmd shortcuts, Hyprland's binds, Control chords and modifiers always go to
+the VM as keys, and with a plain keyboard layout selected on the Mac
+nothing changes at all. Password fields always get plain keys.
+
+- **On:** `omacvm enable mac-ime` (or the control centre, or **Mac input
+  methods (experimental)** in the app's VM window while the VM runs). The
+  VM builds a small module for its Fcitx5, Omarchy's input method framework
+  (under a minute), and restarts Fcitx5. Then shut the VM down and start it
+  again once: the app adds the VM's port for it at the start. GTK apps and
+  Chromium pick up their part at the next login.
+- **Off:** `omacvm disable mac-ime`. The module, its port rule, the GTK line
+  and the Chromium flag go; the next start of the VM has no port for it.
+- **Switching input sources:** in a text field in the VM, macOS's input
+  source shortcuts (Control-Space and Control-Option-Space unless you
+  changed them) and the globe key, when it is set to "Change Input Source",
+  switch the Mac's input source, as in a Mac app. Elsewhere in the VM they
+  go to Omarchy as before (so, in a text field, Control-Space is no longer
+  Fcitx5's own switch key while the feature is on). The Mac's menu bar
+  works too.
+- **Where the candidate window sits:** at the text cursor in Qt apps, GTK
+  apps (ghostty, Nautilus; from the next login after turning it on) and
+  kitty. In apps that tell the input method only that they have the focus
+  (Chromium, Electron apps, foot, alacritty, XWayland apps), at your last
+  click in the VM, else at the bottom left of the window; the text you are
+  composing still shows at the cursor in the app. Omarchy's launcher and
+  menus: at the window below them.
+- **Your own input method in the VM** (Mozc, Rime, Hangul in Fcitx5) keeps
+  working: with a plain layout on the Mac, keys go to the VM and Fcitx5
+  composes as before.
+- **Tested** on a MacBook Air (macOS 26.6): Pinyin (`zhongwen` + Space
+  gives 中文, Esc drops it, Backspace edits it), Japanese Romaji (`nihon` +
+  Return gives にほん) and 2-Set Korean (한국 어) in a GTK app; Pinyin in foot;
+  Pinyin and Japanese Romaji in Chromium. A password field gets plain keys;
+  Control and Cmd chords go to the VM; moving the focus while composing
+  drops the composition.
+- **Not confirmed yet:** picking a Japanese conversion from Kotoeri's
+  candidate list with Return. With typed test keys on that Mac, Return
+  there commits nothing until the input source changes, in the VM and in a
+  plain Mac text view (NSTextView) alike, so it is not the VM's side; a
+  check with real typing is open.
+- The Mac never reads the VM's text, so reconversion of text already
+  typed and suggestions from the text around the cursor do not work. Control shortcuts of an input method (Kotoeri's Control-J/K/L)
+  go to the VM like every Control chord. A Fcitx5 update in the VM may need
+  the module built again: `omacvm apply` does that, and `omacvm check` says
+  when.
+- `omacvm check` has a "Mac input methods" line: the module built for the
+  VM's Fcitx5, the port there, Fcitx5 using it.
 
 ## x86 Linux apps
 

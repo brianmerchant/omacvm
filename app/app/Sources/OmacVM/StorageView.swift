@@ -43,13 +43,18 @@ final class StorageModel: ObservableObject {
     private var mover: FolderMover?
     private var refreshRun = 0
 
+    /// The window pictures (RenderVMWindow): this VMs folder and its VMs
+    /// instead of the Mac's.
+    var shownRoot: URL?
+
     func refresh() {
-        root = Paths.vmsRoot
-        disconnected = Paths.vmsRoots.compactMap { r in
+        root = shownRoot ?? Paths.vmsRoot
+        let roots = shownRoot.map { [$0] } ?? Paths.vmsRoots
+        disconnected = roots.compactMap { r in
             Storage.missingDrive(for: r).map { "\($0) is not connected: its VMs (\(r.path)) are back once it is." }
         }
         let legacy = Paths.vmsRoot.standardizedFileURL.path == Paths.legacyVMsRoot.path ? "" : Paths.legacyVMsRoot.path
-        vms = VMConfig.all().map {
+        vms = VMConfig.all(roots: roots).map {
             Entry(config: $0, size: nil,
                   legacy: $0.folder.deletingLastPathComponent().path == legacy)
         }
@@ -324,14 +329,26 @@ struct VMsFolderRow: View {
 
     var body: some View {
         LabeledContent("VMs folder") {
+            // The path gives way (cut in the middle), never the free space
+            // or the button; the free space stays next to the path, and the
+            // row fills the column, so Change… ends where Start does.
             HStack(spacing: 8) {
-                Text(StorageModel.short(storage.root)).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                if let free = storage.free {
-                    Text("\(Storage.format(free)) free").foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(StorageModel.short(storage.root)).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        .frame(minWidth: 0)
+                        .help(storage.root.path)
+                    if let free = storage.free {
+                        Text("\(Storage.format(free)) free").foregroundStyle(.secondary).fixedSize()
+                    }
                 }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 Button("Change…") { storage.changeRoot() }
                     .disabled(storage.moving != nil)
+                    .fixedSize()
+                    .layoutProbe("folder-change")
             }
+            .frame(maxWidth: .infinity)
+            .layoutProbe("folder-row")
         }
         .onAppear { storage.refresh() }
     }
@@ -431,7 +448,7 @@ struct AllVMsView: View {
             Text("All VMs").font(.headline)
             ForEach(storage.vms) { vm in
                 HStack {
-                    Text(vm.name)
+                    Text(vm.name).lineLimit(1).truncationMode(.middle).help(vm.name)
                     if vm.folder.path == selected?.path {
                         Text("this one").font(.caption).foregroundStyle(.secondary)
                     }
@@ -447,6 +464,7 @@ struct AllVMsView: View {
                         .accessibilityLabel("Delete \(vm.name)…")
                         .disabled(storage.moving != nil)
                 }
+                .layoutProbe("all-vms-row")
             }
             if storage.vms.isEmpty {
                 Text("No VMs.").foregroundStyle(.secondary)
@@ -465,6 +483,7 @@ struct AllVMsView: View {
                 Spacer()
                 Button("Done") { done() }
                     .keyboardShortcut(.defaultAction)
+                    .layoutProbe("all-vms-done")
             }
         }
         .padding(20)

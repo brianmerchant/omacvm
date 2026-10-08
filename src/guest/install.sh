@@ -8,7 +8,7 @@
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, no-idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id, mac-ime) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -158,6 +158,7 @@ esac
 # Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
 [[ $TYPE == app ]] || F[chromium-video]=off
 [[ $TYPE == app ]] || F[vulkan]=off
+[[ $TYPE == app ]] || F[mac-ime]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 [[ $TYPE == fusion ]] && FUSION_DNS=1
@@ -383,6 +384,16 @@ if want x86-apps; then
     "$R/x86/guest/install.sh" off || not_set_up x86-apps "x86 apps (off)"
   fi
 fi
+# The Mac's input methods (OmacVM.app): OmacVM's Fcitx5 module, built once in
+# the VM as a pacman package, and its port's rule. Off on the other routes.
+if want mac-ime; then
+  if [[ ${F[mac-ime]} == on ]]; then
+    log "the Mac's input methods (experimental; the first time a small Fcitx5 module builds)"
+    "$R/ime/guest/install.sh" "$U" on || not_set_up mac-ime "Mac input methods"
+  else
+    "$R/ime/guest/install.sh" "$U" off || not_set_up mac-ime "Mac input methods (off)"
+  fi
+fi
 if ! want battery; then
   :
 elif [[ ${F[battery]} == on ]]; then
@@ -508,11 +519,18 @@ elif [[ ${F[omanotch]} == on ]]; then
   # Fusion the gateway is Fusion's NAT, not the Mac).
   install -d -o "$U" -g "$U" "$H/.config/systemd/user/notchcast.service.d"
   # OmacVM.app: its display sync already follows the window.
-  { printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST"
+  # Also no start while notchcast is being built again: an older unit file
+  # crash-looped into its start limit at the first login (3.0.6).
+  { printf '[Unit]\nConditionFileIsExecutable=%%h/.local/bin/notchcast\nStartLimitIntervalSec=60\nStartLimitBurst=10\n'
+    printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST"
     [[ $TYPE == app ]] && printf 'Environment=NOTCHBAR_FOLLOW_MODE=0\n'; } > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   user_ctl daemon-reload 2>/dev/null || true
-  user_ctl try-restart notchcast.service 2>/dev/null || true
+  # A notchcast stuck in its start limit (3.0.6) runs again, no reboot needed.
+  user_ctl reset-failed notchcast.service 2>/dev/null || true
+  if pgrep -u "$U" -x Hyprland >/dev/null && user_ctl -q is-enabled notchcast.service 2>/dev/null; then
+    user_ctl restart notchcast.service 2>/dev/null || true
+  fi
   # Notifications right under the strip, not a bar's height lower (see the script).
   install -Dm755 "$R/guest/omanotch-notifications.sh" /usr/local/lib/omacvm/omanotch-notifications.sh
   install -Dm644 /dev/stdin /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook <<'HOOK'

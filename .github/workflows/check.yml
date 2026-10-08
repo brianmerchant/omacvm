@@ -238,6 +238,8 @@ jobs:
 
       - name: UTM VM on another drive (--vm-dir; a stand-in UTM, no VM)
         run: src/tests/utm-vm-dir.sh
+      - name: UTM's shared network on another range is found before the install
+        run: src/tests/utm-network.sh
 
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
@@ -356,6 +358,12 @@ jobs:
 
       - name: macOS's shortcuts go to the VM while it has the keyboard (the whole list)
         run: app/runtime/Tests/keys/test-shortcuts.sh
+
+      - name: Mac input methods in QEMU's window code (rules, hooks; off = every key as before)
+        run: app/runtime/Tests/keys/test-ime.sh
+
+      - name: Mac input methods, VM side (the Fcitx5 module's protocol, fuzzed; its VM step)
+        run: src/ime/tests/run.sh
 
       - name: QEMU's full-grab tap goes when Accessibility is taken away (issue 192)
         run: app/runtime/Tests/keys/test-tap-permission.sh
@@ -527,7 +535,14 @@ jobs:
         run: src/tests/touchid-client.sh
 
       - name: The guest's udev rules parse (udevadm verify)
-        run: udevadm verify --resolve-names=never src/vdec/guest/70-omacvm-vdec.rules
+        run: udevadm verify --resolve-names=never src/vdec/guest/70-omacvm-vdec.rules src/ime/guest/70-omacvm-ime.rules
+
+      - name: Mac input methods' Fcitx5 module builds (Ubuntu's Fcitx5), its protocol test with the sanitizers
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends g++ pkg-config libfcitx5core-dev libfcitx5utils-dev libfcitx5config-dev
+          src/ime/tests/build-addon.sh
+          src/ime/tests/run.sh
 
       - name: Hyprland Lua files parse (omacvm_app.lua)
         run: |

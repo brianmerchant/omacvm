@@ -247,6 +247,7 @@ struct VMConfig: Equatable {
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
     var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
     var authSocket: URL { Paths.runDir.appendingPathComponent("\(id).auth") }
+    var imeSocket: URL { Paths.runDir.appendingPathComponent("\(id).ime") }
     var touchIDPanelSocket: URL { Paths.runDir.appendingPathComponent("\(id).tid") }
 
     func write() throws {
@@ -321,8 +322,8 @@ struct VMConfig: Equatable {
     }
 
     /// Every VM in the VMs folders: the current folder's first, each folder by name.
-    static func all() -> [VMConfig] {
-        Paths.vmsRoots.flatMap { root -> [VMConfig] in
+    static func all(roots: [URL] = Paths.vmsRoots) -> [VMConfig] {
+        roots.flatMap { root -> [VMConfig] in
             let items = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
             return items.sorted(by: { $0.path < $1.path }).compactMap { load(from: $0) }
         }

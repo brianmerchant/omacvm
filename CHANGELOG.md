@@ -3,8 +3,24 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.7 (unreleased)
+## 3.0.8 (unreleased)
 
+- Experimental, off by default, OmacVM.app only: the Mac's input methods
+  type in Omarchy: the Mac's candidate window opens at the text cursor in
+  the VM, the chosen text goes into the VM's field (tested with Pinyin,
+  Japanese Romaji kana and 2-Set Korean in a GTK app, foot and Chromium;
+  Kotoeri's candidate list not confirmed yet); keys, Cmd shortcuts and
+  Hyprland's binds stay as they are, password fields get plain keys. On
+  with `omacvm enable mac-ime`, the control centre, or "Mac input methods
+  (experimental)" in the app's VM window while the VM runs, then one
+  restart of the VM. A VM with it off starts exactly as before. Requested
+  and scoped by @Vocllum (#273). Details: docs/features.md, design: docs/adr/0043-mac-ime.md.
+
+- `omacvm build --vm-type utm`: when macOS put UTM's shared network on
+  another range than 192.168.64.0/24 (another VM network on the Mac was
+  there first), the build said so only at the end, after the whole install
+  (about 10 minutes). It now stops as soon as the live installer has its
+  address, and the message says why this can happen.
 - `omacvm build`: two builds at once (for example a UTM and a Parallels VM)
   no longer break each other. The second one stopped in step 1 with "mv: …
   TryOmarchy-v0.4.1.dmg: No such file or directory", as both used the same
@@ -23,6 +39,36 @@ in more words.
   screen once instead of on every frame (Hyprland 41 % to 11 % of a vCPU while
   picking), and big texture uploads from the VM take half the main loop's
   time.
+- App: the window keeps 20 pt on both sides. A long VMs folder is cut in
+  the middle (free space and Change… stay), Change…, Update VM and Start end
+  on one line, and the window is 8 pt shorter. The new VM form's Bridge line
+  wraps instead of running past the fields; a long VM name no longer wraps in
+  All VMs.
+- Control centre: a feature that cannot be set up because the VM's package
+  list is older than the mirrors now says so. On a Mac mini, "WebGPU and GPU
+  compute on" failed with only "was not set up", and "space tries again"
+  could not work until the VM was updated. The control centre now names the
+  reason, offers omarchy update in its own window (only on yes), and says to
+  switch the feature on again after it. OmacVM still never updates a single
+  package on its own (that can leave a black screen). `omacvm enable` and
+  `omacvm apply` give the reason in their "what failed" line too.
+- Control centre: a switch shows its check mark within a second of "done".
+  Before, the row waited 5-10 s for the VM's checks and the Mac's status;
+  they now come in after it.
+- Control centre: the Graphics row fits on its line, also in an 80-column
+  window ("Vulkan: OpenGL until r builds it"); enter shows the whole text, in
+  the VM's own words.
+
+## 3.0.7
+
+- Omanotch: after Update VM to 3.0.6 the bar could be missing from the notch
+  strip. The update builds notchcast again at the next login; until then the
+  old service kept trying to start the missing program and ran into systemd's
+  start limit, so the installer's own start was refused
+  ("start of the service was attempted too often"). The service now waits
+  for notchcast to be built, the installer starts it once with the limit
+  cleared, and Update VM starts a notchcast stuck like this again without a
+  reboot.
 
 ## 3.0.6
 
