@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return bool_with_bql(^{
          return [self handleEventLocked:event];
      });
-@@ -8465,8 +8480,857 @@
+@@ -8465,8 +8480,866 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -200,8 +200,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        omacvm_ime_write(@{ @"t": @"commit", @"text": [text substringWithRange:NSMakeRange(i, end - i)] });
 +        i = end;
 +    }
- }
- 
++}
++
 +/* Code points before UTF-16 index i of s. */
 +static NSUInteger omacvm_ime_cp(NSString *s, NSUInteger i)
 +{
@@ -394,6 +394,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        TISSelectInputSource((TISInputSourceRef)CFArrayGetValueAtIndex(list, target));
 +    }
 +    CFRelease(list);
++    /* Now, not when macOS's notice comes: the next key is for the new one. */
++    omacvm_ime_source_changed();
 +}
 +
 +static void omacvm_ime_hotkey(NSDictionary *all, NSString *key, OmacVMImeHotKey *h,
@@ -520,8 +522,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    r = [[cocoaView window] frame];
 +    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
-+}
-+
+ }
+ 
 +/*
 + * An input context remembers its own input source and selects it again when
 + * it is activated (AppKit's per-document input source). Ours is activated
@@ -611,6 +613,10 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    omacvm_ime_event_sent = false;
 +    used = [omacvm_ime_ctx handleEvent:event];
 +    omacvm_ime_event = nil;
++    if (omacvm_ime_debug) {
++        fprintf(stderr, "omacvm-ime: key %d: input method %s%s\n", [event keyCode], used ? "used it" : "did not want it",
++                omacvm_ime_event_sent ? ", sent to the VM as a key" : "");
++    }
 +    if (omacvm_ime_event_sent) {
 +        return true;            /* went to the VM as a key: its release follows it */
 +    }
@@ -858,6 +864,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (void)doCommandBySelector:(SEL)selector
 +{
++    if (omacvm_ime_debug) {
++        fprintf(stderr, "omacvm-ime: command %s\n", [NSStringFromSelector(selector) UTF8String]);
++    }
 +    /* Return, Tab, arrows, Backspace with nothing marked: the key itself. */
 +    omacvm_ime_send_key();
 +}
@@ -945,7 +954,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9654,7 @@
+@@ -8790,6 +9663,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
