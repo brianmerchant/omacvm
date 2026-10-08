@@ -225,7 +225,9 @@ codesign --verify --deep --strict "$APP" 2>/dev/null && res app ok "$(plist "$AP
 TESTED_COMMIT=$(plist "$APP" OmacVMCommit); TESTED_VERSION=$(plist "$APP" CFBundleShortVersionString)
 OLDROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null)
 if [[ -n $ROOTARG ]]; then mkdir -p "$ROOTARG"; ROOTARG=$(cd "$ROOTARG" && pwd); defaults write "$APPID" vmsRoot "$ROOTARG"; fi
-ROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null || echo "$HOME/OmacVM")
+# The test app's own VMs folder, never the installed app's (test-vms.sh; the
+# test app does not use ~/OmacVM either: TestVMs in VMPick.swift).
+ROOT=$(source "$HERE/test-vms.sh" && e2e_vms_root "$APPID") || die "no test VMs folder: pass --root DIR or set $APPID vmsRoot"
 VMD=$ROOT/$VM
 
 # ---- tools ----
