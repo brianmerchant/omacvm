@@ -11,6 +11,7 @@
 #define main helper_main
 #include "omacvm-gestures.c"
 #undef main
+#include <mach-o/dyld.h>
 #include <spawn.h>
 #include <sys/wait.h>
 
@@ -52,7 +53,9 @@ static int comboHere(const char *name, const char *exe, const char *ident) {
 #define TEST_QEMU "/Users/a/Applications/OmacVM Test.app/Contents/Resources/runtime/bin/OmacVM"
 #define TEST_LAUNCHER "/Users/a/Applications/OmacVM Test.app/Contents/MacOS/OmacVM"
 
-int main(void) {
+int main(int argc, char **argv) {
+  // The stand-in QEMU below is a copy of this test run with --stand-in.
+  if (argc > 1 && !strcmp(argv[1], "--stand-in")) { sleep(30); return 0; }
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   check(testIdentity() == 0, "built without GESTURES_TEST_IDENTITY and run outside its bundle: the normal identity");
   check(vmOursRule("org.omacvm.app.qemu", 0) && vmOursRule("org.omacvm.app", 0) &&
@@ -91,18 +94,22 @@ int main(void) {
         "Parallels, UTM and other apps as before");
 
   // The kernel's signature of real processes, and a development build's QEMU
-  // (a copy of sleep outside any bundle: not OmacVM-signed) as every Gestures'.
+  // (a copy of this test outside any bundle: not OmacVM-signed) as every Gestures'.
+  // Not a copy of /bin/sleep: on macOS 27.0 syspolicyd crashes on such a copy, and
+  // until launchd starts it again (up to 20 min) every new program on the Mac waits.
   char id[256];
   check(signingID(1, id, sizeof id) && !strcmp(id, "com.apple.xpc.launchd"), "signingID: launchd's own identifier");
   check(!signingID(-1, id, sizeof id), "signingID: no process, no identifier");
   char tmpl[] = "/tmp/omacvm-gestures-identity.XXXXXX", p[128];
   if (mkdtemp(tmpl)) {
     snprintf(p, sizeof p, "%s/qemu-system-aarch64", tmpl);
-    char cmd[300];
-    snprintf(cmd, sizeof cmd, "cp /bin/sleep '%s'", p);
+    char self[PROC_PIDPATHINFO_MAXSIZE], cmd[2 * PROC_PIDPATHINFO_MAXSIZE];
+    uint32_t n = sizeof self;
+    if (_NSGetExecutablePath(self, &n)) self[0] = 0;
+    snprintf(cmd, sizeof cmd, "cp '%s' '%s'", self, p);
     pid_t dev = 0;
-    char *argv[] = {p, "30", NULL};
-    if (!system(cmd) && !posix_spawn(&dev, p, NULL, NULL, argv, environ)) {
+    char *args[] = {p, "--stand-in", NULL};
+    if (self[0] && !system(cmd) && !posix_spawn(&dev, p, NULL, NULL, args, environ)) {
       for (int i = 0; i < 100; i++) { char e[PROC_PIDPATHINFO_MAXSIZE]; if (proc_pidpath(dev, e, sizeof e) > 0) break; usleep(20000); }
       identityTest = 0;
       check(isQemu(dev) && vmNet(dev, "OmacVM", &foreign) == NET_APP, "normal Gestures: a development build's QEMU is its own");
