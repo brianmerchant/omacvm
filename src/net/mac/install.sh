@@ -39,9 +39,12 @@
 # team asks again), when OmacVM's release key vouches for that team: the
 # signed update feed of the app's release lists it (src/release/keys.py, main
 # or spare key), or this script is the app's own copy (its Fast Network
-# button: the app vouches for itself). Else (an app signed ad hoc, built from
-# source, or a Developer ID no feed lists): exactly that app's QEMU (its
-# cdhash: install again after rebuilding the app).
+# button: the app vouches for itself). "QEMU" is OmacVM's QEMU identifier: a
+# release app's (org.omacvm.app.qemu); for a test build (OmacVM Test.app,
+# org.omacvm.app.test.qemu) both, so later test builds need no new password.
+# Else (an app signed ad hoc, built from source, or a Developer ID no feed
+# lists): exactly that app's QEMU (its cdhash: install again after rebuilding
+# the app).
 # OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
 # terminal (OmacVM.app's Fast Network button and its question before a start
 # run this script that way: the person at the Mac asked for it); no dialog
@@ -72,9 +75,18 @@ NAT_CLEAN='if [ -f '"$NAT"' ]; then
   fi'
 # Developer ID Application of TEAM, issued by Apple, with the identifier ID
 # (the same text as before teams came from the app: installed daemons stay "ok").
-devid() {   # TEAM ID
-  printf 'anchor apple generic and identifier "%s" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "%s"' "$2" "$1"
+devid() { devid_of "$1" "identifier \"$2\""; }   # TEAM ID
+devid_of() {   # TEAM "identifier ..." (the identifier part)
+  printf 'anchor apple generic and %s and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "%s"' "$2" "$1"
 }
+# The identifiers of the app's QEMU (build-app.sh): a release's, and the test
+# identity's (build-app.sh --test-identity, OmacVM Test.app).
+QEMU_ID=org.omacvm.app.qemu
+TEST_QEMU_ID=org.omacvm.app.test.qemu
+# Either QEMU of TEAM: what an install for a test build trusts, so a test Mac
+# gives its password once for all test builds, and the release app of the
+# same team is served too.
+devid_qemus() { devid_of "$1" "(identifier \"$QEMU_ID\" or identifier \"$TEST_QEMU_ID\")"; }   # TEAM
 
 MODE=install APP=""
 while (( $# )); do
@@ -83,7 +95,7 @@ while (( $# )); do
     --status) MODE=status; shift ;;
     --remove) MODE=remove; shift ;;
     --trust) MODE=trust; shift ;;
-    -h|--help) sed -n '2,51s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,57s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "net/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -95,12 +107,17 @@ fi
 source "$HERE/../../lib/app.sh"   # app_bundle: the installed OmacVM.app; app_version, APP_DOWNLOADS
 KEYS_PY=$HERE/../../release/keys.py
 
-# The Developer ID team APP's QEMU is signed with, if it is a Developer ID build.
-qemu_team() {
-  local q=$1/Contents/Resources/runtime/bin/OmacVM t
-  t=$(codesign -dv "$q" 2>&1 | sed -n 's/^TeamIdentifier=//p')
-  [[ $t =~ ^[A-Z0-9]{10}$ ]] && codesign --verify -R="$(devid "$t" org.omacvm.app.qemu)" "$q" 2>/dev/null && echo "$t"
+# "TEAM IDENTIFIER" of APP's QEMU, if it is a Developer ID build of OmacVM's
+# QEMU (a release's or the test identity's); no other identifier counts.
+qemu_signer() {
+  local q=$1/Contents/Resources/runtime/bin/OmacVM d t i
+  d=$(codesign -dv "$q" 2>&1)
+  t=$(sed -n 's/^TeamIdentifier=//p' <<< "$d") i=$(sed -n 's/^Identifier=//p' <<< "$d")
+  [[ $t =~ ^[A-Z0-9]{10}$ && ( $i == "$QEMU_ID" || $i == "$TEST_QEMU_ID" ) ]] &&
+    codesign --verify -R="$(devid "$t" "$i")" "$q" 2>/dev/null && echo "$t $i"
 }
+# The Developer ID team APP's QEMU is signed with, if it is a Developer ID build.
+qemu_team() { local s; s=$(qemu_signer "$1") && echo "${s% *}"; }
 
 # The code requirement for exactly APP's QEMU (its cdhash).
 hash_req() {
@@ -111,8 +128,13 @@ hash_req() {
   [[ $h =~ ^[0-9a-f]{40}$ ]] || { echo "no cdhash for $q" >&2; return 1; }
   echo "cdhash H\"$h\""
 }
-# The code requirement for the QEMU of any build of APP's team (Developer ID only).
-team_req() { local t; t=$(qemu_team "$1") && devid "$t" org.omacvm.app.qemu && echo; }
+# The code requirement for the QEMU of any build of APP's team (Developer ID
+# only): a release app's QEMU identifier (the text as before, installed
+# daemons stay "ok"), or for a test build both identifiers of that team.
+signer_req() {   # "TEAM IDENTIFIER" (qemu_signer)
+  if [[ ${1#* } == "$QEMU_ID" ]]; then devid "${1% *}" "$QEMU_ID"; else devid_qemus "${1% *}"; fi
+}
+team_req() { local s; s=$(qemu_signer "$1") && signer_req "$s" && echo; }
 
 # This script is APP's own copy (the app's Fast Network button runs that one).
 own_copy() {
@@ -172,12 +194,16 @@ installed_users() {   # the uids it takes connections from, one per line
 
 status() {
   [[ -x $BIN && -f $PLIST ]] || { echo missing; return 0; }
-  local have h
+  local have h s
   installed_users | grep -qx "$(id -u)" || { echo missing; return 0; }   # only for other Mac users
   if [[ -n $APP ]] || APP=$(app_bundle); then
-    # Installed for the team of the app's QEMU (vouched for then), or for exactly this QEMU.
+    # Installed for the team of the app's QEMU (vouched for then; for a
+    # release app also the one for both its release and test QEMUs, installed
+    # for a test build of that team), or for exactly this QEMU.
     have=$(installed_req) && [[ -n $have ]] || { echo old; return 0; }
-    [[ $have == "$(team_req "$APP" 2>/dev/null)" || $have == "$(hash_req "$APP" 2>/dev/null)" ]] || { echo old; return 0; }
+    s=$(qemu_signer "$APP" 2>/dev/null) || s=""
+    [[ -n $s && ( $have == "$(signer_req "$s")" || $have == "$(devid_qemus "${s% *}")" ) ]] ||
+      [[ $have == "$(hash_req "$APP" 2>/dev/null)" ]] || { echo old; return 0; }
     # The app's own daemon (its code), one built from this source (an app
     # nobody vouches for, or one without a daemon), or an older build of the
     # same protocol (installed by an earlier version of the app).
