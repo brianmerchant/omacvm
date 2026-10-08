@@ -50,21 +50,21 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  #include "hw/core/boards.h"
  #include "system/system.h"
  #include "system/runstate.h"
-@@ -845,6 +846,14 @@
+@@ -843,6 +844,14 @@
+     }
+     return changed;
  }
- 
- /*
++
++/*
 + * OmacVM mac-ime (further down): on only for a VM with the feature on
 + * (OMACVM_IME_SOCKET); set once at the start, main thread.
 + */
 +static bool omacvm_ime_on;
 +static bool omacvm_ime_key(NSEvent *event);
 +static bool omacvm_ime_globe(void);
-+
-+/*
+ 
+ /*
   * Main thread, every key and click event before QEMU's own handling (the
-  * logic is omacvm_globe_tap_step). True: the event is used up. While the VM
-  * does not have the globe key a 0xb3 goes nowhere, as before.
 @@ -897,7 +906,9 @@
          }
      }
@@ -76,18 +76,18 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, true);
          qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, false);
      }
-@@ -2034,6 +2045,10 @@
+@@ -2033,6 +2044,10 @@
+ {
      if (omacvm_key_for_macos(event)) {
          return false;
-     }
++    }
 +    /* OmacVM mac-ime: keys for the Mac's input method (off: not even looked at). */
 +    if (omacvm_ime_on && omacvm_ime_key(event)) {
 +        return true;
-+    }
+     }
      return bool_with_bql(^{
          return [self handleEventLocked:event];
-     });
-@@ -8465,8 +8480,881 @@
+@@ -8465,8 +8480,893 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -164,8 +164,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +            break;
 +        }
 +    }
-+}
-+
+ }
+ 
 +/* To the guest's module, once it said hello. */
 +static void omacvm_ime_write(NSDictionary *msg)
 +{
@@ -200,8 +200,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        omacvm_ime_write(@{ @"t": @"commit", @"text": [text substringWithRange:NSMakeRange(i, end - i)] });
 +        i = end;
 +    }
- }
- 
++}
++
 +/* Code points before UTF-16 index i of s. */
 +static NSUInteger omacvm_ime_cp(NSString *s, NSUInteger i)
 +{
@@ -834,6 +834,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    omacvm_ime_connect();
 +}
 +
++#define OMACVM_IME_TRACE(...) do { if (omacvm_ime_debug) { fprintf(stderr, "omacvm-ime: client: " __VA_ARGS__); } } while (0)
++
 +/* QEMU's view as the input method's client (only with mac-ime on). */
 +@implementation QemuCocoaView (OmacVMIme)
 +- (NSTextInputContext *)inputContext
@@ -843,6 +845,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (void)insertText:(id)string replacementRange:(NSRange)replacementRange
 +{
++    OMACVM_IME_TRACE("insertText %lu chars\n", (unsigned long)[([string isKindOfClass:[NSAttributedString class]] ? [string string] : string) length]);
 +    NSString *s = [string isKindOfClass:[NSAttributedString class]] ? [string string] : string;
 +    bool was = omacvm_ime_marked != nil;
 +
@@ -874,6 +877,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange
 +     replacementRange:(NSRange)replacementRange
 +{
++    OMACVM_IME_TRACE("setMarkedText sel %lu+%lu\n", (unsigned long)selectedRange.location, (unsigned long)selectedRange.length);
 +    NSAttributedString *attr = [string isKindOfClass:[NSAttributedString class]] ? string : nil;
 +    NSString *s = attr ? [attr string] : string;
 +    bool was = omacvm_ime_marked != nil;
@@ -895,6 +899,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (void)unmarkText
 +{
++    OMACVM_IME_TRACE("unmarkText\n");
 +    /* The input method keeps the marked text as it is. */
 +    NSString *s = [[omacvm_ime_marked retain] autorelease];
 +
@@ -906,16 +911,19 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (NSRange)selectedRange
 +{
++    OMACVM_IME_TRACE("selectedRange\n");
 +    return NSMakeRange(omacvm_ime_marked ? [omacvm_ime_marked length] : 0, 0);
 +}
 +
 +- (NSRange)markedRange
 +{
++    OMACVM_IME_TRACE("markedRange\n");
 +    return omacvm_ime_marked ? NSMakeRange(0, [omacvm_ime_marked length]) : NSMakeRange(NSNotFound, 0);
 +}
 +
 +- (BOOL)hasMarkedText
 +{
++    OMACVM_IME_TRACE("hasMarkedText\n");
 +    return omacvm_ime_marked != nil;
 +}
 +
@@ -931,6 +939,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
 +                                                actualRange:(NSRangePointer)actualRange
 +{
++    OMACVM_IME_TRACE("attributedSubstring %lu+%lu\n", (unsigned long)range.location, (unsigned long)range.length);
 +    NSRange r;
 +
 +    if (!omacvm_ime_marked || range.location == NSNotFound) {
@@ -948,11 +957,13 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (NSUInteger)characterIndexForPoint:(NSPoint)point
 +{
++    OMACVM_IME_TRACE("characterIndexForPoint\n");
 +    return NSNotFound;
 +}
 +
 +- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange
 +{
++    OMACVM_IME_TRACE("firstRect %lu+%lu\n", (unsigned long)range.location, (unsigned long)range.length);
 +    if (actualRange) {
 +        *actualRange = range;
 +    }
@@ -961,6 +972,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +- (NSInteger)windowLevel
 +{
++    OMACVM_IME_TRACE("windowLevel\n");
 +    NSWindow *w = omacvm_is_our_window([NSApp keyWindow]) ? [NSApp keyWindow] : [self window];
 +    return [w level];
 +}
@@ -969,7 +981,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9678,7 @@
+@@ -8790,6 +9690,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
