@@ -5,6 +5,8 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
+  the animation ends at 5.5 s, before the desktop is ready).
 - Experimental, off by default, OmacVM.app only: the Mac's input methods
   type in Omarchy: the Mac's candidate window opens at the text cursor in
   the VM, the chosen text goes into the VM's field (tested with Pinyin,
