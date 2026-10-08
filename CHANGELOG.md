@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.8 (unreleased)
+## 3.0.9 (unreleased)
 
 - Bridge: its media-key tap can no longer hold the Mac's keyboard and clicks (reported by
   @brianmerchant, #290). The tap now exists only while a VM is in front (not while the Mac sleeps
@@ -12,6 +12,21 @@ in more words.
   Bridge was stopped); a watchdog disables it when the Bridge's main thread has not answered for
   a second; after three such stops in 10 minutes the media keys stay macOS's until the
   Accessibility list changes. Like Gestures, no tap without "control the computer" once a tap had it.
+  While it has a tap, the Bridge asks macOS's permission service off its main thread and does not nap.
+- The command line from `install.sh` (`~/.omacvm`) follows OmacVM's releases, as
+  OmacVM.app does: `omacvm update` and `install.sh` take it to the newest release,
+  or to OmacVM.app's version when the app is newer. Before, it followed `main`,
+  which could be behind the app's release, and `omacvm update` said "already up
+  to date". A checkout with local changes, another clone or an `OMACVM_REF` is
+  not moved; then the warning names the app's own `omacvm`. Takes effect from the
+  first release that has it. Reported by @brianmerchant (#291).
+- `omacvm features` (and option 2 of the menu): moving up and down the checklist no longer
+  doubles or overwrites rows. Every row now fits on one line (long ones are cut), the list
+  scrolls in a short window and is drawn again when the window changes size. Reported by
+  @brianmerchant (#292).
+
+## 3.0.8 (unreleased)
+
 - The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
   the animation ends at 5.5 s, before the desktop is ready).
 - The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in
