@@ -251,7 +251,13 @@ nothing changes at all. Password fields always get plain keys.
 - **Your own input method in the VM** (Mozc, Rime, Hangul in Fcitx5) keeps
   working: with a plain layout on the Mac, keys go to the VM and Fcitx5
   composes as before.
-- **Not done yet:** the Mac never reads the VM's text, so reconversion of
+- **Tested** on a MacBook Air (macOS 26.6): Pinyin (`zhongwen` + Space
+  gives 中文) and 2-Set Korean (한국) type into the VM; a password field gets
+  plain keys; Control chords go to the VM.
+- **Not done yet:** Japanese (Kotoeri) composes kana in the field (にほん),
+  but choosing a conversion in its candidate window with Return does not
+  commit yet on macOS 26; the kana commit when you switch the input source
+  or leave the field. The Mac never reads the VM's text, so reconversion of
   text already typed and suggestions from the text around the cursor do
   not work. Control shortcuts of an input method (Kotoeri's Control-J/K/L)
   go to the VM like every Control chord. A Fcitx5 update in the VM may need

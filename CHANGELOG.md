@@ -6,10 +6,11 @@ in more words.
 ## 3.0.6 (unreleased)
 
 - Experimental, off by default, OmacVM.app only: the Mac's input methods
-  type in Omarchy. Pinyin, Kotoeri, 2-Set Korean and the rest: the Mac's
-  candidate window opens at the text cursor in the VM, the chosen text goes
-  into the VM's field; keys, Cmd shortcuts and Hyprland's binds stay as
-  they are, password fields get plain keys. On with `omacvm enable
+  type in Omarchy: the Mac's candidate window opens at the text cursor in
+  the VM, the chosen text goes into the VM's field (tested with Pinyin and
+  2-Set Korean; Japanese composes kana, its conversion does not commit
+  yet); keys, Cmd shortcuts and Hyprland's binds stay as they are,
+  password fields get plain keys. On with `omacvm enable
   mac-ime`, the control centre, or "Mac input methods (experimental)" in
   the app's VM window while the VM runs, then one restart of the VM. A VM
   with it off starts exactly as before. Requested and scoped by @Vocllum

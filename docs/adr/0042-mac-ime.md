@@ -207,8 +207,8 @@ Then, in the key path (also for keys from the full-grab tap):
   notch and full-screen offsets, the window of that output) to screen
   coordinates. `exact:false`: the last mouse-down in that window if newer
   than the focus change, else the window's box.
-- `attributedSubstringForProposedRange:` returns nil: the Mac never reads
-  the guest's text. `validAttributesForMarkedText` names the clause and
+- `attributedSubstringForProposedRange:` returns parts of the marked text
+  only (Kotoeri reads it back); the Mac never reads the guest's text. `validAttributesForMarkedText` names the clause and
   underline attributes only, so the input method marks its clauses.
 - `unmarkText` commits the marked text as it is (AppKit's meaning).
 - The guest's field gone (focus off, a password field, the guest closing
@@ -298,3 +298,19 @@ permission: AppKit's input context needs none.
   binds and key repeat unchanged; the input-source shortcut and globe key;
   a password field; feature off byte-identical key path; two displays and
   the notch layout for the candidate position.
+
+## Results (2026-10-08)
+
+- Guest side in a real Omarchy VM (Fcitx5 5.1.23, Hyprland): the module
+  builds in seconds, loads, opens the port; GTK4 (exact caret), foot and
+  Chromium (window box) get preedit and commit; password fields are left
+  alone.
+- Typing on a MacBook Air (macOS 26.6, test app, `omacvm enable mac-ime` +
+  one restart): Pinyin and 2-Set Korean commit into a GTK field; Control
+  chords and password fields stay keys; input sources switch with
+  Control-Option-Space in a text field.
+- Open: Kotoeri composes kana and shows its candidates, but Return in the
+  candidate window commits nothing until the input source changes or the
+  field is left (the client sees `setMarkedText` for the reading, then no
+  call on Return). Next step: trace Kotoeri's calls in a plain Cocoa text
+  view on the same Mac and compare.
