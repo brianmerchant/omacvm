@@ -307,6 +307,12 @@ bridge_start() {   # the test Bridge with its log here (as src/mac/install.sh st
   local i; for ((i = 0; i < 20; i++)); do lsof -nP -iTCP:47931 -sTCP:LISTEN >/dev/null 2>&1 && { BSTART=$(stat -f %z "$BLOG" 2>/dev/null || echo 0); return 0; }; sleep 0.5; done
   return 1
 }
+gestures_start() {   # the test Gestures again (as src/mac/install.sh starts it for the test identity)
+  open -g -n --stdout "$HOME/Library/Logs/omacvm-test-gestures.log" --stderr "$HOME/Library/Logs/omacvm-test-gestures.log" \
+    "$APP/Contents/Helpers/OmacVM Test Gestures.app"
+  local i; for ((i = 0; i < 20; i++)); do lsof -nP -iTCP:47930 -sTCP:LISTEN >/dev/null 2>&1 && return 0; sleep 0.5; done
+  return 1
+}
 # The Bridge takes at most 20 jobs an hour per VM (jobsPerHour, src/bridge/mac/control_policy.swift;
 # it says "20 jobs in the last hour: try later"). One pass sends about 50. The count lives in the
 # Bridge's memory: before a step would go over it, the test Bridge starts again (from 0).
@@ -860,6 +866,7 @@ if [[ -n $PREV ]] && want update; then
     close_window
     # The test Bridge and Gestures run from inside the app (a person's live outside it): the updater
     # would wait for them ("A VM runs from OmacVM Test" is any process inside the app).
+    GESTURES_RAN=$(pgrep -f "OmacVM Test Gestures.app/Contents/MacOS/" | head -1)
     stop_inside_app
     hide=(); (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1)   # the updated app starts again: no window either
     open -n -g --env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$F/key.pub")" \
@@ -870,6 +877,8 @@ if [[ -n $PREV ]] && want update; then
     if [[ $(plist "$APP" CFBundleShortVersionString) == "$CV" ]] && codesign --verify --deep --strict "$APP" 2>/dev/null; then
       res app-self-update ok "$PV -> $CV through the app's updater: $(grep 'result:' "$UPD/update.log" 2>/dev/null | tail -1)"
       bridge_start   # this build's Bridge (an installed app restarts it when its helpers change)
+      # A person's Gestures runs on through an update (it lives outside the app); the test one was stopped.
+      [[ -n $GESTURES_RAN ]] && { gestures_start || res gestures-again FAIL "the test Gestures does not listen on 47930 again"; }
       if d=$(update_vm_window); then res update-vm ok "$d"; else res update-vm FAIL "$d"; fi
       ONLY=""   # every step again on the updated VM
       start_pass && steps
