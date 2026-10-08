@@ -70,6 +70,11 @@ class Controller:
         # the row shows only while the Mac has a Magic Mouse.
         self.mouse_swipe: dict | None = None
         self.mouse_swipe_sets = 0   # bumped around each switch: an older look is not kept
+        # Features a job just switched or repaired: their checks from before
+        # the job say nothing about them now, so they are left out until the
+        # next look of each side (the VM's checks, the Mac's status).
+        self.stale_vm: set[str] = set()
+        self.stale_mac: set[str] = set()
 
     # ---- the Mac ----
     @property
@@ -103,6 +108,7 @@ class Controller:
             st = self.bridge.status()
             if not st.get("pending"):
                 self.mac_status = st
+                self.stale_mac = set()
                 self.local.save_cache(mac_status=st)
         except BridgeError as e:
             self.mac_error = e
@@ -176,6 +182,7 @@ class Controller:
         checks = guest_checks()
         if checks is not None:
             self.vm_checks = checks
+            self.stale_vm = set()
             self.checked_at = time.time()
             self.from_cache = False
             self.local.save_cache(vm_checks="\n".join(
@@ -201,6 +208,16 @@ class Controller:
         self.local = Local()
         self.local.cache = cache
         self.bridge = Bridge(self.local.env, self.local.version)
+
+    def job_ended(self, job: S.Job) -> None:
+        """A job ended: the list follows the VM's env at once. A switch or
+        repair that worked was checked by the job itself; the checks from
+        before it are set aside until the next look (seconds later), so its
+        row does not wait for them, nor show what they said before."""
+        self.reload_local()
+        if job.state == "done" and job.action in ("enable", "disable", "reinstall"):
+            self.stale_vm |= set(job.features)
+            self.stale_mac |= set(job.features)
 
     # ---- the model ----
     @property
@@ -273,8 +290,9 @@ class Controller:
                     elif f.get("synced") is True and isinstance(f.get("on"), bool) and f["name"] in on:
                         on[f["name"]] = f["on"]
             if isinstance(self.mac_status.get("checks"), list):
-                mac_checks = S.parse_mac_checks(self.mac_status["checks"])
-        checks = None if self.vm_checks is None and mac_checks is None else (self.vm_checks or []) + (mac_checks or [])
+                mac_checks = [c for c in S.parse_mac_checks(self.mac_status["checks"]) if c.feature not in self.stale_mac]
+        vm_checks = None if self.vm_checks is None else [c for c in self.vm_checks if c.feature not in self.stale_vm]
+        checks = None if vm_checks is None and mac_checks is None else (vm_checks or []) + (mac_checks or [])
         mac_features = set(self.hello.features) if self.hello and self.hello.features else None
         rows = S.build_rows(self.local.features, on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),

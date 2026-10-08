@@ -1439,6 +1439,80 @@ def test_mouse_swipe_look_from_before_a_switch_is_dropped(world):
     assert c.mouse_swipe is None
 
 
+# ---- after a job (Mac mini, 3.0.6, 2026-10-08) ----
+
+@pytest.fixture
+def slow_world(tmp_path, monkeypatch):
+    """A fake Mac and check socket whose answers can be made as slow as the
+    real ones: guest/check.sh about 6 s, the Mac's status after a job 3 s."""
+    mac, checks = FakeMac(), FakeChecks()
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path).items():
+        monkeypatch.setenv(k, v)
+    yield mac, checks
+    mac.stop()
+    checks.stop()
+
+
+def _switch_on_in_env(name):
+    """What the Mac's job does to this VM: its env says NAME is on."""
+    from omacvm_cc.state import env_key
+
+    def done(job):
+        p = os.environ["OMACVM_ENV"]
+        with open(p) as f:
+            lines = [l for l in f.read().splitlines() if not l.startswith(env_key(name) + "=")]
+        with open(p, "w") as f:
+            f.write("\n".join(lines + [env_key(name) + "=on"]) + "\n")
+        done.at = time.monotonic()
+    done.at = 0.0
+    return done
+
+
+def test_a_switch_shows_on_its_row_within_a_second(slow_world):
+    """Touch ID on said done at once, but its check mark came 5-10 s later:
+    the row waited for the VM's checks and the Mac's status. It follows the
+    VM's env as soon as the job ends; the checks come in after."""
+    mac, checks = slow_world
+    ended = _switch_on_in_env("no-idle-lock")
+    mac.on_job_end = ended
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.vm_checks is not None)
+            assert rows(a)["no-idle-lock"].status.value == "off"
+            mac.hello_delay, checks.delay = 2.5, 3.0   # about as slow as the mini's after a job
+            _move_to(a, "no-idle-lock")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: ended.at > 0)
+            assert await settle(pilot, lambda: rows(a)["no-idle-lock"].status.value == "works", 8)
+            took = time.monotonic() - ended.at
+            assert took < 1.5, f"the check mark came {took:.1f} s after the job"
+            # The VM's checks and the Mac's answer still come in afterwards.
+            n = sum(1 for m, p, _ in mac.requests if p == "/omacvm/status")
+            assert await settle(pilot, lambda: sum(1 for m, p, _ in mac.requests if p == "/omacvm/status") > n, 10)
+    asyncio.run(go())
+
+
+def test_a_repair_sets_old_checks_aside_until_new_ones_come(slow_world):
+    """After a repair that worked, the failure from before the job does not
+    show as now; the next check result counts again (still failing here)."""
+    mac, checks = slow_world
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.vm_checks is not None)
+            assert rows(a)["camera"].status.value == "failing"
+            checks.delay = 2.0
+            _move_to(a, "camera")
+            await pilot.press("r")
+            assert await settle(pilot, lambda: a.c.jobs and not any(j.active for j in a.c.jobs.values()))
+            assert await settle(pilot, lambda: rows(a)["camera"].status.value == "works", 1.5)
+            assert await settle(pilot, lambda: rows(a)["camera"].status.value == "failing", 10)
+    asyncio.run(go())
+
+
 def test_graphics_row_fits_and_details_say_it_all(tmp_path, monkeypatch):
     """The mini's Graphics row was cut off ("... until it is built (Om"):
     the row says it short, enter shows the whole of it."""

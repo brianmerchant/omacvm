@@ -737,7 +737,7 @@ class ControlCentre(App):
     # ---- data ----
     def live(self) -> None:
         from textual.worker import WorkerState
-        if any(w.group in ("mac", "job", "live") and w.state in (WorkerState.PENDING, WorkerState.RUNNING)
+        if any(w.group in ("mac", "job", "after-job", "live") and w.state in (WorkerState.PENDING, WorkerState.RUNNING)
                for w in self.workers):
             return   # a first look or a job is on it; it refreshes when done
         self.live_refresh()
@@ -1334,8 +1334,12 @@ class ControlCentre(App):
                     self.waiting_mac = f"waiting for the Mac to answer ({failures} s; its Bridge restarts during an update)"
                 if failures > LOST_AFTER:
                     job = self.c.lose(job.id)
-            self.call_from_thread(self.refresh_all)
-        self.c.reload_local()
+            if job.active:
+                self.call_from_thread(self.refresh_all)
+        # The row follows the VM's env at once (before: only after the VM's
+        # checks and the Mac's status, 5-10 s after "done"); they come after.
+        self.c.job_ended(job)
+        self.stamp = self.c.local_stamp()
         app_path = self.app_step is not None
         self.app_step, self.started_at, self.waiting_mac = None, 0.0, ""
         lost = failures > LOST_AFTER
@@ -1369,8 +1373,16 @@ class ControlCentre(App):
         if action == "disable" and "control-centre" in features and job.state == "done":
             self.call_from_thread(self.exit)
             return
-        self.c.refresh_vm_checks()
+        self.call_from_thread(self.refresh_all)
+        # Side by side, each shown as it comes in: the VM's checks (a few
+        # seconds), the Mac's status with its checks, then the update list.
+        self.call_from_thread(self.run_checks)
+        self.call_from_thread(self.after_job)
+
+    @work(thread=True, exclusive=True, group="after-job")
+    def after_job(self) -> None:
         self.c.refresh_mac()
+        self.call_from_thread(self.refresh_all)
         self.c.refresh_updates()
         self.call_from_thread(self.refresh_all)
 
