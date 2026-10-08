@@ -126,7 +126,7 @@ VM runs, and goes back by itself when a new version does not start
   it; the check says so). VMs from 3.0.0 rebuild it once, after the next
   start or with `omacvm apply`. Until the driver is there the VM starts with
   OpenGL only, and the app, `omacvm graphics` and the control centre say
-  "Vulkan (driver not built yet: runs on OpenGL until the next apply)". In the
+  "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))". In the
   VM `omacvm-venus-driver.timer` checks again 90 s after boot, after the
   desktop, never in the boot's critical chain. Automatic is OpenGL on every
   Mac in 3.0.0 (CHANGELOG).

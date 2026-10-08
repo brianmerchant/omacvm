@@ -45,7 +45,7 @@ decides whether Vulkan apps get the Mac's GPU, not how the desktop draws.
   26.2.4, or OmacVM's Mesa of the vulkan feature). With the setting giving
   Vulkan, apply (or `omacvm graphics` on a running VM) builds Mesa 26.2.4's
   `vulkan-virtio` ahead. Until then Vulkan starts with OpenGL and says
-  "Vulkan (driver not built yet: runs on OpenGL until the next apply)".
+  "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))".
   In the VM `omacvm-venus-driver.timer` checks again 90 s after boot (never
   in the boot's critical chain: no network-online.target, idle priority).
 - The hidden `venus` switch of 2.9 is moved once at the app's first 3.0.0

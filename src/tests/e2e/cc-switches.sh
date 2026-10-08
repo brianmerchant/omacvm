@@ -473,8 +473,12 @@ read_features() {
 }
 # Omanotch: the test identity's VMs reach only a test Omanotch on 47911 (never the person's).
 test_omanotch() { lsof -nP -iTCP:47911 -sTCP:LISTEN >/dev/null 2>&1; }
+# The VM's package list matches the mirrors: a file it names is there (a 404 = older than the mirrors).
+mirrors_current() {
+  gssh 'u=$(pacman -Sp --noconfirm jq 2>/dev/null | grep -m1 "^http"); [ -n "$u" ] && curl -fsIL --max-time 20 "$u" >/dev/null' >/dev/null 2>&1
+}
 prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install its packages (pkg-add refuses a partial update)
-  gssh "pacman -Q python-textual" >/dev/null 2>&1 && return 0
+  mirrors_current && return 0
   log "the VM's packages are older than the mirrors: omarchy update -y, then omacvm apply (limit 45 min)"
   local t0 rc
   t0=$(date +%s)
@@ -494,8 +498,9 @@ prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install i
 }
 system_update_done() {   # after features_as_new: the control centre's Textual is there now
   [[ -n ${SYSUPD:-} ]] || return 0
-  if gssh "python3 -c 'import textual'" >/dev/null 2>&1; then res system-update ok "$SYSUPD; Textual there"
-  else res system-update FAIL "$SYSUPD, but no Textual with the control centre on: $(gssh 'pacman -Q python-textual' 2>&1 | head -1)"; fi
+  # OmacVM's own Textual (src/control/vendor), as check.sh checks it.
+  if tx=$(gssh "python3 -I /usr/local/share/omacvm/control/omacvm_cc/vendor.py --check" 2>&1); then res system-update ok "$SYSUPD; Textual there"
+  else res system-update FAIL "$SYSUPD, but no Textual with the control centre on: $(tail -1 <<<"$tx" | cut -c1-120)"; fi
   SYSUPD=""
 }
 features_as_new() {   # what a new VM has on that this one has off (a clone of a kept VM): on, as a person would

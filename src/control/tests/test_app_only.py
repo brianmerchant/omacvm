@@ -8,12 +8,15 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from omacvm_cc import plain  # noqa: E402
+from omacvm_cc.bridge import BridgeError  # noqa: E402
 from omacvm_cc.state import Job  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 
 class FakeC:
+    """states: what each poll says; a BridgeError in it is raised (the Bridge
+    restarting under the job)."""
     def __init__(self, linked=True, states=("running", "done"), fail=None):
         self.linked, self.states, self.fail, self.started = linked, list(states), fail, None
 
@@ -24,7 +27,14 @@ class FakeC:
         return Job("j1", action, tuple(features), "queued")
 
     def poll(self, job_id):
-        return Job(job_id, "reinstall", ("control-centre",), self.states.pop(0))
+        s = self.states.pop(0)
+        if isinstance(s, Exception):
+            raise s
+        return Job(job_id, "reinstall", ("control-centre",), s)
+
+
+def READY():
+    return True, ""
 
 
 class TTY:
@@ -35,22 +45,46 @@ class TTY:
 def test_textual_fix_asks_the_mac(monkeypatch):
     monkeypatch.setattr(sys, "stdin", TTY())
     c = FakeC()
-    line = plain.textual_fix(c, ask=lambda _: "", wait=0)
+    line = plain.textual_fix(c, ask=lambda _: "", wait=0, ready=READY)
     assert c.started == ("reinstall", ["control-centre"])
     assert "installed" in line and "sudo" not in line
     c = FakeC(states=("failed",))
-    assert "could not install" in plain.textual_fix(c, ask=lambda _: "y", wait=0)
+    assert "could not install" in plain.textual_fix(c, ask=lambda _: "y", wait=0, ready=READY)
     c = FakeC()
-    assert "asks again" in plain.textual_fix(c, ask=lambda _: "n", wait=0) and c.started is None
-    assert "could not install" in plain.textual_fix(FakeC(fail="busy"), ask=lambda _: "", wait=0)
+    assert "asks again" in plain.textual_fix(c, ask=lambda _: "n", wait=0, ready=READY) and c.started is None
+    assert "could not install" in plain.textual_fix(FakeC(fail="busy"), ask=lambda _: "", wait=0, ready=READY)
+
+
+def test_textual_fix_rides_out_the_bridge_restarting(monkeypatch):
+    """The Mac mini, 2026-10-08: the repair restarted the Bridge, the next
+    poll failed and the plain table said "OmacVM Bridge does not answer"
+    while the job went on. It keeps asking, as the control centre does."""
+    monkeypatch.setattr(sys, "stdin", TTY())
+    gone = BridgeError("offline", "OmacVM Bridge does not answer on this Mac")
+    c = FakeC(states=("running", gone, gone, gone, "running", "done"))
+    line = plain.textual_fix(c, ask=lambda _: "", wait=0, ready=READY)
+    assert line.startswith("Textual is installed"), line
+    monkeypatch.setattr(plain, "LOST_AFTER", 2)
+    c = FakeC(states=("running",) + (gone,) * 5)
+    assert "stopped answering" in plain.textual_fix(c, ask=lambda _: "", wait=0, ready=READY)
+
+
+def test_textual_fix_says_the_true_reason(monkeypatch):
+    """The job ended well but Textual still does not load: never "Textual is
+    installed" then (the job's exit status alone said so before)."""
+    monkeypatch.setattr(sys, "stdin", TTY())
+    line = plain.textual_fix(FakeC(), ask=lambda _: "", wait=0,
+                             ready=lambda: (False, "OmacVM's copy of Textual: textual-8.2.8-py3-none-any.whl is missing"))
+    assert "installed" not in line and "still does not load" in line and "textual-8.2.8" in line, line
+    assert "(no space left)" in plain.textual_fix(FakeC(linked=False), why="no space left")
 
 
 def test_textual_fix_without_the_mac_or_a_terminal(monkeypatch):
-    for line in (plain.textual_fix(FakeC(linked=False)),):
+    for line in (plain.textual_fix(FakeC(linked=False), ready=READY),):
         assert "sudo" not in line and "Mac" in line
     monkeypatch.setattr(sys, "stdin", open(os.devnull))
     c = FakeC()
-    assert "terminal" in plain.textual_fix(c) and c.started is None
+    assert "terminal" in plain.textual_fix(c, ready=READY) and c.started is None
 
 
 def test_app_copy_runs_changes_from_a_copy(tmp_path):

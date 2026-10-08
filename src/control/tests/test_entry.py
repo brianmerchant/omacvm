@@ -45,11 +45,17 @@ def run_in_pty(args, env, send=b"", wait=8.0, answer=b""):
     return out.decode("utf-8", "replace"), alive
 
 
-def no_textual_env(tmp_path, mac, checks):
+def no_textual_env(tmp_path, mac, checks, vendor=False):
+    """Python finds no Textual of its own (a VM without python-textual, or one
+    pacman could not install); vendor: OmacVM's own copy is there, as it is
+    from 3.0.6 on (else it is missing too)."""
     stub = tmp_path / "stub"
-    (stub / "textual").mkdir(parents=True)
+    (stub / "textual").mkdir(parents=True, exist_ok=True)
     (stub / "textual" / "__init__.py").write_text("raise ImportError('no textual here')\n")
     env = dict(os.environ, **vm_env(str(tmp_path), mac.port, checks.path))
+    env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    if not vendor:
+        env["OMACVM_VENDOR_DIR"] = str(tmp_path / "no-vendor")
     for k in ("WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "SSH_CONNECTION"):
         env.pop(k, None)
     env["PYTHONPATH"] = str(stub)
@@ -62,7 +68,8 @@ def test_window_waits_for_return(tmp_path):
     try:
         env = no_textual_env(tmp_path, mac, checks)
         out, alive = run_in_pty(["--window"], env, wait=6.0)
-        assert "Install it from the Mac now? [Y/n]" in out and "sudo" not in out and alive, out
+        assert "Repair it from the Mac now" in out and "[Y/n]" in out and "sudo" not in out and alive, out
+        assert "OmacVM's copy of Textual is missing" in out, out
         out, alive = run_in_pty(["--window"], env, wait=6.0, answer=b"n\n")
         assert "Press Return, Escape or q to close." in out and alive, out
         for key in (b"\n", b"\x1b", b"q"):
@@ -78,7 +85,7 @@ def test_terminal_does_not_wait(tmp_path):
     mac, checks = FakeMac(), FakeChecks()
     try:
         out, alive = run_in_pty([], no_textual_env(tmp_path, mac, checks), wait=8.0, answer=b"n\n")
-        assert not alive and "Press Return" not in out and "python-textual" in out, out
+        assert not alive and "Press Return" not in out and "could not load Textual" in out, out
     finally:
         mac.stop()
         checks.stop()
@@ -129,9 +136,26 @@ def test_here_over_ssh_and_in_the_window_stay_put(tmp_path):
         for args, extra in ((["--here"], {}), ([], {"SSH_CONNECTION": "10.0.2.2 1 10.0.2.15 22"}),
                             (["--window"], {})):
             out, alive = run_in_pty(args, dict(base, **extra), send=b"q", wait=8.0, answer=b"n\n")
-            assert "opens in its own window" not in out and "python-textual" in out, (args, out)
+            assert "opens in its own window" not in out and "could not load Textual" in out, (args, out)
         time.sleep(0.3)
         assert not log.exists(), log.read_text()
+    finally:
+        mac.stop()
+        checks.stop()
+
+
+def test_without_pacman_textual_the_control_centre_opens(tmp_path):
+    """The Mac mini, 2026-10-08: after an update from 2.9.1 pacman could not
+    install python-textual (the VM's package list was older than the
+    mirrors), and omacvm showed only its plain table. OmacVM's own copy
+    (src/control/vendor) needs no pacman: the full control centre opens."""
+    mac, checks = FakeMac(), FakeChecks()
+    try:
+        env = no_textual_env(tmp_path, mac, checks, vendor=True)
+        out, alive = run_in_pty(["--here"], env, wait=10.0, answer=b"n\n")
+        assert "[Y/n]" not in out and "could not load Textual" not in out, out
+        assert "\x1b[?1049h" in out and "Trackpad gestures" in out, out   # Textual's screen, with the table
+        assert list((tmp_path / "cache" / "omacvm" / "python").glob("*/.omacvm-complete"))
     finally:
         mac.stop()
         checks.stop()

@@ -1,6 +1,6 @@
 # 0042: Capture mode: the video encoder works beside QEMU's main loop, guest fences wait for its frames
 
-Status: accepted, built (`capture-perf`, 3.0.6).
+Status: accepted, built (`capture-perf`, 3.0.7).
 
 ## Context
 

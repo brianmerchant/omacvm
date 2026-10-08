@@ -60,7 +60,11 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   SQLite (public domain) and HACL* (MIT). `LICENSE.python.txt` in the
   licences folder is CPython's licence with the notices of the code it
   includes.
-- In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come
+- In the VM, only the control centre's Textual is bundled (in OmacVM's
+  `src/control/vendor`, Contents/Resources/omacvm: Textual, Rich, Pygments
+  and their pure-Python dependencies, MIT, BSD-2-Clause and PSF-2.0, listed in
+  the repository's `THIRD_PARTY_NOTICES.md`, each wheel with its licence).
+  Arch Linux ARM and Omarchy (omarchy-mac) come
   from their own servers during the setup, each package under its own licence.
   On Venus VMs `src/app/guest/venus/install.sh` downloads Mesa 26.2.4 (MIT,
   archive.mesa3d.org) and builds it in the VM with OmacVM's patches (MIT, in

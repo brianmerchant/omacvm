@@ -2,7 +2,7 @@
 # The control centre in the VM (feature control-centre). Run as root by
 # ../../guest/install.sh:
 #   control/guest/install.sh <desktop-user> on|off [vm-type]
-# On: Textual (pacman), /usr/local/bin/omacvm, the root check socket (the
+# On: Textual (OmacVM's own copy), /usr/local/bin/omacvm, the root check socket (the
 # guest checks for the control centre: a fixed command, nothing read from the
 # caller), the app launcher entry, an "OmacVM" row in the Omarchy menu, the
 # OmacVM item in the bar, the window rule that floats it in the middle
@@ -86,22 +86,25 @@ window_rule() {
   [[ -n $sig ]] && sudo -u "$U" env XDG_RUNTIME_DIR="$run" HYPRLAND_INSTANCE_SIGNATURE="$sig" hyprctl reload >/dev/null 2>&1 || true
 }
 
-# Textual from pacman: waits for another pacman (Omarchy's first-boot setup or
-# an update holds the lock), tries three times, and says why when it could
-# not. Never `pacman -Sy`: a fresh package list without the update makes the
-# next install a partial update (guest/pkg-add says why).
+# Textual: OmacVM's own copy (control/vendor, pinned wheels), unpacked into
+# the desktop user's cache here so the first start is quick. No pacman: until
+# 3.0.6 it came from python-textual, which a VM whose package list is older
+# than the mirrors cannot get (every download a 404), and the control centre
+# stayed plain text. Not fatal: omacvm unpacks it itself at its next start.
 textual() {
-  local i out
-  python3 -c 'import textual' >/dev/null 2>&1 && return 0
-  for i in 1 2 3; do
-    for _ in $(seq 60); do [[ -e /var/lib/pacman/db.lck ]] || break; sleep 1; done
-    if out=$(../../guest/pkg-add python python-textual 2>&1) && python3 -c 'import textual' >/dev/null 2>&1; then
-      return 0
-    fi
-    [[ $out == *"partial update"* || $out == *"does not find"* ]] && break
-    sleep $((i * 2))
+  local out why try
+  command -v python3 >/dev/null || ../../guest/pkg-add python || true
+  for try in 1 2; do
+    out=$(sudo -u "$U" env HOME="$H" python3 -I ../omacvm_cc/vendor.py 2>&1) || { why=$out; break; }
+    why=$(sudo -u "$U" env HOME="$H" python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import textual.app' "$out" 2>&1) && return 0
+    # Unpacked before and damaged since (a file gone from the cache): the
+    # finished set is never unpacked again by itself, so once more here (the
+    # control centre's repair runs this).
+    [[ $try == 1 && $out == "$H/.cache/omacvm/python/"* && $out != *..* && -d $out ]] || break
+    rm -rf "$out"
   done
-  echo "  python-textual not installed (omacvm shows a plain table; a repair of the control centre installs it later): $(tail -n1 <<<"$out" | sed 's/^OmacVM: //' | cut -c1-200)"
+  echo "  Textual is not ready (omacvm shows a plain table until it is): $(tail -n1 <<<"$why" | cut -c1-200)"
+  return 1
 }
 
 if [[ $WANT == on ]]; then

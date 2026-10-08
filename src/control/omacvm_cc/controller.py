@@ -268,6 +268,10 @@ class Controller:
                     if f.get("fixed") and isinstance(f.get("on"), bool) and f["name"] in on:
                         on[f["name"]] = f["on"]
                         fixed[f["name"]] = str(f["fixed"])
+                    # Only this VM's copy was behind the record (the app's Fast network
+                    # switch): the Mac's state, without a note (nothing was wrong there).
+                    elif f.get("synced") is True and isinstance(f.get("on"), bool) and f["name"] in on:
+                        on[f["name"]] = f["on"]
             if isinstance(self.mac_status.get("checks"), list):
                 mac_checks = S.parse_mac_checks(self.mac_status["checks"])
         checks = None if self.vm_checks is None and mac_checks is None else (self.vm_checks or []) + (mac_checks or [])

@@ -28,6 +28,6 @@ a new record replaces it and says so.
 | [0039](0039-system-disk-options.md) | The app VM's disk stays NVMe, writeback, discard (virtio-blk + iothread hangs after a pause) | accepted (`disk-speed`) |
 | [0040](0040-x86-apps-box64.md) | x86_64 Linux apps through box64, built in the VM | accepted, built (`x86-apps`, 3.0.1) |
 | [0041](0041-touch-id.md) | Touch ID in the VM: pam_exec asks the Bridge, the Mac answers yes or no | accepted (`touch-id`, 3.0.2) |
-| [0042](0042-encoder-beside-the-main-loop.md) | Capture mode: the video encoder works beside QEMU's main loop, guest fences wait for its frames | accepted, built (`capture-perf`, 3.0.6) |
+| [0042](0042-encoder-beside-the-main-loop.md) | Capture mode: the video encoder works beside QEMU's main loop, guest fences wait for its frames | accepted, built (`capture-perf`, 3.0.7) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

@@ -10,7 +10,7 @@
 GRAPHICS_AUTO_VULKAN=0               # Graphics.autoVulkan (3.0.0: Automatic = OpenGL on every Mac)
 GRAPHICS_AUTO_VULKAN_FROM_MACOS=26   # Graphics.autoVulkanFromMacOS
 GRAPHICS_AUTO_VULKAN_ON_MOLTENVK=0   # Graphics.autoVulkanOnMoltenVK
-GRAPHICS_WAITING_FOR_DRIVER="driver not built yet: runs on OpenGL until the next apply"   # Graphics.waitingForDriver
+GRAPHICS_WAITING_FOR_DRIVER="driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics)"   # Graphics.waitingForDriver
 GRAPHICS_DID_NOT_START="Vulkan did not start on this Mac: using OpenGL"   # Graphics.didNotStart
 GRAPHICS_HIGH_PCI_WINDOW_BITS=40     # Graphics.highPCIWindowBits
 GRAPHICS_LOW_WINDOW_HOSTMEM_MB=256   # Graphics.lowWindowHostmemMB

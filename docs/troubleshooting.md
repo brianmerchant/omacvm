@@ -804,7 +804,7 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   frozen screen of the screenshot picker: hyprpicker drew every display again
   on every frame, and each time Hyprland sent the whole screen (21.6 MB)
   through the GPU's upload path.
-- **Fix (3.0.6):** the encoder works beside the main loop; the VM's fences
+- **Fix (3.0.7):** the encoder works beside the main loop; the VM's fences
   wait for its frames instead (ADR
   [0042](adr/0042-encoder-beside-the-main-loop.md)): recording keeps the
   sound whole, the display at 29 frames a second. OmacVM.app VMs get a

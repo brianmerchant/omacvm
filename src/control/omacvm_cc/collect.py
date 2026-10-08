@@ -137,8 +137,21 @@ def vm_versions(local, hello=None) -> str:
         lines.append("the Mac did not answer")
     lines += [f"{vendor} {product}".strip() + (f" · {mem} VM" if mem else ""),
               f"Omarchy {first(['omarchy-version'])} · kernel {platform.release()} · {first(['pacman', '-Q', 'mesa'])}",
-              f"Python {platform.python_version()} · {first(['pacman', '-Q', 'python-textual'])}"]
+              f"Python {platform.python_version()} · {textual_version(first)}"]
     return "\n".join(lines)
+
+
+def textual_version(first) -> str:
+    """The Textual the control centre uses: OmacVM's own copy (vendor.py),
+    or pacman's from before 3.0.6."""
+    try:
+        from . import vendor
+        for name, _ in vendor.wheels()[0]:
+            if name.startswith("textual-"):
+                return f"Textual {name.split('-')[1]} (OmacVM's own)"
+    except Exception:
+        pass
+    return first(['pacman', '-Q', 'python-textual'])
 
 
 def open_text(path: str) -> str:

@@ -62,6 +62,7 @@ src/tests/no-clt.sh
 src/tests/vm-names.sh
 src/tests/proxy.sh
 src/tests/mac-install.sh
+src/tests/feature-truth.sh && src/tests/upgrade-path.sh
 src/tests/release-keys.sh && src/tests/release-script.sh
 src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh && src/tests/build-ctrlc.sh && src/tests/build-space.sh
 src/net/mac/test.sh
@@ -79,7 +80,7 @@ src/tests/features-off.sh
 src/tests/app-storage.sh
 (cd app/app && swift run update-tests)
 src/bridge/mac/tests/run.sh && python3 src/release/manifest.py parts > /dev/null
-(cd src/control && python3 -m pytest -q tests)   # in a venv with textual==8.2.8 and pytest
+(cd src/control && python3 -m pytest -q tests)   # in a venv: pip install --no-deps src/control/vendor/*.whl; pip install pytest pyte
 src/tests/bench-docs.sh
 src/tests/app-idle.sh
 src/tests/app-battery.sh
