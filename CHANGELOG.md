@@ -5,6 +5,16 @@ in more words.
 
 ## 3.0.5 (unreleased)
 
+- `omacvm features` without `--vm` started the VM named Omarchy when it was
+  off, to read its features, and did it through an old copy of the app
+  ("OmacVM Bench 2.9.1.app" sorted before OmacVM.app). Listing and reading
+  (`features`, `features --json`, `check`, `vms`) now never start a VM: one
+  that is off is shown from its folder on the Mac ("VM is off", `"running":
+  false` in the JSON). `enable`, `disable` and `apply` start a stopped VM
+  only when it is named with `--vm`; without it they say so (exit 3).
+  omacvm takes OmacVM.app by its name before any other copy (a renamed
+  install next, test, bench, RC and lane copies last), and never starts a
+  VM with an app older than the OmacVM the VM has.
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
   Gestures took the other app's VMs as its own too: both captured the
   trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the

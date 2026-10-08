@@ -21,7 +21,7 @@
 # features switched or repaired, or for an update the parts it changes (by
 # /etc/omacvm/installed.json); other parts keep being only logged.
 # VM: the one named Omarchy, else the only running one. A stopped VM is
-# started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
+# started only when named with --vm (else exit 3: it is not started). User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
 # Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
 # the notch (no built-in display: the main one). The VM's SSH host key is
 # remembered the first time; --reset-host-key forgets it (a rebuilt VM).
