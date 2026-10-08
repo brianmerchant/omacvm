@@ -5,56 +5,12 @@ in more words.
 
 ## 3.0.5 (unreleased)
 
-- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
-  Gestures took the other app's VMs as its own too: both captured the
-  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
-  VMs of its own app (told by the VM's code signature), as the Bridge
-  does since 3.0.1.
-- Touch ID is no longer marked experimental (control centre, `omacvm
-  features`, README): it is a regular feature, still off until you turn it on.
-- Omanotch: when something moved the hidden NOTCH output after it was in
-  place (a Hyprland config reload with an older rule, another `hyprctl
-  eval`), the strip beside the notch could stay wrong for up to 30 s.
-  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
-  does not take is sent again with growing waits, at most every 30 s once
-  it keeps failing, and never more than 4 times in 30 s.
-
-- A Mac without Xcode's Command Line Tools: OmacVM.app no longer makes macOS
-  ask to install them. Before, the setup screen's look for a prebuilt VM ran
-  python3 and opened macOS's "install the command line developer tools?"
-  window as the app opened, Build refused until they were installed, and
-  the control centre's jobs and `omacvm vms` asked again (a Swift script
-  for the notch). The app now carries a python3, Omanotch and those Swift
-  programs ready made, so its whole route runs without them (and without
-  Homebrew). UTM, VMware Fusion and Parallels still need them, and
-  `omacvm build` asks for them only there.
-
-- OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
-  too much graphics memory (a browser with big WebGL pages) no longer turns
-  the whole VM black. The last part of the graphics memory guard (512 MB on
-  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland,
-  the bar and the lock screen): the app past its share, or the app that
-  wants more while macOS is short of memory, loses its own GPU context, and
-  the VM shows a note that says so. Before, whichever asked next lost it, often Hyprland,
-  and the app then restarted the desktop, closing every app. When the
-  desktop is still lost, the window and the note say why (the guard,
-  macOS short of memory, or a graphics failure).
-
-- OmacVM.app: when the drive with a running VM drops off (unplugged, a
-  loose cable, ejected by force), the app stops the VM at once and its
-  window says "The drive with your VMs (NAME) is gone. Reconnect it and
-  start the VM again." The VM shows as unavailable until the drive is back,
-  then as ready again. Before, QEMU kept running on files that were gone.
-  A VMs folder whose drive was not plugged in at launch shows up by itself
-  once it is.
-
 - OmacVM.app's VM window is compact and fits a 13-inch MacBook without
-  scrolling (it was up to about 900 points tall); on a smaller screen it stops at
-  the screen and scrolls. Settings sit in two columns, on/off settings are
-  switches, and the long explanations moved behind an (i). Disk is one row
-  with **Change…**. USB devices now have their own switch, off by default
-  (a VM that already had devices keeps them).
-
+  scrolling (it was up to about 900 points tall); on a smaller screen it
+  stops at the screen and scrolls. Settings sit in two columns, on/off
+  settings are switches, and the long explanations moved behind an (i).
+  Disk is one row with **Change…**. USB devices now have their own switch,
+  off by default (a VM that already had devices keeps them).
 - OmacVM.app: Disk › Change… is one slider for the disk's size, with a
   number field. It goes down to what Omarchy needs (what btrfs holds,
   plus 10 % or 5 GB spare, never under 64 GB) and up to what the Mac has
@@ -63,7 +19,6 @@ in more words.
   system is checked. A copy of the disk (an APFS clone) is kept until
   that check passes; if a step fails, Go Back brings it back. Compact is
   gone: the space Omarchy frees already goes back to the Mac by itself.
-
 - USB devices (OmacVM.app, experimental) no longer go to the VM by
   themselves. With **USB devices** on, plugging a device in while the VM
   runs asks "Connect “ST-Link V2” to Omarchy or keep it on the Mac?". The
@@ -73,7 +28,32 @@ in more words.
   apart by where they are plugged in and their serial numbers. Devices
   switched on under 3.0.1 to 3.0.4 keep connecting by themselves and now
   show in the list.
-
+- OmacVM.app: when the drive with a running VM drops off (unplugged, a
+  loose cable, ejected by force), the app stops the VM at once and its
+  window says "The drive with your VMs (NAME) is gone. Reconnect it and
+  start the VM again." The VM shows as unavailable until the drive is back,
+  then as ready again. Before, QEMU kept running on files that were gone.
+  A VMs folder whose drive was not plugged in at launch shows up by itself
+  once it is.
+- OmacVM.app on Macs with little memory (8 GB): an app in the VM that takes
+  too much graphics memory (a browser with big WebGL pages) no longer turns
+  the whole VM black. The last part of the graphics memory guard (512 MB on
+  8 GB, 1 GB on 16 GB, 2 GB from 32 GB) is kept for the desktop (Hyprland,
+  the bar and the lock screen): the app past its share, or the app that
+  wants more while macOS is short of memory, loses its own GPU context, and
+  the VM shows a note that says so. Before, whichever asked next lost it,
+  often Hyprland, and the app then restarted the desktop, closing every
+  app. When the desktop is still lost, the window and the note say why (the
+  guard, macOS short of memory, or a graphics failure).
+- A Mac without Xcode's Command Line Tools: OmacVM.app no longer makes macOS
+  ask to install them. Before, the setup screen's look for a prebuilt VM ran
+  python3 and opened macOS's "install the command line developer tools?"
+  window as the app opened, Build refused until they were installed, and
+  the control centre's jobs and `omacvm vms` asked again (a Swift script
+  for the notch). The app now carries a python3, Omanotch and those Swift
+  programs ready made, so its whole route runs without them (and without
+  Homebrew). UTM, VMware Fusion and Parallels still need them, and
+  `omacvm build` asks for them only there.
 - A VM built behind a proxy on the Mac's 127.0.0.1 (Clash, V2Ray, Surge)
   no longer keeps `10.0.2.2:<port>` as its proxy on the fast network, where
   that address leads nowhere and apps failed (Helium could not install
@@ -85,7 +65,6 @@ in more words.
   as it was. `omacvm apply` moves a VM's existing proxy over (from its
   next login); `omacvm-proxy-env` in the VM and `omacvm check` say what a
   login gets.
-
 - An older `omacvm` no longer puts its OmacVM over a VM that has a newer
   one. An old command line checkout (`~/.omacvm` from `install.sh`) first on
   the PATH beside a newer OmacVM.app turned a feature switch into a downgrade:
@@ -99,6 +78,19 @@ in more words.
   is newer than itself, `install.sh` too, and the app's "omacvm in Terminal"
   row says when the one Terminal runs is older. The control centre's jobs
   run OmacVM.app's `omacvm` instead of a checkout with an older OmacVM.
+- With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
+  Gestures took the other app's VMs as its own too: both captured the
+  trackpad and acted on Ctrl+Option+Esc. Each Gestures now takes only the
+  VMs of its own app (told by the VM's code signature), as the Bridge
+  does since 3.0.1.
+- Omanotch: when something moved the hidden NOTCH output after it was in
+  place (a Hyprland config reload with an older rule, another `hyprctl
+  eval`), the strip beside the notch could stay wrong for up to 30 s.
+  notchcast now puts it back on its next look (about 2 s). A rule Hyprland
+  does not take is sent again with growing waits, at most every 30 s once
+  it keeps failing, and never more than 4 times in 30 s.
+- Touch ID is no longer marked experimental (control centre, `omacvm
+  features`, README): it is a regular feature, still off until you turn it on.
 
 ## 3.0.4
 
