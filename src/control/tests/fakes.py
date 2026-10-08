@@ -250,6 +250,7 @@ class FakeChecks:
         self.sock.bind(self.path)
         self.sock.listen(4)
         self.tsv = tsv
+        self.delay = 0.0   # seconds before each answer (guest/check.sh takes about 6 s in a real VM)
 
         def serve():
             while True:
@@ -257,6 +258,7 @@ class FakeChecks:
                     c, _ = self.sock.accept()
                 except OSError:
                     return
+                time.sleep(self.delay)
                 c.sendall(self.tsv.encode())
                 c.close()
         threading.Thread(target=serve, daemon=True).start()
