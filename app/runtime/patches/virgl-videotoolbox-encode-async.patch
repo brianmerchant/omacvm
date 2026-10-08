@@ -1,0 +1,1492 @@
+virglrenderer: encoder frames finish beside QEMU's main loop
+
+What: the VideoToolbox encoder (virgl-videotoolbox-encode.patch) no longer waits
+for the Mac's media engine on vrend's thread, which is QEMU's main loop (it also
+runs the VM's sound timers and display). Each frame is a job (at most 4 in
+flight per encoder): BEGIN_FRAME copies the guest's picture on the GPU and
+leaves a GL fence instead of glFinish; ENCODE_BITSTREAM sets the job's options;
+the job goes to VTCompressionSessionEncodeFrame once that fence signalled, and
+END_FRAME only closes it and numbers it. The output callback finds its job by
+id under enc_lock and wakes the main loop (QEMU's poll fd);
+virgl_video_encode_poll(), run from vrend_renderer_poll(), sends jobs whose copy
+is done and gives finished ones back in order (encode_completed: coded data and
+feedback, now written through GL_COPY_WRITE_BUFFER, in context 0). vrend_video.c
+keeps each frame's coded-data and feedback buffers in a queue for that. Fences:
+each vrend fence records the last job closed before it, and does not signal
+before every job up to it went back: the sync thread waits for that after the
+GL fence (it wakes the main loop first; 2 s at most, then a warning), polled
+fences stay unretired. The guest reads its feedback only after such a fence, so
+it never sees a frame half done. Constant QP: a normal session with
+MinAllowedFrameQP and MaxAllowedFrameQP at the guest's I and P QP (equal for
+FFmpeg and gpu-screen-recorder unless told otherwise); VideoToolbox takes them
+only before the first frame, so another QP is another session. Where the
+encoder refuses the range, or with OMACVM_VIDEO_ENCODE_BASE_QP=1, the
+low-latency session with BaseFrameQP as before (its EncodeFrame waits for the
+frame). A frame the media engine has had for 1 s without output, and any frame left
+without output after CompleteFrames, fails instead of holding fences.
+Unchanged: the frame that never ended fails at the next BEGIN_FRAME,
+a second encode in a frame is refused, every attempted frame gets exactly one
+result, refused frames fail at once.
+Why: screen recording in the VM (Omarchy's gpu-screen-recorder, h264_vaapi,
+constant QP, 60 fps of a 2940x1840 display) kept QEMU's main loop busy 93 % of
+the time on a MacBook Air M2: 78 % in VTCompressionSessionEncodeFrame (the
+low-latency session waits for each frame, 12-13 ms), 6.6 % in glFinish. The
+guest's display fell to 12 frames a second and the Mac got about a third of the
+sound (6.8 s per 20 s, crackling). With this: the main loop is idle 86 % of the
+time while recording, the sound is whole (20.7 s per 20.7 s), the display runs
+at 29 frames a second (each frame's fences wait for the media engine) and
+gpu-screen-recorder uses 8 % of a vCPU instead of 87 %.
+Upstream: OmacVM addition to its own backend; the fence hook would need an
+upstream API for late video results. Not sent.
+Tests: Tests/virgl/test-video-encode.c waits for a fence after each submit as the
+guest does and checks that no fence signals before the frames ahead of it have
+their feedback; three frames sent at once, each with its own buffers, all come
+back in order and decode; runs with polled fences, with QEMU's sync-thread fences
+(OMACVM_TEST_THREAD_SYNC=1) and with the low-latency session
+(OMACVM_VIDEO_ENCODE_BASE_QP=1). Tests/virgl/run-regressions.py: the coded-data
+write no longer touches vertex state (its review entry is gone);
+index-range-writes.py: the write still bumps the buffer's content generation.
+diff --git a/src/vrend/virgl_video.h b/src/vrend/virgl_video.h
+index facc47b..a2af22d 100644
+--- a/src/vrend/virgl_video.h
++++ b/src/vrend/virgl_video.h
+@@ -138,6 +138,9 @@ struct virgl_video_dma_buf {
+ 
+     /* VideoToolbox backend: the decoded CVPixelBufferRef (planes unused) */
+     void *native;
++    /* VideoToolbox encoder: set by encode_upload_picture when the copy into
++     * `native` is still running on the GPU (a GL fence; NULL: done) */
++    void *gpu_fence;
+ };
+ 
+ /*
+@@ -155,7 +158,7 @@ struct virgl_video_callbacks {
+     /* Upload the picture data to be encoded to the video buffer */
+     /* 0 when the picture was copied (the VideoToolbox backend fails the frame otherwise) */
+     int (*encode_upload_picture)(struct virgl_video_codec *codec,
+-                                  const struct virgl_video_dma_buf *dmabuf);
++                                  struct virgl_video_dma_buf *dmabuf);
+ 
+     /* Callback when encoding is complete, used to download the encoded data
+      * and reference picture */
+@@ -165,6 +168,16 @@ struct virgl_video_callbacks {
+                              unsigned num_coded_bufs,
+                              const void * const *coded_bufs,
+                              const unsigned *coded_sizes);
++
++    /* VideoToolbox encoder (frames finish after END_FRAME):
++     * gpu_fence_wait: is the GPU work before this fence done? BLOCK: wait for it
++     * (vrend's thread, a context of its share group current);
++     * gpu_fence_destroy: frees it (vrend's thread);
++     * encode_wake: an encoder's output is in, run virgl_video_encode_poll soon
++     * (any thread). */
++    bool (*gpu_fence_wait)(void *fence, bool block);
++    void (*gpu_fence_destroy)(void *fence);
++    void (*encode_wake)(void);
+ };
+ 
+ int virgl_video_init(int drm_fd,
+@@ -198,6 +211,16 @@ int virgl_video_decode_bitstream(struct virgl_video_codec *codec,
+ int virgl_video_encode_bitstream(struct virgl_video_codec *codec,
+                                  struct virgl_video_buffer *source,
+                                  const union virgl_picture_desc *desc);
++/* VideoToolbox encoder: frames finish after END_FRAME. A fence made after a
++ * frame's END_FRAME (seq: virgl_video_encode_seq() when it is made) must not
++ * signal before virgl_video_encode_done(seq); virgl_video_encode_poll() moves
++ * frames on and gives finished ones back (vrend's thread). */
++void virgl_video_encode_poll(void);
++bool virgl_video_encode_busy(void);
++uint64_t virgl_video_encode_seq(void);
++bool virgl_video_encode_done(uint64_t seq);
++bool virgl_video_encode_wait(uint64_t seq, uint32_t timeout_ms);
++
+ int virgl_video_end_frame(struct virgl_video_codec *codec,
+                           struct virgl_video_buffer *target);
+ 
+diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
+index 70d3a0b..f8a56ac 100644
+--- a/src/vrend/virgl_video_vt.c
++++ b/src/vrend/virgl_video_vt.c
+@@ -197,6 +197,26 @@ struct vt_bytes {
+     size_t cap;
+ };
+ 
++/* One frame on its way through the media engine (see "Encoder" below). The
++ * fields after `id` are written by VideoToolbox's output thread, under enc_lock. */
++#define VT_ENC_MAX_JOBS 4
++struct enc_job {
++    uint64_t seq;               /* 0 until the frame is closed (END_FRAME, or given up) */
++    CVPixelBufferRef src;       /* the picture, until it went to the encoder */
++    void *gpu_fence;            /* the picture's GPU copy; NULL once done */
++    CFDictionaryRef props;      /* frame options (key frame, QP) */
++    CMTime pts, dur;
++    bool ready;                 /* props, pts and dur are set: may go to the encoder */
++    bool sent;                  /* went to VTCompressionSessionEncodeFrame */
++    uint64_t sent_ns;           /* ... when */
++    bool fail;                  /* reported as failed whatever the encoder says */
++    uint64_t id;                /* the output callback's handle on this job */
++    bool out;                   /* the output is in */
++    OSStatus status;
++    VTEncodeInfoFlags info;
++    struct vt_bytes coded;      /* Annex B access unit */
++};
++
+ struct virgl_video_codec {
+     uint32_t guest_profile;
+     enum pipe_video_profile profile;
+@@ -252,20 +272,20 @@ struct virgl_video_codec {
+     uint32_t enc_w, enc_h;              /* the stream's size: the guest's picture cropped */
+     bool enc_broken;                    /* no session could be made: refuse every frame */
+     CVPixelBufferRef enc_src;           /* this frame's picture, filled by vrend */
+-    struct vt_bytes coded;              /* Annex B output of the last frame */
+-    OSStatus enc_status;
+-    VTEncodeInfoFlags enc_info;         /* of the last output (dropped?) */
+-    pthread_mutex_t enc_lock;           /* coded, enc_status, enc_info: see "Threading" */
+-    bool enc_have_desc;                 /* a frame went to VideoToolbox, not yet ended */
+-    bool enc_attempted;                 /* encode_bitstream came this frame: feedback owed */
++    void *enc_src_fence;                /* ... its GPU copy (NULL: copied already) */
++    struct enc_job jobs[VT_ENC_MAX_JOBS];   /* frames in flight, oldest at job_head */
++    unsigned job_head, job_count;
++    struct enc_job *enc_cur;            /* this frame's job, not closed yet */
++    pthread_mutex_t enc_lock;           /* the jobs' output fields: see "Threading" */
+     CMTime enc_pts;                     /* next frame's time stamp, always increasing */
+     uint64_t enc_frame;                 /* presentation index */
+     bool enc_cqp;                       /* session made for constant QP */
+-    bool enc_frame_qp;                  /* ... and it takes the QP per frame (BaseFrameQP) */
++    enum { ENC_QP_NONE, ENC_QP_RANGE, ENC_QP_FRAME, ENC_QP_QUALITY } enc_qp_mode;
+     uint32_t enc_sessions;              /* sessions made, to log only the first few */
+     uint32_t enc_bitrate;               /* settings in use, to update only on change */
+     uint32_t enc_peak;
+-    uint32_t enc_qp;
++    uint32_t enc_qp;                    /* QP (quality mode) or the low end of the range */
++    uint32_t enc_qp_hi;                 /* ... its high end (ENC_QP_RANGE) */
+     uint32_t enc_fps_num;
+     uint32_t enc_fps_den;
+     uint32_t enc_gop;
+@@ -2184,11 +2204,21 @@ static bool kind_offered(enum vt_codec_kind kind)
+  * SPS and PPS, HEVC: VPS, SPS and PPS before every key frame). VideoToolbox keeps
+  * its own reference frames and never reorders (no B frames), so the guest's
+  * reference lists and picture order counts are not needed.
+- * Threading: all calls come from vrend's thread. The output callback may run on
+- * a VideoToolbox thread at any time after EncodeFrame; it writes codec->coded,
+- * enc_status and enc_info under enc_lock, and vrend's side takes the lock too.
+- * A frame the guest never ended is completed (and dropped) before the next one
+- * starts, so one frame's output never mixes into another's. */
++ * Frames are encoded beside the guest: vrend's thread (QEMU's main loop, which
++ * also runs the VM's sound and display) never waits for the media engine, which
++ * takes 12-40 ms for a Retina-sized frame. Each frame is a job: its picture,
++ * the fence of its GPU copy, its frame options, later its output. A job goes to
++ * VideoToolbox once its copy is done on the GPU, and back to vrend
++ * (encode_completed) once its output is in, both in order and both from
++ * virgl_video_encode_poll (vrend's thread). END_FRAME closes the frame's job and
++ * gives it a number (seq); a fence the guest asks for after that is held until
++ * the job went back (virgl_video_encode_wait on the sync thread, or
++ * virgl_video_encode_done for polled fences), so the guest reads its coded data
++ * and feedback only once they are there.
++ * Threading: all calls come from vrend's thread, but virgl_video_encode_wait
++ * (the sync thread). The output callback runs on a VideoToolbox thread; it finds
++ * its job by number under enc_lock (a job given up meanwhile is not found, its
++ * output is dropped) and wakes vrend's thread (callbacks->encode_wake). */
+ 
+ /* Limits on what a guest may ask for. */
+ #define VT_ENC_MIN_SIZE 16
+@@ -2210,6 +2240,17 @@ static bool kind_offered(enum vt_codec_kind kind)
+ _Static_assert(VT_ENC_CAPS_LIMIT <= VT_ENC_MAX_LIVE && VT_ENC_CAPS_LIMIT <= 255,
+                "omacvm_max_open has 8 bits");
+ 
++/* The encoders alive (vrend's thread), for virgl_video_encode_poll. */
++static struct virgl_video_codec *enc_live[VT_ENC_MAX_LIVE];
++/* Closed jobs: seq of the last one closed (vrend's thread) and of the oldest
++ * not given back yet (UINT64_MAX: none), the second under enc_wait_lock for the
++ * sync thread. */
++static uint64_t enc_seq_last;
++static uint64_t enc_seq_open = UINT64_MAX;
++static pthread_mutex_t enc_wait_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t enc_wait_cond = PTHREAD_COND_INITIALIZER;
++static uint64_t enc_next_id = 1;   /* job ids for the output callback */
++
+ static CMVideoCodecType enc_codec_type(enum vt_codec_kind kind)
+ {
+     return kind == VT_KIND_HEVC ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264;
+@@ -2258,23 +2299,40 @@ static OSStatus enc_param_set(enum vt_codec_kind kind, CMFormatDescriptionRef fm
+     return CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fmt, i, ps, size, count, nal_len);
+ }
+ 
+-static void enc_output_locked(struct virgl_video_codec *codec, OSStatus status,
+-                              VTEncodeInfoFlags flags, CMSampleBufferRef sample);
++static void enc_output_locked(struct virgl_video_codec *codec, struct enc_job *job,
++                              OSStatus status, VTEncodeInfoFlags flags, CMSampleBufferRef sample);
++
++/* The job with this id, if it is still in flight (enc_lock held). */
++static struct enc_job *enc_job_by_id(struct virgl_video_codec *codec, uint64_t id)
++{
++    for (unsigned i = 0; i < codec->job_count; i++) {
++        struct enc_job *job = &codec->jobs[(codec->job_head + i) % VT_ENC_MAX_JOBS];
++        if (job->id == id)
++            return job;
++    }
++    return NULL;
++}
+ 
+ static void enc_output_callback(void *ref_con, void *frame_ref_con, OSStatus status,
+                                 VTEncodeInfoFlags flags, CMSampleBufferRef sample)
+ {
+     struct virgl_video_codec *codec = ref_con;
++    struct enc_job *job;
+ 
+-    (void)frame_ref_con;
+     pthread_mutex_lock(&codec->enc_lock);
+-    enc_output_locked(codec, status, flags, sample);
++    job = enc_job_by_id(codec, (uint64_t)(uintptr_t)frame_ref_con);
++    if (job && job->sent && !job->out) {
++        enc_output_locked(codec, job, status, flags, sample);
++        job->out = true;
++    }
+     pthread_mutex_unlock(&codec->enc_lock);
++    if (job && callbacks && callbacks->encode_wake)
++        callbacks->encode_wake();
+ }
+ 
+ /* The output callback's work, with enc_lock held. */
+-static void enc_output_locked(struct virgl_video_codec *codec, OSStatus status,
+-                              VTEncodeInfoFlags flags, CMSampleBufferRef sample)
++static void enc_output_locked(struct virgl_video_codec *codec, struct enc_job *job,
++                              OSStatus status, VTEncodeInfoFlags flags, CMSampleBufferRef sample)
+ {
+     static const uint8_t start[4] = { 0, 0, 0, 1 };
+     CMFormatDescriptionRef fmt;
+@@ -2285,8 +2343,9 @@ static void enc_output_locked(struct virgl_video_codec *codec, OSStatus status,
+     char *data = NULL, *copy = NULL;
+     int nal_len = 4;
+ 
+-    codec->enc_status = status;
+-    codec->enc_info = flags;
++    job->status = status;
++    job->info = flags;
++    job->coded.size = 0;
+     if (status != noErr || !sample || (flags & kVTEncodeInfo_FrameDropped))
+         return;
+ 
+@@ -2305,8 +2364,8 @@ static void enc_output_locked(struct virgl_video_codec *codec, OSStatus status,
+             size_t ps_size = 0;
+             if (enc_param_set(codec->kind, fmt, i, &ps, &ps_size, NULL, NULL) != noErr)
+                 continue;
+-            bytes_append(&codec->coded, start, 4);
+-            bytes_append(&codec->coded, ps, ps_size);
++            bytes_append(&job->coded, start, 4);
++            bytes_append(&job->coded, ps, ps_size);
+         }
+     } else if (fmt) {
+         enc_param_set(codec->kind, fmt, 0, NULL, NULL, NULL, &nal_len);
+@@ -2315,20 +2374,20 @@ static void enc_output_locked(struct virgl_video_codec *codec, OSStatus status,
+         nal_len = 4;
+ 
+     /* AVCC/HVCC: each NAL unit after an nal_len-byte big-endian length. A frame
+-     * that does not fit the limit is dropped whole (enc_status). */
++     * that does not fit the limit is dropped whole (status). */
+     /* The data pointer is good for `contiguous` bytes only: a block buffer in
+      * pieces is copied into one (bounded by the limit) first. */
+     block = CMSampleBufferGetDataBuffer(sample);
+     if (!block || CMBlockBufferGetDataPointer(block, 0, &contiguous, &total, &data) != noErr ||
+         total > VT_ENC_MAX_CODED) {
+-        codec->enc_status = kVTVideoEncoderMalfunctionErr;
++        job->status = kVTVideoEncoderMalfunctionErr;
+         return;
+     }
+     if (contiguous < total) {
+         copy = malloc(total);
+         if (!copy || CMBlockBufferCopyDataBytes(block, 0, total, copy) != kCMBlockBufferNoErr) {
+             free(copy);
+-            codec->enc_status = kVTVideoEncoderMalfunctionErr;
++            job->status = kVTVideoEncoderMalfunctionErr;
+             return;
+         }
+         data = copy;
+@@ -2340,11 +2399,11 @@ static void enc_output_locked(struct virgl_video_codec *codec, OSStatus status,
+         off += nal_len;
+         if (len > total - off)
+             break;
+-        if (codec->coded.size + 4 + len > VT_ENC_MAX_CODED ||
+-            !bytes_append(&codec->coded, start, 4) ||
+-            !bytes_append(&codec->coded, data + off, len)) {
+-            codec->enc_status = kVTVideoEncoderMalfunctionErr;
+-            codec->coded.size = 0;
++        if (job->coded.size + 4 + len > VT_ENC_MAX_CODED ||
++            !bytes_append(&job->coded, start, 4) ||
++            !bytes_append(&job->coded, data + off, len)) {
++            job->status = kVTVideoEncoderMalfunctionErr;
++            job->coded.size = 0;
+             break;
+         }
+         off += len;
+@@ -2415,30 +2474,68 @@ static bool enc_session_make(struct virgl_video_codec *codec, bool low_latency)
+     return true;
+ }
+ 
++static OSStatus enc_set_int(VTCompressionSessionRef s, CFStringRef key, int32_t v)
++{
++    CFNumberRef n = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &v);
++    OSStatus st = VTSessionSetProperty(s, key, n);
++    CFRelease(n);
++    return st;
++}
++
++/* Constant QP: the frame QP held between MinAllowedFrameQP and
++ * MaxAllowedFrameQP (the guest's I and P QP; the same for FFmpeg and
++ * gpu-screen-recorder unless told otherwise). Taken only before the first frame
++ * (VideoToolbox ignores later changes), so another range is another session.
++ * False when the encoder does not take them. */
++static bool enc_set_qp_range(struct virgl_video_codec *codec, uint32_t lo, uint32_t hi)
++{
++    if (enc_set_int(codec->enc, kVTCompressionPropertyKey_MaxAllowedFrameQP, (int32_t)hi) ||
++        enc_set_int(codec->enc, kVTCompressionPropertyKey_MinAllowedFrameQP, (int32_t)lo))
++        return false;
++    codec->enc_qp = lo;
++    codec->enc_qp_hi = hi;
++    return true;
++}
++
+ /* Bitrate modes: no low-latency rate control. It drops frames to keep the
+  * bitrate, and a VA-API encoder has no way to tell the guest a frame was
+  * dropped (Chrome then gives up on the hardware encoder); DataRateLimits keeps
+- * the rate instead. Constant QP: a low-latency session, which takes the QP per
+- * frame (BaseFrameQP; no rate control, so nothing is dropped). Where the
+- * encoder cannot, a normal session with VideoToolbox's quality from the QP
+- * (an approximation, logged). Settings and time stamps start over. */
+-static bool enc_session_create(struct virgl_video_codec *codec, bool cqp)
++ * the rate instead. Constant QP: a normal session with the frame QP held
++ * between equal MinAllowedFrameQP and MaxAllowedFrameQP (the media engine works
++ * beside the caller). Where the encoder refuses that, a low-latency session that
++ * takes the QP per frame (BaseFrameQP; no rate control, nothing dropped, but
++ * EncodeFrame waits for the frame), and where it cannot either, a normal session
++ * with VideoToolbox's quality from the QP (an approximation, logged). Settings
++ * and time stamps start over. */
++static bool enc_session_create(struct virgl_video_codec *codec, bool cqp, uint32_t qp_lo,
++                               uint32_t qp_hi)
+ {
+     CFBooleanRef frame_qp = NULL;
+ 
+-    codec->enc_frame_qp = false;
++    codec->enc_qp_mode = ENC_QP_NONE;
++    codec->enc_qp = 0;
+     if (cqp) {
+-        if (!enc_session_make(codec, true))
+-            return false;
+-        if (VTSessionCopyProperty(codec->enc, kVTCompressionPropertyKey_SupportsBaseFrameQP,
+-                                  kCFAllocatorDefault, &frame_qp) == noErr && frame_qp) {
+-            codec->enc_frame_qp = frame_qp == kCFBooleanTrue;
+-            CFRelease(frame_qp);
++        if (!getenv("OMACVM_VIDEO_ENCODE_BASE_QP") && enc_session_make(codec, false)) {
++            if (enc_set_qp_range(codec, qp_lo, qp_hi))
++                codec->enc_qp_mode = ENC_QP_RANGE;
++            else
++                enc_session_destroy(codec);
+         }
+-        if (!codec->enc_frame_qp) {
+-            if (codec->enc_sessions < 4)
+-                virgl_warn("vt-video: no per-frame QP; constant QP approximated by quality\n");
+-            enc_session_destroy(codec);
++        if (!codec->enc) {
++            if (!enc_session_make(codec, true))
++                return false;
++            if (VTSessionCopyProperty(codec->enc, kVTCompressionPropertyKey_SupportsBaseFrameQP,
++                                      kCFAllocatorDefault, &frame_qp) == noErr && frame_qp) {
++                if (frame_qp == kCFBooleanTrue)
++                    codec->enc_qp_mode = ENC_QP_FRAME;
++                CFRelease(frame_qp);
++            }
++            if (codec->enc_qp_mode != ENC_QP_FRAME) {
++                if (codec->enc_sessions < 4)
++                    virgl_warn("vt-video: no per-frame QP; constant QP approximated by quality\n");
++                enc_session_destroy(codec);
++                codec->enc_qp_mode = ENC_QP_QUALITY;
++            }
+         }
+     }
+     if (!codec->enc && !enc_session_make(codec, false))
+@@ -2450,7 +2547,9 @@ static bool enc_session_create(struct virgl_video_codec *codec, bool cqp)
+                          enc_profile_level(codec->profile));
+     VTCompressionSessionPrepareToEncodeFrames(codec->enc);
+     codec->enc_cqp = cqp;
+-    codec->enc_bitrate = codec->enc_peak = codec->enc_qp = 0;
++    codec->enc_bitrate = codec->enc_peak = 0;
++    if (codec->enc_qp_mode != ENC_QP_RANGE)
++        codec->enc_qp = 0;
+     codec->enc_fps_num = codec->enc_fps_den = codec->enc_gop = 0;
+     codec->enc_frame = 0;
+     codec->enc_pts = kCMTimeZero;
+@@ -2459,7 +2558,10 @@ static bool enc_session_create(struct virgl_video_codec *codec, bool cqp)
+         virgl_info("vt-video: %s encoder %ux%u (pictures %ux%u), %s\n",
+                    codec->kind == VT_KIND_HEVC ? "HEVC" : "H.264", codec->enc_w, codec->enc_h,
+                    codec->width, codec->height,
+-                   !cqp ? "bitrate" : codec->enc_frame_qp ? "constant QP" : "quality from QP");
++                   !cqp ? "bitrate" :
++                   codec->enc_qp_mode == ENC_QP_RANGE ? "constant QP" :
++                   codec->enc_qp_mode == ENC_QP_FRAME ? "constant QP (low latency)" :
++                   "quality from QP");
+     return true;
+ }
+ 
+@@ -2589,24 +2691,22 @@ static void enc_params_get(const struct virgl_video_codec *codec,
+         e->qp_p = 51;
+ }
+ 
+-static void enc_set_int(VTCompressionSessionRef s, CFStringRef key, int32_t v)
+-{
+-    CFNumberRef n = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &v);
+-    VTSessionSetProperty(s, key, n);
+-    CFRelease(n);
+-}
+-
+ /* Rate control, frame rate and key frame interval; set again only on change.
+  * Bitrate: the guest's target as the average, at most 1.5 times it (or its
+  * peak, if higher) in any second, so a frame is never dropped for the rate.
+- * Constant QP: the QP goes with each frame (enc_encode); only an encoder without
+- * per-frame QP gets VideoToolbox's quality from the guest's P-frame QP. */
++ * Constant QP: the QP goes with each job (enc_send); only an encoder without
++ * per-frame QP gets VideoToolbox's quality from the guest's P-frame QP.
++ * Frames still waiting for their GPU copy go to the encoder first, so a change
++ * applies from this frame on. */
++static void enc_send_all(struct virgl_video_codec *codec);
++
+ static void enc_apply_settings(struct virgl_video_codec *codec, const struct enc_params *e)
+ {
+     if (e->cqp) {
+-        if (!codec->enc_frame_qp && e->qp_p != codec->enc_qp) {
++        if (codec->enc_qp_mode == ENC_QP_QUALITY && e->qp_p != codec->enc_qp) {
+             float q = (51.0f - (float)e->qp_p) / 51.0f;
+             CFNumberRef n = CFNumberCreate(kCFAllocatorDefault, kCFNumberFloatType, &q);
++            enc_send_all(codec);
+             VTSessionSetProperty(codec->enc, kVTCompressionPropertyKey_Quality, n);
+             CFRelease(n);
+             codec->enc_qp = e->qp_p;
+@@ -2619,6 +2719,7 @@ static void enc_apply_settings(struct virgl_video_codec *codec, const struct enc
+         CFArrayRef limits;
+         const void *v[2];
+ 
++        enc_send_all(codec);
+         if (e->peak > limit)
+             limit = e->peak;
+         bytes = (int32_t)(limit / 8);
+@@ -2638,44 +2739,255 @@ static void enc_apply_settings(struct virgl_video_codec *codec, const struct enc
+     if (e->fps_num != codec->enc_fps_num || e->fps_den != codec->enc_fps_den) {
+         double fps = (double)e->fps_num / e->fps_den;
+         CFNumberRef n = CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &fps);
++        enc_send_all(codec);
+         VTSessionSetProperty(codec->enc, kVTCompressionPropertyKey_ExpectedFrameRate, n);
+         CFRelease(n);
+         codec->enc_fps_num = e->fps_num;
+         codec->enc_fps_den = e->fps_den;
+     }
+     if (e->gop && e->gop != codec->enc_gop) {
++        enc_send_all(codec);
+         enc_set_int(codec->enc, kVTCompressionPropertyKey_MaxKeyFrameInterval, (int32_t)e->gop);
+         codec->enc_gop = e->gop;
+     }
+ }
+ 
++/* ---- jobs ---------------------------------------------------------------- */
++
++static struct enc_job *enc_job_at(struct virgl_video_codec *codec, unsigned i)
++{
++    return &codec->jobs[(codec->job_head + i) % VT_ENC_MAX_JOBS];
++}
++
++/* Releases what a job holds on vrend's thread (picture, fence, options). */
++static void enc_job_release(struct enc_job *job)
++{
++    if (job->src)
++        CVPixelBufferRelease(job->src);
++    job->src = NULL;
++    if (job->gpu_fence && callbacks && callbacks->gpu_fence_destroy)
++        callbacks->gpu_fence_destroy(job->gpu_fence);
++    job->gpu_fence = NULL;
++    if (job->props)
++        CFRelease(job->props);
++    job->props = NULL;
++}
++
++/* The oldest closed job not given back yet, over all encoders, for the
++ * fences that wait (vrend's thread). */
++static void enc_update_open(void)
++{
++    uint64_t open = UINT64_MAX;
++
++    for (unsigned c = 0; c < VT_ENC_MAX_LIVE; c++) {
++        struct virgl_video_codec *codec = enc_live[c];
++        for (unsigned i = 0; codec && i < codec->job_count; i++) {
++            struct enc_job *job = enc_job_at(codec, i);
++            if (job->seq && job->seq < open)
++                open = job->seq;
++        }
++    }
++    pthread_mutex_lock(&enc_wait_lock);
++    if (open != enc_seq_open) {
++        enc_seq_open = open;
++        pthread_cond_broadcast(&enc_wait_cond);
++    }
++    pthread_mutex_unlock(&enc_wait_lock);
++}
++
++/* Closes the frame's job: from now on fences wait for it. */
++static void enc_job_close(struct virgl_video_codec *codec, struct enc_job *job, bool fail)
++{
++    if (fail)
++        job->fail = true;
++    job->seq = ++enc_seq_last;
++    pthread_mutex_lock(&enc_wait_lock);
++    if (job->seq < enc_seq_open)
++        enc_seq_open = job->seq;
++    pthread_mutex_unlock(&enc_wait_lock);
++    if (codec->enc_cur == job)
++        codec->enc_cur = NULL;
++}
++
++/* Is the picture copy of this job done on the GPU? BLOCK: wait for it. */
++static bool enc_job_copied(struct enc_job *job, bool block)
++{
++    if (!job->gpu_fence)
++        return true;
++    if (!callbacks || !callbacks->gpu_fence_wait ||
++        callbacks->gpu_fence_wait(job->gpu_fence, block)) {
++        if (callbacks && callbacks->gpu_fence_destroy)
++            callbacks->gpu_fence_destroy(job->gpu_fence);
++        job->gpu_fence = NULL;
++        return true;
++    }
++    return false;
++}
++
++/* One job to the encoder. A job that cannot go is failed (it is given back as
++ * such). */
++static void enc_job_send(struct virgl_video_codec *codec, struct enc_job *job)
++{
++    VTEncodeInfoFlags info = 0;
++    OSStatus st;
++
++    pthread_mutex_lock(&codec->enc_lock);
++    job->sent = true;
++    job->sent_ns = now_ns();
++    pthread_mutex_unlock(&codec->enc_lock);
++    st = VTCompressionSessionEncodeFrame(codec->enc, job->src, job->pts, job->dur, job->props,
++                                         (void *)(uintptr_t)job->id, &info);
++    if (st != noErr) {
++        virgl_error("vt-video: encode frame failed: %d\n", (int)st);
++        pthread_mutex_lock(&codec->enc_lock);
++        job->fail = true;
++        job->out = true;
++        pthread_mutex_unlock(&codec->enc_lock);
++    }
++    enc_job_release(job);
++}
++
++/* Jobs whose picture is copied go to the encoder, in order (BLOCK: all of
++ * them, waiting for their copies). */
++static void enc_send(struct virgl_video_codec *codec, bool block)
++{
++    for (unsigned i = 0; i < codec->job_count; i++) {
++        struct enc_job *job = enc_job_at(codec, i);
++
++        if (job->sent || job->fail)
++            continue;
++        if (!job->ready || !codec->enc || !enc_job_copied(job, block))
++            break;
++        enc_job_send(codec, job);
++    }
++}
++
++static void enc_send_all(struct virgl_video_codec *codec)
++{
++    enc_send(codec, true);
++}
++
++/* Closed jobs whose output is in (or that failed) go back to vrend, in order;
++ * WAIT: wait for the media engine first. */
++static void enc_deliver(struct virgl_video_codec *codec, bool wait)
++{
++    bool changed = false;
++
++    if (wait) {
++        enc_send(codec, true);
++        if (codec->enc)
++            VTCompressionSessionCompleteFrames(codec->enc, kCMTimeInvalid);
++        /* VideoToolbox says every frame it got is done: a closed frame without
++         * output never gets one (it fails, rather than holding fences). */
++        pthread_mutex_lock(&codec->enc_lock);
++        for (unsigned i = 0; i < codec->job_count; i++) {
++            struct enc_job *job = enc_job_at(codec, i);
++            if (job->seq && job->sent && !job->out)
++                job->fail = true;
++        }
++        pthread_mutex_unlock(&codec->enc_lock);
++    }
++    while (codec->job_count) {
++        struct enc_job *job = enc_job_at(codec, 0);
++        struct vt_bytes coded = { 0 };
++        const void *bufs[1];
++        unsigned sizes[1];
++        bool ok;
++
++        pthread_mutex_lock(&codec->enc_lock);
++        if (!job->seq || (!job->fail && !job->out)) {
++            pthread_mutex_unlock(&codec->enc_lock);
++            break;
++        }
++        ok = !job->fail && job->out && job->status == noErr &&
++             !(job->info & kVTEncodeInfo_FrameDropped) && job->coded.size;
++        if (!ok && codec->errors++ < 5)
++            virgl_warn("vt-video: frame not encoded: %s, status %d, flags 0x%x\n",
++                       job->fail ? (job->sent ? "given up" : "not sent to the encoder") :
++                       "no output",
++                       (int)job->status, (unsigned)job->info);
++        coded = job->coded;
++        memset(&job->coded, 0, sizeof(job->coded));
++        job->id = 0;
++        codec->job_head = (codec->job_head + 1) % VT_ENC_MAX_JOBS;
++        codec->job_count--;
++        pthread_mutex_unlock(&codec->enc_lock);
++        enc_job_release(job);
++        job->seq = 0;
++        changed = true;
++
++        if (ok) {
++            codec->frames++;
++            bufs[0] = coded.data;
++            sizes[0] = (unsigned)coded.size;
++        }
++        if (callbacks && callbacks->encode_completed)
++            callbacks->encode_completed(codec, NULL, NULL, ok ? 1 : 0, ok ? bufs : NULL,
++                                        ok ? sizes : NULL);
++        bytes_free(&coded);
++    }
++    if (changed)
++        enc_update_open();
++}
++
++/* A new job for this frame (ENCODE_BITSTREAM). Room is made by waiting for the
++ * oldest when VT_ENC_MAX_JOBS are in flight. */
++static struct enc_job *enc_job_new(struct virgl_video_codec *codec)
++{
++    struct enc_job *job;
++
++    if (codec->job_count == VT_ENC_MAX_JOBS)
++        enc_deliver(codec, true);
++    if (codec->job_count == VT_ENC_MAX_JOBS) {
++        /* only an open job can stay: give it up */
++        if (codec->enc_cur)
++            enc_job_close(codec, codec->enc_cur, true);
++        enc_deliver(codec, true);
++    }
++    pthread_mutex_lock(&codec->enc_lock);
++    job = enc_job_at(codec, codec->job_count);
++    memset(job, 0, sizeof(*job));
++    job->id = enc_next_id++;
++    job->src = codec->enc_src;
++    job->gpu_fence = codec->enc_src_fence;
++    codec->enc_src = NULL;
++    codec->enc_src_fence = NULL;
++    codec->job_count++;
++    pthread_mutex_unlock(&codec->enc_lock);
++    codec->enc_cur = job;
++    return job;
++}
++
++/* The picture of this frame, when no job took it. */
++static void enc_drop_src(struct virgl_video_codec *codec)
++{
++    if (codec->enc_src)
++        CVPixelBufferRelease(codec->enc_src);
++    codec->enc_src = NULL;
++    if (codec->enc_src_fence && callbacks && callbacks->gpu_fence_destroy)
++        callbacks->gpu_fence_destroy(codec->enc_src_fence);
++    codec->enc_src_fence = NULL;
++}
++
+ /* begin_frame: a picture buffer from the session's pool; vrend copies the
+- * guest's picture (its plane textures) into it. The session comes with the
+- * first picture description (it has the stream's size): the first picture
+- * gets a buffer of its own, at the guest's full picture size. */
++ * guest's picture (its plane textures) into it on the GPU. The session comes
++ * with the first picture description (it has the stream's size): the first
++ * picture gets a buffer of its own, at the guest's full picture size. */
+ static int enc_begin_frame(struct virgl_video_codec *codec, struct virgl_video_buffer *target)
+ {
+     struct virgl_video_dma_buf dmabuf;
+     CVPixelBufferPoolRef pool;
+ 
+-    /* A frame the guest began but never ended: wait for it, drop its output and
+-     * give the guest failure feedback for it. */
+-    if (codec->enc && codec->enc_have_desc)
+-        VTCompressionSessionCompleteFrames(codec->enc, kCMTimeInvalid);
+-    if (codec->enc_attempted && callbacks && callbacks->encode_completed)
+-        callbacks->encode_completed(codec, NULL, NULL, 0, NULL, NULL);
+-    codec->enc_have_desc = false;
+-    codec->enc_attempted = false;
+-    pthread_mutex_lock(&codec->enc_lock);
+-    codec->coded.size = 0;
+-    pthread_mutex_unlock(&codec->enc_lock);
++    /* A frame the guest began but never ended: it fails (its output, when it
++     * comes, is dropped), so nothing of it reaches the next frame. */
++    if (codec->enc_cur) {
++        enc_job_close(codec, codec->enc_cur, true);
++        enc_deliver(codec, false);
++    }
++    enc_drop_src(codec);
+     if (codec->enc_broken || target->format != PIPE_FORMAT_NV12 ||
+         target->width < codec->width || target->height < codec->height)
+         return -1;
+-    if (codec->enc_src) {
+-        CVPixelBufferRelease(codec->enc_src);
+-        codec->enc_src = NULL;
+-    }
+     if (codec->enc) {
+         pool = VTCompressionSessionGetPixelBufferPool(codec->enc);
+         if (!pool || CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool,
+@@ -2706,32 +3018,42 @@ static int enc_begin_frame(struct virgl_video_codec *codec, struct virgl_video_b
+         dmabuf.num_planes = (uint32_t)CVPixelBufferGetPlaneCount(codec->enc_src);
+         dmabuf.native = codec->enc_src;
+         if (callbacks->encode_upload_picture(codec, &dmabuf)) {
+-            /* No picture: this frame fails (encode finds no enc_src). */
++            /* No picture: this frame fails (its job finds no picture). */
++            if (dmabuf.gpu_fence && callbacks->gpu_fence_destroy)
++                callbacks->gpu_fence_destroy(dmabuf.gpu_fence);
+             CVPixelBufferRelease(codec->enc_src);
+             codec->enc_src = NULL;
+             return -1;
+         }
++        codec->enc_src_fence = dmabuf.gpu_fence;
+     }
+     return 0;
+ }
+ 
+-static int enc_encode(struct virgl_video_codec *codec, const union virgl_picture_desc *desc)
++/* encode_bitstream: the frame's job gets its options and goes to the encoder
++ * as soon as its picture is copied. JOB is this frame's (new) job. */
++static int enc_encode(struct virgl_video_codec *codec, struct enc_job *job,
++                      const union virgl_picture_desc *desc)
+ {
+     CFMutableDictionaryRef props = NULL;
+-    VTEncodeInfoFlags info = 0;
+     struct enc_params e;
+-    OSStatus st;
++    uint32_t lo, hi;
+     bool key;
+ 
+-    /* One picture per frame (begin_frame gives a new one). */
+-    if (!codec->enc_src || codec->enc_have_desc)
++    if (!job->src)
+         return -1;
+     enc_params_get(codec, desc, &e);
+     /* Rate control mode changed (bitrate <-> constant QP): a new session, so no
+-     * setting of the old mode stays (it starts with parameter sets and a key frame). */
+-    if (codec->enc && e.cqp != codec->enc_cqp) {
++     * setting of the old mode stays (it starts with parameter sets and a key frame).
++     * Earlier frames finish on the old session first. */
++    lo = e.qp_i < e.qp_p ? e.qp_i : e.qp_p;
++    hi = e.qp_i < e.qp_p ? e.qp_p : e.qp_i;
++    if (codec->enc && (e.cqp != codec->enc_cqp ||
++                       (e.cqp && codec->enc_qp_mode == ENC_QP_RANGE &&
++                        (lo != codec->enc_qp || hi != codec->enc_qp_hi)))) {
++        enc_send_all(codec);
+         enc_session_destroy(codec);
+-        if (!enc_session_create(codec, e.cqp)) {
++        if (!enc_session_create(codec, e.cqp, lo, hi)) {
+             codec->enc_broken = true;
+             return -1;
+         }
+@@ -2741,31 +3063,33 @@ static int enc_encode(struct virgl_video_codec *codec, const union virgl_picture
+         CVPixelBufferRef first = NULL;
+ 
+         enc_visible_size(codec, desc, &codec->enc_w, &codec->enc_h);
+-        if (!enc_session_create(codec, e.cqp)) {
++        if (!enc_session_create(codec, e.cqp, lo, hi)) {
+             codec->enc_broken = true;   /* logged once; the guest falls back */
+             return -1;
+         }
+         if (codec->enc_w != codec->width || codec->enc_h != codec->height) {
++            /* the CPU reads the picture: its GPU copy must be done */
++            enc_job_copied(job, true);
+             pool = VTCompressionSessionGetPixelBufferPool(codec->enc);
+             if (!pool || CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool,
+                                                             &first) != kCVReturnSuccess ||
+-                !enc_copy_picture(codec->enc_src, first)) {
++                !enc_copy_picture(job->src, first)) {
+                 if (first)
+                     CVPixelBufferRelease(first);
+                 return -1;
+             }
+-            CVPixelBufferRelease(codec->enc_src);
+-            codec->enc_src = first;
++            CVPixelBufferRelease(job->src);
++            job->src = first;
+         }
+     }
+     enc_apply_settings(codec, &e);
+     key = e.idr || codec->enc_frame == 0;
+-    if (key || codec->enc_frame_qp)
++    if (key || codec->enc_qp_mode == ENC_QP_FRAME)
+         props = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
+                                           &kCFTypeDictionaryValueCallBacks);
+     if (key)
+         CFDictionarySetValue(props, kVTEncodeFrameOptionKey_ForceKeyFrame, kCFBooleanTrue);
+-    if (codec->enc_frame_qp) {
++    if (codec->enc_qp_mode == ENC_QP_FRAME) {
+         /* Every frame of such a session must carry it. */
+         CFNumberRef n = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type,
+                                        key ? &e.qp_i : &e.qp_p);
+@@ -2775,64 +3099,125 @@ static int enc_encode(struct virgl_video_codec *codec, const union virgl_picture
+     /* Time stamps: each frame lasts 1/fps of the guest's current frame rate
+      * (fps_num <= 240 * fps_den), added up, so they increase also when the rate
+      * changes during the stream. */
+-    CMTime pts = codec->enc_pts;
+-    CMTime dur = CMTimeMake(codec->enc_fps_den, (int32_t)codec->enc_fps_num);
+-    codec->enc_pts = CMTimeAdd(pts, dur);
+-    pthread_mutex_lock(&codec->enc_lock);
+-    codec->enc_status = noErr;
+-    codec->enc_info = 0;
+-    pthread_mutex_unlock(&codec->enc_lock);
+-    st = VTCompressionSessionEncodeFrame(codec->enc, codec->enc_src, pts, dur, props, NULL, &info);
+-    if (props)
+-        CFRelease(props);
+-    if (st != noErr) {
+-        virgl_error("vt-video: encode frame failed: %d\n", (int)st);
+-        return -1;
+-    }
++    job->pts = codec->enc_pts;
++    job->dur = CMTimeMake(codec->enc_fps_den, (int32_t)codec->enc_fps_num);
++    codec->enc_pts = CMTimeAdd(job->pts, job->dur);
++    job->props = props;
++    job->ready = true;
+     codec->enc_frame++;
+-    codec->enc_have_desc = true;
++    enc_send(codec, false);
+     return 0;
+ }
+ 
+-/* end_frame: wait for this frame's output and hand it to vrend. Whenever the
+- * guest asked for an encode this frame it gets feedback: the coded data, or a
+- * failure (never the previous frame's result left in its feedback buffer). */
++/* end_frame: closes the frame's job; its result reaches the guest's buffers
++ * later (virgl_video_encode_poll), before any fence the guest asks for after
++ * this. Whenever the guest asked for an encode this frame it gets feedback:
++ * the coded data, or a failure (never another frame's result). */
+ static int enc_end_frame(struct virgl_video_codec *codec, struct virgl_video_buffer *target)
+ {
+-    const void *bufs[1];
+-    unsigned sizes[1];
+-    bool ok;
+-
+     (void)target;
+-    if (!codec->enc_attempted)
++    enc_drop_src(codec);
++    if (!codec->enc_cur)
+         return 0;
+-    codec->enc_attempted = false;
+-    if (codec->enc && codec->enc_have_desc)
+-        VTCompressionSessionCompleteFrames(codec->enc, kCMTimeInvalid);
+-    if (codec->enc_src) {
+-        CVPixelBufferRelease(codec->enc_src);
+-        codec->enc_src = NULL;
++    enc_job_close(codec, codec->enc_cur, false);
++    enc_deliver(codec, false);
++    return 0;
++}
++
++/* Frames whose picture copy is done go to the encoder; finished ones go back to
++ * vrend (vrend's thread, with a GL context of its share group current). */
++void virgl_video_encode_poll(void)
++{
++    for (unsigned c = 0; c < VT_ENC_MAX_LIVE; c++) {
++        struct virgl_video_codec *codec = enc_live[c];
++        struct enc_job *head;
++        bool stuck;
++
++        if (!codec || !codec->job_count)
++            continue;
++        enc_send(codec, false);
++        /* a frame the media engine has had for 1 s: finish what it has (the
++         * guest's fences would wait 2 s for each frame otherwise) */
++        head = enc_job_at(codec, 0);
++        pthread_mutex_lock(&codec->enc_lock);
++        stuck = head->seq && head->sent && !head->out && now_ns() - head->sent_ns > 1000000000ull;
++        pthread_mutex_unlock(&codec->enc_lock);
++        if (stuck && codec->errors++ < 5)
++            virgl_warn("vt-video: no output from the encoder after 1 s; frames given up\n");
++        enc_deliver(codec, stuck);
+     }
+-    /* All output of this frame is in (CompleteFrames returned). */
+-    pthread_mutex_lock(&codec->enc_lock);
+-    ok = codec->enc_have_desc && codec->enc_status == noErr && codec->coded.size;
+-    if (!ok && codec->errors++ < 5)
+-        virgl_warn("vt-video: frame %llu not encoded: %s, status %d, flags 0x%x\n",
+-                   (unsigned long long)codec->enc_frame,
+-                   codec->enc_have_desc ? "no output" : "not sent to the encoder",
+-                   (int)codec->enc_status, (unsigned)codec->enc_info);
+-    codec->enc_have_desc = false;
+-    if (ok) {
+-        codec->frames++;
+-        bufs[0] = codec->coded.data;
+-        sizes[0] = (unsigned)codec->coded.size;
+-    }
+-    if (callbacks && callbacks->encode_completed)
+-        callbacks->encode_completed(codec, NULL, NULL, ok ? 1 : 0, ok ? bufs : NULL,
+-                                    ok ? sizes : NULL);
+-    codec->coded.size = 0;
+-    pthread_mutex_unlock(&codec->enc_lock);
+-    return ok ? 0 : -1;
++}
++
++/* Anything in flight that virgl_video_encode_poll has to look after? */
++bool virgl_video_encode_busy(void)
++{
++    for (unsigned c = 0; c < VT_ENC_MAX_LIVE; c++)
++        if (enc_live[c] && enc_live[c]->job_count)
++            return true;
++    return false;
++}
++
++/* The last frame closed: a fence made now must wait for it (vrend's thread). */
++uint64_t virgl_video_encode_seq(void)
++{
++    return enc_seq_last;
++}
++
++/* Every frame closed up to SEQ given back? (any thread) */
++bool virgl_video_encode_done(uint64_t seq)
++{
++    bool done;
++
++    if (!seq)
++        return true;
++    pthread_mutex_lock(&enc_wait_lock);
++    done = enc_seq_open > seq;
++    pthread_mutex_unlock(&enc_wait_lock);
++    return done;
++}
++
++/* Waits up to TIMEOUT_MS until every frame closed up to SEQ was given back
++ * (the sync thread); false on time out. */
++bool virgl_video_encode_wait(uint64_t seq, uint32_t timeout_ms)
++{
++    struct timespec ts;
++    bool done;
++
++    if (!seq)
++        return true;
++    clock_gettime(CLOCK_REALTIME, &ts);
++    ts.tv_sec += timeout_ms / 1000;
++    ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
++    if (ts.tv_nsec >= 1000000000L) {
++        ts.tv_sec++;
++        ts.tv_nsec -= 1000000000L;
++    }
++    pthread_mutex_lock(&enc_wait_lock);
++    while (enc_seq_open <= seq)
++        if (pthread_cond_timedwait(&enc_wait_cond, &enc_wait_lock, &ts))
++            break;
++    done = enc_seq_open > seq;
++    pthread_mutex_unlock(&enc_wait_lock);
++    return done;
++}
++
++/* An encoder goes away: VideoToolbox finishes (its callback must not come
++ * later), the jobs are dropped without feedback (vrend drops its buffers). */
++static void enc_codec_gone(struct virgl_video_codec *codec)
++{
++    enc_session_destroy(codec);
++    for (unsigned i = 0; i < codec->job_count; i++) {
++        struct enc_job *job = enc_job_at(codec, i);
++        enc_job_release(job);
++        bytes_free(&job->coded);
++    }
++    codec->job_count = 0;
++    codec->enc_cur = NULL;
++    enc_drop_src(codec);
++    for (unsigned c = 0; c < VT_ENC_MAX_LIVE; c++)
++        if (enc_live[c] == codec)
++            enc_live[c] = NULL;
++    enc_update_open();
+ }
+ 
+ int virgl_video_init(int drm_fd, struct virgl_video_callbacks *cbs,
+@@ -3015,8 +3400,14 @@ struct virgl_video_codec *virgl_video_create_codec(
+     codec->l0_default = -1;
+     codec->l1_default = -1;
+     pthread_mutex_init(&codec->enc_lock, NULL);
+-    if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_ENCODE)
++    if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_ENCODE) {
+         live_encoders++;
++        for (unsigned c = 0; c < VT_ENC_MAX_LIVE; c++)
++            if (!enc_live[c]) {
++                enc_live[c] = codec;
++                break;
++            }
++    }
+ 
+     vt_log("codec profile %u (%s) %ux%u\n", (unsigned)args->profile,
+            codec->kind == VT_KIND_H264 ? "H.264" : codec->kind == VT_KIND_VP9 ? "VP9" :
+@@ -3036,10 +3427,8 @@ void virgl_video_destroy_codec(struct virgl_video_codec *codec)
+         return;
+     vt_log("codec done: %u frames, %u errors\n", codec->frames, codec->errors);
+     session_destroy(codec);
+-    enc_session_destroy(codec);
+-    if (codec->enc_src)
+-        CVPixelBufferRelease(codec->enc_src);
+-    bytes_free(&codec->coded);
++    if (codec->entrypoint == PIPE_VIDEO_ENTRYPOINT_ENCODE)
++        enc_codec_gone(codec);
+     if (codec->format)
+         CFRelease(codec->format);
+     if (codec->output)
+@@ -3149,18 +3538,30 @@ int virgl_video_encode_bitstream(struct virgl_video_codec *codec,
+                                  struct virgl_video_buffer *source,
+                                  const union virgl_picture_desc *desc)
+ {
++    struct enc_job *job;
++
+     (void)source;
+-    if (!codec || !desc || codec->entrypoint != PIPE_VIDEO_ENTRYPOINT_ENCODE)
++    if (!codec || !desc)
++        return -1;
++    /* vrend holds the guest's coded-data and feedback buffers now: they get
++     * exactly one result, in order, whatever happens below. */
++    if (codec->entrypoint != PIPE_VIDEO_ENTRYPOINT_ENCODE) {
++        if (callbacks && callbacks->encode_completed)
++            callbacks->encode_completed(codec, NULL, NULL, 0, NULL, NULL);
+         return -1;
+-    /* vrend holds the guest's coded-data and feedback buffers now: end_frame
+-     * reports to them whatever happens below. */
+-    codec->enc_attempted = true;
++    }
++    job = enc_job_new(codec);
+     if (desc->base.profile != codec->guest_profile) {
+         virgl_error("vt-video: profiles not matched, picture: %d, codec: %u\n",
+                     desc->base.profile, codec->guest_profile);
++        job->fail = true;
++        return -1;
++    }
++    if (enc_encode(codec, job, desc)) {
++        job->fail = true;
+         return -1;
+     }
+-    return enc_encode(codec, desc);
++    return 0;
+ }
+ 
+ int virgl_video_end_frame(struct virgl_video_codec *codec,
+diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
+index 1c4659f..33b256a 100644
+--- a/src/vrend/vrend_renderer.c
++++ b/src/vrend/vrend_renderer.c
+@@ -194,6 +194,9 @@ struct vrend_fence {
+    struct vrend_context *ctx;
+    uint32_t flags;
+    uint64_t fence_id;
++   /* OmacVM: the last video encoder frame closed before this fence; the fence
++    * signals only once that frame's result is in the guest's buffers. */
++   uint64_t video_seq;
+ 
+    union {
+       GLsync glsyncobj;
+@@ -8890,6 +8893,42 @@ static void fence_wait_render(uint64_t now)
+ }
+ #endif
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++/* OmacVM: the VideoToolbox encoder finishes frames after END_FRAME, beside
++ * QEMU's main loop. A fence made after a frame closed waits for its result. */
++static bool fence_video_ready(const struct vrend_fence *fence)
++{
++   return !fence->video_seq || vrend_video_encode_done(fence->video_seq);
++}
++
++/* Sync thread: hold the fence until its encoder frames are given back
++ * (vrend_renderer_poll does that on the main thread, woken here). */
++static void fence_wait_video(const struct vrend_fence *fence)
++{
++   static unsigned late;
++
++   if (fence_video_ready(fence))
++      return;
++   if (vrend_state.eventfd >= 0 && write_eventfd(vrend_state.eventfd, 1))
++      perror("failed to write to eventfd\n");
++   if (!vrend_video_encode_wait(fence->video_seq, 2000) && late++ < 5)
++      virgl_warn("video: encoder frame not back after 2 s; fence %" PRIu64 " signalled anyway\n",
++                 fence->fence_id);
++}
++#else
++static bool fence_video_ready(UNUSED const struct vrend_fence *fence) { return true; }
++static void fence_wait_video(UNUSED const struct vrend_fence *fence) { }
++#endif
++
++/* OmacVM: an encoder frame is out of the media engine (any thread). */
++void vrend_renderer_video_wake(void)
++{
++   int fd = vrend_state.eventfd;
++
++   if (fd >= 0 && write_eventfd(fd, 1))
++      perror("failed to write to eventfd\n");
++}
++
+ static bool do_wait(struct vrend_fence *fence, bool can_block)
+ {
+ #ifdef HAVE_EPOXY_EGL_H
+@@ -8952,6 +8991,9 @@ static void vrend_renderer_check_queries(void);
+ 
+ void vrend_renderer_poll(void) {
+    vrend_memory_tick();
++#ifdef ENABLE_VIDEO
++   vrend_video_poll();
++#endif
+    if (vrend_state.use_async_fence_cb) {
+       flush_eventfd(vrend_state.eventfd);
+       mtx_lock(&vrend_state.poll_mutex);
+@@ -8974,6 +9016,7 @@ static void wait_sync(struct vrend_fence *fence)
+ 
+    bool signal_poll = atomic_load(&vrend_state.has_waiting_queries);
+    do_wait(fence, /* can_block */ true);
++   fence_wait_video(fence);
+ 
+    mtx_lock(&vrend_state.fence_mutex);
+    if (vrend_state.use_async_fence_cb) {
+@@ -14375,6 +14418,11 @@ int vrend_renderer_create_fence(struct vrend_context *ctx,
+    fence->ctx = ctx;
+    fence->flags = flags;
+    fence->fence_id = fence_id;
++#ifdef ENABLE_VIDEO
++   fence->video_seq = vrend_state.video_available ? vrend_video_encode_seq() : 0;
++#else
++   fence->video_seq = 0;
++#endif
+ 
+ #ifdef HAVE_EPOXY_EGL_H
+    if (vrend_state.use_egl_fence) {
+@@ -14467,7 +14515,7 @@ void vrend_renderer_check_fences(void)
+       vrend_renderer_force_ctx_0();
+ 
+       list_for_each_entry_safe(struct vrend_fence, fence, &vrend_state.fence_list, fences) {
+-         if (do_wait(fence, /* can_block */ false)) {
++         if (fence_video_ready(fence) && do_wait(fence, /* can_block */ false)) {
+             list_del(&fence->fences);
+             list_addtail(&fence->fences, &retired_fences);
+          } else {
+diff --git a/src/vrend/vrend_renderer.h b/src/vrend/vrend_renderer.h
+index 9200ad6..35cef95 100644
+--- a/src/vrend/vrend_renderer.h
++++ b/src/vrend/vrend_renderer.h
+@@ -512,6 +512,7 @@ int vrend_renderer_create_fence(struct vrend_context *ctx,
+                                 uint64_t fence_id);
+ 
+ void vrend_renderer_check_fences(void);
++void vrend_renderer_video_wake(void);
+ void vrend_renderer_submit_begin(void);
+ void vrend_renderer_submit_end(void);
+ 
+diff --git a/src/vrend/vrend_video.c b/src/vrend/vrend_video.c
+index ce0e2a2..1950123 100644
+--- a/src/vrend/vrend_video.c
++++ b/src/vrend/vrend_video.c
+@@ -86,6 +86,7 @@ struct vrend_context;
+  * their pictures are dropped quietly, the refusal itself was logged. The last
+  * few per context; older ones count as unknown handles. */
+ #define VREND_VIDEO_REFUSED_MAX 16
++#define VREND_VIDEO_ENC_JOBS 8
+ 
+ struct vrend_video_context {
+     struct vrend_context *ctx;
+@@ -98,8 +99,15 @@ struct vrend_video_context {
+ struct vrend_video_codec {
+     struct virgl_video_codec *codec;
+     uint32_t handle;
+-    struct vrend_resource *feed_res;    /* encoding feedback */
+-    struct vrend_resource *dest_res;    /* encoding coded buffer */
++    /* Encoding: the feedback and coded-data buffers of each frame the backend
++     * has not given back yet, oldest first (its frames finish after END_FRAME,
++     * in order; the backend keeps at most 4 in flight). */
++    struct {
++        struct vrend_resource *feed_res;
++        struct vrend_resource *dest_res;
++    } enc_jobs[VREND_VIDEO_ENC_JOBS];
++    unsigned enc_head, enc_count;
++    bool enc_this_frame;                /* an encode came since BEGIN_FRAME */
+     struct vrend_video_context *ctx;
+     struct list_head head;
+ };
+@@ -393,7 +401,8 @@ static struct vrend_resource *encode_plane(struct vrend_video_buffer *buf, unsig
+     return res;
+ }
+ 
+-static bool blit_video_buffer_to_pixbuf(struct vrend_video_buffer *buf, CVPixelBufferRef pix)
++static bool blit_video_buffer_to_pixbuf(struct vrend_video_buffer *buf, CVPixelBufferRef pix,
++                                        void **gpu_fence)
+ {
+     IOSurfaceRef surface = CVPixelBufferGetIOSurface(pix);
+     CGLContextObj cgl = CGLGetCurrentContext();
+@@ -475,15 +484,24 @@ static bool blit_video_buffer_to_pixbuf(struct vrend_video_buffer *buf, CVPixelB
+         glEnable(GL_RASTERIZER_DISCARD);
+     glColorMask(mask[0], mask[1], mask[2], mask[3]);
+     vrend_renderer_pause_render_condition(buf->ctx->ctx, false);
+-    /* The encoder reads the IOSurface outside GL: the copies must be done. */
+-    glFinish();
++    /* The encoder reads the IOSurface outside GL: the copies must be done
++     * first. The backend waits for this fence beside QEMU's main loop (it used
++     * to be glFinish here, which waited for all the guest's GPU work). */
++    if (ok) {
++        GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++        glFlush();
++        if (sync)
++            *gpu_fence = sync;
++        else
++            glFinish();
++    }
+     return ok;
+ }
+ 
+ /* The guest's picture into the encoder's pixel buffer: 0 when both planes were
+  * copied, -1 when not (the frame then fails; never an old or half picture). */
+ static int sync_video_buffer_to_pixbuf(struct vrend_video_buffer *buf,
+-                                       const struct virgl_video_dma_buf *dmabuf)
++                                       struct virgl_video_dma_buf *dmabuf)
+ {
+     CVPixelBufferRef pix = dmabuf->native;
+     GLint old_row = 0, old_align = 4, old_pbo = 0, old_tex = 0;
+@@ -492,7 +510,8 @@ static int sync_video_buffer_to_pixbuf(struct vrend_video_buffer *buf,
+ 
+     if (!pix || buf->num_planes < 2)
+         return -1;
+-    if (!getenv("OMACVM_VIDEO_COPY") && blit_video_buffer_to_pixbuf(buf, pix))
++    dmabuf->gpu_fence = NULL;
++    if (!getenv("OMACVM_VIDEO_COPY") && blit_video_buffer_to_pixbuf(buf, pix, &dmabuf->gpu_fence))
+         return 0;
+     if (failures++ < 5)
+         virgl_warn("video: encoder picture copied with the CPU\n");
+@@ -690,7 +709,7 @@ static void vrend_video_decode_completed(
+ 
+ static int vrend_video_enocde_upload_picture(
+                                 struct virgl_video_codec *codec,
+-                                const struct virgl_video_dma_buf *dmabuf)
++                                struct virgl_video_dma_buf *dmabuf)
+ {
+     struct vrend_video_buffer *buf = vrend_video_buffer(dmabuf->buf);
+ 
+@@ -715,13 +734,28 @@ static void vrend_video_encode_completed(
+     void *buf;
+     unsigned i, size, data_size;
+     struct virgl_video_encode_feedback feedback;
+-    struct vrend_video_codec *cdc = vrend_video_codec(codec);
++    struct vrend_video_codec *vcdc = vrend_video_codec(codec);
++    struct {
++        struct vrend_resource *dest_res, *feed_res;
++    } job, *cdc = &job;
+ 
+     (void)src_buf;
+     (void)ref_buf;
+ 
+-    if (!cdc->dest_res || !cdc->feed_res)
++    /* this result is for the oldest frame still out */
++    if (!vcdc || !vcdc->enc_count)
+         return;
++    job.dest_res = vcdc->enc_jobs[vcdc->enc_head].dest_res;
++    job.feed_res = vcdc->enc_jobs[vcdc->enc_head].feed_res;
++    vcdc->enc_jobs[vcdc->enc_head].dest_res = NULL;
++    vcdc->enc_jobs[vcdc->enc_head].feed_res = NULL;
++    vcdc->enc_head = (vcdc->enc_head + 1) % VREND_VIDEO_ENC_JOBS;
++    vcdc->enc_count--;
++    if (!cdc->dest_res || !cdc->feed_res) {
++        vrend_resource_reference(&cdc->dest_res, NULL);
++        vrend_resource_reference(&cdc->feed_res, NULL);
++        return;
++    }
+ 
+     memset(&feedback, 0, sizeof(feedback));
+ 
+@@ -741,12 +775,14 @@ static void vrend_video_encode_completed(
+     }
+     if (num_coded_bufs && data_size != UINT32_MAX &&
+         has_bit(cdc->dest_res->storage_bits, VREND_STORAGE_GL_BUFFER) && cdc->dest_res->gl_id) {
++        /* GL_COPY_WRITE_BUFFER: no vertex or index state of whatever context
++         * is current (this also runs from vrend_video_poll, in context 0). */
+         vrend_resource_contents_changed(cdc->dest_res);
+-        glBindBufferARB(cdc->dest_res->target, cdc->dest_res->gl_id);
+-        buf = glMapBufferRange(cdc->dest_res->target, 0,
++        glBindBufferARB(GL_COPY_WRITE_BUFFER, cdc->dest_res->gl_id);
++        buf = glMapBufferRange(GL_COPY_WRITE_BUFFER, 0,
+                                cdc->dest_res->base.width0, GL_MAP_WRITE_BIT);
+         if (!buf)
+-            glBindBufferARB(cdc->dest_res->target, 0);
++            glBindBufferARB(GL_COPY_WRITE_BUFFER, 0);
+     }
+     if (buf) {
+         for (i = 0, data_size = 0; i < num_coded_bufs; i++) {
+@@ -756,8 +792,8 @@ static void vrend_video_encode_completed(
+                                  data_size, coded_bufs[i], size);
+             data_size += size;
+         }
+-        glUnmapBuffer(cdc->dest_res->target);
+-        glBindBufferARB(cdc->dest_res->target, 0);
++        glUnmapBuffer(GL_COPY_WRITE_BUFFER);
++        glBindBufferARB(GL_COPY_WRITE_BUFFER, 0);
+         feedback.stat = VIRGL_VIDEO_ENCODE_STAT_SUCCESS;
+         feedback.coded_size = data_size;
+     } else {
+@@ -776,12 +812,73 @@ static void vrend_video_encode_completed(
+     vrend_resource_reference(&cdc->feed_res, NULL);
+ }
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++/* The encoder's picture copies (blit_video_buffer_to_pixbuf's fences). */
++static bool vrend_video_gpu_fence_wait(void *fence, bool block)
++{
++    GLenum r = glClientWaitSync(fence, block ? GL_SYNC_FLUSH_COMMANDS_BIT : 0,
++                                block ? 2000000000ull : 0);
++
++    if (r == GL_TIMEOUT_EXPIRED && block)
++        virgl_warn("video: encoder picture copy not done after 2 s\n");
++    return r != GL_TIMEOUT_EXPIRED || block;
++}
++
++static void vrend_video_gpu_fence_destroy(void *fence)
++{
++    glDeleteSync(fence);
++}
++#endif
++
+ static struct virgl_video_callbacks video_callbacks = {
+     .decode_completed           = vrend_video_decode_completed,
+     .encode_upload_picture      = vrend_video_enocde_upload_picture,
+     .encode_completed           = vrend_video_encode_completed,
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++    .gpu_fence_wait             = vrend_video_gpu_fence_wait,
++    .gpu_fence_destroy          = vrend_video_gpu_fence_destroy,
++    .encode_wake                = vrend_renderer_video_wake,
++#endif
+ };
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++/* Encoder frames finish after END_FRAME (virgl_video_vt.c): these keep the
++ * guest's fences behind them and move them on. */
++void vrend_video_poll(void)
++{
++    if (!virgl_video_encode_busy())
++        return;
++    /* QEMU's own GL work may have changed the current context. */
++    vrend_renderer_force_ctx_0();
++    virgl_video_encode_poll();
++}
++
++uint64_t vrend_video_encode_seq(void)
++{
++    return virgl_video_encode_seq();
++}
++
++bool vrend_video_encode_done(uint64_t seq)
++{
++    return virgl_video_encode_done(seq);
++}
++
++bool vrend_video_encode_wait(uint64_t seq, uint32_t timeout_ms)
++{
++    return virgl_video_encode_wait(seq, timeout_ms);
++}
++#else
++void vrend_video_poll(void) { }
++uint64_t vrend_video_encode_seq(void) { return 0; }
++bool vrend_video_encode_done(uint64_t seq) { (void)seq; return true; }
++bool vrend_video_encode_wait(uint64_t seq, uint32_t timeout_ms)
++{
++    (void)seq;
++    (void)timeout_ms;
++    return true;
++}
++#endif
++
+ int vrend_video_init(int drm_fd)
+ {
+ #ifndef ENABLE_VIDEO_VIDEOTOOLBOX
+@@ -871,8 +968,10 @@ static void destroy_video_codec(struct vrend_video_codec *cdc)
+     if (cdc) {
+         list_del(&cdc->head);
+         virgl_video_destroy_codec(cdc->codec);
+-        vrend_resource_reference(&cdc->dest_res, NULL);
+-        vrend_resource_reference(&cdc->feed_res, NULL);
++        for (unsigned i = 0; i < VREND_VIDEO_ENC_JOBS; i++) {
++            vrend_resource_reference(&cdc->enc_jobs[i].dest_res, NULL);
++            vrend_resource_reference(&cdc->enc_jobs[i].feed_res, NULL);
++        }
+         free(cdc);
+     }
+ }
+@@ -1031,6 +1130,7 @@ int vrend_video_begin_frame(struct vrend_video_context *ctx,
+     if (!cdc || !tgt)
+         return -1;
+ 
++    cdc->enc_this_frame = false;
+     return virgl_video_begin_frame(cdc->codec, tgt->buffer);
+ }
+ 
+@@ -1327,19 +1427,26 @@ int vrend_video_encode_bitstream(struct vrend_video_context *ctx,
+ 
+     /* One encode per frame: a second one before the frame ends is refused, so
+      * the first keeps its coded-data and feedback buffers (and gets its result). */
+-    if (cdc->feed_res) {
++    if (cdc->enc_this_frame || cdc->enc_count == VREND_VIDEO_ENC_JOBS) {
+         static struct virgl_video_log_limit said;
+         unsigned skipped;
++        unsigned last = (cdc->enc_head + cdc->enc_count + VREND_VIDEO_ENC_JOBS - 1) %
++                        VREND_VIDEO_ENC_JOBS;
+         if (virgl_video_log_ok(&said, &skipped))
+             virgl_warn("%s: second encode in one frame refused%s\n", __func__,
+                        virgl_video_log_since(skipped));
+-        if (feed_res != cdc->feed_res)
++        if (!cdc->enc_count || feed_res != cdc->enc_jobs[last].feed_res)
+             encode_refused(feed_res);
+         return -1;
+     }
+ 
+-    vrend_resource_reference(&cdc->feed_res, feed_res);
+-    vrend_resource_reference(&cdc->dest_res, dest_res);
++    {
++        unsigned i = (cdc->enc_head + cdc->enc_count) % VREND_VIDEO_ENC_JOBS;
++        vrend_resource_reference(&cdc->enc_jobs[i].feed_res, feed_res);
++        vrend_resource_reference(&cdc->enc_jobs[i].dest_res, dest_res);
++        cdc->enc_count++;
++        cdc->enc_this_frame = true;
++    }
+ 
+     return virgl_video_encode_bitstream(cdc->codec, src->buffer, &desc);
+ }
+@@ -1351,6 +1458,8 @@ int vrend_video_end_frame(struct vrend_video_context *ctx,
+     struct vrend_video_codec *cdc = get_video_codec(ctx, cdc_handle);
+     struct vrend_video_buffer *tgt = get_video_buffer(ctx, tgt_handle);
+ 
++    if (cdc)
++        cdc->enc_this_frame = false;
+     if (!cdc || !tgt)
+         return -1;
+ 
+diff --git a/src/vrend/vrend_video.h b/src/vrend/vrend_video.h
+index 7b61db1..7ddbfe1 100644
+--- a/src/vrend/vrend_video.h
++++ b/src/vrend/vrend_video.h
+@@ -35,6 +35,8 @@
+ #ifndef VREND_VIDEO_H
+ #define VREND_VIDEO_H
+ 
++#include <stdbool.h>
++#include <stdint.h>
+ #include <virgl_hw.h>
+ 
+ #define VREND_VIDEO_BUFFER_PLANE_NUM  3
+@@ -88,6 +90,12 @@ int vrend_video_encode_bitstream(struct vrend_video_context *ctx,
+                                  uint32_t dest_handle,
+                                  uint32_t desc_handle,
+                                  uint32_t feed_handle);
++/* Encoder frames that finish after END_FRAME (VideoToolbox): see vrend_video.c. */
++void vrend_video_poll(void);
++uint64_t vrend_video_encode_seq(void);
++bool vrend_video_encode_done(uint64_t seq);
++bool vrend_video_encode_wait(uint64_t seq, uint32_t timeout_ms);
++
+ int vrend_video_end_frame(struct vrend_video_context *ctx,
+                           uint32_t cdc_handle,
+                           uint32_t tgt_handle);

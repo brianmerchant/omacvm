@@ -16,6 +16,12 @@
  * Main 10) encode nothing; at most 12 encoders are open at once (the caps tell
  * the guest 8), and one closed makes room for the next; the guest's conditional rendering does not stop the
  * picture copy (Apple's software OpenGL copies either way: no proof for the GPU).
+ * Frames finish after END_FRAME, beside the caller: every submit here waits for a
+ * fence the way the guest does, and no fence signals before the frames closed
+ * ahead of it have their feedback; three frames sent at once (each with its own
+ * buffers, no wait between them) all come back, in order and decodable.
+ * OMACVM_TEST_THREAD_SYNC=1 runs it all with QEMU's fences (the sync thread,
+ * fences reported from it); otherwise fences are polled.
  * Runs on Apple's software OpenGL (soft-gl.h); the encoder is the Mac's media engine.
  * Skips a codec the Mac has no hardware encoder for.
  * OMACVM_TEST_H264_OUT=FILE / OMACVM_TEST_HEVC_OUT=FILE also write the streams. */
@@ -28,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
+#include <unistd.h>
 #include "soft-gl.h"
 #define VIRGL_RENDERER_UNSTABLE_APIS 1
 #include "virglrenderer.h"
@@ -40,7 +47,8 @@ enum { TEST_PIPE_BUFFER = 0, TEST_PIPE_TEXTURE_2D = 2 };
 /* guest numbering (Mesa >= 26): enum pipe_video_profile / entrypoint */
 enum { G_AVC_HIGH = 11, G_HEVC_MAIN = 15, G_HEVC_MAIN_10 = 16, G_ENTRYPOINT_ENCODE = 4 };
 enum { PIC_P = 0, PIC_IDR = 3 };
-enum { R_Y = 1, R_UV, R_DESC, R_CODED, R_FEED, R_SMALL, R_TEX, R_FEED2, R_QUERY };
+enum { R_Y = 1, R_UV, R_DESC, R_CODED, R_FEED, R_SMALL, R_TEX, R_FEED2, R_QUERY,
+       R_CODED_B, R_CODED_C, R_FEED_B, R_FEED_C, R_LAST = R_FEED_C };
 enum { BUF = 2 };   /* the video buffer's handle; codecs get 10, 11, ... */
 
 static CGLContextObj main_ctx;
@@ -52,10 +60,35 @@ static void check(int ok, const char *what)
    failures += !ok;
 }
 
+/* Fences as QEMU uses them: one after each submit, the guest reads its
+ * feedback once it signalled. With OMACVM_TEST_THREAD_SYNC=1 they are reported
+ * from the sync thread. */
+static volatile uint32_t fence_done;
+static uint32_t fence_next;
+static volatile const struct virgl_video_encode_feedback *fence_watch;
+static volatile int fence_early;   /* a fence signalled before its frame's feedback */
+
 static void write_fence(void *cookie, uint32_t fence)
 {
    (void)cookie;
-   (void)fence;
+   if (fence_watch && fence_watch->stat == 0xaa)
+      fence_early++;
+   __atomic_store_n(&fence_done, fence, __ATOMIC_RELEASE);
+}
+
+static int wait_fence(void)
+{
+   uint32_t id = ++fence_next;
+
+   virgl_renderer_create_fence((int)id, 1);
+   for (int i = 0; i < 5000; i++) {
+      virgl_renderer_poll();
+      if (__atomic_load_n(&fence_done, __ATOMIC_ACQUIRE) >= id)
+         return 0;
+      usleep(1000);
+   }
+   printf("FAIL: fence %u not signalled after 5 s\n", id);
+   return -1;
 }
 
 static virgl_renderer_gl_context create_gl_context(void *cookie, int scanout,
@@ -103,6 +136,7 @@ static int submit(struct cmds *c)
 {
    int r = virgl_renderer_submit_cmd(c->dw, 1, c->n);
    c->n = 0;
+   wait_fence();
    return r;
 }
 
@@ -265,8 +299,8 @@ static int split_nals(const uint8_t *d, uint32_t n, const uint8_t **nal, size_t 
 static struct cmds *c;
 static uint8_t y[W * H], uv[W * H / 2];
 static union virgl_picture_desc desc;
-static uint8_t coded[4 << 20], small[16];
-static struct virgl_video_encode_feedback feed, feed2;
+static uint8_t coded[4 << 20], small[16], coded_b[1 << 20], coded_c[1 << 20];
+static struct virgl_video_encode_feedback feed, feed2, feed_b, feed_c;
 static uint8_t query_result[64];
 
 static void create_codec(uint32_t handle, uint32_t profile, uint32_t w, uint32_t h)
@@ -344,7 +378,9 @@ static int encode_frame(uint32_t codec, uint32_t profile, int f, const struct rc
    emit(c, VIRGL_CMD0(VIRGL_CCMD_END_FRAME, 0, 2));
    emit(c, codec);
    emit(c, BUF);
+   fence_watch = &feed;
    submit(c);
+   fence_watch = NULL;
    return feed.stat == VIRGL_VIDEO_ENCODE_STAT_SUCCESS && feed.coded_size &&
           feed.coded_size <= sizeof(coded) ? 0 : -1;
 }
@@ -822,8 +858,99 @@ static void test_render_condition(uint32_t handle, uint32_t profile, const char 
    check(!bad && decoded == 5 && min_psnr > 30, line);
 }
 
+/* Three frames in one submit, nothing waited for between them (FFmpeg keeps
+ * frames in flight like this), each with its own coded-data and feedback
+ * buffer: all three come back with the one fence after them, in order (each
+ * decodes to its own picture). */
+static void test_pipeline(uint32_t handle, uint32_t profile, const char *name)
+{
+   static uint8_t stream[2 << 20];
+   static uint8_t ys[FRAMES][W * H];
+   static uint8_t *const out[3] = { coded, coded_b, coded_c };
+   static struct virgl_video_encode_feedback *const fb[3] = { &feed, &feed_b, &feed_c };
+   static const uint32_t dest[3] = { R_CODED, R_CODED_B, R_CODED_C };
+   static const uint32_t fbr[3] = { R_FEED, R_FEED_B, R_FEED_C };
+   uint32_t stream_size = 0;
+   int ok = 1, rounds = 4;
+   char line[200];
+
+   hevc = profile != G_AVC_HIGH;
+   if (!offered(profile))
+      return;
+   create_codec(handle, profile, W, H);
+   for (int r = 0; r < rounds; r++) {
+      for (int i = 0; i < 3; i++) {
+         int f = r * 3 + i;
+         make_picture(f, y, uv);
+         memcpy(ys[f], y, sizeof(y));
+         emit_plane(c, R_Y, W, H, 1, y);
+         emit_plane(c, R_UV, W / 2, H / 2, 2, uv);
+         memset(&desc, 0, sizeof(desc));
+         if (profile == G_AVC_HIGH) {
+            desc.h264_enc.base.profile = profile;
+            desc.h264_enc.base.entry_point = G_ENTRYPOINT_ENCODE;
+            desc.h264_enc.rate_ctrl[0].rate_ctrl_method = rc_normal.method;
+            desc.h264_enc.rate_ctrl[0].target_bitrate = rc_normal.bitrate;
+            desc.h264_enc.rate_ctrl[0].frame_rate_num = rc_normal.fps_num;
+            desc.h264_enc.rate_ctrl[0].frame_rate_den = rc_normal.fps_den;
+            desc.h264_enc.gop_size = rc_normal.gop;
+            desc.h264_enc.picture_type = f == 0 ? PIC_IDR : PIC_P;
+         } else {
+            desc.h265_enc.base.profile = profile;
+            desc.h265_enc.base.entry_point = G_ENTRYPOINT_ENCODE;
+            desc.h265_enc.rc.rate_ctrl_method = rc_normal.method;
+            desc.h265_enc.rc.target_bitrate = rc_normal.bitrate;
+            desc.h265_enc.rc.frame_rate_num = rc_normal.fps_num;
+            desc.h265_enc.rc.frame_rate_den = rc_normal.fps_den;
+            desc.h265_enc.seq.intra_period = rc_normal.gop;
+            desc.h265_enc.picture_type = f == 0 ? PIC_IDR : PIC_P;
+         }
+         /* the description buffer is read at ENCODE_BITSTREAM: one submit per
+          * frame's description, but no fence wait until the third */
+         memset(fb[i], 0xaa, sizeof(*fb[i]));
+         emit(c, VIRGL_CMD0(VIRGL_CCMD_BEGIN_FRAME, 0, 2));
+         emit(c, handle);
+         emit(c, BUF);
+         emit(c, VIRGL_CMD0(VIRGL_CCMD_ENCODE_BITSTREAM, 0, 5));
+         emit(c, handle);
+         emit(c, BUF);
+         emit(c, dest[i]);
+         emit(c, R_DESC);
+         emit(c, fbr[i]);
+         emit(c, VIRGL_CMD0(VIRGL_CCMD_END_FRAME, 0, 2));
+         emit(c, handle);
+         emit(c, BUF);
+         virgl_renderer_submit_cmd(c->dw, 1, c->n);
+         c->n = 0;
+      }
+      fence_watch = &feed_c;
+      wait_fence();
+      fence_watch = NULL;
+      for (int i = 0; i < 3; i++) {
+         if (fb[i]->stat != VIRGL_VIDEO_ENCODE_STAT_SUCCESS || !fb[i]->coded_size ||
+             fb[i]->coded_size > sizeof(coded_b) ||
+             stream_size + fb[i]->coded_size > sizeof(stream)) {
+            ok = 0;
+            continue;
+         }
+         memcpy(stream + stream_size, out[i], fb[i]->coded_size);
+         stream_size += fb[i]->coded_size;
+      }
+   }
+   double min_psnr = 0;
+   int decoded = ok ? decode_back(stream, stream_size, ys, &min_psnr) : 0;
+   snprintf(line, sizeof(line), "%s: 3 frames at a time, %d rounds: all back after one fence, "
+            "%d of %d decode in order, lowest luma PSNR %.1f dB", name, rounds, decoded,
+            rounds * 3, min_psnr);
+   check(ok && decoded == rounds * 3 && min_psnr > 30, line);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_DESTROY_VIDEO_CODEC, 0, 1));
+   emit(c, handle);
+   submit(c);
+}
+
 int main(void)
 {
+   char line_end[160];
    setvbuf(stdout, NULL, _IONBF, 0);
    main_ctx = soft_gl_context(NULL);
    if (!main_ctx || CGLSetCurrentContext(main_ctx)) {
@@ -832,7 +959,13 @@ int main(void)
    }
    soft_gl_require();
    static int cookie;
-   if (virgl_renderer_init(&cookie, VIRGL_RENDERER_USE_VIDEO, &callbacks)) {
+   int flags = VIRGL_RENDERER_USE_VIDEO;
+   const char *ts = getenv("OMACVM_TEST_THREAD_SYNC");
+   if (ts && !strcmp(ts, "1")) {
+      flags |= VIRGL_RENDERER_THREAD_SYNC | VIRGL_RENDERER_ASYNC_FENCE_CB;
+      printf("fences: reported by the sync thread\n");
+   }
+   if (virgl_renderer_init(&cookie, flags, &callbacks)) {
       printf("FAIL: virgl_renderer_init\n");
       return 1;
    }
@@ -860,6 +993,14 @@ int main(void)
             sizeof(feed2), 1, &feed2, sizeof(feed2));
    make_res(R_QUERY, TEST_PIPE_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_CUSTOM,
             sizeof(query_result), 1, query_result, sizeof(query_result));
+   make_res(R_CODED_B, TEST_PIPE_BUFFER, VIRGL_FORMAT_R8_UNORM, 0, sizeof(coded_b), 1,
+            coded_b, sizeof(coded_b));
+   make_res(R_CODED_C, TEST_PIPE_BUFFER, VIRGL_FORMAT_R8_UNORM, 0, sizeof(coded_c), 1,
+            coded_c, sizeof(coded_c));
+   make_res(R_FEED_B, TEST_PIPE_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_CUSTOM,
+            sizeof(feed_b), 1, &feed_b, sizeof(feed_b));
+   make_res(R_FEED_C, TEST_PIPE_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_CUSTOM,
+            sizeof(feed_c), 1, &feed_c, sizeof(feed_c));
 
    c = calloc(1, sizeof(*c));
    emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_VIDEO_BUFFER, 0, 6));
@@ -880,6 +1021,8 @@ int main(void)
    test_cqp(16, G_AVC_HIGH, "H.264");
    test_cqp(17, G_HEVC_MAIN, "HEVC");
    test_render_condition(18, G_AVC_HIGH, "H.264");
+   test_pipeline(19, G_AVC_HIGH, "H.264");
+   test_pipeline(50, G_HEVC_MAIN, "HEVC");
 
    /* Codecs the host does not offer: nothing is encoded with them. */
    static const struct { uint32_t profile, w, h; const char *what; } refused[] = {
@@ -927,8 +1070,12 @@ int main(void)
       }
    }
 
+   snprintf(line_end, sizeof(line_end), "no fence signalled before the feedback of the frames "
+            "ahead of it (%d early)", fence_early);
+   check(!fence_early, line_end);
+
    virgl_renderer_context_destroy(1);
-   for (uint32_t r = R_Y; r <= R_QUERY; r++)
+   for (uint32_t r = R_Y; r <= R_LAST; r++)
       virgl_renderer_resource_unref(r);
    free(c);
    virgl_renderer_cleanup(&cookie);

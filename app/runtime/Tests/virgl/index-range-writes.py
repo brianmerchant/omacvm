@@ -77,6 +77,11 @@ REVIEWED = {
     ("vrend/vrend_renderer.c", "vrend_clear", "glClearBufferfv"): ("framebuffer", None),
     ("vrend/vrend_blitter.c", "vrend_renderer_blit_gl", "glBufferData"): ("own", "the blitter's vertices"),
     ("vrend/vrend_video.c", "vrend_video_encode_completed", "glMapBufferRange"): ("bumps", None),
+    ("vrend/vrend_video.c", "vrend_video_encode_completed", "glBindBufferARB"): ("bumps", None),
+    ("vrend/vrend_renderer.c", "vrend_upload_pbo_map", "glBufferData"):
+        ("own", "vrend's texture upload buffer (virgl-transfer-upload-pbo.patch)"),
+    ("vrend/vrend_renderer.c", "vrend_upload_pbo_map", "glMapBufferRange"):
+        ("own", "vrend's texture upload buffer (virgl-transfer-upload-pbo.patch)"),
 }
 
 # Calls that write a buffer's contents, map it, or bind it where the GPU writes.

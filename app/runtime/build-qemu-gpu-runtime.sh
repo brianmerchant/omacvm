@@ -1118,6 +1118,13 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-legacy-vertex-cach
 # OmacVM: an index buffer's index range is read back once per write, not on every indexed
 # draw (the range check read the same indices tens of thousands of times a frame).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-index-range-cache.patch"
+# OmacVM: the video encoder's frames finish beside QEMU's main loop (it waited 12-40 ms for
+# the media engine on every frame: screen recording took the VM's sound and display with it);
+# a guest fence waits for the frames closed before it.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-encode-async.patch"
+# OmacVM: big texture uploads go through a pixel unpack buffer (one CPU copy instead of three
+# steps: a frozen screen in screenshot mode uploads a whole display per frame).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-transfer-upload-pbo.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
