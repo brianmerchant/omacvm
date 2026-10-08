@@ -28,7 +28,7 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
 | Web apps: Speedometer 3.1 | 64 % | 52 % | **71 %** | 67 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
-| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 76 % · 18 % | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 76 % · 32 % (3.0.6) | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
 | 3D: glmark2 (score) | 1017 (2.9.0 RC in a window: 2856) | 964 | 1813 | **7306** |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
@@ -58,7 +58,7 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
-  <img src="images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 64, 52, 71, 67. Browser graphics (WebGL Aquarium): 18, 26, 38, 25. Browser overall (Basemark Web 3.0): 76, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent with the vulkan feature on, not available in the others." width="100%">
+  <img src="images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 64, 52, 71, 67. Browser graphics (WebGL Aquarium): 32 (OmacVM.app 3.0.6, striped: not released yet), 26, 38, 25. Browser overall (Basemark Web 3.0): 76, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent with the vulkan feature on, not available in the others." width="100%">
 </p>
 
 ## The Mac itself, and video
