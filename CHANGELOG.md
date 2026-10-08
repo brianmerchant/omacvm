@@ -16,6 +16,11 @@ in more words.
   restart of the VM. A VM with it off starts exactly as before. Requested
   and scoped by @Vocllum (#273). Details: docs/features.md, design: docs/adr/0043-mac-ime.md.
 
+- `omacvm build --vm-type utm`: when macOS put UTM's shared network on
+  another range than 192.168.64.0/24 (another VM network on the Mac was
+  there first), the build said so only at the end, after the whole install
+  (about 10 minutes). It now stops as soon as the live installer has its
+  address, and the message says why this can happen.
 - Capture mode no longer makes the VM lag or the sound crackle
   ([troubleshooting 32](docs/troubleshooting.md#32-app-the-vm-lags-and-the-sound-crackles-while-recording-the-screen-or-taking-a-screenshot)).
   Screen recording: the Mac's video encoder works beside QEMU's main loop

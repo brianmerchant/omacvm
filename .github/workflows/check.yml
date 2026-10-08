@@ -235,6 +235,8 @@ jobs:
 
       - name: UTM VM on another drive (--vm-dir; a stand-in UTM, no VM)
         run: src/tests/utm-vm-dir.sh
+      - name: UTM's shared network on another range is found before the install
+        run: src/tests/utm-network.sh
 
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
