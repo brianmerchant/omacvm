@@ -31,6 +31,10 @@ final class AppState: ObservableObject {
 
     init() {
         (config, screen) = Self.start()
+        // --vm NAME that no VM has: said here, and nothing is started (main.swift).
+        if let n = VMConfig.unknownRequested {
+            message = VMPick.unknownText(n, roots: Paths.vmsRoots)
+        }
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
         storage.onMoved = { [weak self] in self?.reload() }
@@ -103,6 +107,8 @@ final class AppState: ObservableObject {
             return (existing, existing.isReady ? .ready : .setup)
         }
         var c = VMConfig()
+        // Never the folder of a VM that is there (one --vm did not name, say).
+        c.name = VMPick.freeName(root: Paths.vmsRoot, taken: VMConfig.all().map(\.name))
         let t = Mac.tier(1)
         c.cpus = t.cpus
         c.memoryMB = t.memoryGB * 1024
@@ -190,7 +196,16 @@ struct SetupView: View {
     }
     private var canBuild: Bool {
         userOK && !password.isEmpty && password == password2 && VMConfig.validName(state.config.name)
-            && prebuilt != .checking
+            && !nameTaken && prebuilt != .checking
+    }
+    /// A VM (or a folder) of that name is there: a build would take over its disk.
+    /// The shown VM's own folder (a build that did not finish, built again) is not taken.
+    private var nameTaken: Bool {
+        let folder = Paths.vmsRoot.appendingPathComponent(state.config.name).standardizedFileURL.path
+        if let own = state.config.location?.standardizedFileURL.path, own.caseInsensitiveCompare(folder) == .orderedSame {
+            return false
+        }
+        return VMPick.freeName(state.config.name, root: Paths.vmsRoot, taken: VMConfig.all().map(\.name)) != state.config.name
     }
 
     var body: some View {
@@ -222,6 +237,8 @@ struct SetupView: View {
                 TextField("VM name", text: $state.config.name)
                 if !state.config.name.isEmpty && !VMConfig.validName(state.config.name) {
                     Text("Letters, digits, spaces, . _ and - only (64 at most).").font(.caption).foregroundStyle(.red)
+                } else if nameTaken {
+                    Text("A VM named \(state.config.name) is there already: pick another name.").font(.caption).foregroundStyle(.red)
                 }
                 TextField("User name", text: $state.config.user)
                 if !state.config.user.isEmpty && !userOK {
@@ -257,6 +274,7 @@ struct SetupView: View {
                     Text(p).font(.caption).foregroundStyle(.red)
                 }
             }
+            if let m = state.message { Text(m).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Text("Keyboard \(state.config.keyboard), \(state.config.timeZone), \(state.config.language) (from the Mac)")
                     .font(.caption).foregroundStyle(.secondary)

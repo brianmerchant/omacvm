@@ -78,7 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             if CommandLine.arguments.contains("--start") {
-                let vm = args.firstIndex(of: "--vm").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ""
+                let vm = VMPick.requested(args) ?? ""
+                // --vm without a name: no request (an empty one would start the VM shown there).
+                if VMPick.requested(args) == "" {
+                    FileHandle.standardError.write(Data("OmacVM: \(VMPick.unknownText("", roots: []))\n".utf8))
+                    NSApp.terminate(nil)
+                    return
+                }
                 DistributedNotificationCenter.default().postNotificationName(
                     Self.startRequest, object: vm, userInfo: nil, deliverImmediately: true)
             }
@@ -98,9 +104,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
             DistributedNotificationCenter.default().addObserver(
-                forName: Self.restartRequest, object: nil, queue: .main) { _ in
-                Task { @MainActor in await Updater.shared.restartFromMac() }
+                forName: Self.restartRequest, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    // Only a VM in this test build's own VMs folder (TestVMs.hookProblem).
+                    if let c = self?.runner?.config, let why = Paths.hookProblem(c.location) {
+                        FileHandle.standardError.write(Data("OmacVM: --update-restart refused: \(why)\n".utf8))
+                        return
+                    }
+                    Task { @MainActor in await Updater.shared.restartFromMac() }
+                }
             }
+        }
+        if TestIdentity.isOn, let why = TestVMs.refusedSetting(custom: UserDefaults.standard.string(forKey: "vmsRoot"),
+                                                               production: Paths.productionVMsRoots) {
+            FileHandle.standardError.write(Data("OmacVM: \(why); VMs folder \(Paths.vmsRoot.path)\n".utf8))
+        }
+        // --vm NAME that no VM has: no start, no test hook, the window says so.
+        let unknownVM = VMConfig.unknownRequested
+        if let n = unknownVM {
+            FileHandle.standardError.write(Data("OmacVM: \(VMPick.unknownText(n, roots: Paths.vmsRoots))\n".utf8))
         }
         // Before any VM start reads the Graphics setting.
         Settings.migrateVenusSwitch()
@@ -147,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A restart-update shut a VM down for this version (or the old one
         // came back): start it again, once.
         let again = args.contains("--update-now") ? nil : u.takeRestartVM(afterSwap: args.contains("--update-check"))
-        let starting = again != nil || (state.config.isReady && args.contains("--start"))
+        let starting = again != nil || (unknownVM == nil && state.config.isReady && args.contains("--start"))
         Updater.shared.start(pending: args.contains("--update-now") || args.contains("--update-check") ? .leave
                              : starting ? .waitUntilIdle : .installNow)
         buildMenu()
@@ -158,12 +180,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Test builds (the disk size check on a test Mac): Apply in Disk ›
         // Change… for this size, before --start.
+        // Only on a VM in the VMs folder this test build was given, never on
+        // one of the installed app's (TestVMs.hookProblem).
         if let v = TestHooks.value("OMACVM_TEST_DISK_GB", bundleID: Bundle.main.bundleIdentifier), let gb = Int(v) {
-            let result: String
-            do { result = "\(try VMDisk.change(state.config, to: gb))" } catch { result = "refused: \(error.localizedDescription)" }
-            try? "disk to \(gb) GB: \(result)\n".write(to: state.config.folder.appendingPathComponent("logs/test-disk-change"),
-                                                     atomically: true, encoding: .utf8)
-            reloadConfig()
+            if let why = unknownVM.map({ VMPick.unknownText($0, roots: Paths.vmsRoots) }) ?? Paths.hookProblem(state.config.location) {
+                FileHandle.standardError.write(Data("OmacVM: OMACVM_TEST_DISK_GB refused: \(why)\n".utf8))
+            } else {
+                let result: String
+                do { result = "\(try VMDisk.change(state.config, to: gb))" } catch { result = "refused: \(error.localizedDescription)" }
+                try? "disk to \(gb) GB: \(result)\n".write(to: state.config.folder.appendingPathComponent("logs/test-disk-change"),
+                                                         atomically: true, encoding: .utf8)
+                reloadConfig()
+            }
         }
         if let again {
             startAgain(again)
@@ -211,7 +239,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A build or an update runs a VM without a window; the screen stays on
         // it (startVM checks the same, but only after the lines below).
         if state.screen == .building { showWindow(); return }
-        if !name.isEmpty, let c = VMConfig.named(name) { state.config = c; state.screen = c.isReady ? .ready : .setup }
+        if !name.isEmpty {
+            // A name no VM has starts nothing (never the VM shown now).
+            guard let c = VMConfig.named(name) else {
+                let why = VMPick.unknownText(name, roots: Paths.vmsRoots)
+                FileHandle.standardError.write(Data("OmacVM: start request: \(why)\n".utf8))
+                state.message = why
+                showWindow()
+                return
+            }
+            state.config = c
+            state.screen = c.isReady ? .ready : .setup
+        }
         if state.config.isReady { startVM() } else { showWindow() }
     }
 
@@ -336,6 +375,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let p = state.config.filesProblem {
             state.message = p
+            showWindow()
+            return
+        }
+        // The test identity never starts a VM of the installed app.
+        if TestIdentity.isOn, TestVMs.isProduction(state.config.folder, production: Paths.productionVMsRoots) {
+            let why = "\(state.config.folder.path) is a VM of the installed OmacVM: the test build does not start it."
+            FileHandle.standardError.write(Data("OmacVM: \(why)\n".utf8))
+            state.message = why
             showWindow()
             return
         }

@@ -52,10 +52,18 @@ APP_BUNDLE_ID=org.omacvm.app
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,
 # else ~/OmacVM (the app makes it on first use), unless that name is taken by
 # something else: then the old place, ~/Library/Application Support/OmacVM/VMs.
+# The test identity never uses a folder of the installed app (TestVMs in
+# app/app/Sources/OmacVM/VMPick.swift): its own setting unless that is one,
+# else ~/OmacVM Test VMs.
 APP_VMS_OLD="Library/Application Support/OmacVM/VMs"
+APP_TEST_VMS="OmacVM Test VMs"
 app_vms_root() {
   local r new=$HOME/OmacVM
   r=$(defaults read "$APP_ID" vmsRoot 2>/dev/null)
+  if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+    [[ -n $r ]] && ! app_prod_dir "${r%/}" && { echo "${r%/}"; return; }
+    echo "$HOME/$APP_TEST_VMS"; return
+  fi
   [[ -n $r ]] && { echo "${r%/}"; return; }
   app_vms_ours "$new" && { echo "$new"; return; }
   # Taken by something else (a file, ~/omacvm on a case-insensitive drive).
@@ -73,11 +81,43 @@ app_vms_roots() {
   for ((i = 0; i < 64; i++)); do
     r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
     r=${r%/}
-    [[ -n $r ]] && ! app_same_dir "$r" "${seen[@]}" && { echo "$r"; seen+=("$r"); }
+    [[ -n $r ]] && ! app_same_dir "$r" "${seen[@]}" || continue
+    [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && app_prod_dir "$r" && continue
+    echo "$r"; seen+=("$r")
   done
   # The old place holds the installed app's VMs from 2.9 and older: not the test identity's.
   [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && return
   app_same_dir "$HOME/$APP_VMS_OLD" "${seen[@]}" || echo "$HOME/$APP_VMS_OLD"
+}
+
+# app_prod_dir DIR: DIR is (in) a VMs folder of the installed app
+# (org.omacvm.app): its setting, its older folders, ~/OmacVM, the old place.
+# By name in any case (macOS drives mostly ignore it) and on disk.
+app_prod_dir() {
+  local d p i r roots=() up h
+  p=$(defaults export "${OMACVM_PROD_APP_ID:-org.omacvm.app}" - 2>/dev/null)
+  r=$(plutil -extract vmsRoot raw -o - - <<<"$p" 2>/dev/null) && [[ -n $r ]] && roots+=("${r%/}")
+  for ((i = 0; i < 64; i++)); do
+    r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
+    [[ -n $r ]] && roots+=("${r%/}")
+  done
+  roots+=("$HOME/OmacVM" "$HOME/$APP_VMS_OLD")
+  # The account's own home too, when HOME is another folder.
+  h=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')
+  [[ -n $h && $h != "$HOME" ]] && roots+=("$h/OmacVM" "$h/$APP_VMS_OLD")
+  d=$(printf '%s' "${1%/}" | tr '[:upper:]' '[:lower:]')
+  for r in "${roots[@]}"; do
+    r=$(printf '%s' "$r" | tr '[:upper:]' '[:lower:]')
+    [[ $d == "$r" || $d == "$r"/* ]] && return 0
+  done
+  # The same folder under another name (a link, a firmlink): DIR or a folder above it.
+  up=${1%/}
+  while [[ -n $up ]]; do
+    for r in "${roots[@]}"; do [[ -e $up && $up -ef $r ]] && return 0; done
+    [[ $up == */* ]] || break
+    up=${up%/*}
+  done
+  return 1
 }
 
 # app_same_dir DIR DIR...: DIR is one of the others, by name or as the same
