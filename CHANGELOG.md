@@ -5,32 +5,6 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
-- The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
-  the animation ends at 5.5 s, before the desktop is ready).
-- The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in
-  System Settings, without quitting the app first (macOS kept the old answer for the running
-  app; the app now asks in a fresh process).
-- Experimental, off by default, OmacVM.app only: the Mac's input methods
-  type in Omarchy: the Mac's candidate window opens at the text cursor in
-  the VM, the chosen text goes into the VM's field (tested with Pinyin,
-  Japanese Romaji kana and 2-Set Korean in a GTK app, foot and Chromium;
-  Kotoeri's candidate list not confirmed yet); keys, Cmd shortcuts and
-  Hyprland's binds stay as they are, password fields get plain keys. On
-  with `omacvm enable mac-ime`, the control centre, or "Mac input methods
-  (experimental)" in the app's VM window while the VM runs, then one
-  restart of the VM. A VM with it off starts exactly as before. Requested
-  and scoped by @Vocllum (#273). Details: docs/features.md, design: docs/adr/0043-mac-ime.md.
-
-- `omacvm build --vm-type utm`: when macOS put UTM's shared network on
-  another range than 192.168.64.0/24 (another VM network on the Mac was
-  there first), the build said so only at the end, after the whole install
-  (about 10 minutes). It now stops as soon as the live installer has its
-  address, and the message says why this can happen.
-- `omacvm build`: two builds at once (for example a UTM and a Parallels VM)
-  no longer break each other. The second one stopped in step 1 with "mv: …
-  TryOmarchy-v0.4.1.dmg: No such file or directory", as both used the same
-  download and work files. Now it says it waits for the other build and
-  starts its installer when that one is done.
 - Capture mode no longer makes the VM lag or the sound crackle
   ([troubleshooting 32](docs/troubleshooting.md#32-app-the-vm-lags-and-the-sound-crackles-while-recording-the-screen-or-taking-a-screenshot)).
   Screen recording: the Mac's video encoder works beside QEMU's main loop
@@ -44,11 +18,28 @@ in more words.
   screen once instead of on every frame (Hyprland 41 % to 11 % of a vCPU while
   picking), and big texture uploads from the VM take half the main loop's
   time.
-- App: the window keeps 20 pt on both sides. A long VMs folder is cut in
-  the middle (free space and Change… stay), Change…, Update VM and Start end
-  on one line, and the window is 8 pt shorter. The new VM form's Bridge line
-  wraps instead of running past the fields; a long VM name no longer wraps in
-  All VMs.
+- Experimental, off by default, OmacVM.app only: the Mac's input methods
+  type in Omarchy: the Mac's candidate window opens at the text cursor in
+  the VM, the chosen text goes into the VM's field (tested with Pinyin,
+  Japanese Romaji kana and 2-Set Korean in a GTK app, foot and Chromium;
+  Kotoeri's candidate list not confirmed yet); keys, Cmd shortcuts and
+  Hyprland's binds stay as they are, password fields get plain keys. On
+  with `omacvm enable mac-ime`, the control centre, or "Mac input methods
+  (experimental)" in the app's VM window while the VM runs, then one
+  restart of the VM. A VM with it off starts exactly as before. Requested
+  and scoped by @Vocllum (#273). Details: docs/features.md, design: docs/adr/0043-mac-ime.md.
+- OmacVM.app's prebuilt VM is new (release `prebuilt-3.0.8`, 3.7 GB):
+  Omarchy 4.0.3rc4 with 60 packages newer than in `prebuilt-3.0.0` (kernel
+  7.2.9, Mesa 26.2.4, Chromium 153), and the login keyring is made on the
+  VM's first boot, so Chromium never asks for a keyring password. Setup from
+  it took 90-94 s plus the download (MacBook Pro M4 Max, MacBook Air M2).
+  Apps before 3.0.8 keep using `prebuilt-3.0.0`.
+- Graphics: browser pages that change shader values before every draw (WebGL
+  Aquarium) are faster on the Mac's OpenGL. The values of a whole batch go to
+  the GPU in one upload; before, each draw set them with its own OpenGL call,
+  and Apple's OpenGL then redid its draw setup. Aquarium with 30,000 fish on a
+  MacBook Pro M4 Max: 32.9 to 41.8 frames a second
+  (`OMACVM_VIRGL_CONST_UBO=0` turns it off).
 - Control centre: a feature that cannot be set up because the VM's package
   list is older than the mirrors now says so. On a Mac mini, "WebGPU and GPU
   compute on" failed with only "was not set up", and "space tries again"
@@ -63,12 +54,28 @@ in more words.
 - Control centre: the Graphics row fits on its line, also in an 80-column
   window ("Vulkan: OpenGL until r builds it"); enter shows the whole text, in
   the VM's own words.
-- Graphics: browser pages that change shader values before every draw (WebGL
-  Aquarium) are faster on the Mac's OpenGL. The values of a whole batch go to
-  the GPU in one upload; before, each draw set them with its own OpenGL call,
-  and Apple's OpenGL then redid its draw setup. Aquarium with 30,000 fish on a
-  MacBook Pro M4 Max: 32.9 to 41.8 frames a second
-  (`OMACVM_VIRGL_CONST_UBO=0` turns it off).
+- App: the window keeps 20 pt on both sides. A long VMs folder is cut in
+  the middle (free space and Change… stay), Change…, Update VM and Start end
+  on one line, and the window is 8 pt shorter. The new VM form's Bridge line
+  wraps instead of running past the fields; a long VM name no longer wraps in
+  All VMs.
+- The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in
+  System Settings, without quitting the app first (macOS kept the old answer for the running
+  app; the app now asks in a fresh process).
+- The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
+  the animation ends at 5.5 s, before the desktop is ready).
+- `omacvm build --vm-type utm`: when macOS put UTM's shared network on
+  another range than 192.168.64.0/24 (another VM network on the Mac was
+  there first), the build said so only at the end, after the whole install
+  (about 10 minutes). It now stops as soon as the live installer has its
+  address, and the message says why this can happen.
+- `omacvm build`: two builds at once (for example a UTM and a Parallels VM)
+  no longer break each other. The second one stopped in step 1 with "mv: …
+  TryOmarchy-v0.4.1.dmg: No such file or directory", as both used the same
+  download and work files. Now it says it waits for the other build and
+  starts its installer when that one is done.
+- Tests: app-cli-identity.sh no longer fails on a CI runner Mac where
+  OmacVM.app is open.
 
 ## 3.0.7
 
