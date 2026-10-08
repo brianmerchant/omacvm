@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 530" width="1000" height="530" role="img" aria-labelledby="t d">
 <title id="t">How fast Omarchy runs in OmacVM.app, UTM, VMware Fusion and Parallels, as a share of macOS itself</title>
-<desc id="d">CPU, all cores (Geekbench 7): OmacVM.app 99 percent, UTM 89 percent, VMware Fusion 99 percent, Parallels 96 percent. Web apps (Speedometer 3.1): OmacVM.app 64 percent, UTM 52 percent, VMware Fusion 71 percent, Parallels 67 percent. Browser graphics (WebGL Aquarium): OmacVM.app 32 percent (3.0.6), UTM 26 percent, VMware Fusion 38 percent, Parallels 25 percent. Browser overall (Basemark Web 3.0): OmacVM.app 76 percent, UTM 67 percent, VMware Fusion 78 percent, Parallels 75 percent. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent, UTM not available (no OpenCL or Vulkan), VMware Fusion not available (no OpenCL or Vulkan), Parallels not available (no OpenCL or Vulkan). macOS itself is 100 percent.</desc>
+<desc id="d">CPU, all cores (Geekbench 7): OmacVM.app 99 percent, UTM 89 percent, VMware Fusion 99 percent, Parallels 96 percent. Web apps (Speedometer 3.1): OmacVM.app 64 percent, UTM 52 percent, VMware Fusion 71 percent, Parallels 67 percent. Browser graphics (WebGL Aquarium): OmacVM.app 32 percent, UTM 26 percent, VMware Fusion 38 percent, Parallels 25 percent. Browser overall (Basemark Web 3.0): OmacVM.app 76 percent, UTM 67 percent, VMware Fusion 78 percent, Parallels 75 percent. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent, UTM not available (no OpenCL or Vulkan), VMware Fusion not available (no OpenCL or Vulkan), Parallels not available (no OpenCL or Vulkan). macOS itself is 100 percent.</desc>
 <defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><rect x="20" y="20" width="2" height="2" fill="#26233a"/></pattern>
 <pattern id="hatch-app" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#ebbcba" fill-opacity="0.25"/><rect width="3" height="6" fill="#ebbcba"/></pattern>
 <pattern id="hatch-utm" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#c4a7e7" fill-opacity="0.25"/><rect width="3" height="6" fill="#c4a7e7"/></pattern>
@@ -46,10 +46,8 @@
 <text x="655.9" y="236" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">67 %</text>
 <text x="40" y="283.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e0def4" font-weight="600">Browser graphics</text>
 <text x="40" y="300.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86">WebGL Aquarium</text>
-<rect x="230" y="258.0" width="200.3" height="11" rx="3" fill="url(#hatch-app)"/>
+<rect x="230" y="258.0" width="200.3" height="11" rx="3" fill="#ebbcba"/>
 <text x="438.3" y="267" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" font-weight="600" stroke="#191724" stroke-width="4" paint-order="stroke">32 %</text>
-<rect x="480.3" y="257" width="50" height="13" rx="6.5" fill="none" stroke="#ebbcba" stroke-opacity="0.7"/>
-<text x="505.4" y="267" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#ebbcba" text-anchor="middle">3.0.6</text>
 <rect x="230" y="273.0" width="161.8" height="11" rx="3" fill="#c4a7e7"/>
 <text x="399.8" y="282" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="12" fill="#e0def4" stroke="#191724" stroke-width="4" paint-order="stroke">26 %</text>
 <rect x="230" y="288.0" width="233.7" height="11" rx="3" fill="#f6c177"/>
@@ -73,6 +71,6 @@
 <text x="230" y="433" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" fill="#6e6a86">– UTM: not available (no OpenCL or Vulkan)</text>
 <text x="230" y="448" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" fill="#6e6a86">– VMware Fusion: not available (no OpenCL or Vulkan)</text>
 <text x="230" y="463" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="11" fill="#6e6a86">– Parallels: not available (no OpenCL or Vulkan)</text>
-<text x="500.0" y="500" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">OmacVM.app in the browser rows (3.0.0; Aquarium 3.0.6): Mac mini M4 next to Parallels, scaled by Parallels' result on this Mac.</text>
+<text x="500.0" y="500" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">OmacVM.app in the browser rows: Mac mini M4 next to Parallels, scaled by Parallels' result on this Mac.</text>
 <text x="500.0" y="516" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#6e6a86" text-anchor="middle">GPU compute: omacvm enable vulkan (experimental). glmark2 and vkmark have no macOS version: see docs/benchmarks.</text>
 </svg>

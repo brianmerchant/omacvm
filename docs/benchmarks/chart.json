@@ -42,10 +42,9 @@
   }
  },
  "note": [
-  "OmacVM.app in the browser rows (3.0.0; Aquarium 3.0.6): Mac mini M4 next to Parallels, scaled by Parallels' result on this Mac.",
+  "OmacVM.app in the browser rows: Mac mini M4 next to Parallels, scaled by Parallels' result on this Mac.",
   "GPU compute: omacvm enable vulkan (experimental). glmark2 and vkmark have no macOS version: see docs/benchmarks."
  ],
- "unreleased": {"app": {"aquarium": "3.0.6"}},
  "missing": {
   "utm": {
    "geekbench-gpu-opencl": "not available (no OpenCL or Vulkan)"
