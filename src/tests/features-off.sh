@@ -278,12 +278,18 @@ EOF
     # Touch ID: off unless named on, but every start has its port (3.0.4):
     # turning it on later needs no restart. The record says both.
     expect "app: Touch ID off unless named on; the port all the same" \
-      "touchid=false record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID off, Touch ID port on" \
+      "touchid=false record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID off, Touch ID port on, Mac input methods off" \
       "$("$T/links" "$T/vm" x | sed 's/.* touchid=/touchid=/')"
     app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on touch-id=on"
     expect "app: touch-id=on: named in the record, the port as always" \
-      "touchid=true record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID on, Touch ID port on" \
+      "touchid=true record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID on, Touch ID port on, Mac input methods off" \
       "$("$T/links" "$T/vm" x | sed 's/.* touchid=/touchid=/')"
+    # mac-ime: its port only when named on (off by default; no port, no socket otherwise).
+    app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on mac-ime=on"
+    expect "app: mac-ime=on: its port this start" "Mac input methods on" \
+      "$("$T/links" "$T/vm" x | grep -o 'Mac input methods [a-z]*')"
+    app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on mac-ime=off"
+    expect "app: mac-ime=off: no port" "Mac input methods off" "$("$T/links" "$T/vm" x | grep -o 'Mac input methods [a-z]*')"
     mkdir -p "$T/old"
     expect "app: a VM from before: Touch ID off, its port all the same" "touchid=false" "$("$T/links" "$T/old" x | grep -o 'touchid=[a-z]*')"
     expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47811>47911,47830>47930,47831>47931" "$("$T/links" "$T/old")"
@@ -408,6 +414,12 @@ grep -q 'env\["OMACVM_SLIRP_HOST_PORTS"\] = links.hostPorts' "$R/app/app/Sources
   grep -q 'if links.battery { startBattery() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   grep -q 'if links.camera { startCamera() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   echo "ok   Runner.swift follows MacLinks" || { echo "FAIL Runner.swift does not follow MacLinks"; fail=1; }
+# mac-ime: the port and QEMU's socket only with the record's mac-ime=on.
+[[ $(grep -c 'if links.macIME {' "$R/app/app/Sources/OmacVM/Runner.swift") -eq 2 ]] &&
+  grep -q 'a += MacIME.arguments(socket: q(c.imeSocket.path))' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  grep -q 'env\[MacIME.socketVariable\] = c.imeSocket.path' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  echo "ok   Runner.swift: the mac-ime port and socket only with it on" ||
+  { echo "FAIL Runner.swift: the mac-ime port or socket is not behind links.macIME"; fail=1; }
 
 # off_lines under set -e: taking out the file's last lines is no failure
 # (grep then finds nothing; the control centre's "bridge off" stopped there).

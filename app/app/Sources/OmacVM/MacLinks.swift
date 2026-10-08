@@ -1,5 +1,4 @@
 import Foundation
-import OmacVMFeatures
 
 /// What of the Mac one VM may use, from its features: `omacvm apply` writes
 /// them into the VM's folder (`features`: "bridge=on gestures=off ...").
@@ -21,7 +20,7 @@ struct MacLinks: Equatable {
     var touchID = false
     /// The Mac's input methods (mac-ime): off unless the file says mac-ime=on.
     /// Only then does this start get the org.omacvm.ime port and QEMU's
-    /// window code its socket (MacIME); turned on while the VM runs, it
+    /// window code its socket (Runner, OmacVMFeatures' MacIME); turned on while the VM runs, it
     /// waits for the next start.
     var macIME = false
 
@@ -40,7 +39,7 @@ struct MacLinks: Equatable {
         battery = on["battery"] ?? true
         camera = on["camera"] ?? true
         touchID = on["touch-id"] ?? false
-        macIME = MacIME.isOn(features: text)
+        macIME = on["mac-ime"] ?? false
     }
 
     static func load(folder: URL) -> MacLinks {
