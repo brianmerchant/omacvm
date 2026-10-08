@@ -1437,3 +1437,36 @@ def test_mouse_swipe_look_from_before_a_switch_is_dropped(world):
     world.mouse_swipe = None
     c.refresh_mac()
     assert c.mouse_swipe is None
+
+
+def test_graphics_row_fits_and_details_say_it_all(tmp_path, monkeypatch):
+    """The mini's Graphics row was cut off ("... until it is built (Om"):
+    the row says it short, enter shows the whole of it."""
+    from textual.widgets import DataTable
+    from omacvm_cc.tui import DetailsScreen
+    mac, checks = FakeMac(version="2.9.0"), FakeChecks()
+    mac.graphics = {"graphics": "vulkan", "next_start": "opengl", "this_start": "", "driver_ready": False,
+                    "waiting_for_driver": True,
+                    "summary": "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))"}
+    for k, v in vm_env(str(tmp_path), mac.port, checks.path, "OMACVM_VM_TYPE=app\n").items():
+        monkeypatch.setenv(k, v)
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(90, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.graphics() == "vulkan")
+            await pilot.pause(0.2)
+            cell = str(a.screen.query_one(DataTable).get_cell("graphics", "note"))
+            assert cell == "Vulkan: OpenGL until r builds its driver", cell
+            _move_to(a, "graphics")
+            await pilot.press("enter")
+            assert await settle(pilot, lambda: isinstance(a.screen, DetailsScreen))
+            await pilot.pause(0.2)
+            body = str(a.screen.query_one("#body").render())
+            assert "runs on OpenGL" in body and "until the driver is built" in body.replace("\n", " ").replace("  ", " ")
+            assert "OmacVM in the VM" not in body
+    try:
+        asyncio.run(go())
+    finally:
+        mac.stop()
+        checks.stop()

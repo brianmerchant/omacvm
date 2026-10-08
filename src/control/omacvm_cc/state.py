@@ -90,6 +90,7 @@ class Row:
     note: str
     update: bool = False
     checks: tuple[Check, ...] = field(default=())
+    detail: str = ""   # the whole story behind a short note (the details screen's "Now")
 
 
 # ---- parsing ----
@@ -488,6 +489,14 @@ GRAPHICS_CHOICES = ("auto", "opengl", "vulkan")
 GRAPHICS_TITLES = {"auto": "Automatic", "opengl": "OpenGL", "vulkan": "Vulkan"}
 # The Mac's words when Vulkan fell back (Graphics.didNotStart, src/lib/graphics.sh).
 GRAPHICS_DID_NOT_START = "Vulkan did not start on this Mac: using OpenGL"
+# The row's short words, whole in a 90-column window (the Mac's summary is
+# for its own window and omacvm: about 100 characters, cut off in the row on
+# the Mac mini, 2026-10-08); the whole story under enter.
+GRAPHICS_WAITING_NOTE = "Vulkan: OpenGL until r builds its driver"
+GRAPHICS_WAITING_DETAIL = ("Vulkan is chosen, but this VM does not have its Vulkan driver yet, so it runs on OpenGL "
+                           "until the driver is built. r builds it (a few minutes; when the VM's packages are too old "
+                           "for that, after a whole system update with omarchy update, asked first).")
+GRAPHICS_FELL_BACK_NOTE = "Vulkan: did not start, OpenGL (r retries)"
 GRAPHICS_FEATURE = Feature(
     name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
     summary="OpenGL, Vulkan, or Automatic (OpenGL on every Mac in 3.0.0); from the VM's next start")
@@ -516,19 +525,22 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     this = str(g.get("this_start") or "")
     now = "OpenGL and Vulkan" if "-> vulkan" in this else "OpenGL" if this else ""
     note = f"{title}: {now}" if now and now == nxt else f"{title}: {nxt} from the next start"
+    detail = ""
     if g.get("waiting_for_driver") is True:
         # Vulkan chosen, no Venus driver for the Mac's pages yet: OpenGL until
-        # r on this row (or an apply) builds it; the Mac's summary says so.
-        note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))")
+        # r on this row (or an apply) builds it.
+        note, detail = GRAPHICS_WAITING_NOTE, GRAPHICS_WAITING_DETAIL
     elif str(g.get("summary") or "").startswith(GRAPHICS_DID_NOT_START):
         # A Vulkan start showed nothing on this Mac; the app started it on
-        # OpenGL and stays there until Vulkan is chosen again (Space here).
-        note = str(g["summary"])
+        # OpenGL and stays there until Vulkan is chosen again (r here: the
+        # same choice again clears the fallback, src/cmd/graphics.sh).
+        note = GRAPHICS_FELL_BACK_NOTE
+        detail = str(g["summary"]).replace("choose Vulkan again to try once more", "r on this row tries Vulkan again")
     if any(c.status == "fail" for c in mine):
         bad = next(c for c in mine if c.status == "fail")
         return Row(GRAPHICS_FEATURE, True, Status.NEEDS_PERSON if bad.human else Status.FAILING,
-                   f"{note}; {bad.name}: {bad.detail}", checks=mine)
-    return Row(GRAPHICS_FEATURE, True, Status.WORKS, note, checks=mine)
+                   f"{note}; {bad.name}: {bad.detail}", checks=mine, detail=detail)
+    return Row(GRAPHICS_FEATURE, True, Status.WORKS, note, checks=mine, detail=detail)
 
 
 def next_graphics(current: str) -> str:

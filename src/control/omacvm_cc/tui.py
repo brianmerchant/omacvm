@@ -399,7 +399,12 @@ class DetailsScreen(Screen):
             t.append("\n")
             field("Record", fixed)
             t.append("\n")
-        if (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY, S.Status.NEXT_START) or f.name == "gpu-memory") and r.note:
+        if r.detail:
+            t.append("\n")
+            field("Now", r.detail)
+            t.append("\n")
+        elif (r.status in (S.Status.UNAVAILABLE, S.Status.BUSY, S.Status.NEXT_START)
+              or f.name in ("gpu-memory", "graphics")) and r.note:
             t.append("\n")
             field("Now", r.note)
             t.append("\n")
