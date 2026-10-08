@@ -490,7 +490,10 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   code signature `<bundle id>.qemu`; a development build's QEMU is every helper's). Its VMs reach Omanotch on 47911 only: a test Omanotch
   (src/omanotch/mac build, `port` 47911, `bridgeDir` omacvm-test-bridge) on a Mac without the user's. Start a helper with `open` (so macOS checks its own
   grant, not the Terminal's); small tools without a bundle run as children of your shell (the Terminal's grants).
-  Never `src/mac/install.sh` from a test: that installs over the user's helpers. The test app's own
+  Never `src/mac/install.sh` from a test: that installs over the user's helpers. If one runs anyway with the test
+  identity or another HOME, every helper LaunchAgent gets an `org.omacvm.test.*` label (`omacvm_label` in
+  `src/lib/labels.sh`; launchd has one GUI session per user, whatever HOME says), never a production one
+  (`src/tests/test-labels.sh`). The test app's own
   `Contents/Resources/omacvm/omacvm` (and its VM scripts) run by hand is the test identity too (src/lib/identity.sh).
   Its VMs folder is its own `vmsRoot` (`defaults write org.omacvm.app.test vmsRoot DIR`), else
   `~/OmacVM Test VMs`; never `~/OmacVM`, the old hidden place or another folder of the installed app (a setting

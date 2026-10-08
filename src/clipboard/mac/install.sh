@@ -1,8 +1,10 @@
 #!/bin/bash
-# Clipboard, Mac side: VM -> Mac copy. LaunchAgent org.omacvm.clip-in.
+# Clipboard, Mac side: VM -> Mac copy. LaunchAgent org.omacvm.clip-in
+# (org.omacvm.test.clip-in for a test HOME: src/lib/labels.sh).
 set -euo pipefail
 cd "$(dirname "$0")"
-LABEL=org.omacvm.clip-in
+source ../../lib/labels.sh   # after the cd above
+LABEL=$(omacvm_label clip-in)
 D=$HOME/.local/share/omacvm
 mkdir -p "$D/clip" "$HOME/Library/LaunchAgents"
 install -m755 omacvm-clip-in "$D/omacvm-clip-in"

@@ -31,6 +31,10 @@ in more words.
   2 s, then 30 s, and after three in 10 minutes Gestures lets go of the keyboard and
   trackpads until the Accessibility list changes. A watchdog disables the tap when
   Gestures' main thread has not answered for a second.
+- Tests and other HOMEs: the Mac helpers' LaunchAgents get `org.omacvm.test.*` labels with
+  the test identity or a HOME that is not the user's own, so a test run can no longer
+  replace the user's own Bridge, Gestures, clipboard helper or Omanotch (`src/lib/labels.sh`,
+  `src/tests/test-labels.sh`).
 
 ## 3.0.8
 

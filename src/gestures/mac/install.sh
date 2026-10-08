@@ -20,7 +20,8 @@ while (( $# )); do
   shift
 done
 (( PRE )) || ./build.sh
-LABEL=org.omacvm.gestures
+source ../../lib/labels.sh   # after the cd above
+LABEL=$(omacvm_label gestures)
 PL=~/Library/LaunchAgents/$LABEL.plist
 launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"

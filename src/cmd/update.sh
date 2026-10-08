@@ -108,11 +108,11 @@ fi
 
 # ---------- the Mac ----------
 args=()
-launchctl print "gui/$(id -u)/org.omacvm.bridge" >/dev/null 2>&1 || args+=(--no-bridge)
-if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- --keys-only; then args+=(--keys-only)
-elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
-launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--skip-clip)
-launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
+launchctl print "gui/$(id -u)/$(omacvm_label bridge)" >/dev/null 2>&1 || args+=(--no-bridge)
+if launchctl print "gui/$(id -u)/$(omacvm_label gestures)" 2>/dev/null | grep -q -- --keys-only; then args+=(--keys-only)
+elif ! launchctl print "gui/$(id -u)/$(omacvm_label gestures)" >/dev/null 2>&1; then args+=(--skip-gestures); fi
+launchctl print "gui/$(id -u)/$(omacvm_label clip-in)" >/dev/null 2>&1 || args+=(--skip-clip)
+launchctl print "gui/$(id -u)/$(omacvm_label omanotch)" >/dev/null 2>&1 && args+=(--omanotch)
 step mac "the Mac side"
 log "OmacVM on the Mac"
 # A helper that does not build keeps its last build running; the VMs still

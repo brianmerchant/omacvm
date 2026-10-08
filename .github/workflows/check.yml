@@ -203,6 +203,8 @@ jobs:
 
       - name: A Mac helper that does not build
         run: src/tests/mac-install.sh
+      - name: A test HOME never uses the helpers' production LaunchAgent labels
+        run: src/tests/test-labels.sh
 
       - name: Release keys on the command line (either key, Developer ID teams, a named spare)
         run: src/tests/release-keys.sh
