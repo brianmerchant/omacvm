@@ -76,18 +76,18 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, true);
          qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, false);
      }
-@@ -2034,6 +2045,10 @@
+@@ -2033,6 +2044,10 @@
+ {
      if (omacvm_key_for_macos(event)) {
          return false;
-     }
++    }
 +    /* OmacVM mac-ime: keys for the Mac's input method (off: not even looked at). */
 +    if (omacvm_ime_on && omacvm_ime_key(event)) {
 +        return true;
-+    }
+     }
      return bool_with_bql(^{
          return [self handleEventLocked:event];
-     });
-@@ -8465,8 +8480,810 @@
+@@ -8465,8 +8480,822 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -279,9 +279,15 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    return omacvm_ime.hello && omacvm_ime.focus && !omacvm_ime.password;
 +}
 +
++/*
++ * A window of the VM has the keyboard. macOS 26 draws the input method's
++ * candidate list as a window of this process, and that window can become
++ * the key window while it shows: the VM's main window still counts then.
++ */
 +static bool omacvm_ime_window_key(void)
 +{
-+    return [NSApp isActive] && omacvm_is_our_window([NSApp keyWindow]) && !omacvm_touchid_up;
++    return [NSApp isActive] && !omacvm_touchid_up &&
++           (omacvm_is_our_window([NSApp keyWindow]) || omacvm_is_our_window([NSApp mainWindow]));
 +}
 +
 +/*
@@ -305,6 +311,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        omacvm_ime_was_active = active;
 +        if (!active) {
 +            [omacvm_ime_ctx deactivate];
++        }
++        if (omacvm_ime_debug) {
++            NSWindow *k = [NSApp keyWindow];
++            fprintf(stderr, "omacvm-ime: %s (active app %d, key window %s level %ld, main ours %d, source im %d, focus %d)\n",
++                    active ? "active" : "inactive", [NSApp isActive], k ? [NSStringFromClass([k class]) UTF8String] : "none",
++                    (long)[k level], omacvm_is_our_window([NSApp mainWindow]), omacvm_ime.source_im, omacvm_ime.focus);
 +        }
 +        if (omacvm_ime_said < 4) {
 +            omacvm_ime_said++;
@@ -898,7 +910,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9607,7 @@
+@@ -8790,6 +9619,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
