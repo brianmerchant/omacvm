@@ -284,6 +284,9 @@ jobs:
       - name: Feature state truth (the record against the fast network and SDDM autologin)
         run: src/tests/feature-truth.sh
 
+      - name: After an update from an older OmacVM (Textual without pacman, the Vulkan driver's words)
+        run: src/tests/upgrade-path.sh
+
       - name: A feature switch runs only its parts (no Hyprland reload for the rest)
         run: src/tests/feature-switch.sh
 

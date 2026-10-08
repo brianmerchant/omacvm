@@ -518,8 +518,8 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     note = f"{title}: {now}" if now and now == nxt else f"{title}: {nxt} from the next start"
     if g.get("waiting_for_driver") is True:
         # Vulkan chosen, no Venus driver for the Mac's pages yet: OpenGL until
-        # an apply (or Space on this row while the VM runs) builds it.
-        note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until the next apply)")
+        # r on this row (or an apply) builds it; the Mac's summary says so.
+        note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))")
     elif str(g.get("summary") or "").startswith(GRAPHICS_DID_NOT_START):
         # A Vulkan start showed nothing on this Mac; the app started it on
         # OpenGL and stays there until Vulkan is chosen again (Space here).

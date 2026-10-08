@@ -579,8 +579,14 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
     : > "$d/venus-ready"
   else
     rm -f "$d/venus-ready"
+    # Only a whole VM side builds it (src/app/guest/install.sh); a repair of
+    # other features or a feature switch (--only) does not try, so it did not fail either.
     if [[ $GRAPHICS == vulkan ]] && ! graphics_forced "$d"; then
-      info "Graphics: the VM's Vulkan driver did not build (see above): the VM runs on OpenGL until an apply builds it"
+      if [[ -z $ONLY ]]; then
+        info "Graphics: the VM's Vulkan driver did not build (see above): the VM runs on OpenGL until it is built (OmacVM in the VM: r on Graphics, or omacvm graphics --vm \"$VM\" vulkan)"
+      else
+        info "Graphics: Vulkan waits for the VM's driver, which this run does not build: OmacVM in the VM: r on Graphics, or omacvm graphics --vm \"$VM\" vulkan"
+      fi
     fi
   fi
   # Its VA-API shim keeps AV1 to Chromium-based browsers (FFmpeg's AV1 cannot

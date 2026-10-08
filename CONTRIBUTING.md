@@ -62,6 +62,7 @@ src/tests/no-clt.sh
 src/tests/vm-names.sh
 src/tests/proxy.sh
 src/tests/mac-install.sh
+src/tests/feature-truth.sh && src/tests/upgrade-path.sh
 src/tests/release-keys.sh && src/tests/release-script.sh
 src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh && src/tests/build-ctrlc.sh && src/tests/build-space.sh
 src/net/mac/test.sh
