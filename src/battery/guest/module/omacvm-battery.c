@@ -16,6 +16,12 @@
  * percentage beside a stale charging flag. -1 means no estimate. A malformed
  * line is rejected whole and the previous state is retained.
  *
+ * Since 1.1.0 a line may also carry current_now (µA, signed: below 0 while
+ * the battery gives power) and power_now (µW). Left out: not known. With
+ * them UPower has a real rate, so watts and time left; without, it guesses
+ * one from charge steps, and the guess is noise. The agent sends them only to
+ * 1.1.0 or newer (an older module rejects the whole line).
+ *
  * Lock ordering: omb_register_lock -> omb_state_lock. get_property() takes
  * only omb_state_lock; power_supply registration calls take only
  * omb_register_lock, never while omb_state_lock is held, because
@@ -43,6 +49,9 @@ struct omb_state {
 	int charge_full_design;
 	int voltage_now;
 	int cycle_count;
+	bool has_current;
+	int current_now;
+	int power_now;
 };
 
 static struct platform_device *omb_pdev;
@@ -63,6 +72,9 @@ static struct omb_state omb_state = {
 	.charge_full_design = -1,
 	.voltage_now = -1,
 	.cycle_count = -1,
+	.has_current = false,
+	.current_now = 0,
+	.power_now = -1,
 };
 
 static const struct {
@@ -92,6 +104,10 @@ static enum power_supply_property omb_bat_properties[] = {
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_AVG,
+	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
+	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
+	POWER_SUPPLY_PROP_POWER_NOW,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
@@ -125,22 +141,40 @@ static int omb_bat_get_property(struct power_supply *psy,
 		val->intval = omb_state.capacity;
 		break;
 	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG:
+	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW:
 		if (omb_state.time_to_empty < 0)
 			error = -ENODATA;
 		else
 			val->intval = omb_state.time_to_empty;
 		break;
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_AVG:
+	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
 		if (omb_state.time_to_full < 0)
 			error = -ENODATA;
 		else
 			val->intval = omb_state.time_to_full;
 		break;
-	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
-		if (omb_state.charge_limit < 0)
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		/* The kernel's sign: below 0 while discharging. Only then, so
+		 * UPower (current < 0 means discharging) never contradicts the
+		 * Mac's status, e.g. on the charger with the battery helping. */
+		if (!omb_state.has_current) {
 			error = -ENODATA;
-		else
-			val->intval = omb_state.charge_limit;
+			break;
+		}
+		val->intval = abs(omb_state.current_now);
+		if (omb_state.status == POWER_SUPPLY_STATUS_DISCHARGING)
+			val->intval = -val->intval;
+		break;
+	case POWER_SUPPLY_PROP_POWER_NOW:
+		val->intval = omb_state.power_now;
+		if (val->intval < 0)
+			error = -ENODATA;
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
+		/* No limit in macOS: 100, the driver default ("charges to
+		 * full"), rather than no value, which tools read as unknown. */
+		val->intval = omb_state.charge_limit < 0 ? 100 : omb_state.charge_limit;
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -231,6 +265,9 @@ static int omb_parse(const char *buf, size_t count, struct omb_state *next)
 	next->charge_full_design = -1;
 	next->voltage_now = -1;
 	next->cycle_count = -1;
+	next->has_current = false;
+	next->current_now = 0;
+	next->power_now = -1;
 
 	copy = kstrndup(buf, count, GFP_KERNEL);
 	if (!copy)
@@ -297,6 +334,16 @@ static int omb_parse(const char *buf, size_t count, struct omb_state *next)
 			if (kstrtoint(value, 10, target) || *target < -1 ||
 			    (!allow_zero && *target == 0))
 				goto out;
+		} else if (!strcmp(token, "current_now")) {
+			/* INT_MIN has no positive twin for abs(). */
+			if (kstrtoint(value, 10, &next->current_now) ||
+			    next->current_now == INT_MIN)
+				goto out;
+			next->has_current = true;
+		} else if (!strcmp(token, "power_now")) {
+			if (kstrtoint(value, 10, &next->power_now) ||
+			    next->power_now < -1)
+				goto out;
 		} else if (!strcmp(token, "time_to_empty")) {
 			if (kstrtoint(value, 10, &next->time_to_empty) ||
 			    next->time_to_empty < -1)
@@ -323,6 +370,7 @@ static ssize_t state_show(struct device *dev, struct device_attribute *attr,
 			  char *buf)
 {
 	struct omb_state snapshot;
+	int length;
 
 	mutex_lock(&omb_state_lock);
 	snapshot = omb_state;
@@ -330,14 +378,23 @@ static ssize_t state_show(struct device *dev, struct device_attribute *attr,
 	if (!snapshot.present)
 		return sysfs_emit(buf, "present=0 ac=%d\n",
 				  snapshot.ac_online ? 1 : 0);
-	return sysfs_emit(buf,
-			  "present=1 status=%s capacity=%d ac=%d time_to_empty=%d time_to_full=%d charge_limit=%d charge_now=%d charge_full=%d charge_full_design=%d voltage_now=%d cycle_count=%d\n",
-			  omb_status_token(snapshot.status), snapshot.capacity,
-			  snapshot.ac_online ? 1 : 0, snapshot.time_to_empty,
-			  snapshot.time_to_full, snapshot.charge_limit,
-			  snapshot.charge_now, snapshot.charge_full,
-			  snapshot.charge_full_design, snapshot.voltage_now,
-			  snapshot.cycle_count);
+	length = sysfs_emit(buf,
+			    "present=1 status=%s capacity=%d ac=%d time_to_empty=%d time_to_full=%d charge_limit=%d charge_now=%d charge_full=%d charge_full_design=%d voltage_now=%d cycle_count=%d",
+			    omb_status_token(snapshot.status), snapshot.capacity,
+			    snapshot.ac_online ? 1 : 0, snapshot.time_to_empty,
+			    snapshot.time_to_full, snapshot.charge_limit,
+			    snapshot.charge_now, snapshot.charge_full,
+			    snapshot.charge_full_design, snapshot.voltage_now,
+			    snapshot.cycle_count);
+	/* What the agent wrote: left out when not known. */
+	if (snapshot.has_current)
+		length += sysfs_emit_at(buf, length, " current_now=%d",
+					snapshot.current_now);
+	if (snapshot.power_now >= 0)
+		length += sysfs_emit_at(buf, length, " power_now=%d",
+					snapshot.power_now);
+	length += sysfs_emit_at(buf, length, "\n");
+	return length;
 }
 
 static ssize_t state_store(struct device *dev, struct device_attribute *attr,
@@ -364,7 +421,10 @@ static ssize_t state_store(struct device *dev, struct device_attribute *attr,
 		      next.charge_full != omb_state.charge_full ||
 		      next.charge_full_design != omb_state.charge_full_design ||
 		      next.voltage_now != omb_state.voltage_now ||
-		      next.cycle_count != omb_state.cycle_count;
+		      next.cycle_count != omb_state.cycle_count ||
+		      next.has_current != omb_state.has_current ||
+		      next.current_now != omb_state.current_now ||
+		      next.power_now != omb_state.power_now;
 	omb_state = next;
 	mutex_unlock(&omb_state_lock);
 
@@ -452,4 +512,4 @@ module_exit(omb_exit);
 MODULE_AUTHOR("Try Omarchy contributors, OmacVM");
 MODULE_DESCRIPTION("Mirror the host Mac's battery as guest BAT0/ADP0");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.1.0");
