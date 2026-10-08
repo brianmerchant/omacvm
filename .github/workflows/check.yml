@@ -306,6 +306,9 @@ jobs:
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
 
+      - name: Stale-frame check reads the guest's scanout and finds changed pixels below the bar (#167)
+        run: src/tests/stale-frames-diff.sh
+
       - name: An app VM's address comes from its running QEMU (fast network turned off while it runs)
         run: src/tests/app-vm-address.sh
 
