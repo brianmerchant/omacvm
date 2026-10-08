@@ -30,6 +30,12 @@ in more words.
   VM: r on Graphics") instead of "until the next apply". A repair of another
   feature no longer says the Vulkan driver "did not build": it never tried.
 
+- The camera and Chromium video on a VM whose package list is older than
+  the mirrors (a VM updated from 2.9.1 without dkms, say): their rows said
+  "omacvm apply", which only meets the same missing files again. They now
+  name the packages that are missing and the way out: update the system
+  (omarchy update), then r on the row.
+
 - Graphics memory in the control centre: macOS's memory pressure "warn" alone
   is fine now, with a short note (a Mac that gives the VM half its memory sits
   there). "Needs you" only when macOS is out of memory or graphics memory was

@@ -71,6 +71,21 @@ grep -q 'python3 -I /usr/local/share/omacvm/control/omacvm_cc/vendor.py --check'
   { echo "FAIL check.sh checks OmacVM's copy of Textual"; fail=1; }
 grep -q 'pacman -Q python-textual' "$R/src/guest/check.sh" && { echo "FAIL check.sh still asks pacman for Textual"; fail=1; }
 
+# ---- check.sh: a feature whose packages pacman could not install names them and the way out ----
+# (a 2.9.1 VM without dkms after its update: camera and Chromium video said "omacvm apply", which
+# hits the same 404s again; a system update is what helps)
+fn2=$(awk '/^missing_pkgs\(\) \{/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/guest/check.sh")
+[[ $fn2 == *missing_pkgs* ]] || { echo "FAIL check.sh missing_pkgs() not found"; exit 1; }
+mkdir -p "$T/bin2"; printf '#!/bin/bash\nexit 0\n' > "$T/bin2/pacman"; chmod +x "$T/bin2/pacman"
+mp() ( PATH="$1:$PATH"; shift; eval "$fn2"; missing_pkgs "$@" )
+expect "packages missing: named, with the way out" \
+  "dkms v4l2loopback-dkms not installed (an old package list?): update the system with omarchy update, then r on this row (omacvm apply)" \
+  "$(mp "$T/bin" dkms v4l2loopback-dkms)"
+expect "packages there: nothing" "" "$(mp "$T/bin2" dkms make gcc)"
+for w in 'campkg=$(missing_pkgs dkms v4l2loopback-dkms)' 'vpkg=$(missing_pkgs dkms make gcc)'; do
+  grep -qF "$w" "$R/src/guest/check.sh" || { echo "FAIL check.sh: $w"; fail=1; }
+done
+
 # ---- apply.sh: "the Vulkan driver did not build" only when it was built ----
 block=$(awk '/^  if gssh "\$IP" "\/usr\/local\/share\/omacvm\/app\/guest\/venus\/vulkan-virtio.sh --ready"/ {on = 1}
              on {print} on && /^  fi$/ {exit}' "$R/src/cmd/apply.sh")
