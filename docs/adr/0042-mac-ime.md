@@ -176,9 +176,18 @@ scancode exactly as now, unless all of these hold:
 - the guest's last word is focus on, kind `text`,
 - the current input source is an input method
   (`TISCopyCurrentKeyboardInputSource`, `kTISPropertyInputSourceType` is
-  `kTISTypeKeyboardInputMode`; followed on
+  `kTISTypeKeyboardInputMode`, `...InputMethodWithoutModes` or the method
+  itself, `...InputMethodModeEnabled`; followed on
   `kTISNotifySelectedKeyboardInputSourceChanged`),
-- the VM window has the keyboard.
+- the VM window has the keyboard (the key window, or the main window: on
+  macOS 26 the candidate list is a window of the app's own process and can
+  become the key window while it shows).
+
+The context's `selectedKeyboardInputSource` is set to the Mac's current
+source before each activation: an input context selects its remembered
+source when activated, and ours is activated again as fields come and go,
+which switched the Mac back to the plain layout right after the user picked
+an input method (seen on the Air, macOS 26.6).
 
 Then, in the key path (also for keys from the full-grab tap):
 
@@ -202,8 +211,11 @@ Then, in the key path (also for keys from the full-grab tap):
   the guest's text. `validAttributesForMarkedText` names the clause and
   underline attributes only, so the input method marks its clauses.
 - `unmarkText` commits the marked text as it is (AppKit's meaning).
-- Focus off, the window losing the keyboard, or the guest closing the
-  port: `discardMarkedText` and cancel.
+- The guest's field gone (focus off, a password field, the guest closing
+  the port): `discardMarkedText` and cancel. Only the keys gone (another
+  input source, another window or app in front): the context is
+  deactivated and the input method commits or keeps its text, as in a Mac
+  app; a commit still reaches the field.
 - Input source switching: while the conditions above hold except the
   input-method one, macOS's "Select the previous/next input source"
   shortcuts (symbolic hot keys 60 and 61, Ctrl+Space by default) and the
