@@ -27,8 +27,9 @@
  *    one by one; the program has the block "vsconstblk";
  * 12 800 draws with 8 vec4s each in one submit: more constants than one window holds, so
  *    the window moves on; every draw still reads its own;
- * 13 a vertex shader with 16 inputs (no location left for the index) keeps a range per
- *    draw;
+ * 13 a vertex shader with 16 inputs (no location left for the index): with windows it keeps
+ *    uniforms (a range at the 16-byte offset of a vertex entry would go one by one, slower
+ *    than uniforms), with OMACVM_VIRGL_CONST_UBO=1 a range per draw;
  * 14 a vertex shader reading CONST[0][3000] with 4 constants declared, then 800 draws with
  *    red constants in the same submit: the shader is refused as before (uniforms and a
  *    block of 4 do not compile); a window must not let it read the other draws' constants;
@@ -37,7 +38,14 @@
  *    the host refuses the separable link in every mode (Apple's GL, gl_PerVertex);
  * 16 a submit of a pattern, then small vertex and fragment constants: the buffer the GPU
  *    reads holds those constants and zeros, nothing of the earlier submit (the gaps between
- *    entries and the window pad are zeroed).
+ *    entries and the window pad are zeroed);
+ * 17 a 16-input vertex program, then a window program with the same constants; 18 a window
+ *    program from the stage's own buffer, a 16-input program, the window program again;
+ * 19 both orders, in one submit and across submits: a window is never bound past the end
+ *    of the buffer it reads (gl-oracle: a 64 KB window over a 64-byte own buffer);
+ * 20 vertex (window), geometry (an index) and fragment constants per draw;
+ * 21 random runs (programs, constants, submits, sub contexts; SEED, SEEDS): every draw is
+ *    checked by gl-oracle, and the printed hashes are the same in all three modes.
  * Run as is, with OMACVM_VIRGL_CONST_UBO=1 and with OMACVM_VIRGL_CONST_UBO=0.
  * Usage: test-const-ubo [case] */
 #include <OpenGL/OpenGL.h>
@@ -63,7 +71,7 @@ enum { RED = 0xff0000ff, GREEN = 0xff00ff00, BLUE = 0xffff0000, YELLOW = 0xff00f
 enum { R_RT = 1, R_POS, R_UBO, R_COUNT };
 /* objects */
 enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, VS_IN16, FS_VARYING, FS_CONST, FS_MUL,
-       VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS };
+       VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS, GS_CONST = 50 };
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -832,16 +840,18 @@ static void case_inputs16(struct cmds *c, int ctx)
       emit_draw(c);
    }
    check(submit(ctx, c) == 0, "a vertex shader with 16 inputs");
-   check_stripes(ctx, 4, colours, "16 inputs: a range per draw");
+   check_stripes(ctx, 4, colours, "16 inputs");
 }
 
 static void check_inputs16_counts(void)
 {
    unsigned long long binds = last.binds - totals_before.binds;
    unsigned long long index = last.index - totals_before.index;
+   unsigned long long own = last.own - totals_before.own;
    char text[160];
-   snprintf(text, sizeof(text), "16 inputs: %llu range binds, %llu index draws", binds, index);
-   check(const_ubo ? binds == 4 && index == 0 : binds == 0, text);
+   snprintf(text, sizeof(text), "16 inputs: %llu range binds, %llu index draws, %llu one by one",
+            binds, index, own);
+   check(const_ubo == 1 ? binds == 4 && index == 0 : binds == 0 && index == 0 && own == 0, text);
 }
 
 static void check_stale_counts(void)
@@ -976,6 +986,209 @@ static void check_zeroed(float mark)
    check(buf && size > 0 && marks == 0, text);
 }
 
+/* 17: a vertex program without a window (16 inputs) whose constants go to the stage's own
+ * buffer (a range at a misaligned offset), then a window program with the same constants:
+ * the window must not be bound past that buffer's end (gl-oracle) */
+static void case_own_small(struct cmds *c, int ctx)
+{
+   emit_bind_shaders(c, VS_IN16, FS_CONST);
+   emit_stripe(c, 0);
+   emit_colour_consts(c, TEST_SHADER_FRAGMENT, 2, 1, WHITE);  /* vertex entry lands at 32 */
+   emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, GREEN);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_stripe(c, 1);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "16 inputs, then a window program with the same constants");
+   const uint32_t want[2] = { WHITE, GREEN };
+   check_stripes(ctx, 2, want, "window after a vertex range program");
+}
+
+/* 18: the other way round: a window program from the own buffer (stale constants), then a
+ * 16-input program re-specifies that buffer smaller, then the window program draws again
+ * with its cached window binding */
+static void case_own_shrink(struct cmds *c, int ctx)
+{
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, RED);
+   check(submit(ctx, c) == 0, "constants only");
+   for (int k = 0; k < 5; k++) {
+      emit_colour_consts(c, TEST_SHADER_FRAGMENT, 1, 0, WHITE);
+      check(submit(ctx, c) == 0, "ring turnover");
+   }
+   emit_stripe(c, 0);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "window draw from the own buffer");
+   emit_bind_shaders(c, VS_IN16, FS_CONST);
+   emit_stripe(c, 1);
+   emit_colour_consts(c, TEST_SHADER_FRAGMENT, 2, 1, WHITE);
+   emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, GREEN);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_stripe(c, 2);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "window again after a 16-input program");
+   const uint32_t want[3] = { RED, WHITE, GREEN };
+   check_stripes(ctx, 3, want, "window, 16 inputs, window");
+}
+
+/* 19: both orders in one context, in one submit and across submits */
+static void case_own_mixed(struct cmds *c, int ctx)
+{
+   emit_bind_shaders(c, VS_IN16, FS_VARYING);
+   emit_colour_consts(c, TEST_SHADER_FRAGMENT, 1, 0, WHITE);   /* vertex entry not at 0 */
+   emit_stripe(c, 0);
+   emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, GREEN);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_stripe(c, 1);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "16 inputs then window, one submit");
+   check_stripes(ctx, 2, (const uint32_t[2]){ GREEN, GREEN }, "one submit");
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_stripe(c, 2);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "window");
+   for (int k = 0; k < 5; k++) {
+      emit_colour_consts(c, TEST_SHADER_FRAGMENT, 1, 0, WHITE);
+      submit(ctx, c);
+   }
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_stripe(c, 2);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_IN16, FS_VARYING);
+   emit_stripe(c, 3);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   emit_stripe(c, 0);
+   emit_draw(c);
+   check(submit(ctx, c) == 0, "window, 16 inputs, window across submits");
+   check_stripes(ctx, 4, (const uint32_t[4]){ GREEN, GREEN, GREEN, GREEN }, "mixed");
+}
+
+/* a geometry shader: the colour is the vertex colour times CONST[0][ADDR + 1], the index
+ * from CONST[0][0].x */
+static const char *gs_const =
+   "GEOM\n"
+   "PROPERTY GS_INPUT_PRIMITIVE TRIANGLES\n"
+   "PROPERTY GS_OUTPUT_PRIMITIVE TRIANGLE_STRIP\n"
+   "PROPERTY GS_MAX_OUTPUT_VERTICES 3\n"
+   "PROPERTY GS_INVOCATIONS 1\n"
+   "DCL IN[][0], POSITION\n"
+   "DCL IN[][1], GENERIC[0]\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL OUT[1], GENERIC[0]\n"
+   "DCL CONST[0][0..2]\n"
+   "DCL ADDR[0]\n"
+   "IMM[0] INT32 { 0, 0, 0, 0 }\n"
+   "  0: ARL ADDR[0].x, CONST[0][0].xxxx\n"
+   "  1: MOV OUT[0], IN[0][0]\n"
+   "  2: MUL OUT[1], IN[0][1], CONST[0][ADDR[0].x+1]\n"
+   "  3: EMIT IMM[0].xxxx\n"
+   "  4: MOV OUT[0], IN[1][0]\n"
+   "  5: MUL OUT[1], IN[1][1], CONST[0][ADDR[0].x+1]\n"
+   "  6: EMIT IMM[0].xxxx\n"
+   "  7: MOV OUT[0], IN[2][0]\n"
+   "  8: MUL OUT[1], IN[2][1], CONST[0][ADDR[0].x+1]\n"
+   "  9: EMIT IMM[0].xxxx\n"
+   " 10: END\n";
+
+/* 20: vertex (window), geometry (an index) and fragment constants, per draw */
+static void case_gs(struct cmds *c, int ctx)
+{
+   emit_shader(c, GS_CONST, 2, gs_const);
+   emit_bind_shaders(c, VS_CONST, FS_MUL);
+   emit_bind_shader(c, GS_CONST, 2);
+   const uint32_t vs[4] = { WHITE, YELLOW, WHITE, BLUE }, fs[4] = { RED, GREEN, BLUE, WHITE };
+   for (int s = 0; s < 4; s++) {
+      float g[3][4];
+      memset(g, 0, sizeof(g));
+      g[0][0] = s & 1;
+      for (int i = 0; i < 4; i++) { g[1][i] = 1; g[2][i] = 1; }
+      g[1][0] = 0;
+      emit_stripe(c, s);
+      emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, vs[s]);
+      emit_consts(c, 2, 3, (const float (*)[4])g);
+      emit_colour_consts(c, TEST_SHADER_FRAGMENT, 1, 0, fs[s]);
+      emit_draw(c);
+   }
+   check(submit(ctx, c) == 0, "three stages' constants per draw");
+   const uint32_t want[4] = { 0xff000000, GREEN, BLUE, BLUE };
+   check_stripes(ctx, 4, want, "vertex * geometry * fragment constants");
+}
+
+/* 21: random runs (programs, constants of 8 vec4s, submits, two sub contexts), one per
+ * seed from SEED (default 1) for SEEDS seeds (default 4); prints a hash of the stripes
+ * after every submit per seed: the same in all three modes (run-regressions.py) */
+static unsigned rng_state;
+static unsigned rnd(unsigned n)
+{
+   rng_state = rng_state * 1103515245u + 12345u;
+   return (rng_state >> 16) % n;
+}
+
+static void random_run(struct cmds *c, int ctx, unsigned seed)
+{
+   static const uint32_t vss[] = { VS_CONST, VS_CONST8, VS_INDEX, VS_IN16, VS_PLAIN };
+   static const uint32_t fss[] = { FS_VARYING, FS_CONST, FS_MUL };
+   rng_state = seed;
+   emit_sub_ctx(c, VIRGL_CCMD_CREATE_SUB_CTX, 1);
+   emit_sub_ctx(c, VIRGL_CCMD_SET_SUB_CTX, 1);
+   emit_state(c, ctx);
+   emit_sub_ctx(c, VIRGL_CCMD_SET_SUB_CTX, 0);
+   submit(ctx, c);
+   unsigned long long hash = 1469598103934665603ull;
+   int sub = 0;
+   for (int submitn = 0; submitn < 40; submitn++) {
+      int ops = 1 + rnd(60);
+      for (int k = 0; k < ops; k++) {
+         switch (rnd(6)) {
+         case 0: emit_bind_shader(c, vss[rnd(5)], TEST_SHADER_VERTEX); break;
+         case 1: emit_bind_shader(c, fss[rnd(3)], TEST_SHADER_FRAGMENT); break;
+         case 2: case 3: {
+            float v[8][4];
+            for (int a = 0; a < 8; a++)
+               for (int b = 0; b < 4; b++)
+                  v[a][b] = rnd(5) / 4.0f;
+            v[0][0] = rnd(6);
+            emit_consts(c, rnd(2) ? TEST_SHADER_VERTEX : TEST_SHADER_FRAGMENT, 8,
+                        (const float (*)[4])v);
+            break; }
+         case 4:
+            if (rnd(4) == 0) {
+               sub = !sub;
+               emit_sub_ctx(c, VIRGL_CCMD_SET_SUB_CTX, sub);
+            }
+            break;
+         default: emit_stripe(c, rnd(4)); emit_draw(c); break;
+         }
+      }
+      submit(ctx, c);
+      uint32_t got[4];
+      read_stripes(ctx, got);
+      for (int q = 0; q < 4; q++) {
+         hash ^= got[q];
+         hash *= 1099511628211ull;
+      }
+   }
+   if (sub) {
+      emit_sub_ctx(c, VIRGL_CCMD_SET_SUB_CTX, 0);
+      submit(ctx, c);
+   }
+   emit_sub_ctx(c, VIRGL_CCMD_DESTROY_SUB_CTX, 1);
+   submit(ctx, c);
+   printf("random seed %u hash %016llx\n", seed, hash);
+}
+
+static void case_random(struct cmds *c, int ctx)
+{
+   const char *first = getenv("SEED"), *count = getenv("SEEDS");
+   unsigned seed = first ? (unsigned)atoi(first) : 1, n = count ? (unsigned)atoi(count) : 4;
+   for (unsigned k = 0; k < n; k++)
+      random_run(c, ctx, seed + k);
+   check(1, "random runs drawn (gl-oracle checked every draw)");
+}
+
 static void run_case(int n)
 {
    static struct cmds c;
@@ -1000,6 +1213,11 @@ static void run_case(int n)
    case 14: case_far(&c, ctx); break;
    case 15: case_separable(&c, ctx); break;
    case 16: case_zeroed(&c, ctx); break;
+   case 17: case_own_small(&c, ctx); break;
+   case 18: case_own_shrink(&c, ctx); break;
+   case 19: case_own_mixed(&c, ctx); break;
+   case 20: case_gs(&c, ctx); break;
+   case 21: case_random(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 4)
@@ -1040,7 +1258,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 16; n++)
+   for (int n = 1; n <= 21; n++)
       if (!only || only == n)
          run_case(n);
 

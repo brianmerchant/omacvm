@@ -13,15 +13,18 @@ also before the early link of a separable program; never an array), so a draw se
 attribute value (glVertexAttribI1i) and binds the window only when its constants lie
 outside the bound one. The upload is then padded by a window of zeros. The shader can
 read only its own constants of the window: an index from ADDR is clamped to them, a
-fixed index outside them is refused at compile time as uniforms refuse it. Other stages,
-and vertex shaders that use every attribute location, bind their range per draw with
-glBindBufferRange (as vrend already does for the VirglBlock). Constants that did not come
-through the upload (another sub context in the same submit, a ring buffer that took a
-later submit, an earlier submit, fewer constants than the shader reads, a range the GL
-would not take at that offset) go into the stage's own buffer, zero-padded, on the draw
-that needs them. Only where the block fits: desktop GL with uniform buffers, a context
-with GLSL 1.40, not compute, at most GL_MAX_UNIFORM_BLOCK_SIZE, and room for this block
-and the VirglBlock in the stage's uniform block limit. A program whose blocks then need
+fixed index outside them is refused at compile time as uniforms refuse it. A vertex
+shader that uses every attribute location keeps uniforms (its constants would rarely
+start where the GL takes a range, and filling a buffer per draw costs more than
+uniforms). Other stages bind their range per draw with glBindBufferRange (as vrend
+already does for the VirglBlock). Constants that did not come through the upload
+(another sub context in the same submit, a ring buffer that took a later submit, an
+earlier submit, fewer constants than the shader reads, a range the GL would not take at
+that offset) go into the stage's own buffer, zero-padded, on the draw that needs them;
+a window is never bound over an own buffer smaller than the window (const_own_size).
+Only where the block fits: desktop GL with uniform buffers, a context with GLSL 1.40,
+not compute, at most GL_MAX_UNIFORM_BLOCK_SIZE, and room for this block and the
+VirglBlock in the stage's uniform block limit. A program whose blocks then need
 more bindings than the GL has (or whose virgl_cbase is not where it must be) has its
 shaders built again with uniforms (shader key const_uniforms) and the draw selects again
 at once. A program whose blocks reach the window's binding makes the next window draw
@@ -34,15 +37,16 @@ size (~0.53 us per draw on an M4 Max), and WebGL pages change uniforms before ne
 every draw (Aquarium 30k: ~31,000 SET_CONSTANT_BUFFER + draws a frame, QEMU's render
 thread at 98 %). In the host-only measurement (bench/aquarium-fusion/drawcost-const.c)
 a range bound per draw cost 0.19 us less per draw, a window plus an index attribute
-0.35 us less. Aquarium 30k on an M4 Max (MacBook Pro): 32.5 -> 42.5 fps.
+0.35 us less. Aquarium 30k on an M4 Max (MacBook Pro): 32.9 -> 41.8 fps.
 Upstream: not sent (depends on OmacVM's uniform block checks).
 Tests: Tests/virgl/test-const-ubo.c (soft GL + gl-oracle; per-draw constants in each
 stage, stale ring buffers, short constants, an index in the shader, program and sub
 context switches, a guest uniform buffer in the same shader, a cut-off command, a window
 that moves, a vertex shader without a free location, a fixed index far past the
-constants, separable programs, an upload holding nothing of an earlier submit; run in
-all three modes), Tests/virgl/index-range-writes.py (the new buffer writes are vrend's
-own).
+constants, separable programs, an upload holding nothing of an earlier submit, a
+window after a vertex shader without one (both orders), geometry shader constants,
+random runs that must draw the same pixels in all three modes; run in all three
+modes), Tests/virgl/index-range-writes.py (the new buffer writes are vrend's own).
 
 diff --git a/src/vrend/vrend_decode.c b/src/vrend/vrend_decode.c
 --- a/src/vrend/vrend_decode.c
@@ -174,7 +178,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  // bound sampler view (texture) state associated with the current
  // program or pipeline stage
  struct vrend_shader_view {
-@@ -916,6 +981,20 @@
+@@ -916,6 +981,22 @@
  
     struct vrend_constants consts[PIPE_SHADER_TYPES];
     bool const_dirty[PIPE_SHADER_TYPES];
@@ -186,6 +190,8 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +      uint32_t next;
 +   } const_ring;
 +   GLuint const_own[PIPE_SHADER_TYPES];
++   /* the size each own buffer was last given (a window needs a whole window of it) */
++   uint32_t const_own_size[PIPE_SHADER_TYPES];
 +   /* the range bound at vrend_const_window_binding() (only vertex shader windows go
 +    * there): buffer and start; id 0 = nothing known */
 +   GLuint const_win_id;
@@ -195,7 +201,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  
     struct pipe_constant_buffer cbs[PIPE_SHADER_TYPES][PIPE_MAX_CONSTANT_BUFFERS];
     uint32_t const_bufs_used_mask[PIPE_SHADER_TYPES];
-@@ -1056,6 +1135,8 @@
+@@ -1056,6 +1137,8 @@
     struct virgl_resource *untyped_resource_cache;
  
     struct vrend_shader_cfg shader_cfg;
@@ -204,7 +210,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  
     unsigned debug_flags;
  
-@@ -2031,7 +2112,9 @@
+@@ -2031,7 +2114,9 @@
  static void bind_const_locs(struct vrend_linked_shader_program *sprog,
                              enum pipe_shader_type shader_type)
  {
@@ -215,7 +221,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
       char name[32];
       snprintf(name, 32, "%sconst0", pipe_shader_to_prefix(shader_type));
       sprog->const_location[shader_type] = vrend_get_uniform_location(sprog, name,
-@@ -2151,6 +2234,13 @@
+@@ -2151,6 +2236,13 @@
     return vrend_state.max_ubo_bindings - 1;
  }
  
@@ -229,7 +235,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  /* The GL programs of a linked program: one, or one per stage of a pipeline. */
  static unsigned vrend_program_gl_ids(const struct vrend_linked_shader_program *sprog,
                                       enum pipe_shader_type last_shader,
-@@ -2233,7 +2323,68 @@
+@@ -2233,7 +2325,68 @@
  
        bind_virgl_block_loc(sprog, shader_type, next_ubo_id);
     }
@@ -299,7 +305,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  }
  
  static void bind_ssbo_locs(struct vrend_linked_shader_program *sprog,
-@@ -2361,6 +2512,11 @@
+@@ -2361,6 +2514,11 @@
        }
     }
  
@@ -311,18 +317,18 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     shader->is_linked = vrend_link(shader->program_id);
  
     if (!shader->is_linked) {
-@@ -2550,6 +2706,10 @@
+@@ -2550,6 +2708,10 @@
           glBindAttribLocation(vs_id, i, name);
        }
     }
 +   /* OmacVM: the vertex shader's constants index sits at the last location (the shader's
-+    * own inputs leave it free, vrend_shader.c const_ubo_index_on) */
++    * own inputs leave it free, vrend_shader.c const_ubo_index_wanted) */
 +   if (vs->sel->sinfo.const_ubo_index)
 +      glBindAttribLocation(vs_id, vrend_state.const_ubo_index_loc, "virgl_cbase");
  
     bool link_success;
     if (separable) { /* separable programs */
-@@ -2979,6 +3139,11 @@
+@@ -2979,6 +3141,11 @@
     uint64_t last_ns, last_draws, last_selects, last_vertex_skips, last_element_skips;
  } vrend_vertex_stats;
  
@@ -334,7 +340,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  static void vrend_vertex_state_changed(void)
  {
     vrend_vertex_state_gen++;
-@@ -3010,6 +3175,14 @@
+@@ -3010,6 +3177,14 @@
                   (vrend_vertex_stats.selects - vrend_vertex_stats.last_selects) / s,
                   (vrend_vertex_stats.vertex_skips - vrend_vertex_stats.last_vertex_skips) / s,
                   (vrend_vertex_stats.element_skips - vrend_vertex_stats.last_element_skips) / s);
@@ -349,15 +355,10 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     virgl_info("vertex binds (%s): totals draws %llu selects %llu vertex-skips %llu "
                "element-skips %llu\n", when,
                (unsigned long long)vrend_vertex_stats.draws,
-@@ -4184,11 +4357,246 @@
-             UPDATE_INT_SIGN_MASK(ve->base.src_format, i,
-                                  v->signed_int_bitmask,
-                                  v->unsigned_int_bitmask);
-+         }
-+      }
-+   }
-+}
-+
+@@ -4189,6 +4364,245 @@
+    }
+ }
+ 
 +/* Where constants may start in a buffer: a range offset glBindBufferRange takes, and
 + * whole vec4s for a vertex shader's window index. */
 +static uint32_t vrend_const_align(void)
@@ -485,10 +486,10 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +         if (!staging) {
 +            p->active = false;
 +            return;
-          }
++         }
 +         p->staging = staging;
 +         p->staging_cap = p->staging_size + pad;
-       }
++      }
 +      memset(p->staging + p->staging_size, 0, pad);
 +      uint32_t slot = sub->const_ring.next++ % VREND_CONST_RING;
 +      if (!sub->const_ring.ids[slot])
@@ -508,14 +509,14 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +      p->gen = sub->const_ring.gen[slot];
 +      vrend_const_stats.uploads++;
 +      vrend_const_stats.upload_bytes += p->staging_size + pad;
-    }
++   }
 +
 +   consts->ubo_ok = true;
 +   consts->ubo_id = p->id;
 +   consts->ubo_slot = p->slot;
 +   consts->ubo_gen = p->gen;
- }
- 
++}
++
 +/* The stage's constants into its own buffer, zero-padded to the bytes the shader reads:
 + * for constants that did not come through the prescan, an upload that is no longer current
 + * (its ring buffer took a later submit), a block larger than what the guest sent, or a
@@ -532,6 +533,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +      glGenBuffers(1, &sub_ctx->const_own[shader_type]);
 +   glBindBuffer(GL_UNIFORM_BUFFER, sub_ctx->const_own[shader_type]);
 +   glBufferData(GL_UNIFORM_BUFFER, size, NULL, GL_STREAM_DRAW);
++   sub_ctx->const_own_size[shader_type] = size;
 +   if (have)
 +      glBufferSubData(GL_UNIFORM_BUFFER, 0, have, consts->consts);
 +   for (uint32_t at = have; at < bytes; at += sizeof(zeros))
@@ -561,10 +563,12 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +
 +   vrend_const_resolve(sub_ctx, consts);
 +   /* a range starts at an aligned offset; a window holds the constants from the aligned
-+    * offset at or before them */
++    * offset at or before them. The own buffer may have been given less than this block
++    * by another program of the stage (a vertex shader without a window). */
 +   if (!consts->ubo_ok || consts->ubo_bytes < bytes ||
 +       (consts->ubo_slot < VREND_CONST_RING &&
 +        sub_ctx->const_ring.gen[consts->ubo_slot] != consts->ubo_gen) ||
++       (consts->ubo_slot == VREND_CONST_RING && sub_ctx->const_own_size[shader_type] < size) ||
 +       (window ? consts->ubo_offset % align + bytes > size : consts->ubo_offset % align != 0))
 +      vrend_const_own_buffer(sub_ctx, shader_type, bytes, size);
 +
@@ -576,7 +580,8 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +   }
 +
 +   /* A window of size bytes from an aligned start at or before the constants; the ring
-+    * upload is padded by a window and the own buffer is one, so it stays inside. The
++    * upload is padded by a window and the own buffer holds at least one (const_own_size,
++    * checked above), so it stays inside. The
 +    * shader reads only virgl_cbase .. virgl_cbase + num_consts - 1 of it (its indices
 +    * are checked or clamped against num_consts, vrend_shader.c). */
 +   uint32_t start = sub_ctx->const_win_start;
@@ -596,7 +601,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  void vrend_set_constants(struct vrend_context *ctx,
                           uint32_t shader,
                           uint32_t num_constant,
-@@ -4198,6 +4606,7 @@
+@@ -4198,6 +4612,7 @@
  
     consts = &ctx->sub->consts[shader];
     ctx->sub->const_dirty[shader] = true;
@@ -604,7 +609,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  
     /* avoid reallocations by only growing the buffer */
     if (consts->num_allocated_consts < num_constant) {
-@@ -4215,6 +4624,9 @@
+@@ -4215,6 +4630,9 @@
        memcpy(consts->consts, data, num_constant * sizeof(unsigned int));
  
     consts->num_consts = num_constant;
@@ -614,7 +619,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  }
  
  /* The GPU reads or writes a resource bound as a vertex, index, uniform, stream output,
-@@ -5071,6 +5483,8 @@
+@@ -5071,6 +5489,8 @@
  {
     enum pipe_shader_type type = sel->type;
  
@@ -623,7 +628,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     if (vrend_state.use_core_profile) {
        bool add_alpha_test = true;
  
-@@ -6375,6 +6789,10 @@
+@@ -6375,6 +6795,10 @@
  static void vrend_draw_bind_const_shader(struct vrend_sub_context *sub_ctx,
                                           int shader_type, bool new_program)
  {
@@ -634,7 +639,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     if (sub_ctx->consts[shader_type].consts &&
         sub_ctx->shaders[shader_type] &&
         (sub_ctx->prog->const_location[shader_type] != -1) &&
-@@ -6588,6 +7006,9 @@
+@@ -6588,6 +7012,9 @@
  static void vrend_draw_bind_objects(struct vrend_sub_context *sub_ctx, bool new_program)
  {
     GLuint next_ubo_id = 0, next_sampler_id = 0;
@@ -644,21 +649,21 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     for (int shader_type = PIPE_SHADER_VERTEX; shader_type <= sub_ctx->last_shader_idx; shader_type++) {
        vrend_set_active_pipeline_stage(sub_ctx->prog, shader_type);
  
-@@ -7513,6 +7934,13 @@
-    /* OmacVM: no program (it was freed) also selects again */
-    if (sub_ctx->shader_dirty || sub_ctx->swizzle_output_rgb_to_bgr ||
-        sub_ctx->needs_manual_srgb_encode_bitmask || sub_ctx->vbo_dirty || !sub_ctx->prog) {
-+      program_select_result = vrend_select_program(sub_ctx, info->vertices_per_patch);
-+      vrend_vertex_stats.selects++;
-+   }
+@@ -7516,6 +7943,13 @@
+       program_select_result = vrend_select_program(sub_ctx, info->vertices_per_patch);
+       vrend_vertex_stats.selects++;
+    }
 +   /* OmacVM: the constants' blocks did not fit this program: its shaders are now built
 +    * with uniforms, select again (once) */
 +   if (sub_ctx->prog && sub_ctx->prog->const_retry && program_select_result != PROGRAMM_ERROR) {
 +      sub_ctx->shader_dirty = true;
-       program_select_result = vrend_select_program(sub_ctx, info->vertices_per_patch);
-       vrend_vertex_stats.selects++;
-    }
-@@ -7777,6 +8205,8 @@
++      program_select_result = vrend_select_program(sub_ctx, info->vertices_per_patch);
++      vrend_vertex_stats.selects++;
++   }
+ 
+    if (!sub_ctx->prog || program_select_result == PROGRAMM_ERROR) {
+       vrend_report_dropped_draws(ctx, "Dropping rendering due to missing shaders");
+@@ -7777,6 +8211,8 @@
     vrend_use_program(sub_ctx, sub_ctx->prog);
  
     vrend_set_active_pipeline_stage(sub_ctx->prog, PIPE_SHADER_COMPUTE);
@@ -667,11 +672,10 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     vrend_draw_bind_ubo_shader(sub_ctx, PIPE_SHADER_COMPUTE, 0);
     vrend_draw_bind_const_shader(sub_ctx, PIPE_SHADER_COMPUTE, new_program);
     vrend_draw_bind_samplers_shader(sub_ctx, PIPE_SHADER_COMPUTE, 0);
-@@ -9533,6 +9963,51 @@
-                     (GLint *)&vrend_state.ssbo_offset_alignment);
+@@ -9534,6 +9970,51 @@
     vrend_state.ubo_offset_alignment = MAX2(vrend_state.ubo_offset_alignment, 1);
     vrend_state.ssbo_offset_alignment = MAX2(vrend_state.ssbo_offset_alignment, 1);
-+
+ 
 +   /* OmacVM: shader constants in uniform buffers on desktop GL with uniform buffers;
 +    * OMACVM_VIRGL_CONST_UBO=0 keeps them uniforms (as before) */
 +   const char *const_ubo = getenv("OMACVM_VIRGL_CONST_UBO");
@@ -716,10 +720,11 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 +              "uniform buffers, vertex shaders index one window per draw" :
 +              const_ubo_ranges ? "uniform buffers, one range bound per draw (OMACVM_VIRGL_CONST_UBO=1)" :
 +              "uniform buffers, one range bound per draw");
- 
++
     glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,
                   (GLint*)&vrend_state.max_texture_units);
-@@ -9762,6 +10237,8 @@
+ 
+@@ -9762,6 +10243,8 @@
        sub->prog->ref_context = NULL;
  
     vrend_free_programs(sub);
@@ -728,18 +733,18 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
     for (enum pipe_shader_type type = 0; type < PIPE_SHADER_TYPES; type++) {
        free(sub->consts[type].consts);
        sub->consts[type].consts = NULL;
-@@ -9841,6 +10318,10 @@
-    }
+@@ -9842,6 +10325,10 @@
     ctx->sub = NULL;
     ctx->sub0 = NULL;
-+
+ 
 +   free(ctx->const_prescan.e);
 +   free(ctx->const_prescan.staging);
 +   memset(&ctx->const_prescan, 0, sizeof(ctx->const_prescan));
- 
++
     if (ctx->ctx_id)
        vrend_renderer_force_ctx_0();
-@@ -9931,6 +10412,11 @@
+ 
+@@ -9931,6 +10418,11 @@
     }
  
     grctx->shader_cfg.glsl_version = glver;
@@ -751,7 +756,7 @@ diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
  
     if (!grctx->ctx_id)
        grctx->fence_retire = vrend_clicbs->ctx0_fence_retire;
-@@ -16604,6 +17090,8 @@
+@@ -16604,6 +17096,8 @@
     }
  
     sub->sub_ctx_id = sub_ctx_id;
@@ -788,10 +793,24 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
     int num_imm;
     struct immed imm[MAX_IMMEDIATE];
  
-@@ -1027,6 +1030,54 @@
-       return 0;
-    const unsigned first = ffs(ctx->ubo_used_mask) - 1;
+@@ -1029,6 +1032,60 @@
     return u_bit_consecutive(first, util_last_bit(ctx->ubo_used_mask) - first);
+ }
+ 
++/* OmacVM: a vertex shader's constants block as a window over a whole submit's constants:
++ * the shader reads <prefix>const0[virgl_cbase + i], virgl_cbase being an int vertex
++ * attribute the renderer sets per draw (glVertexAttribI1i, no array) at the location
++ * const_ubo_index_loc, so a draw changes one attribute value instead of a buffer
++ * binding. Only when the shader's own inputs leave that location free. */
++static bool const_ubo_index_wanted(const struct dump_ctx *ctx)
++{
++   if (ctx->prog_type != TGSI_PROCESSOR_VERTEX || !ctx->cfg->const_ubo_index_loc)
++      return false;
++   unsigned slots = 0;
++   for (unsigned i = 0; i < ctx->num_inputs; i++)
++      if (!ctx->inputs[i].glsl_predefined_no_emit)
++         slots += ctx->inputs[i].last - ctx->inputs[i].first + 1;
++   return slots < ctx->cfg->const_ubo_index_loc;
 +}
 +
 +/* OmacVM: CONST[0] (the guest's plain uniforms) as a uniform block instead of a uniform
@@ -811,23 +830,13 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
 +          !ctx->key->const_uniforms &&
 +          ctx->prog_type != TGSI_PROCESSOR_COMPUTE &&
 +          ctx->num_consts <= (int)ctx->cfg->const_ubo_max_vec4 &&
-+          util_bitcount(ubos) + 2 <= ctx->cfg->const_ubo_max_blocks;
-+}
-+
-+/* OmacVM: a vertex shader's constants block as a window over a whole submit's constants:
-+ * the shader reads <prefix>const0[virgl_cbase + i], virgl_cbase being an int vertex
-+ * attribute the renderer sets per draw (glVertexAttribI1i, no array) at the location
-+ * const_ubo_index_loc, so a draw changes one attribute value instead of a buffer
-+ * binding. Only when the shader's own inputs leave that location free. */
-+static bool const_ubo_index_wanted(const struct dump_ctx *ctx)
-+{
-+   if (ctx->prog_type != TGSI_PROCESSOR_VERTEX || !ctx->cfg->const_ubo_index_loc)
-+      return false;
-+   unsigned slots = 0;
-+   for (unsigned i = 0; i < ctx->num_inputs; i++)
-+      if (!ctx->inputs[i].glsl_predefined_no_emit)
-+         slots += ctx->inputs[i].last - ctx->inputs[i].first + 1;
-+   return slots < ctx->cfg->const_ubo_index_loc;
++          util_bitcount(ubos) + 2 <= ctx->cfg->const_ubo_max_blocks &&
++          /* with windows on, a vertex shader without a free location for the index keeps
++           * uniforms: vertex constants then start at any 16 bytes, which a range takes only
++           * at the GL's alignment, so most draws would fill the stage's own buffer (about
++           * four times the cost of uniforms) */
++          (ctx->prog_type != TGSI_PROCESSOR_VERTEX || !ctx->cfg->const_ubo_index_loc ||
++           const_ubo_index_wanted(ctx));
 +}
 +
 +/* Both answers depend on the declarations only: decided once, at the first instruction
@@ -840,10 +849,12 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
 +   ctx->const_ubo_decided = true;
 +   ctx->const_ubo = const_ubo_wanted(ctx);
 +   ctx->const_ubo_index = ctx->const_ubo && const_ubo_index_wanted(ctx);
- }
- 
++}
++
  static int sampler_array_size(const struct dump_ctx *ctx, int first)
-@@ -5160,13 +5211,22 @@
+ {
+    for (uint32_t i = 0; i < ctx->num_sampler_arrays; i++)
+@@ -5160,13 +5217,22 @@
                 char index[64];
                 if (src->Indirect.File != TGSI_FILE_ADDRESS)
                    return false;
@@ -868,7 +879,7 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
           }
           break;
        }
-@@ -5791,6 +5851,8 @@
+@@ -5791,6 +5857,8 @@
            ctx->info.indirect_files & (1 << TGSI_FILE_INPUT)) {
           rewrite_vs_pos_array(ctx);
        }
@@ -877,7 +888,7 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
  
        emit_buf(&ctx->glsl_strbufs, "void main(void)\n{\n");
        if (iter->processor.Processor == TGSI_PROCESSOR_FRAGMENT) {
-@@ -6937,7 +6999,14 @@
+@@ -6937,7 +7005,14 @@
     }
     if (ctx->num_consts) {
        const char *cname = tgsi_proc_to_prefix(ctx->prog_type);
@@ -893,7 +904,7 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
     }
  
     if (ctx->ubo_used_mask) {
-@@ -8110,6 +8179,8 @@
+@@ -8110,6 +8185,8 @@
     sinfo->image_binding_offset = ctx->key->image_binding_offset;
     sinfo->image_last_binding = ctx->key->image_binding_offset + ctx->image_last_binding;
     sinfo->num_consts = ctx->num_consts;
@@ -902,7 +913,7 @@ diff --git a/src/vrend/vrend_shader.c b/src/vrend/vrend_shader.c
     sinfo->ubo_used_mask = (ctx->info.dimension_indirect_files & (1 << TGSI_FILE_CONSTANT)) ?
                            ubo_array_mask(ctx) : ctx->ubo_used_mask;
     sinfo->fog_input_mask = ctx->fog_input_mask;
-@@ -8465,6 +8536,11 @@
+@@ -8465,6 +8542,11 @@
     if (ctx.glsl_strbufs.required_sysval_uniform_decls)
        ctx.glsl_ver_required = require_glsl_ver(&ctx, 140);
  
@@ -943,7 +954,7 @@ diff --git a/src/vrend/vrend_shader.h b/src/vrend/vrend_shader.h
     uint32_t has_texture_shadow_lod : 1;
     uint32_t has_vs_layer : 1;
     uint32_t has_vs_viewport_index : 1;
-+   /* OmacVM: CONST[0] as a uniform block (vrend_shader_const_ubo); 0 = a uniform array */
++   /* OmacVM: CONST[0] as a uniform block (const_ubo_wanted); 0 = a uniform array */
 +   uint32_t use_const_ubo : 1;
 +   /* uniform blocks one stage may use, and vec4s one block may hold, on the host GL */
 +   uint32_t const_ubo_max_blocks : 8;
