@@ -5,6 +5,11 @@ in more words.
 
 ## 3.0.7 (unreleased)
 
+- `omacvm build`: two builds at once (for example a UTM and a Parallels VM)
+  no longer break each other. The second one stopped in step 1 with "mv: …
+  TryOmarchy-v0.4.1.dmg: No such file or directory", as both used the same
+  download and work files. Now it says it waits for the other build and
+  starts its installer when that one is done.
 - Capture mode no longer makes the VM lag or the sound crackle
   ([troubleshooting 32](docs/troubleshooting.md#32-app-the-vm-lags-and-the-sound-crackles-while-recording-the-screen-or-taking-a-screenshot)).
   Screen recording: the Mac's video encoder works beside QEMU's main loop

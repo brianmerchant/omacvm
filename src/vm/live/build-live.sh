@@ -20,6 +20,7 @@ set -euo pipefail
 # ---------- defaults ----------
 VM_NAME="Omarchy ARM"
 source "$(dirname "${BASH_SOURCE[0]}")/release.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/workdir-lock.sh"
 RELEASE=$LIVE_RELEASE
 REPO="omacom/try-omarchy"
 # Not OmacVM.app's cache (~/Library/Caches/omacvm/live): this script deletes
@@ -96,6 +97,9 @@ FREE_GB="$(df -g "$FREE_AT" 2>/dev/null | tail -1 | awk '{print $4}')"
 if [[ "$FREE_GB" =~ ^[0-9]+$ && "$FREE_GB" -lt 15 ]]; then
   die "need ~15 GB free for the work folder $WORKDIR (found ${FREE_GB} GB)"
 fi
+# One build at a time in the work folder (another `omacvm build` may run).
+workdir_lock "$WORKDIR"
+trap 'workdir_unlock "$WORKDIR"' EXIT
 if [[ -n "${SSH_KEY:-}" && ! -f "$SSH_KEY" ]]; then
   die "--ssh-key file not found: $SSH_KEY"
 fi
@@ -158,7 +162,7 @@ log "mounting DMG"
 MOUNT_OUT="$(hdiutil attach -nobrowse -readonly "$SRC")"
 DMG_VOL="$(printf '%s\n' "$MOUNT_OUT" | sed -n 's/.*\(\/Volumes\/.*\)$/\1/p' | head -1)"
 [[ -n "$DMG_VOL" ]] || die "could not mount $SRC"
-cleanup_dmg() { hdiutil detach "$DMG_VOL" >/dev/null 2>&1 || true; }
+cleanup_dmg() { hdiutil detach "$DMG_VOL" >/dev/null 2>&1 || true; workdir_unlock "$WORKDIR"; }
 trap cleanup_dmg EXIT
 APP="$(find "$DMG_VOL" -maxdepth 3 -name '*.app' | head -1)"
 [[ -n "$APP" ]] || die "no .app found inside $DMG_VOL"
