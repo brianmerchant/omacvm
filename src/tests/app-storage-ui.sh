@@ -9,8 +9,8 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${1:?usage: app-storage-ui.sh OUT_DIR}
 mkdir -p "$OUT"
 T=$(mktemp -d)
-BIN=omacvm-storage-render
-trap 'rm -rf "$T"; defaults delete "$BIN" >/dev/null 2>&1 || true' EXIT
+BIN=org.omacvm.test.storage-render.$$   # its own settings domain (CI's clean-up hook knows the pattern)
+trap 'rm -rf "$T"; defaults delete "$BIN" >/dev/null 2>&1; rm -f "$HOME/Library/Preferences/$BIN.plist"' EXIT
 H=$T/home
 vm() {   # FOLDER
   mkdir -p "$1/logs"; printf "NAME='%s'\nCPUS=4\nMEM_MB=8192\nDISK_GB=64\nSSH_PORT=52222\nVM_USER='me'\n" "$(basename "$1")" > "$1/vm.env"
