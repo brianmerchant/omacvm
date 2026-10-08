@@ -536,13 +536,12 @@ start_pass() {   # start the VM, the control centre's driver into it, the featur
 }
 
 baseline() {   # TAG: the control centre comes up linked; no row fails; the Mac reaches the VM
-  local s bad env try settled=""
+  local s bad env
   CC_UP=0
-  for try in 1 2; do
-    cc start 120; s=$CCS
-    if ccok; then
-      CC_UP=1
-      bad=$(/usr/bin/python3 -c '
+  cc start 120; s=$CCS
+  if ccok; then
+    CC_UP=1
+    bad=$(/usr/bin/python3 -c '
 import json, re, sys
 o = json.load(open(sys.argv[1]))
 if "\uf00c" not in o["screen"] and "\uf10c" not in o["screen"]:
@@ -552,16 +551,11 @@ bad = [l.strip(" \u2502")[:90] for l in o["screen"].splitlines() if re.search("\
 env = [b for b in bad if "Graphics memory" in b and "short of memory" in b]
 print(" | ".join(b for b in bad if b not in env)[:600])
 print(" ".join(env)[:200])' "$CCJ")
-      env=$(sed -n 2p <<<"$bad"); bad=$(sed -n 1p <<<"$bad")
-      # Right after a start a row may fail for a few seconds (a Mac helper the app started a moment
-      # ago, not linked yet): once more 30 s later; a row that stays failing still fails.
-      if [[ -n $bad && $try == 1 ]]; then settled="failing at first, fine 30 s later: $bad"; sleep 30; continue; fi
-      [[ -z $bad ]] && res "baseline-$1" ok "$s${env:+; this Mac (not the product): $env}${settled:+; $settled}" || res "baseline-$1" FAIL "rows failing or needing a person: $bad"
-    else
-      res "baseline-$1" FAIL "$s"
-    fi
-    break
-  done
+    env=$(sed -n 2p <<<"$bad"); bad=$(sed -n 1p <<<"$bad")
+    [[ -z $bad ]] && res "baseline-$1" ok "$s${env:+; this Mac (not the product): $env}" || res "baseline-$1" FAIL "rows failing or needing a person: $bad"
+  else
+    res "baseline-$1" FAIL "$s"
+  fi
   reachable 30 && res "reachable-$1" ok "$(vminfo)" || res "reachable-$1" FAIL "$(vminfo)"
 }
 
