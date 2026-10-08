@@ -17,7 +17,9 @@
 # Exit: 0 all there now, 1 not (one line on stderr), 3 not because the VM
 # needs a full system update first (an old package list, or a partial update
 # refused): guest/system-update, then try again. pacman's own output goes to
-# /var/log/omacvm-pacman.log.
+# /var/log/omacvm-pacman.log. Exit 3's line ends "Update the system with
+# omarchy update, then omacvm apply": cmd/apply.sh gives that as the reason
+# a part was not set up (the control centre then offers omarchy update).
 # Tests: src/tests/pkg-safe.sh.
 set -uo pipefail
 # pacman's English words below ("Depends On", "[installed: "): with the

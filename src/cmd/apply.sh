@@ -475,14 +475,36 @@ if (( TRANSACTION )); then
 fi
 # What the guest said, to name what failed.
 GI_LOG=$(mktemp -t omacvm-apply); trap 'rm -f "$GI_LOG"' EXIT
+# Why a part was not set up, from the guest's own lines. pkg-add's "update
+# the system first" (its exit 3: an old package list, or a partial update it
+# refused) is named whichever part said it: it holds for the whole VM, and
+# the one way on is omarchy update (the control centre keys on "(omarchy
+# update first)"). Else, when only the switched or repaired parts ran, the
+# last "OmacVM: ..." line (an update runs every part: it could be another's).
+why_not() {
+  local log l
+  log=$(sed "s/"$'\033'"\[[0-9;]*m//g" "$GI_LOG" | tr -d '\r')
+  l=$(grep -E '^OmacVM: .* not installed: .*Update the system with omarchy update, then omacvm apply$' <<<"$log" | tail -1) || l=""
+  if [[ $l == *"older than the mirrors"* ]]; then
+    echo "Omarchy's package list is older than the mirrors (omarchy update first)"
+  elif [[ -n $l ]]; then
+    echo "its packages need newer versions of what the VM has (omarchy update first)"
+  elif [[ -n $ONLY ]]; then
+    l=$(grep -E '^OmacVM: ' <<<"$log" | tail -1) || l=""
+    echo "${l#OmacVM: }"
+  fi
+}
 what_failed() {
-  local l part=""
+  local l part="" why
   l=$(sed "s/"$'\033'"\[[0-9;]*m//g" "$GI_LOG" | grep -E '^guest/install\.sh: ' | tail -1) || l=""
   if [[ $l =~ ^guest/install\.sh:\ ([a-z][a-z0-9-]*)\ was\ not\ set\ up ]] && feature_index "${BASH_REMATCH[1]}" >/dev/null; then
     part=${BASH_REMATCH[1]}
-    failed_part "$part" "${FTITLE[$(feature_index "$part")]} was not set up"
+    why=$(why_not)
+    failed_part "$part" "${FTITLE[$(feature_index "$part")]} was not set up${why:+: $why}"
   elif [[ $l =~ ^guest/install\.sh:\ failed\ during:\ (.*)$ ]]; then
-    failed_part "" "the VM side stopped at: ${BASH_REMATCH[1]}"
+    part=${BASH_REMATCH[1]}
+    why=$(ONLY="" why_not)
+    failed_part "" "the VM side stopped at: $part${why:+: $why}"
   else
     l=$(sed "s/"$'\033'"\[[0-9;]*m//g" "$GI_LOG" | grep -v '^[[:space:]]*$' | tail -1) || l=""
     failed_part "" "${l:-the VM side failed}"

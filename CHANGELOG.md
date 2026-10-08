@@ -18,6 +18,20 @@ in more words.
   screen once instead of on every frame (Hyprland 41 % to 11 % of a vCPU while
   picking), and big texture uploads from the VM take half the main loop's
   time.
+- Control centre: a feature that cannot be set up because the VM's package
+  list is older than the mirrors now says so. On a Mac mini, "WebGPU and GPU
+  compute on" failed with only "was not set up", and "space tries again"
+  could not work until the VM was updated. The control centre now names the
+  reason, offers omarchy update in its own window (only on yes), and says to
+  switch the feature on again after it. OmacVM still never updates a single
+  package on its own (that can leave a black screen). `omacvm enable` and
+  `omacvm apply` give the reason in their "what failed" line too.
+- Control centre: a switch shows its check mark within a second of "done".
+  Before, the row waited 5-10 s for the VM's checks and the Mac's status;
+  they now come in after it.
+- Control centre: the Graphics row fits on its line, also in an 80-column
+  window ("Vulkan: OpenGL until r builds it"); enter shows the whole text, in
+  the VM's own words.
 
 ## 3.0.7
 
