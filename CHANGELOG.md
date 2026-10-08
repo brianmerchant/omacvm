@@ -29,6 +29,11 @@ in more words.
   screen once instead of on every frame (Hyprland 41 % to 11 % of a vCPU while
   picking), and big texture uploads from the VM take half the main loop's
   time.
+- App: the window keeps 20 pt on both sides. A long VMs folder is cut in
+  the middle (free space and Change… stay), Change…, Update VM and Start end
+  on one line, and the window is 8 pt shorter. The new VM form's Bridge line
+  wraps instead of running past the fields; a long VM name no longer wraps in
+  All VMs.
 - Control centre: a feature that cannot be set up because the VM's package
   list is older than the mirrors now says so. On a Mac mini, "WebGPU and GPU
   compute on" failed with only "was not set up", and "space tries again"
