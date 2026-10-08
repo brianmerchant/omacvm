@@ -214,7 +214,13 @@ final class StripView: NSView {
         // (Only straight down out of the strip's bottom edge: sideways may be
         // another display that shows macOS.)
         let straightDown = p.y >= bounds.height - 1 && p.x >= 0 && p.x < bounds.width
-        if straightDown, activeOwner != nil {
+        if activeOwner == OmacVMApp.owner {
+            // OmacVM.app's QEMU shows and hides the Mac's cursor itself, in
+            // step with the guest's frame (omacvm-cocoa-notch-park): a
+            // transparent cursor here left no arrow at all until the guest's
+            // showed.
+            NSCursor.arrow.set()
+        } else if straightDown, activeOwner != nil {
             BackgroundCursor.transparent.set()
         } else if let screenPoint = window?.convertPoint(toScreen: event.locationInWindow),
            let owner = activeOwner, StripView.isOverVMWindow(screenPoint, vmOwners: [owner]) {

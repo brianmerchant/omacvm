@@ -329,6 +329,8 @@ jobs:
 
       - name: Mac pointer for the VM (experimental hardware cursor rules, guest image checks)
         run: app/runtime/Tests/display/test-hw-cursor.sh
+      - name: One pointer between the VM and Omanotch's strip (the guest's goes into NOTCH)
+        run: app/runtime/Tests/display/test-notch-park.sh
       - name: Guest sizes that fit Omarchy's scale presets (full screen, window steps)
         run: app/runtime/Tests/display/test-clean-size.sh
 

@@ -86,6 +86,10 @@ final class Runner {
         // with MoltenVK and with KosmicKrisp: the guest then keeps Mesa's normal Vulkan present,
         // not the software copy (omacvm-vulkan-present); the Mac copies each frame into GL.
         a += ["-smbios", "type=11,value=omacvm.vkwindows=1"]
+        // This runtime moves the guest's pointer up into Omanotch's hidden NOTCH
+        // output when the Mac's pointer leaves for the strip (omacvm-cocoa-notch-park):
+        // notchcast then never hides the guest's cursor (that lagged by Hyprland's tick).
+        a += ["-smbios", "type=11,value=omacvm.notchpointer=1"]
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
