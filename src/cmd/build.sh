@@ -755,6 +755,9 @@ else
   rm -f "$LIVE"
   utm_start "$VM"
   ui_spin_val IP "The live installer gets its address" utm_ip "$VM" 300 || die "the live installer got no IP address"
+  # UTM's shared network not on 192.168.64.0/24 (macOS gave it another range): say so now, not after the
+  # whole install in step 5 (apply's own check), and leave nothing half-installed but this VM.
+  vm_network_ok utm "$IP" || needs_person "UTM's shared network is not on its default range (see above); delete the VM '$VM' in UTM, then run omacvm build again"
 fi
 # SSH host keys: the live installer's is remembered for this step only, the
 # new system's for good (from its first start on).

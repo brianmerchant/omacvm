@@ -595,7 +595,7 @@ vm_network_ok() {
       fi ;;
     utm)
       if [[ -n ${2:-} && $2 != 192.168.64.* ]]; then
-        printf 'The UTM VM is at %s, outside UTM'"'"'s default shared network 192.168.64.0/24 (the Mac at 192.168.64.1), which OmacVM needs: give the VM the "Shared Network" mode with macOS'"'"'s default range.\n' "$2" >&2
+        printf 'The UTM VM is at %s, outside UTM'"'"'s default shared network 192.168.64.0/24 (the Mac at 192.168.64.1), which OmacVM needs: give the VM the "Shared Network" mode with macOS'"'"'s default range. If it has that mode already, macOS may have put the shared network on another range because another VM network on this Mac was there first (another VM app, or OmacVM.app'"'"'s fast network).\n' "$2" >&2
         return 1
       fi ;;
     fusion)
