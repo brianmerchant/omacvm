@@ -1132,6 +1132,9 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-videotoolbox-encod
 # OmacVM: big texture uploads go through a pixel unpack buffer (one CPU copy instead of three
 # steps: a frozen screen in screenshot mode uploads a whole display per frame).
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-transfer-upload-pbo.patch"
+# OmacVM: shader constants go through uniform buffers, one upload per submit and one range
+# bound per draw (Apple's GL redoes much of its draw setup after every glUniform call).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-const-uniform-buffer.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
