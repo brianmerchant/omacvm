@@ -373,7 +373,8 @@ the VM's SSH on `127.0.0.1:<port>`.
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
   only the app's user can open. So do the displays (`org.omacvm.display`,
-  below). The battery goes one way; the VM can only ask
+  below) and, with `mac-ime` on, the Mac's input methods (`org.omacvm.ime`,
+  [below](#mac-input-methods-experimental-off-by-default)). The battery goes one way; the VM can only ask
   for a fresh reading.
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
   program could connect, or listen in their place while they are not
@@ -432,6 +433,41 @@ the VM's SSH on `127.0.0.1:<port>`.
   `omacvm-cocoa-hw-cursor-logic.patch` (unit test
   `app/runtime/Tests/display/test-hw-cursor.sh`); in a VM:
   `src/tests/input-latency-vm.sh --hw-cursor`.
+
+## Mac input methods (experimental, off by default)
+
+The Mac's input methods type in Omarchy (feature `mac-ime`; what it does:
+[features](../features.md#mac-input-methods); design:
+[ADR 0042](../adr/0042-mac-ime.md); requested and scoped by @Vocllum in
+[#273](https://github.com/gillesgoetsch/OmacVM/issues/273)).
+
+- Only for a VM whose record (its folder's `features`) says `mac-ime=on`
+  at its start, the app adds the virtio port `org.omacvm.ime` (`nr=8` on
+  `vser0`, after Touch ID's: no PCI device moves) and sets
+  `OMACVM_IME_SOCKET` for QEMU. Any other VM starts exactly as before: no
+  port, no socket, and QEMU's window code never looks at a key for it.
+  qemu.log's "Mac links" line says "Mac input methods on|off" for each
+  start; `omacvm apply` says when the switch waits for the next start.
+- In the VM, OmacVM's Fcitx5 module (`src/ime/guest`, package
+  `omacvm-fcitx5-ime`, built in the VM against its Fcitx5) opens the port
+  (udev gives it to the desktop user) and tells the Mac which kind of field
+  has the focus and where its caret is, in Hyprland's logical pixels; it
+  puts what the Mac composes into that field as preedit and commit. JSON
+  lines, at most 4 KiB each.
+- QEMU's window code (`omacvm-cocoa-ime.patch`, rules in
+  `omacvm-cocoa-ime-logic.patch`) is the input method's client
+  (`NSTextInputClient`) while a text field in the VM has the focus, the
+  Mac's input source is an input method and the VM has the keyboard. Keys
+  with Cmd or Control, and modifiers, always go to the VM as keys; keys the
+  input method does not take go to the VM as keys too. The caret goes
+  through the same display layout as the pointer (every output, the
+  notch's black rows). The Mac never reads the guest's text, and the guest
+  can only move the candidate window or keep keys going to the VM. No
+  entitlement, no permission.
+- QEMU's log: "cocoa: mac-ime: ..." (on, the module's hello, which way the
+  keys go). Tests: `src/ime/tests/run.sh` (the module's protocol and the VM
+  step), `app/runtime/Tests/keys/test-ime.sh` (the window code's rules and
+  hooks), `swift run features-tests` (the port only with the record's on).
 
 ## Fast network (experimental, off by default)
 

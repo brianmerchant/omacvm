@@ -5,6 +5,16 @@ in more words.
 
 ## 3.0.6 (unreleased)
 
+- Experimental, off by default, OmacVM.app only: the Mac's input methods
+  type in Omarchy. Pinyin, Kotoeri, 2-Set Korean and the rest: the Mac's
+  candidate window opens at the text cursor in the VM, the chosen text goes
+  into the VM's field; keys, Cmd shortcuts and Hyprland's binds stay as
+  they are, password fields get plain keys. On with `omacvm enable
+  mac-ime`, the control centre, or "Mac input methods (experimental)" in
+  the app's VM window while the VM runs, then one restart of the VM. A VM
+  with it off starts exactly as before. Requested and scoped by @Vocllum
+  (#273). Details: docs/features.md, design: docs/adr/0042-mac-ime.md.
+
 - Troubleshooting 29 (no sound at all after a start, fixed in 3.0.4) names
   the real cause: WirePlumber meeting Chromium's video decoder before its
   daemon is ready. A kernel update alone never did it: the module is built

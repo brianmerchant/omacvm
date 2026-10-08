@@ -1,7 +1,8 @@
 # 0042: The Mac's input methods in the VM: macOS composes, Fcitx5 inserts
 
-Status: accepted, planned for 3.0.7 (`mac-ime`: off by default,
-experimental, OmacVM.app only). Requested and scoped by @Vocllum in
+Status: accepted, built (`mac-ime`: off by default, experimental,
+OmacVM.app only; in the next release after it lands, 3.0.7 unless it
+makes 3.0.6's release candidate). Requested and scoped by @Vocllum in
 [#273](https://github.com/gillesgoetsch/OmacVM/issues/273).
 
 ## Context
@@ -92,13 +93,16 @@ feature `mac-ime` ("Mac input methods"): off by default, experimental,
 
 ### Channel
 
-A virtio port `org.omacvm.ime` (`nr=8` on `vser0`), on every OmacVM.app VM
-from its start whatever the setting, like `org.omacvm.auth`: turning the
-feature on needs no VM restart and moves no PCI device. Its socket is
-served by QEMU's window code (as `org.omacvm.display`, socket in
+A virtio port `org.omacvm.ime` (`nr=8` on `vser0`: no PCI device moves),
+only on a VM whose record says `mac-ime=on` at its start (MacLinks, from
+the VM folder's `features`), so a VM with it off starts exactly as before:
+no port, no socket, QEMU's window code never looks at a key for it.
+Turning it on therefore needs one restart of the VM (apply and the check
+say so; qemu.log's "Mac links" line has "Mac input methods on|off"). Its
+socket is served by QEMU's window code (as `org.omacvm.display`, socket in
 `OMACVM_IME_SOCKET`), because the window is where the keys and the input
-context are. udev gives the port to the desktop user (0600), the user
-Fcitx5 runs as.
+context are. udev gives the port to the desktop user (`uaccess`, as the
+clipboard's), the user Fcitx5 runs as.
 
 JSON lines, at most 4 KiB a line (longer lines dropped), version in hello.
 Numbers are checked as in the display port (finite, below 1e7); anything
@@ -111,11 +115,15 @@ Guest to Mac:
 {"t":"focus","on":true,"kind":"text","rect":[x,y,w,h],"exact":true}
 {"t":"rect","rect":[x,y,w,h],"exact":true}
 {"t":"focus","on":false}
+{"t":"reset"}
 ```
 
 `rect` in Hyprland's global logical pixels; `exact` false when only the
 window's box is known. `kind` is `text` or `password` (Fcitx5's
-`PasswordOrSensitive`).
+`Password` or `Sensitive`). `reset`: the app reset its input context (a
+click moved the caret); the Mac drops what was marked. Either side says
+hello when it (re)connects; the guest answers the Mac's hello with hello
+and its focus, and a guest hello resets the Mac's state (Fcitx5 restarted).
 
 Mac to guest:
 
@@ -135,16 +143,19 @@ the clause being converted (highlight), `0` an underline.
 the VM against the installed Fcitx5 when the feature goes on, rebuilt by
 `omacvm apply` when Fcitx5's version changed, as a pacman package like
 `omacvm-box64`. An addon that does not load leaves Fcitx5 as it was: no
-hello, so the Mac never switches over.
+hello, so the Mac never switches over. Rebuilt by `omacvm apply` when its
+sources or Fcitx5's version changed (`build-info` in the package); the
+check says when.
 
 - Opens `/dev/virtio-ports/org.omacvm.ime` in Fcitx5's event loop, says
   hello.
 - `InputContextFocusIn/Out`, `InputContextCursorRectChanged`,
   `InputContextCapabilityChanged`: sends focus and rect (debounced to one
   per frame). A relative rectangle gets the origin of Hyprland's focused
-  window (`j/activewindow` on Hyprland's socket); an absolute one (XIM) is
-  converted from X coordinates with the output's scale; a context with no
-  rectangle (Wayland IM v2) sends the window's box with `exact:false`.
+  window (`j/activewindow` on Hyprland's socket); any other (no rectangle:
+  Wayland IM v2; X root coordinates: XIM, whose mapping to Hyprland's
+  logical space depends on XWayland's scaling) sends the window's box with
+  `exact:false`.
 - preedit: `inputPanel().setClientPreedit()` with the segments and cursor,
   `updatePreedit()`; commit: `commitString()`; cancel: an empty preedit.
   Only on the input context that has the focus; a message for a context
@@ -187,9 +198,10 @@ Then, in the key path (also for keys from the full-grab tap):
   notch and full-screen offsets, the window of that output) to screen
   coordinates. `exact:false`: the last mouse-down in that window if newer
   than the focus change, else the window's box.
-- `attributedSubstringForProposedRange:` returns nil and
-  `validAttributesForMarkedText` is empty: the Mac never reads the guest's
-  text.
+- `attributedSubstringForProposedRange:` returns nil: the Mac never reads
+  the guest's text. `validAttributesForMarkedText` names the clause and
+  underline attributes only, so the input method marks its clauses.
+- `unmarkText` commits the marked text as it is (AppKit's meaning).
 - Focus off, the window losing the keyboard, or the guest closing the
   port: `discardMarkedText` and cancel.
 - Input source switching: while the conditions above hold except the
@@ -197,15 +209,16 @@ Then, in the key path (also for keys from the full-grab tap):
   shortcuts (symbolic hot keys 60 and 61, Ctrl+Space by default) and the
   globe key when System Settings says "Change Input Source" switch the
   Mac's input source (`TISSelectInputSource`) instead of going to the VM.
-  Today both go to the VM while it has the keyboard
-  (omacvm-cocoa-system-shortcuts.patch, omacvm-cocoa-globe-key.patch), so
-  without this the user could not switch to their input method inside the
-  VM.
+  The shortcuts only while macOS's own shortcuts are off for the VM
+  (omacvm-cocoa-system-shortcuts.patch); while macOS keeps them (the
+  default) it switches by itself. The globe key goes to the VM while it has
+  the keyboard (omacvm-cocoa-globe-key.patch), so without this the user
+  could not switch to their input method inside the VM.
 
 ### Where it shows
 
 One row, same style as the other experimental ones, nothing new: the line
-in `src/features.tsv`
+in `src/features.tsv` (summary as in the file)
 
 ```
 mac-ime  off  vm  experimental,app-only  -  Mac input methods  type Chinese, Japanese and Korean in Omarchy with your Mac's own input methods and candidate window (OmacVM.app only)
@@ -214,7 +227,9 @@ mac-ime  off  vm  experimental,app-only  -  Mac input methods  type Chinese, Jap
 gives the control centre's row (the app's Features… opens it), `omacvm
 features` and `omacvm enable/disable mac-ime`. One switch row "Mac input
 methods (experimental)" next to "Fast network (experimental)" in the app's
-settings. A check row (addon built for the running Fcitx5, port open,
+VM window (MacIMERow.swift): it runs the app's own `omacvm enable|disable
+mac-ime --vm NAME`, so it can be switched while the VM runs (greyed out
+otherwise; the (i) says why). A check row (addon built for the running Fcitx5, port open,
 next-login settings in place). An entry in docs/features.md. No prompt, no
 permission: AppKit's input context needs none.
 
@@ -223,9 +238,9 @@ permission: AppKit's input context needs none.
 - Works where a guest Fcitx5 engine works today, with the Mac's input
   method instead: Japanese (Kotoeri, Google Japanese Input), Chinese
   (Pinyin, Zhuyin, Cangjie, Wubi), Korean, and others that use marked text.
-- Caret exact in Qt, GTK (with the GTK_IM_MODULE line), kitty and XWayland
-  apps; window-anchored in Chromium, Electron, foot and alacritty until
-  Hyprland gives the caret. A floating GTK window with client-side shadows
+- Caret exact in Qt, GTK (with the GTK_IM_MODULE line) and kitty;
+  window-anchored in Chromium, Electron, foot, alacritty and XWayland apps
+  until Hyprland gives the caret (and XIM's coordinates are mapped). A floating GTK window with client-side shadows
   is off by the shadow's width.
 - Text fields in layer surfaces (launcher, menus) anchor at the layer's
   box at best.
@@ -259,7 +274,7 @@ permission: AppKit's input context needs none.
 
 - Offline: the line parser and rectangle mapping as a host test (fuzzed
   lines, wrong types, huge numbers, the 4 KiB limit), the addon's message
-  handling against a fake port (`src/tests/ime/`), the patch in the build
+  handling (`src/ime/tests/`), the patch in the build
   check.
 - Real typing only on the MacBook Air (rule 61: no synthetic input on the
   Mac the user works on), test identity, test VM: Japanese (Kotoeri
