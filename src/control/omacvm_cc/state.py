@@ -496,7 +496,7 @@ GRAPHICS_WAITING_NOTE = "Vulkan: OpenGL until r builds it"
 GRAPHICS_WAITING_DETAIL = ("Vulkan is chosen, but this VM does not have its Vulkan driver yet, so it runs on OpenGL "
                            "until the driver is built. r builds it (a few minutes; when the VM's packages are too old "
                            "for that, after a whole system update with omarchy update, asked first).")
-GRAPHICS_FELL_BACK_NOTE = "Vulkan failed: OpenGL (r retries)"
+GRAPHICS_FELL_BACK_NOTE = "Vulkan: OpenGL now, r tries again"
 GRAPHICS_FEATURE = Feature(
     name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
     summary="OpenGL, Vulkan, or Automatic (OpenGL on every Mac in 3.0.0); from the VM's next start")
@@ -524,8 +524,12 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     nxt = "OpenGL and Vulkan" if g.get("next_start") == "vulkan" else "OpenGL"
     this = str(g.get("this_start") or "")
     now = "OpenGL and Vulkan" if "-> vulkan" in this else "OpenGL" if this else ""
-    note = f"{title}: {now}" if now and now == nxt else f"{title}: {nxt} from the next start"
-    detail = ""
+    if now and now == nxt:
+        note, detail = f"{title}: {now}", ""
+    else:
+        # Short in the row (OpenGL is always there); the whole of it under enter.
+        note = f"{title}: {'Vulkan' if nxt != 'OpenGL' else 'OpenGL'} from next start"
+        detail = f"{title}: {nxt} from the VM's next start (shut it down, then start it again)"
     if g.get("waiting_for_driver") is True:
         # Vulkan chosen, no Venus driver for the Mac's pages yet: OpenGL until
         # r on this row (or an apply) builds it.
