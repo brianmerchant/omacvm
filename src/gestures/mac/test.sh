@@ -14,7 +14,10 @@
 #    it; a failed re-creation keeps the old tap and is logged once. Accessibility
 #    (or Input Monitoring) taken away: the tap and its run-loop source go and
 #    the trackpads are let go at once, nothing enables or creates a tap again
-#    until it is back (issue #192) (test-tap.c).
+#    until it is back (issue #192). A tap macOS (or the watchdog) disabled is
+#    removed, never enabled again; a new one after 2 s, then 30 s; the third
+#    in 10 minutes parks it until the Accessibility list changes (#290)
+#    (test-tap.c).
 # 5. Ctrl+Option+Esc (and the old Ctrl+Option+Cmd+Esc, exact modifiers only): in the VM the display under the pointer moves out
 #    with macOS's own Space shortcut as the user set it (or every display
 #    with "all"), toward the Space it came from; in macOS back in; not moved

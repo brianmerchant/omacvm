@@ -25,6 +25,12 @@ in more words.
   scrolls in a short window and is drawn again when the window changes size. Reported by
   @brianmerchant (#292).
 
+- Gestures: its event tap follows the Bridge's new rule (#290). A tap macOS disabled
+  is removed and never enabled again (before: enabled again at once, so a tap that
+  did not answer could hold the Mac's keys and clicks again); a new one comes after
+  2 s, then 30 s, and after three in 10 minutes Gestures lets go of the keyboard and
+  trackpads until the Accessibility list changes. A watchdog disables the tap when
+  Gestures' main thread has not answered for a second.
 - Tests and other HOMEs: the Mac helpers' LaunchAgents get `org.omacvm.test.*` labels with
   the test identity or a HOME that is not the user's own, so a test run can no longer
   replace the user's own Bridge, Gestures, clipboard helper or Omanotch (`src/lib/labels.sh`,

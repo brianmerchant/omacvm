@@ -13,6 +13,7 @@ static CFMachPortRef fakeTapCreate(CGEventTapLocation l, CGEventTapPlacement p, 
   (void)l; (void)p; (void)o; (void)m; (void)cb; (void)u;
   if (failNext) return NULL;
   created++;
+  enabled = 1;   // a new tap is enabled
   return CFMachPortCreate(NULL, NULL, NULL, NULL);
 }
 static bool fakeIsEnabled(CFMachPortRef t) { (void)t; return enabled; }
@@ -28,6 +29,8 @@ static int fail;
 static int fakeQemu(pid_t pid) { return pid != 1200; }   // 1200: OmacVM.app's launcher
 static int perm = PERM_AX | PERM_IM;
 static int fakePerm(void) { return perm; }
+static double clockNow = 1000;
+static double fakeNow(void) { return clockNow; }
 static int stopped;
 static void fakeStopDevice(MTDeviceRef d, MTFrameCallback cb) { (void)d; (void)cb; stopped++; }
 static void drain(void) { for (int i = 0; i < 5; i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false); }
@@ -41,6 +44,7 @@ int main(void) {
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   isQemuFn = fakeQemu;
   permFn = fakePerm;
+  nowFn = fakeNow;
   stopDeviceFn = fakeStopDevice;
   trackpad = 0;   // startTrackpads would open this Mac's real trackpad
   perm = PERM_IM;
@@ -69,9 +73,17 @@ int main(void) {
   CFMachPortInvalidate(tapPort);                     // macOS took it away
   frontChanged(900, 0, 1, "Omarchy", 0, 0);
   check(created == 5 && CFMachPortIsValid(tapPort), "new tap when macOS invalidated ours");
+  // Disabled (#290): removed, never enabled again; a new one after the hold-off.
   enabled = 0;
   frontChanged(900, 0, 1, "Omarchy", 0, 0);
-  check(created == 5 && enabled, "a disabled tap is enabled again, not created again");
+  check(!tapPort && !enabled && created == 5, "a disabled tap is removed, not enabled again");
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(950, NET_APP, 1, "Omarchy", 0, 0);
+  check(!tapPort && created == 5, "no new tap during the 2 s hold-off, not even for another VM");
+  clockNow += 2.1; enabled = 1;
+  tapBack();
+  check(tapPort && created == 6, "a new tap after the hold-off");
+  created = 5;   // (the counts below as before)
   // Permission taken away: the old tap stays.
   failNext = 1;
   CFMachPortRef keep = tapPort;
@@ -126,11 +138,37 @@ int main(void) {
   frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);
   check(capturing, "... and capture again");
 
-  // macOS disables the tap (timeout): enabled again only with the permission.
+  // macOS disables the tap (timeout): never enabled again; removed after the
+  // callback, a new one after the hold-off; the third in 10 minutes parks it.
   CGEventRef ev = CGEventCreate(NULL);
+  clockNow += 1000;   // the strikes above are forgotten
+  int c = created;
   enabled = 0;
   tapCb(NULL, kCGEventTapDisabledByTimeout, ev, NULL);
-  check(enabled && tapPort, "disabled by timeout, permissions there: enabled again");
+  check(!enabled && tapPort, "disabled by timeout: not enabled again in the callback");
+  drain();
+  check(!tapPort && !inputPaused && capturing, "... removed right after it (trackpads and capture stay)");
+  clockNow += 2.1; enabled = 1; tapBack();
+  check(tapPort && created == c + 1, "... a new one after 2 s");
+  enabled = 0;
+  tapCb(NULL, kCGEventTapDisabledByUserInput, ev, NULL);
+  drain();
+  clockNow += 2.1; tapBack();
+  check(!tapPort && created == c + 1, "disabled again: no new one after 2 s");
+  clockNow += 28; enabled = 1; tapBack();
+  check(tapPort && created == c + 2, "... after 30 s");
+  enabled = 0;
+  tapCb(NULL, kCGEventTapDisabledByTimeout, ev, NULL);
+  drain();
+  check(!tapPort && tapParked && inputPaused && !capturing, "the third in 10 minutes: parked, trackpads let go, capture off");
+  clockNow += 3600; enabled = 1; tapBack(); checkPermissions();
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1302, NET_APP, 1, "Omarchy", 0, 0);
+  check(!tapPort && created == c + 2, "... no tap while parked, an hour later, with a VM in front");
+  tapPolicyReset(); checkPermissions();   // what accessibilityChanged does
+  frontChanged(1302, NET_APP, 1, "Omarchy", 0, 0);
+  check(tapPort && created == c + 3 && !inputPaused && capturing, "the Accessibility list changed: a new tap, capture again");
+  // Disabled while Accessibility is gone: it goes, waiting for the permission.
   enabled = 0;
   perm = PERM_IM;
   tapCb(NULL, kCGEventTapDisabledByTimeout, ev, NULL);
@@ -140,8 +178,15 @@ int main(void) {
   enabled = 1;
   perm = PERM_AX | PERM_IM;
   checkPermissions();
-  frontChanged(1301, NET_APP, 1, "Omarchy", 0, 0);
-  check(tapPort && created == 10 && capturing, "back again");
+  frontChanged(1302, NET_APP, 1, "Omarchy", 0, 0);
+  check(tapPort && created == c + 4 && capturing, "back again");
+  created = 10;   // (the counts below as before)
+  // The watchdog's step: ask, wait up to a second, then stalled.
+  double asked = 0;
+  check(watchStep(5.0, &asked) == 1 && watchStep(5.5, &asked) == 0 && watchStep(6.0, &asked) == 0 &&
+        watchStep(6.01, &asked) == 2, "watchdog: asks, waits a second, then disables");
+  asked = 0;
+  check(watchStep(7.0, &asked) == 1, "watchdog: answered, asks again");
   // The capture check finds it disabled while Accessibility is gone.
   enabled = 0;
   perm = 0;

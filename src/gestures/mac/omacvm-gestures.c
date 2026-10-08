@@ -633,6 +633,14 @@ static int slowPerm;   // main thread: slowPermNow's last answer
 static int permNow(void) { return (AXIsProcessTrusted() ? PERM_AX : 0) | slowPerm; }
 static int (*permFn)(void) = permNow;
 static int tapPerm;       // the permissions the tap was created with (main thread)
+// The tap the watchdog guards (below); NULL: none. Under watchLock, so the
+// watchdog never touches a tap the main thread has let go of.
+static pthread_mutex_t watchLock = PTHREAD_MUTEX_INITIALIZER;
+static CFMachPortRef watchTap;   // under watchLock
+static double watchAsked;        // under watchLock: when the main thread was asked to answer (0: it did)
+static void watchTapSet(CFMachPortRef t) {
+  pthread_mutex_lock(&watchLock); watchTap = t; watchAsked = 0; pthread_mutex_unlock(&watchLock);
+}
 static int seenPerm;      // every permission a tap of this process was created with
 static int installTap(void) {
   int perm = permFn();
@@ -652,6 +660,7 @@ static int installTap(void) {
     CFRunLoopSourceInvalidate(tapSource);
     CFRelease(tapSource);
   }
+  watchTapSet(newTap);
   if (tapPort) { CFMachPortInvalidate(tapPort); CFRelease(tapPort); }
   tapPort = newTap;
   tapSource = newSource;
@@ -664,6 +673,7 @@ static int installTap(void) {
 // its port gone.
 static void removeTap(void) {
   if (!tapPort) return;
+  watchTapSet(NULL);
   CGEventTapEnable(tapPort, false);
   CFRunLoopRemoveSource(CFRunLoopGetMain(), tapSource, kCFRunLoopCommonModes);
   CFRunLoopSourceInvalidate(tapSource);
@@ -696,19 +706,103 @@ static void startTrackpads(void);
 static void cursorTimerOn(int on);
 static void permissionsSeen(int perm);
 
+// No tap and no trackpads: macOS has the keyboard, clicks and gestures.
+static void pauseInput(void) {
+  removeTap();
+  inputPaused = 1;
+  stopTrackpads();
+  if (capturing) { capturing = 0; logf_("capture off"); sendState("off"); }
+  cursorTimerOn(0);   // the macOS pointer shows again
+}
+
+// ---- the tap must never hold the Mac's input (#290, the Bridge's rule) ----
+// An active tap at the head of the HID chain holds every event of its kind
+// until its callback answers. macOS disables a tap that did not answer in
+// time; enabling it again (as before) could bring the hold back over and
+// over. Now a disabled tap is removed, never enabled again; a new one comes
+// after a hold-off (2 s, then 30 s), and after three in 10 minutes none (and
+// no trackpads) until macOS's Accessibility list changes. A watchdog off the
+// main thread disables the tap when the main thread (the tap's callback) has
+// not answered for a second.
+#define TAP_PARK 3
+#define TAP_FORGET 600.0
+static const double tapHoldOff[TAP_PARK - 1] = { 2, 30 };
+static double uptimeNow(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9; }
+static double (*nowFn)(void) = uptimeNow;
+static double tapStrikes[TAP_PARK];   // main thread: when taps were disabled (the last 10 minutes)
+static int nStrikes;
+static double tapUntil;               // main thread: no new tap before this
+static int tapParked;                 // main thread: none until the Accessibility list changes
+static int tapMayCreate(void) { return !tapParked && nowFn() >= tapUntil; }
+static void rearmTap(const char *why);
+static void tapBack(void) { if (!tapPort && tapMayCreate()) rearmTap("hold-off over after macOS disabled it"); }
+// A strike at `now`; returns the hold-off in s, or -1: parked.
+static double tapStrike(double now) {
+  int k = 0;
+  for (int i = 0; i < nStrikes; i++) if (now - tapStrikes[i] < TAP_FORGET) tapStrikes[k++] = tapStrikes[i];
+  if (k == TAP_PARK) { memmove(tapStrikes, tapStrikes + 1, (TAP_PARK - 1) * sizeof *tapStrikes); k--; }
+  tapStrikes[k++] = now;
+  nStrikes = k;
+  if (k >= TAP_PARK) { tapParked = 1; return -1; }
+  tapUntil = now + tapHoldOff[k - 1];
+  return tapHoldOff[k - 1];
+}
+// Main thread: the tap was disabled (by macOS or the watchdog).
+static void tapDisabled(const char *by) {
+  if (!tapPort) return;
+  double h = tapStrike(nowFn());
+  if (h < 0) {
+    pauseInput();
+    logf_("event tap disabled (%s) %d times in 10 minutes: removed, trackpads let go (macOS has the keyboard, "
+          "clicks and gestures) until macOS's Accessibility list changes", by, TAP_PARK);
+    return;
+  }
+  removeTap();
+  logf_("event tap disabled (%s): removed (never enabled again), a new one in %.0f s", by, h);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(h * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ tapBack(); });
+}
+// macOS's Accessibility list changed: a fresh start (main thread).
+static void tapPolicyReset(void) { nStrikes = 0; tapUntil = 0; tapParked = 0; }
+
+// The watchdog's step every 0.25 s: 1 = ask the main thread to answer,
+// 2 = it has not answered for longer than a second.
+static int watchStep(double now, double *asked) {
+  if (*asked == 0) { *asked = now; return 1; }
+  return now - *asked > 1.0 ? 2 : 0;
+}
+static void *tapWatchdog(void *u) {
+  (void)u;
+  for (;;) {
+    usleep(250000);
+    pthread_mutex_lock(&watchLock);
+    int step = watchTap ? watchStep(uptimeNow(), &watchAsked) : 0;
+    if (step == 2) {
+      CFMachPortRef t = watchTap;
+      watchTap = NULL;   // once: the main thread removes it when it is back
+      CGEventTapEnable(t, false);
+      int still = CFMachPortIsValid(t) && CGEventTapIsEnabled(t);
+      pthread_mutex_unlock(&watchLock);
+      logf_("the main thread did not answer for 1 s: event tap disabled (macOS passes every key and click on)");
+      if (still) { logf_("the event tap could not be disabled: quitting so it goes (launchd starts Gestures again)"); _exit(75); }
+      continue;
+    }
+    pthread_mutex_unlock(&watchLock);
+    if (step == 1) dispatch_async(dispatch_get_main_queue(), ^{
+      pthread_mutex_lock(&watchLock); watchAsked = 0; pthread_mutex_unlock(&watchLock);
+    });
+  }
+  return NULL;
+}
+
 static void checkPermissions(void) {
   if (tapPort && !inputPaused) {
     int perm = permFn();
     if (permitted(perm)) return;
-    removeTap();
-    inputPaused = 1;
+    pauseInput();
     permissionsSeen(perm);
     logf_("permission taken away: event tap removed, trackpads let go (macOS has the keyboard, clicks and "
           "gestures); waiting for Accessibility");
-    stopTrackpads();
-    if (capturing) { capturing = 0; logf_("capture off"); sendState("off"); }
-    cursorTimerOn(0);   // the macOS pointer shows again
-  } else if (inputPaused && installTap()) {
+  } else if (inputPaused && !tapParked && installTap()) {
     inputPaused = 0;
     permissionsSeen(tapPerm);
     if (trackpad) startTrackpads();
@@ -738,6 +832,7 @@ static void permissionTimer(CFRunLoopTimerRef t, void *info) {
 // macOS's Accessibility list changed: look now, and once more when it has settled.
 static void accessibilityChanged(CFNotificationCenterRef c, void *o, CFNotificationName n, const void *obj, CFDictionaryRef info) {
   (void)c; (void)o; (void)n; (void)obj; (void)info;
+  tapPolicyReset();
   checkPermissions();
   refreshSlowPerms();
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -751,6 +846,7 @@ static void accessibilityChanged(CFNotificationCenterRef c, void *o, CFNotificat
 static void rearmTap(const char *why) {
   static int failedLogged;
   if (inputPaused) return;   // checkPermissions brings it back
+  if (!tapMayCreate()) return;   // after macOS disabled one: tapBack, or the Accessibility list
   if (installTap()) {
     logf_("event tap created again (%s)", why);
     failedLogged = 0;
@@ -815,12 +911,13 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
     if (rec) fprintf(rec, "C\t%.4f\t%d\n", unixNow(), now);
     sendState(now ? "on" : (front && !inputPaused ? "esc" : "off"));
   }
-  // Invalidated or disabled by macOS: back only with the permissions; without
-  // them it goes (enabling it again held all input, #192).
+  // Invalidated or disabled (by macOS or the watchdog): without the
+  // permissions it goes (#192); a disabled one is removed, never enabled
+  // again (#290).
   if (tapPort && (!CFMachPortIsValid(tapPort) || !CGEventTapIsEnabled(tapPort))) {
     if (!permitted(permFn())) checkPermissions();
     else if (!CFMachPortIsValid(tapPort)) rearmTap("macOS invalidated it");
-    else CGEventTapEnable(tapPort, true);
+    else tapDisabled("found disabled");
   }
 }
 
@@ -2094,11 +2191,13 @@ static int swallowEscUp, escClosedMC;
 static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u) {
   (void)p; (void)u;
   if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
-    // Enabled again only with the permissions; without them the tap goes
-    // (after this callback has returned), never enabled again (#192).
-    // (This callback runs on the main thread: refreshSlowPerms asks tccd
-    // off it, so a "control the computer" taken away is seen within ms.)
-    if (permitted(permFn())) { CGEventTapEnable(tapPort, true); refreshSlowPerms(); }
+    // Never enabled again (#290): removed after this callback has returned,
+    // a new one after a hold-off; without the permissions it goes for good
+    // until they are back (#192). (This callback runs on the main thread:
+    // refreshSlowPerms asks tccd off it.)
+    const char *by = type == kCGEventTapDisabledByTimeout ? "macOS's timeout" : "user input";
+    CFMachPortRef was = tapPort;
+    if (permitted(permFn())) { dispatch_async(dispatch_get_main_queue(), ^{ if (tapPort == was) tapDisabled(by); }); refreshSlowPerms(); }
     else dispatch_async(dispatch_get_main_queue(), ^{ checkPermissions(); });
     return e;
   }
@@ -2650,6 +2749,7 @@ int main(int argc, char **argv) {
   }
   CFRelease(opts);
   if (asked) logf_("permissions granted");
+  { pthread_t th; pthread_create(&th, NULL, tapWatchdog, NULL); pthread_detach(th); }
   logPermissions();
 
   // The trackpad only now, with the permissions granted and the run loop about
