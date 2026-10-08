@@ -790,3 +790,27 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
   Before: keep the VM's window visible while a job runs.
 - **Where:** `app/runtime/patches/omacvm-cocoa-no-app-nap.patch`; test
   `src/tests/app-nap.sh` (`--live PID` checks a running VM's vCPU threads).
+
+## 32. app: the VM lags and the sound crackles while recording the screen or taking a screenshot
+
+- **Symptom:** in Omarchy's capture mode (a screenshot of a region or a
+  window, screen recording) the VM gets slow and the sound crackles or drops
+  out; worst while recording, and on 120 Hz or several displays. Up to 3.0.5.
+- **Cause:** two kinds of work stopped QEMU's main loop, which also runs the
+  VM's sound and display. Recording: each frame waited 12-13 ms in the Mac's
+  video encoder (constant QP used VideoToolbox's low-latency session): the
+  main loop was busy 93 % of the time, the display ran at 12 frames a second
+  and the Mac got a third of the sound (MacBook Air M2, 2940x1840). The
+  frozen screen of the screenshot picker: hyprpicker drew every display again
+  on every frame, and each time Hyprland sent the whole screen (21.6 MB)
+  through the GPU's upload path.
+- **Fix (3.0.6):** the encoder works beside the main loop; the VM's fences
+  wait for its frames instead (ADR
+  [0042](adr/0042-encoder-beside-the-main-loop.md)): recording keeps the
+  sound whole, the display at 29 frames a second. OmacVM.app VMs get a
+  hyprpicker that draws only when something changed (`omacvm apply` builds
+  it; `omacvm check` shows "screenshot freeze"), and big uploads take half
+  the main loop's time. Numbers: [video-encode.md](video-encode.md#while-recording).
+- **Where:** `app/runtime/patches/virgl-videotoolbox-encode-async.patch`,
+  `virgl-transfer-upload-pbo.patch`, `src/app/guest/hyprpicker/`; tests
+  `app/runtime/Tests/virgl/test-video-encode.c`, `test-upload-pbo.c`.

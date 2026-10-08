@@ -324,6 +324,23 @@ reads back on every draw again; `OMACVM_VIRGL_CACHE_STATS=1` logs the hit rate
 every 10 s. Tests: `test-index-range-cache` (switch on and off),
 `mutate-index-range-cache.py` (manual: every check taken out alone fails it).
 
+Texture uploads (`virgl-transfer-upload-pbo.patch`): an upload from the guest's
+memory (shm buffers: apps that draw on the CPU, the frozen screen of
+screenshots) was gathered into a temporary copy that `glTexSubImage2D` read
+from client memory, where Apple's GL copies it again and lays it out for the
+GPU on the CPU. Plain 2D uploads of 64 KiB or more are now gathered straight
+into a pixel unpack buffer and the GPU does the rest: half the main loop's
+time per upload (2940x1840 on an M4 Max: 1.13 → 0.55 ms).
+`OMACVM_VIRGL_UPLOAD_PBO=0` goes back. Test: `test-upload-pbo` (both ways).
+
+Video encoder frames (`virgl-videotoolbox-encode-async.patch`): the encoder
+finishes frames after END_FRAME, beside the main loop, and every vrend fence
+made after a frame closed waits for its result (the sync thread waits after
+the GL fence; polled fences stay). One fence timeline for the VM means the
+desktop's fences wait for the encoder too. ADR
+[0042](../adr/0042-encoder-beside-the-main-loop.md), numbers in
+[video-encode.md](../video-encode.md#while-recording).
+
 ### Where the time goes
 
 - Light frames (glmark2, the desktop): the fence round trip. Fixed above.

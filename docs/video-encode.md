@@ -13,6 +13,7 @@ Studio, and video calls in Google Chrome (camera and screen sharing).
 | Google Chrome, WebRTC: camera, screen sharing | yes, *VaapiVideoEncodeAccelerator* (H.264) |
 | Brave | gets the same switches as Chrome; not tested in a call |
 | OBS Studio | yes: *FFmpeg VAAPI H.264* and *HEVC*, screen capture through PipeWire |
+| Omarchy's screen recording (gpu-screen-recorder, `h264_vaapi`, constant QP) | yes: 60 frames a second of a 2940x1840 display on a MacBook Air M2, the VM's sound whole (see [While recording](#while-recording)) |
 | wf-recorder 0.6 | no: its GPU capture fails on virtio-gpu (Hyprland refuses the buffer) and it crashes; `--no-dmabuf` fails in wf-recorder itself. Software (`-c libx264`) works |
 | Firefox | no: Firefox 157 has no VA-API encoder on Linux (it decodes with VA-API only) |
 | Chromium from Arch Linux ARM (Omarchy's default browser) | no: built without VA-API (153), so it encodes on the CPU; `omacvm apply` adds the switches once it loads libva |
@@ -150,6 +151,17 @@ App ─VA-API─▶ Mesa's virgl VA driver ─virtio-gpu─▶ virglrenderer (QE
 - The guest's VA-API driver sends one raw NV12 picture per frame (two plane
   textures) and the encode parameters: bitrate, frame rate, key frame interval
   or constant QP, picture type, and its SPS (for the picture's real size).
+- Frames are encoded beside QEMU's main loop, which also runs the VM's sound
+  and display: the media engine takes 12-40 ms for a Retina-sized frame, and
+  the main loop never waits for it. END_FRAME only closes the frame; the
+  frame goes to the encoder once the GPU has copied its picture, and its
+  coded data and feedback reach the guest's buffers when the encoder is
+  done, in order, up to 4 frames in flight per encoder
+  (`virgl-videotoolbox-encode-async.patch`). A fence the guest asks for
+  after END_FRAME signals only then, so the guest never reads a frame half
+  done. Fences are one timeline for the whole VM, so while a frame encodes
+  the desktop's own fences wait too (ADR
+  [0042](adr/0042-encoder-beside-the-main-loop.md)).
 - The host blits the planes into an IOSurface from the compression session's
   pool (a CPU copy if the blit fails) and encodes them in real time without B
   frames. VideoToolbox writes the whole stream; the guest gets an Annex B access
@@ -162,11 +174,18 @@ App ─VA-API─▶ Mesa's virgl VA driver ─virtio-gpu─▶ virglrenderer (QE
   second. VideoToolbox's low-latency mode is not used for that: it drops
   frames, and VA-API has no way to tell the guest (Chrome then gave up on the
   hardware encoder for screen sharing).
-- Constant QP (FFmpeg without `-b:v`): every frame carries the guest's QP
-  (VideoToolbox's `BaseFrameQP`, which turns its rate control off). A switch
-  between bitrate and constant QP starts a new session. In the test VM, 1080p
-  `-rc_mode CQP`: QP 18 gives 54 MB (H.264) and 49 MB (HEVC) for the 10-second
-  clip, QP 40 2.3 MB and 2.0 MB (luma PSNR 43.0/42.9 against 36.2/36.3 dB).
+- Constant QP (FFmpeg without `-b:v`, gpu-screen-recorder): the frame QP is
+  held between VideoToolbox's `MinAllowedFrameQP` and `MaxAllowedFrameQP`,
+  the guest's I- and P-frame QP (the same unless the app sets them apart).
+  VideoToolbox takes them only before the first frame, so another QP starts a
+  new session, as does a switch between bitrate and constant QP. The sizes
+  match the per-frame `BaseFrameQP` of a low-latency session within 1 %, but
+  that session's EncodeFrame waits for each frame (12-13 ms at 2940x1840): it
+  is used only where the encoder refuses the range, or with
+  `OMACVM_VIDEO_ENCODE_BASE_QP=1`. In the test VM, 1080p `-rc_mode CQP`
+  (measured with `BaseFrameQP`): QP 18 gives 54 MB (H.264) and 49 MB (HEVC)
+  for the 10-second clip, QP 40 2.3 MB and 2.0 MB (luma PSNR 43.0/42.9
+  against 36.2/36.3 dB).
 - A frame that fails, does not fit the guest's buffer, is refused before it
   reaches the encoder, or is never ended by the guest is reported to the guest
   as failed (never cut short, never the previous frame's result). Only a
@@ -198,6 +217,28 @@ and encoding), `OMACVM_VIDEO_DECODE=0` all video. The QEMU log says
 Every Apple Silicon Mac (M1 and newer) has hardware H.264 and HEVC encoders;
 the backend asks VideoToolbox at run time and offers only what it reports.
 
+## While recording
+
+Omarchy's screen recording (`omarchy-capture-screenrecording --fullscreen`:
+gpu-screen-recorder 6.1.3, `h264_vaapi`, constant QP, 60 frames a second)
+on a MacBook Air M2, test VM with 4 vCPUs at 2940x1840 60 Hz, 20 s with the
+pointer moving and a 30 Hz tone playing (2026-10-08,
+`work/tracks/capture-perf.md` in the workspace):
+
+| | 3.0.5 | 3.0.6 |
+|---|---|---|
+| QEMU's main loop busy | 93 % (78 % waiting in EncodeFrame) | 14 % |
+| Main loop late 10 ms or more | 1,082 times, worst 216 ms | 2 times (at the start), worst 55 ms |
+| Sound the Mac got | 6.8 s of 20.7 s | 20.7 s of 20.7 s |
+| The VM's display | 12 frames a second | 29 frames a second |
+| gpu-screen-recorder (VM CPU) | 87 % | 8 % |
+| The recording | | 1227 frames in 20.45 s, H.264 2940x1840, plays |
+
+The display stays below 60 while recording: each frame the recorder sends
+holds the VM's fences until the media engine is done with it (above). The
+start of a recording can still drop 20-40 ms of sound once (the encoder's
+session is made and the first picture copied on the main loop).
+
 ## Tests
 
 - Build time: `app/runtime/Tests/virgl/test-video-encode.c`, H.264 and HEVC
@@ -208,7 +249,11 @@ the backend asks VideoToolbox at run time and offers only what it reports.
   encodes in one frame (failure feedback for each), refused sizes and
   profiles, cropped pictures through the GPU blit and the CPU copy, constant
   QP 18 against QP 40 and against 50 kbit/s before and after it, the
-  12-encoder limit.
+  12-encoder limit, three frames sent at once coming back in order after one
+  fence, and no fence signalling before the frames ahead of it have their
+  feedback. It runs three times: polled fences, QEMU's fences from the sync
+  thread (`OMACVM_TEST_THREAD_SYNC=1`) and the low-latency constant QP
+  session (`OMACVM_VIDEO_ENCODE_BASE_QP=1`).
 - In a VM:
   - `tests/video/ffmpeg-encode.sh [ENCODER...]`: FFmpeg, frames per second,
     the VM's and the Mac's CPU, bitrate, PSNR.

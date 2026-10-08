@@ -5,6 +5,20 @@ in more words.
 
 ## 3.0.6 (unreleased)
 
+- Capture mode no longer makes the VM lag or the sound crackle
+  ([troubleshooting 32](docs/troubleshooting.md#32-app-the-vm-lags-and-the-sound-crackles-while-recording-the-screen-or-taking-a-screenshot)).
+  Screen recording: the Mac's video encoder works beside QEMU's main loop
+  instead of stopping it for every frame. On a MacBook Air M2 at 2940x1840
+  the main loop went from 93 % to 14 % busy, the VM's sound from a third to
+  all of it, the display from 12 to 29 frames a second while recording, and
+  gpu-screen-recorder from 87 % to 8 % of a vCPU. Constant QP now uses a
+  normal encoder session with the QP held in place
+  ([video encoding](docs/video-encode.md#while-recording)). Screenshots: in
+  OmacVM.app VMs `omacvm apply` builds a hyprpicker that draws the frozen
+  screen once instead of on every frame (Hyprland 41 % to 11 % of a vCPU while
+  picking), and big texture uploads from the VM take half the main loop's
+  time.
+
 - Troubleshooting 29 (no sound at all after a start, fixed in 3.0.4) names
   the real cause: WirePlumber meeting Chromium's video decoder before its
   daemon is ready. A kernel update alone never did it: the module is built
