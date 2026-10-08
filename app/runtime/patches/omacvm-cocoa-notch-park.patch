@@ -1,11 +1,13 @@
 From: OmacVM
 Subject: [PATCH] ui: one pointer between the VM and Omanotch's strip in full screen
 
-What: when the pointer leaves the main view up into Omanotch's strip
+What: when the pointer leaves a view of the VM up into Omanotch's strip
 (macOS full screen below a notch, absolute pointer, VM has it), QEMU sends
-one last tablet position: the top row of the guest's hidden NOTCH output
-at the exit's x (ui/omacvm-notch-park.h). The guest's layout message now
-also keeps NOTCH's box. Nothing else changes: the next motion over the VM
+one last tablet position: the top row of the guest's hidden NOTCH output,
+behind the camera (ui/omacvm-notch-park.h). The main view and the views of
+the other outputs (with an external display holding the main window, the
+MacBook's display is one of those). The guest's layout message now also
+keeps NOTCH's box. Nothing else changes: the next motion over the VM
 brings the guest's pointer back, as before.
 
 Why: since full screen moved to its own Space (3.0.x), the strip is
@@ -38,7 +40,7 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
  - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
                    button:(int)button down:(bool)down;
  - (void) omacvmUngrabAfterDrag;
-+- (void) omacvmParkInNotch:(NSEvent *)event;
++- (void) omacvmParkInNotch:(NSEvent *)event view:(NSView *)view output:(int)output;
  - (void) omacvmGuestAtTop:(bool)top;
  @end
  
@@ -46,7 +48,7 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
  typedef struct OmacVMBox { double x, y, w, h; } OmacVMBox;
  static bool omacvm_map_pointer(int output, double u, double v,
                                 double *nx, double *ny);
-+static bool omacvm_notch_park_target(double u, double *nx, double *ny);
++static bool omacvm_notch_park_target(int output, double *nx, double *ny);
  static int omacvm_active_outputs(void);
  static bool omacvm_is_our_window(NSWindow *w);
  static bool omacvm_pointer_over_ours(void);
@@ -54,28 +56,27 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
  - (void) mouseExited:(NSEvent *)event
  {
      omacvm_pointer_left(&omacvm_ptr);
-+    [self omacvmParkInNotch:event];
++    [self omacvmParkInNotch:event view:self output:0];
      /*
       * OmacVM: with several outputs the pointer may just be on the next one,
       * or crossing the strip between them in the middle of a drag (the
-@@ -2517,6 +2521,44 @@
-         (omacvm_active_outputs() < 2 ||
-          (!omacvm_pointer_over_ours() && ![NSEvent pressedMouseButtons]))) {
-         [self ungrabMouse];
-+    }
-+}
-+
+@@ -2520,6 +2524,45 @@
+     }
+ }
+ 
 +/*
 + * OmacVM: up into Omanotch's strip in full screen below a notch, the guest's
 + * pointer goes into its hidden NOTCH output in the same moment (one cursor:
 + * the Mac's shows on the strip at once; ui/omacvm-notch-park.h says why).
-+ * The next motion over the VM brings it back.
++ * The next motion over the VM brings it back. The main view and the views
++ * of the other outputs (the MacBook's display can be one of those when an
++ * external display has the main window).
 + */
-+- (void) omacvmParkInNotch:(NSEvent *)event
++- (void) omacvmParkInNotch:(NSEvent *)event view:(NSView *)view output:(int)output
 +{
-+    NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
-+    NSSize size = [self bounds].size;
-+    NSWindow *w = [self window];
++    NSPoint p = [view convertPoint:[event locationInWindow] fromView:nil];
++    NSSize size = [view bounds].size;
++    NSWindow *w = [view window];
 +    OmacVMParkIn in = {
 +        .absolute = isAbsoluteEnabled,
 +        .grabbed = isMouseGrabbed,
@@ -86,8 +87,7 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
 +    };
 +    double nx, ny;
 +
-+    if (!omacvm_park_wanted(&in) || size.width <= 0 ||
-+        !omacvm_notch_park_target(p.x / size.width, &nx, &ny)) {
++    if (!omacvm_park_wanted(&in) || !omacvm_notch_park_target(output, &nx, &ny)) {
 +        return;
 +    }
 +    with_bql(^{
@@ -98,12 +98,15 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
 +        qemu_input_event_sync();
 +    });
 +    if (omacvm_pointer_debug) {
-+        fprintf(stderr, "omacvm-pointer: up into the strip: guest pointer to NOTCH (%.4f, %.4f)\n",
-+                nx, ny);
-     }
- }
- 
-@@ -6755,6 +6797,7 @@
++        fprintf(stderr, "omacvm-pointer: up into the strip (output %d): guest pointer to NOTCH (%.4f, %.4f)\n",
++                output, nx, ny);
++    }
++}
++
+ /* OmacVM: a drag that ended outside every window of ours lets go of the pointer. */
+ - (void) omacvmUngrabAfterDrag
+ {
+@@ -6755,6 +6798,7 @@
  static OmacVMBox omacvm_guest_box[OMACVM_MAX_OUTPUTS];
  static OmacVMBox omacvm_guest_bounds;
  static bool omacvm_guest_known;
@@ -111,26 +114,37 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
  static NSString *omacvm_last_layout;
  
  /*
-@@ -6881,6 +6924,18 @@
-     *nx = MIN(1.0, MAX(0.0, (b->x + u * b->w - all->x) / all->w));
-     *ny = MIN(1.0, MAX(0.0, (b->y + v * b->h - all->y) / all->h));
+@@ -6883,6 +6927,21 @@
      return true;
-+}
-+
-+/* The top row of NOTCH above the main output, from the layout the guest reported. */
-+static bool omacvm_notch_park_target(double u, double *nx, double *ny)
-+{
-+    const OmacVMBox *s = &omacvm_guest_box[0], *n = &omacvm_guest_notch;
-+    const OmacVMBox *a = &omacvm_guest_bounds;
-+
-+    return omacvm_guest_known &&
-+           omacvm_park_place((OmacVMParkBox){ s->x, s->y, s->w, s->h },
-+                             (OmacVMParkBox){ n->x, n->y, n->w, n->h },
-+                             (OmacVMParkBox){ a->x, a->y, a->w, a->h }, u, nx, ny);
  }
  
++/* NOTCH's top row above an output's middle, from the layout the guest reported. */
++static bool omacvm_notch_park_target(int output, double *nx, double *ny)
++{
++    const OmacVMBox *s, *n = &omacvm_guest_notch;
++    const OmacVMBox *a = &omacvm_guest_bounds;
++
++    if (!omacvm_guest_known || output < 0 || output >= OMACVM_MAX_OUTPUTS) {
++        return false;
++    }
++    s = &omacvm_guest_box[output];
++    return omacvm_park_place((OmacVMParkBox){ s->x, s->y, s->w, s->h },
++                             (OmacVMParkBox){ n->x, n->y, n->w, n->h },
++                             (OmacVMParkBox){ a->x, a->y, a->w, a->h }, nx, ny);
++}
++
  static int omacvm_active_outputs(void)
-@@ -8058,6 +8113,7 @@
+ {
+     return omacvm_mac_count;
+@@ -7560,6 +7619,7 @@
+ - (void)mouseEntered:(NSEvent *)e { [self send:e button:-1 down:false]; }
+ - (void)mouseExited:(NSEvent *)e
+ {
++    [cocoaView omacvmParkInNotch:e view:self output:output];
+     if ([cocoaView isMouseGrabbed] && !omacvm_pointer_over_ours() &&
+         ![NSEvent pressedMouseButtons]) {
+         [cocoaView ungrabMouse];
+@@ -8058,6 +8118,7 @@
      bool first = true;
  
      memset(omacvm_guest_box, 0, sizeof(omacvm_guest_box));
@@ -138,7 +152,7 @@ src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).
      omacvm_guest_known = false;
      for (NSDictionary *m in monitors) {
          if (![m isKindOfClass:[NSDictionary class]]) {
-@@ -8083,6 +8139,8 @@
+@@ -8083,6 +8144,8 @@
                  omacvm_guest_box[index] = (OmacVMBox){ x, y, w, h };
                  omacvm_guest_known = true;
              }

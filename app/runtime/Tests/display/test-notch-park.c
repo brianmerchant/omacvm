@@ -82,25 +82,23 @@ static void test_place(void)
     double nx = -1, ny = -1;
     OmacVMParkBox none = { 0, 0, 0, 0 };
 
-    CHECK(omacvm_park_place(SCREEN, NOTCH, ALL, 0.5, &nx, &ny), "NOTCH right above");
-    CHECK(near(nx, 0.5) && near(ny, 0), "middle of the top row: %f %f", nx, ny);
-    omacvm_park_place(SCREEN, NOTCH, ALL, 0, &nx, &ny);
-    CHECK(near(nx, 0), "left edge: %f", nx);
-    omacvm_park_place(SCREEN, NOTCH, ALL, 1, &nx, &ny);
-    CHECK(near(nx, 1279.0 / 1280), "right edge stays on NOTCH's last column: %f", nx);
-    omacvm_park_place(SCREEN, NOTCH, ALL, 7, &nx, &ny);
-    CHECK(near(nx, 1279.0 / 1280), "a far-off x is held to NOTCH: %f", nx);
+    CHECK(omacvm_park_place(SCREEN, NOTCH, ALL, &nx, &ny), "NOTCH right above");
+    CHECK(near(nx, 0.5) && near(ny, 0),
+          "the middle of NOTCH's top row, behind the camera (not the exit's x: notchcast "
+          "keeps the strip under the guest's pointer from the last frame): %f %f", nx, ny);
 
-    CHECK(!omacvm_park_place(SCREEN, none, ALL, 0.5, &nx, &ny),
+    CHECK(!omacvm_park_place(SCREEN, none, ALL, &nx, &ny),
           "no NOTCH (Omanotch off, or the guest has not said yet)");
-    CHECK(!omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, 32, 1280, 32 }, ALL, 0.5, &nx, &ny),
+    CHECK(!omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, 32, 1280, 32 }, ALL, &nx, &ny),
           "NOTCH over the screen's top edge (another display above): its rows are the screen's");
-    CHECK(!omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, -10, 1280, 32 }, ALL, 0.5, &nx, &ny),
+    CHECK(!omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, -10, 1280, 32 }, ALL, &nx, &ny),
           "NOTCH not touching the screen");
-    CHECK(!omacvm_park_place(SCREEN, (OmacVMParkBox){ 1280, 0, 1280, 32 }, ALL, 0.5, &nx, &ny),
+    CHECK(!omacvm_park_place(SCREEN, (OmacVMParkBox){ 1280, 0, 1280, 32 }, ALL, &nx, &ny),
           "NOTCH above another output, not this one");
-    CHECK(omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, 0.4, 1280, 31.8 }, ALL, 0.5, &nx, &ny),
+    CHECK(omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, 0.4, 1280, 31.8 }, ALL, &nx, &ny),
           "half a px of slack for scaled sizes");
+    CHECK(omacvm_park_place(SCREEN, (OmacVMParkBox){ 0, 0, 500, 32 }, ALL, &nx, &ny) &&
+          near(nx, 499.0 / 1280), "a NOTCH narrower than the screen: its last column: %f", nx);
 
     /* An external display left of the built-in one: the box around all moves. */
     {
@@ -108,9 +106,11 @@ static void test_place(void)
         OmacVMParkBox notch = { 1920, 248, 1280, 32 };
         OmacVMParkBox all = { 0, 0, 3200, 1080 };
 
-        CHECK(omacvm_park_place(screen, notch, all, 0.25, &nx, &ny), "beside an external display");
-        CHECK(near(nx, (1920 + 320) / 3200.0) && near(ny, 248 / 1080.0),
+        CHECK(omacvm_park_place(screen, notch, all, &nx, &ny), "beside an external display");
+        CHECK(near(nx, (1920 + 640) / 3200.0) && near(ny, 248 / 1080.0),
               "NOTCH's top row in the whole box: %f %f", nx, ny);
+        CHECK(!omacvm_park_place((OmacVMParkBox){ 0, 0, 1920, 1080 }, notch, all, &nx, &ny),
+              "the external display's view: NOTCH is not above it");
     }
 }
 
@@ -159,7 +159,7 @@ static void move(World *w, int now, double y)
         double nx, ny;
 
         if (w->fix && omacvm_park_wanted(&in) &&
-            omacvm_park_place(SCREEN, NOTCH, ALL, 0.5, &nx, &ny)) {
+            omacvm_park_place(SCREEN, NOTCH, ALL, &nx, &ny)) {
             tablet(w, ny * ALL.h + ALL.y);
         }
         w->mac_hidden = false;
