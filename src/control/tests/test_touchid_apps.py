@@ -184,6 +184,19 @@ def test_next_start_only_for_an_app_vm_without_the_port(tmp_path, monkeypatch):
     assert L.next_start("app", {"touch-id": True}) == set()
 
 
+def test_mac_ime_from_the_next_start_without_its_port(tmp_path, monkeypatch):
+    # mac-ime: the app adds org.omacvm.ime only at a start with the feature on.
+    monkeypatch.setenv("OMACVM_AUTH_PORT", str(tmp_path / "org.omacvm.auth"))
+    monkeypatch.setenv("OMACVM_IME_PORT", str(tmp_path / "org.omacvm.ime"))
+    assert L.next_start("app", {"mac-ime": True}) == {"mac-ime"}
+    assert L.next_start("app", {"mac-ime": False}) == set()
+    assert L.next_start("utm", {"mac-ime": True}) == set()
+    (tmp_path / "org.omacvm.ime").symlink_to("../vport5p8")
+    assert L.next_start("app", {"mac-ime": True, "touch-id": True}) == {"touch-id"}
+    # No extra question before switching it: the row says "from the next start" after.
+    assert S.next_start_note("mac-ime", True, "app") == ""
+
+
 def test_about_lists_the_apps(features):
     t = S.feature_about(next(x for x in features if x.name == "touch-id"))
     assert "1Password: Settings › Security › Unlock using system authentication" in t

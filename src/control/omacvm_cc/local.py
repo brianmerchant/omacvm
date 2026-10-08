@@ -44,13 +44,22 @@ def auth_port() -> str:
     return os.environ.get("OMACVM_AUTH_PORT", "/dev/virtio-ports/org.omacvm.auth")
 
 
+def ime_port() -> str:
+    """OmacVM.app's port for the Mac's input methods (mac-ime; the app adds it
+    at a start with the feature on)."""
+    return os.environ.get("OMACVM_IME_PORT", "/dev/virtio-ports/org.omacvm.ime")
+
+
 def next_start(vm_type: str, on: dict[str, bool]) -> set[str]:
     """The features that are on but in use only from the VM's next start:
-    Touch ID on an OmacVM.app VM without its port (turned on while the VM
-    ran; the app adds the port when it starts the VM)."""
+    Touch ID or the Mac's input methods on an OmacVM.app VM without its port
+    (turned on while the VM ran; the app adds the port when it starts the VM)."""
+    out = set()
     if vm_type == "app" and on.get("touch-id") and not os.path.lexists(auth_port()):
-        return {"touch-id"}
-    return set()
+        out.add("touch-id")
+    if vm_type == "app" and on.get("mac-ime") and not os.path.lexists(ime_port()):
+        out.add("mac-ime")
+    return out
 
 
 def check_socket() -> str:
