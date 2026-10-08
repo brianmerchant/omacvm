@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      }
      return bool_with_bql(^{
          return [self handleEventLocked:event];
-@@ -8465,8 +8480,822 @@
+@@ -8465,8 +8480,842 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -495,6 +495,11 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +    if (omacvm_ime.has_rect && omacvm_ime.exact &&
 +        omacvm_ime_to_screen(omacvm_ime.x, omacvm_ime.y, omacvm_ime.w, omacvm_ime.h, &r)) {
++        /* A caret as tall as a whole field (an entry stretched over its window): its top line. */
++        if (NSHeight(r) > 40) {
++            r.origin.y = NSMaxY(r) - 40;
++            r.size.height = 40;
++        }
 +        return r;
 +    }
 +    if (omacvm_ime_click_at > omacvm_ime_focus_at) {
@@ -508,6 +513,21 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
  }
  
++/*
++ * An input context remembers its own input source and selects it again when
++ * it is activated (AppKit's per-document input source). Ours is activated
++ * and deactivated as fields come and go, so it would switch the Mac back to
++ * the source it had at its last activation (a plain layout) right after the
++ * user picked an input method: it always takes the Mac's current one.
++ */
++static void omacvm_ime_activate(void)
++{
++    if (omacvm_ime_source && ![[omacvm_ime_ctx selectedKeyboardInputSource] isEqualToString:omacvm_ime_source]) {
++        [omacvm_ime_ctx setSelectedKeyboardInputSource:omacvm_ime_source];
++    }
++    [omacvm_ime_ctx activate];
++}
++
 +/* The key the input method has now goes to the VM as a key, QEMU's way. */
 +static void omacvm_ime_send_key(void)
 +{
@@ -557,7 +577,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    if (kt == OMACVM_IME_FLAGS) {
 +        /* Modifiers go to the VM; the input method sees them too (Shift switches some to Latin). */
 +        if (omacvm_ime_active(&omacvm_ime)) {
-+            [omacvm_ime_ctx activate];
++            omacvm_ime_activate();
 +            [omacvm_ime_ctx handleEvent:event];
 +        }
 +        return false;
@@ -578,7 +598,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    case OMACVM_IME_TO_IM:
 +        break;
 +    }
-+    [omacvm_ime_ctx activate];
++    omacvm_ime_activate();
 +    omacvm_ime_event = event;
 +    omacvm_ime_event_sent = false;
 +    used = [omacvm_ime_ctx handleEvent:event];
@@ -910,7 +930,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9619,7 @@
+@@ -8790,6 +9639,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
