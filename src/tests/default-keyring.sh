@@ -4,7 +4,7 @@
 # "Default keyring" (no password), from Omarchy's own step when the VM has it,
 # else from OmacVM's copy; a home with keyrings of its own is never switched
 # to another default; the first boot and omacvm apply run it; omacvm check's
-# "keyring" line. runuser is a stand-in (runs the command as this user).
+# "keyring" line. setpriv and id are stand-ins (run the command as this user).
 #   src/tests/default-keyring.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -15,13 +15,17 @@ expect() {   # WHAT WANT GOT
 }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin"
-cat > "$T/bin/runuser" <<'EOF'
+cat > "$T/bin/setpriv" <<'EOF'
 #!/bin/bash
-echo "runuser $*" >> "$CALLS"
+echo "setpriv $*" >> "$CALLS"
 while [[ $1 != -- ]]; do shift; done; shift
 exec "$@"
 EOF
-chmod +x "$T/bin/runuser"
+cat > "$T/bin/id" <<'EOF'
+#!/bin/bash
+[[ $1 == -g && $2 == tester ]] && echo 1000
+EOF
+chmod +x "$T/bin/setpriv" "$T/bin/id"
 # pkill: a gnome-keyring of the user runs when $T/daemon exists
 cat > "$T/bin/pkill" <<'EOF2'
 #!/bin/bash
@@ -51,7 +55,10 @@ expect "keyring as Omarchy's (no password, never locks)" \
 expect "keyring has a ctime" 1 "$(grep -c '^ctime=[0-9][0-9]*$' "$d/Default_keyring.keyring" 2>/dev/null)"
 expect "modes (folder, keyring, default)" "drwx------ -rw------- -rw-r--r--" \
   "$(perms "$d") $(perms "$d/Default_keyring.keyring") $(perms "$d/default")"
-expect "made as the user" "runuser -u tester -- env HOME=$T/h bash -c" "$(head -1 "$CALLS" | cut -d' ' -f1-8)"
+expect "made as the user" "setpriv --reuid=tester --regid=1000 --init-groups -- env HOME=$T/h bash -c" "$(head -1 "$CALLS" | cut -d' ' -f1-9)"
+# No PAM session (runuser, su, sudo): in the first boot pam_systemd waited
+# 2 minutes for the user's manager (systemd-user-sessions runs after it).
+expect "no login session for the user" 0 "$(grep -v '^ *#' "$K" | grep -cE '(^|[^_a-z])(runuser|su|sudo) ')"
 out=$("$K" status "$T/h"); rc=$?
 expect "status after" "Default_keyring 0" "$out $rc"
 before=$(cat "$d/Default_keyring.keyring")
@@ -107,7 +114,7 @@ fresh; d=$T/h/.local/share/keyrings; mkdir -p "$d"; echo secret > "$d/work.keyri
 expect "own default keyring" "kept (work)" "$("$K" setup tester "$T/h")"
 fresh; d=$T/h/.local/share/keyrings; mkdir -p "$d"; echo ../../x > "$d/default"
 expect "odd default name: status none" "none" "$("$K" status "$T/h")"
-expect "no runuser or pkill for kept homes" "" "$(grep -c . "$CALLS" | grep -v '^0$')"
+expect "no setpriv or pkill for kept homes" "" "$(grep -c . "$CALLS" | grep -v '^0$')"
 
 # 4. Who runs it: the prebuilt first boot (new images) and omacvm apply's
 # system steps (VMs from older images).
