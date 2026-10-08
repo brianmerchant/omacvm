@@ -99,9 +99,11 @@ for a in /Applications/*.app; do
      $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app.test ]] && { sysT=$a; break; }
 done
 expect "app_bundle, test identity: not org.omacvm.app.tester" "$sysT" "$(lib 1 "$T/Drive/Tester.app" 'app_bundle || true')"
-want="open -n -b org.omacvm.app.test --args --start --vm V"; [[ -n $sysT ]] && want="open -n $sysT --args --start --vm V"
-expect "app_start, test identity, no test app found: never opens OmacVM.app" "$want" \
-  "$(lib 1 "$T/Drive/Tester.app" 'app_start V')"
+# No test app found: it opens nothing (never OmacVM.app, never a copy macOS picks).
+want="no-open"; [[ -n $sysT ]] && want="open -n $sysT --args --start --vm V"
+got=$(lib 1 "$T/Drive/Tester.app" 'app_start V || true')
+[[ -n $sysT || $got == *open\ * ]] || got=no-open
+expect "app_start, test identity, no test app found: never opens OmacVM.app" "$want" "$got"
 expect "app_start, OmacVM: OmacVM.app" "open -n $H/Applications/OmacVM.app --args --start --vm V" \
   "$(lib "" "$T/none.app" 'app_start V')"
 exit $fail
