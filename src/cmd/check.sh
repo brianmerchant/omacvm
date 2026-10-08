@@ -55,7 +55,7 @@ if [[ -z $IP ]]; then
      n=$(head -1 "$d/logs/network" 2>/dev/null) && [[ $n == vmnet-down* ]]; then
     stop 1 "fast network: ${n#vmnet-down }"
   fi
-  [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
+  [[ -n $IP ]] || stop 1 "'$VM' is off, nothing was started (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
 if [[ -z $TYPE ]]; then
   TYPE=$(vm_type "$VM" 2>/dev/null) || {

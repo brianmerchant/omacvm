@@ -16,11 +16,13 @@
 #   app_any_on_vmnet    one of the VMs runs on the fast network now
 #   app_no_address DIR  why app_ip has no address for a VM that runs
 #   app_fast_network_wish DIR on|off  the fast network from the VM's next start
-#   app_start NAME      start it in the app (its window opens)
+#   app_start NAME      start it in the app (its window opens; app_boot_app's app only)
 #   app_other_running NAME  another app VM that runs, if any
 #   app_bundle          the installed OmacVM.app (any name it was installed under;
-#                       the app whose bundled omacvm runs first, then
-#                       ~/Applications, then /Applications)
+#                       the app whose bundled omacvm runs first, then OmacVM.app,
+#                       then another name, test/bench/lane copies last)
+#   app_boot_app NAME   the app that may start that VM: never one older than its OmacVM,
+#                       never while another copy of the app is open
 #   app_create [--prebuilt] DIR KEY=VALUE...  a new VM in DIR through the app's
 #                       own create script (the password on stdin), as when built
 #                       in the app; --prebuilt: from a prebuilt image
@@ -306,17 +308,50 @@ app_other_running() {   # NAME -> another app VM that runs (the app runs one at 
 }
 
 app_start() {
-  # -n: a new launcher passes the request on when one already runs. The app
-  # app_bundle finds, not any copy LaunchServices knows (an older one, say).
+  # -n: a new launcher passes the request on when one already runs. Only the
+  # app app_boot_app allows: never any copy LaunchServices knows (open -b can
+  # pick an old one), never one older than the VM.
   local a
-  if a=$(app_bundle); then open -n "$a" --args --start --vm "$1" || return 1
-  # The test identity never opens OmacVM.app (the user's app).
-  else open -n -b "$APP_BUNDLE_ID" --args --start --vm "$1" || return 1; fi
+  a=$(app_boot_app "$1") || return 1
+  open -n "$a" --args --start --vm "$1" || return 1
   app_ip "$1" 60
 }
 
-app_bundle() {   # the app whose own copy of omacvm runs, else in ~/Applications, else /Applications, by its bundle id
-  local a id
+# app_boot_app NAME: the app that may start that VM (app_bundle's), or why
+# not on stderr (status 1): no app, or one older than the OmacVM the VM has
+# (its folder's omacvm-version, written by omacvm apply). An older app would
+# run the VM with older Mac links and helpers than its OmacVM expects (#233).
+app_boot_app() {
+  local a av d v=""
+  a=$(app_bundle) || { echo "omacvm: no OmacVM.app here to start '$1' (~/Applications, /Applications): install it, or start the VM yourself" >&2; return 1; }
+  av=$(app_version "$a") || av=
+  d=$(app_dir "$1") && v=$(head -1 "$d/omacvm-version" 2>/dev/null | tr -cd '0-9A-Za-z.+-' | cut -c1-40)
+  if [[ -n $v ]] && { [[ -z $av ]] || app_version_lt "$av" "$v"; }; then
+    echo "omacvm: '$1' has OmacVM $v; $a is ${av:-of no known version}: an older app never starts a newer VM. Update OmacVM.app (omacvm update), then try again" >&2
+    return 1
+  fi
+  # A copy of the app that is open already takes the start request (a second
+  # launcher hands it over, main.swift): only when it is this one.
+  local p r
+  while IFS= read -r p; do
+    r=${p%/Contents/MacOS/OmacVM}
+    [[ $r != "$p" ]] && app_ours "$r" || continue
+    [[ $(cd -P "$r" 2>/dev/null && pwd) == "$(cd -P "$a" && pwd)" ]] && continue
+    echo "omacvm: $r is open and would start '$1' instead of $a: quit it, then try again" >&2
+    return 1
+  done < <(ps -axo comm= 2>/dev/null)
+  echo "$a"
+}
+
+# app_bundle: the installed app, by its bundle id (APP_BUNDLE_ID). First the
+# app whose own copy of omacvm runs (OMACVM_APP_RUNTIME), wherever it is.
+# Else in ~/Applications and /Applications, by name before version, so a copy
+# never wins because its name sorts first ("OmacVM Bench 2.9.1.app" before
+# "OmacVM.app"): 1. OmacVM.app (the test identity: OmacVM Test.app); 2. the
+# app under another name it was installed as ("Omarchy.app"); 3. copies named
+# like a test, bench, RC or lane build. Within one, the newest.
+app_bundle() {
+  local a v t id best=() bestv=()
   # OmacVM.app's bundled omacvm (and its apply-vm.sh) set OMACVM_APP_RUNTIME
   # to the app's runtime: that app, wherever it is (another drive, Downloads).
   # The test identity: also a lane's copy (org.omacvm.app.test.<lane>), as
@@ -328,11 +363,31 @@ app_bundle() {   # the app whose own copy of omacvm runs, else in ~/Applications
       [[ $id == "$APP_BUNDLE_ID" || ( ${OMACVM_TEST_IDENTITY:-} == 1 && $id == "$APP_BUNDLE_ID".* ) ]] &&
       { echo "$a"; return 0; }
   fi
-  for a in "$HOME"/Applications/*.app /Applications/*.app; do
-    [[ -f $a/Contents/Resources/scripts/create-vm.sh ]] || continue
-    [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == "$APP_BUNDLE_ID" ]] && { echo "$a"; return 0; }
+  # One pass; the -f test first, so only OmacVM's apps cost a process.
+  # (OMACVM_SYSTEM_APPS: another /Applications, for tests only)
+  for a in "$HOME"/Applications/*.app "${OMACVM_SYSTEM_APPS:-/Applications}"/*.app; do
+    [[ -f $a/Contents/Resources/scripts/create-vm.sh ]] && app_ours "$a" || continue
+    t=$(app_tier "$a"); v=$(app_version "$a") || v=
+    if [[ -z ${best[t]:-} ]] || app_version_lt "${bestv[t]:-0}" "${v:-0}"; then best[t]=$a; bestv[t]=$v; fi
   done
+  for t in 1 2 3; do [[ -n ${best[t]:-} ]] && { echo "${best[t]}"; return 0; }; done
   return 1
+}
+
+app_ours() {   # APP: an OmacVM.app with the bundle id this omacvm looks for
+  [[ -f $1/Contents/Resources/scripts/create-vm.sh &&
+     $(defaults read "$1/Contents/Info" CFBundleIdentifier 2>/dev/null) == "$APP_BUNDLE_ID" ]]
+}
+
+app_tier() {   # APP -> 1 the installed name, 2 another name, 3 a test/bench/RC/lane copy
+  local n
+  n=$(basename "$1" .app | tr '[:upper:]' '[:lower:]')
+  if [[ $n == omacvm && $APP_BUNDLE_ID == org.omacvm.app ]] ||
+     [[ $n == "omacvm test" && $APP_BUNDLE_ID == org.omacvm.app.test ]]; then echo 1; return; fi
+  case $n in
+    *bench*|*test*|*" rc"*|*-rc*|*lane*) echo 3 ;;
+    *) echo 2 ;;
+  esac
 }
 
 app_version() { defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/dev/null; }

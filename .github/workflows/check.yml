@@ -193,6 +193,8 @@ jobs:
 
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null
+      - name: omacvm never starts a VM by itself, nor with an old copy of the app
+        run: src/tests/no-autostart.sh < /dev/null
 
       - name: A Mac helper that does not build
         run: src/tests/mac-install.sh
