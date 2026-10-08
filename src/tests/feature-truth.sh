@@ -69,6 +69,35 @@ expect "after the fix: no drift" "" "${DRIFT[*]:-}"
 features_read_env "$probe"; FV[$(feature_index autologin)]=on; FV[$(feature_index fast-network)]=on
 features_real "$probe" "$d"
 expect "copy wrong, record right: drift" 2 "${#DRIFT[@]}"
+# ... but nothing to say: the record did not say anything wrong (the Mac
+# mini, 2026-10-08: the app's Fast network switch wrote the record and the
+# fast-network file, the VM's copy from the update before still said off,
+# and the control centre showed "OmacVM's record said off: fixed").
+expect "copy wrong, record right: no line" "" "$(features_drift_lines "fixed the record")"
+expect "copy wrong, record right: copy only" "yes yes" \
+  "$(feature_copy_only fast-network && echo yes) $(feature_copy_only autologin && echo yes)"
+cat > "$T/env" <<'X'
+OMACVM_FEATURE_autologin=off
+OMACVM_FEATURE_fast_network=off
+X
+features_record_fix ip "$d"
+expect "copy wrong, record right: the copy follows" "OMACVM_FEATURE_autologin=on OMACVM_FEATURE_fast_network=on" \
+  "$(tr '\n' ' ' < "$T/env" | sed 's/ $//')"
+# The app's switch, as on the mini: the record says on, the file is there, the copy says off.
+printf 'bridge=on fast-network=on autologin=off\n' > "$d/features"
+features_read_env $'OMACVM_FEATURE_fast_network=off\nOMACVM_FEATURE_autologin=off'; features_read_record "$d"
+features_real $'OMACVM_FEATURE_fast_network=off\nOMACVM_FEATURE_autologin=off' "$d"
+expect "app switch: fast network on" on "$(fv fast-network)"
+expect "app switch: nothing said" "" "$(features_drift_lines "fixed the record")"
+# features.sh: no "fixed" for it, "synced" instead (the control centre shows on without a note).
+block=$(awk '/^drift_of\(\) \{/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/cmd/features.sh")
+eval "$block"; FIXED="fixed the record"
+expect "features --json: fixed empty for a copy behind" "" "$(drift_of fast-network)"
+grep -q '"synced": %s' "$R/src/cmd/features.sh" || { echo "FAIL features.sh --json has synced"; fail=1; }
+# The record itself wrong: still said (the switch flipped outside OmacVM).
+printf 'bridge=on fast-network=off\n' > "$d/features"
+features_read_env "OMACVM_FEATURE_fast_network=off"; features_read_record "$d"; features_real "OMACVM_FEATURE_fast_network=off" "$d"
+expect "record wrong: said" "on (the app's Fast network setting); OmacVM's record said off: fixed the record" "$(drift_of fast-network)"
 
 # Switched off outside OmacVM: real off wins.
 rm "$d/fast-network"
@@ -154,6 +183,24 @@ expect "apply-vm: the setup's choice before the first apply" "--feature bridge=o
 printf 'bridge=off autologin=on fast-network=on\n' > "$d2/features"
 expect "apply-vm: the record once it is there, without the fast network" "--feature bridge=off --feature autologin=on" \
   "$(av "$d2" "bridge=on autologin=off")"
+
+# ---- the setup's choices of older OmacVM versions (vm.env FEATURES, 2.7 to 3.0.5) ----
+# The first apply after an update takes them in: the person's choices stay,
+# idle-lock (before 3.0.1) flips into no-idle-lock.
+block=$(awk '/^feats=\$\{FEATURES:-\}$/ {on = 1} on {print} on && /^done$/ {exit}' "$R/app/scripts/apply-vm.sh")
+sfb=$(awk '/^set_feature\(\) \{/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/cmd/apply.sh")
+era() {   # FEATURES -> "no-idle-lock autologin fast-network scroll-momentum" after the first apply's options
+  ( VM_DIR=$T/none FEATURES=$1; args=(); eval "$block"
+    SETN=(); SETV=(); eval "$sfb"
+    set -- "${args[@]}"; while (( $# )); do [[ $1 == --feature ]] && set_feature "${2%%=*}" "${2#*=}"; shift 2; done
+    features_read_env ""
+    for ((k = 0; k < ${#SETN[@]}; k++)); do FV[$(feature_index "${SETN[$k]}")]=${SETV[$k]}; done
+    echo "$(fv no-idle-lock) $(fv autologin) $(fv fast-network) $(fv scroll-momentum)" )
+}
+expect "2.7.0's choices" "off off off off" "$(era "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on battery=off idle-lock=on autologin=off thp-kernel=off")"
+expect "2.9.1's choices (the Mac mini)" "off off off off" "$(era "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on battery=off idle-lock=on autologin=off thp-kernel=on fast-network=off")"
+expect "3.0.0's choices, lock off" "on on off on" "$(era "bridge=on scroll-momentum=on idle-lock=off autologin=on control-centre=on fast-network=off vulkan=off")"
+expect "3.0.5's choices" "on off off on" "$(era "bridge=on scroll-momentum=on no-idle-lock=on autologin=off control-centre=on fast-network=off touch-id=off")"
 
 # ---- apply.sh: the real state goes in, and a rollback goes back to it ----
 block=$(awk '/^# OmacVM.app: the VM.s record \(its features file\) over the VM.s copy\.$/ {on = 1} on {print} on && /^fi$/ {n++} on && n == 2 {exit}' "$R/src/cmd/apply.sh")

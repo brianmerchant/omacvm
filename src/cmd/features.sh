@@ -19,9 +19,10 @@
 # named with --vm; without --vm, one that is off is not (exit 3).
 # --json (features): {"vm", "type", "ip", "running", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "reason", "needs", "title", "summary",
-# "fixed"}]}; reason: why this Mac or VM cannot have it ("" when available);
+# "fixed", "synced"}]}; reason: why this Mac or VM cannot have it ("" when available);
 # on: as the VM really is (src/lib/features.sh: features_real); fixed: what
-# OmacVM's record had wrong and that it was fixed ("" when it was right).
+# OmacVM's record had wrong and that it was fixed ("" when it was right);
+# synced: the record was right, only the VM's copy was behind (fixed too).
 # Listing never starts a VM. Without --vm: the state of the VM it would pick
 # if that one runs, else the defaults ("vm": null). A named VM that is off
 # ("running": false): an OmacVM.app VM's record and version from its folder,
@@ -140,10 +141,10 @@ else
 fi
 OLD=("${FV[@]}")
 drift_of() {   # NAME -> "on (the app's Fast network setting); OmacVM's record said off: fixed the record", or nothing
-  local d n v w said
+  local d n v w said only
   for d in ${DRIFT[@]+"${DRIFT[@]}"}; do
-    IFS=$'\t' read -r n v w said <<<"$d"
-    [[ $n == "$1" ]] && echo "$v ($w); OmacVM's record said $said: $FIXED"
+    IFS=$'\t' read -r n v w said only <<<"$d"
+    [[ $n == "$1" && $only != copy ]] && echo "$v ($w); OmacVM's record said $said: $FIXED"
   done
   return 0
 }
@@ -171,12 +172,13 @@ if (( JSON )); then
     "$( [[ -n $IP ]] && echo true || echo false)" "$( [[ -n $version ]] && json_str "$version" || echo null)"
   for ((i = 0; i < ${#FN[@]}; i++)); do
     available "$i" && av=true || av=false
-    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s, "fixed": %s}' \
+    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s, "fixed": %s, "synced": %s}' \
       "$( ((i)) && echo ,)" "${FN[$i]}" "$( [[ ${FV[$i]} == on ]] && echo true || echo false)" \
       "$( [[ $(feature_default "$i") == on ]] && echo true || echo false)" \
       "$(feature_has_tag "$i" experimental && echo true || echo false)" "$av" "$(json_str "$REASON")" \
       "$( [[ ${FNEEDS[$i]} == - ]] && echo null || json_str "${FNEEDS[$i]}")" \
-      "$(json_str "${FTITLE[$i]}")" "$(json_str "${FSUM[$i]}")" "$(json_str "$(drift_of "${FN[$i]}")")"
+      "$(json_str "${FTITLE[$i]}")" "$(json_str "${FSUM[$i]}")" "$(json_str "$(drift_of "${FN[$i]}")")" \
+      "$(feature_copy_only "${FN[$i]}" && echo true || echo false)"
   done
   printf '\n]}\n'
   exit 0

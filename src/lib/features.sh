@@ -141,8 +141,13 @@ features_read_record() {
 
 # features_real PROBE [DIR]: the features that can be switched outside
 # OmacVM, as they are. FV gets the real state, and DRIFT
-# "name<TAB>real<TAB>where<TAB>said" for each one that the record (FV) or
-# the VM's copy (PROBE's OMACVM_FEATURE_) had wrong; said: what that was.
+# "name<TAB>real<TAB>where<TAB>said[<TAB>copy]" for each one that the record
+# (FV) or the VM's copy (PROBE's OMACVM_FEATURE_) had wrong; said: what that
+# was. copy: the record was right and only the VM's copy was behind (the
+# app's Fast network switch writes the record and the fast-network file; the
+# copy follows with the next look): fixed without a word, the record did not
+# say anything wrong (2026-10-08: "OmacVM's record said off: fixed" for a
+# fast network the person had just switched on in the app).
 features_real() {
   local real
   DRIFT=()
@@ -159,16 +164,25 @@ feature_drift() {   # PROBE NAME REAL WHERE
   i=$(feature_index "$2") || return 0
   copy=$(sed -n "s/^OMACVM_FEATURE_$(tr - _ <<<"$2")=//p" <<<"$1" | tail -1)
   [[ ${FV[$i]} == "$3" && ( -z $copy || $copy == "$3" ) ]] && return 0
-  DRIFT+=("$2"$'\t'"$3"$'\t'"$4"$'\t'"$( [[ $3 == on ]] && echo off || echo on)")
+  DRIFT+=("$2"$'\t'"$3"$'\t'"$4"$'\t'"$( [[ $3 == on ]] && echo off || echo on)$( [[ ${FV[$i]} == "$3" ]] && printf '\tcopy')")
   FV[$i]=$3
+}
+# feature_copy_only NAME: its DRIFT entry is only the VM's copy behind the record.
+feature_copy_only() {
+  local d
+  for d in ${DRIFT[@]+"${DRIFT[@]}"}; do
+    [[ $d == "$1"$'\t'* && $d == *$'\t'copy ]] && return 0
+  done
+  return 1
 }
 
 # One line per drift, as "Autologin: on (SDDM's autologin in the VM); OmacVM's
 # record said off: fixed the record" (TAIL: what came of it).
 features_drift_lines() {
-  local d n v w said i
+  local d n v w said i only
   for d in ${DRIFT[@]+"${DRIFT[@]}"}; do
-    IFS=$'\t' read -r n v w said <<<"$d"
+    IFS=$'\t' read -r n v w said only <<<"$d"
+    [[ $only == copy ]] && continue   # the record was right: nothing to say
     i=$(feature_index "$n") || continue
     echo "${FTITLE[$i]}: $v ($w); OmacVM's record said $said${1:+: $1}"
   done
