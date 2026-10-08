@@ -166,7 +166,8 @@ cleanup() {
   # --app: the test app that was there before.
   if [[ -n ${PRE:-} && -d $PRE && ${OMACVM_E2E_KEEP_APP:-} != 1 ]]; then rm -rf "$APP"; ditto "$PRE" "$APP"; fi
   remove_clones
-  if [[ -n $ROOTARG ]]; then
+  # Only a setting this run changed goes back (a run that stopped before that leaves it alone).
+  if [[ -n $ROOTARG && ${ROOT_SET:-0} == 1 ]]; then
     if [[ -n $OLDROOT ]]; then defaults write "$APPID" vmsRoot "$OLDROOT"; else defaults delete "$APPID" vmsRoot 2>/dev/null; fi
   fi
   # The test helpers this run started go again (one that ran before keeps running).
@@ -224,7 +225,7 @@ codesign --verify --deep --strict "$APP" 2>/dev/null && res app ok "$(plist "$AP
   || res app FAIL "$APP does not verify"
 TESTED_COMMIT=$(plist "$APP" OmacVMCommit); TESTED_VERSION=$(plist "$APP" CFBundleShortVersionString)
 OLDROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null)
-if [[ -n $ROOTARG ]]; then mkdir -p "$ROOTARG"; ROOTARG=$(cd "$ROOTARG" && pwd); defaults write "$APPID" vmsRoot "$ROOTARG"; fi
+if [[ -n $ROOTARG ]]; then mkdir -p "$ROOTARG"; ROOTARG=$(cd "$ROOTARG" && pwd); defaults write "$APPID" vmsRoot "$ROOTARG"; ROOT_SET=1; fi
 # The test app's own VMs folder, never the installed app's (test-vms.sh; the
 # test app does not use ~/OmacVM either: TestVMs in VMPick.swift).
 ROOT=$(source "$HERE/test-vms.sh" && e2e_vms_root "$APPID") || die "no test VMs folder: pass --root DIR or set $APPID vmsRoot"
