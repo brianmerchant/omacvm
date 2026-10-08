@@ -330,15 +330,18 @@ struct VMsFolderRow: View {
     var body: some View {
         LabeledContent("VMs folder") {
             // The path gives way (cut in the middle), never the free space
-            // or the button; the row fills the column, so Change… ends where
-            // Start does.
+            // or the button; the free space stays next to the path, and the
+            // row fills the column, so Change… ends where Start does.
             HStack(spacing: 8) {
-                Text(StorageModel.short(storage.root)).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    .help(storage.root.path)
-                if let free = storage.free {
-                    Text("\(Storage.format(free)) free").foregroundStyle(.secondary).fixedSize()
+                HStack(spacing: 8) {
+                    Text(StorageModel.short(storage.root)).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        .frame(minWidth: 0)
+                        .help(storage.root.path)
+                    if let free = storage.free {
+                        Text("\(Storage.format(free)) free").foregroundStyle(.secondary).fixedSize()
+                    }
                 }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 Button("Change…") { storage.changeRoot() }
                     .disabled(storage.moving != nil)
                     .fixedSize()
