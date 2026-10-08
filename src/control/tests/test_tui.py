@@ -1148,7 +1148,7 @@ def gpu_world(tmp_path, monkeypatch, vm_type="app", gpu=True):
 
 def test_gpu_memory_row_live(tmp_path, monkeypatch):
     """An OmacVM.app VM shows its graphics memory, asked at most every 2 s
-    while open (a warning when macOS is short of memory), and nothing once
+    while open (a warning when macOS is out of memory), and nothing once
     the control centre is closed."""
     from omacvm_cc.state import Status
     mac, checks = gpu_world(tmp_path, monkeypatch)
@@ -1169,7 +1169,7 @@ def test_gpu_memory_row_live(tmp_path, monkeypatch):
             # macOS gets short of memory: the row warns at the next look.
             mac.gpu_memory = dict(mac.gpu_memory, pressure="critical", in_use_mb=3000, peak_mb=3100)
             assert await settle(pilot, lambda: rows(a)["gpu-memory"].status is Status.NEEDS_PERSON, seconds=5)
-            assert rows(a)["gpu-memory"].note.startswith("2.9 GB (peak 3.0 GB); macOS is short of memory")
+            assert rows(a)["gpu-memory"].note.startswith("2.9 GB (peak 3.0 GB); macOS is out of memory")
             # At most one look every 2 s (and no more than one at a time).
             n0, t0 = len(mac.gpu_memory_at), time.monotonic()
             await pilot.pause(4.5)
