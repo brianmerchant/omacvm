@@ -855,6 +855,13 @@ grep -q '\[self omacvmParkInNotch:event view:self output:0\];' "$source_dir/ui/c
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
+# Experimental, off by default (feature mac-ime, docs/adr/0042-mac-ime.md): the
+# Mac's input methods type into the VM; nothing of it runs without
+# OMACVM_IME_SOCKET (the app sets it only for a VM with the feature on).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-ime-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-ime.patch"
+"$native_dir/Tests/keys/test-ime.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the Mac's input methods are not wired as tested (test-ime.sh)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

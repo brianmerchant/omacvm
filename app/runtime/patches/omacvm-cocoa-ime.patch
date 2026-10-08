@@ -1,0 +1,881 @@
+From: OmacVM
+Subject: [PATCH] ui/cocoa: the Mac's input methods type into the VM (mac-ime, experimental)
+
+What: with OMACVM_IME_SOCKET set (OmacVM.app sets it only for a VM with the
+feature mac-ime on, together with the virtio port org.omacvm.ime), QEMU's
+view becomes an NSTextInputClient. The VM's Fcitx5 module (src/ime/guest)
+says over the port which kind of field has the focus and where its caret
+is. While a text field has it, the Mac's input source is an input method
+and the VM has the keyboard, keys without Cmd or Control go to the view's
+NSTextInputContext (also keys from the full-grab tap): marked text goes to
+the guest as preedit (code points, clauses), chosen text as commit; keys the
+input method does not want (Return, arrows, Backspace with nothing marked,
+its Latin mode's own letters) go to the VM as keys, QEMU's way; the release
+of a key it used is not sent. The candidate window is placed at the guest's
+caret, mapped through the display layout the display port already keeps
+(output, black rows, the window of that output); with only the window known
+(Chromium, foot) at the last click after the focus, else the window's
+bottom left. In a text field, macOS's input source shortcuts (hot keys 60
+and 61, while macOS's own shortcuts are off for the VM) and a globe key set
+to "Change Input Source" switch the Mac's input source instead of going to
+the VM. Leaving the field, the window or the input method drops what was
+marked. The Mac never reads the guest's text.
+
+Why: #273 (requested and scoped by @Vocllum): Chinese, Japanese and Korean
+with the Mac's own input methods and candidate window in Omarchy
+(docs/adr/0042-mac-ime.md).
+
+Off: without OMACVM_IME_SOCKET omacvm_ime_on stays false; handleEvent:
+checks it before anything else and the globe key's tap only after its own
+test, so every key takes QEMU's path byte for byte as before, and the view
+has no input context (as NSView without the protocol).
+
+Security: the guest is untrusted. Lines over 4 KiB are dropped, numbers
+checked (ui/omacvm-ime.h), types checked before use (NSJSONSerialization
+values); the guest can only move the candidate window or keep keys going
+to the VM. Nothing new is allowed: no entitlement, no permission.
+
+Upstream: not applicable (OmacVM's guest side).
+Test: app/runtime/Tests/keys/test-ime.sh (the rules, and this patch's hooks
+in the patched ui/cocoa.m); typing on a test VM (docs/adr/0042-mac-ime.md).
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -48,6 +48,7 @@
+ #include "ui/omacvm-desktop-restart.h"
+ #include "ui/omacvm-clean-size.h"
+ #include "ui/omacvm-notch-park.h"
++#include "ui/omacvm-ime.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -843,6 +844,14 @@
+     }
+     return changed;
+ }
++
++/*
++ * OmacVM mac-ime (further down): on only for a VM with the feature on
++ * (OMACVM_IME_SOCKET); set once at the start, main thread.
++ */
++static bool omacvm_ime_on;
++static bool omacvm_ime_key(NSEvent *event);
++static bool omacvm_ime_globe(void);
+ 
+ /*
+  * Main thread, every key and click event before QEMU's own handling (the
+@@ -897,7 +906,9 @@
+         }
+     }
+     int what = omacvm_globe_tap_step(&omacvm_globe_tap, ev, omacvm_now_ms());
+-    if (what == OMACVM_GLOBE_DO_TAP && qemu_console_is_graphic(dcl.con)) {
++    /* mac-ime: in a text field, a globe key set to "Change Input Source" switches the Mac's. */
++    if (what == OMACVM_GLOBE_DO_TAP && qemu_console_is_graphic(dcl.con) &&
++        !(omacvm_ime_on && omacvm_ime_globe())) {
+         qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, true);
+         qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, false);
+     }
+@@ -2034,6 +2045,10 @@
+     if (omacvm_key_for_macos(event)) {
+         return false;
+     }
++    /* OmacVM mac-ime: keys for the Mac's input method (off: not even looked at). */
++    if (omacvm_ime_on && omacvm_ime_key(event)) {
++        return true;
++    }
+     return bool_with_bql(^{
+         return [self handleEventLocked:event];
+     });
+@@ -8465,8 +8480,783 @@
+     dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
+     dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
+     dispatch_resume(omacvm_chan_src);
++}
++
++/*
++ * OmacVM mac-ime (docs/adr/0042-mac-ime.md): the Mac's input methods type
++ * into the VM. OmacVM.app sets OMACVM_IME_SOCKET only for a VM with the
++ * feature on; without it nothing here runs and every key takes QEMU's path
++ * as before. The VM's Fcitx5 module (src/ime/guest) says over the virtio
++ * port org.omacvm.ime which kind of field has the focus and where its caret
++ * is. While a text field has it, the Mac's input source is an input method
++ * and the VM has the keyboard, keys without Cmd or Control go to an
++ * NSTextInputContext of QEMU's view: the input method's marked text goes to
++ * the guest as preedit, its chosen text as commit. Keys it does not want
++ * (Return, arrows, Backspace with nothing marked, the letters of its Latin
++ * mode) go to the VM as keys, as always. The candidate window sits at the
++ * guest's caret. The Mac never reads the guest's text; the guest's numbers
++ * are checked (ui/omacvm-ime.h). Main thread only; keys to the VM take the
++ * BQL as QEMU's own path does.
++ */
++@interface QemuCocoaView (OmacVMIme) <NSTextInputClient>
++@end
++
++static int omacvm_ime_fd = -1;
++static dispatch_source_t omacvm_ime_src;
++static OmacVMImeLines omacvm_ime_lines;
++static OmacVMImeState omacvm_ime;
++static OmacVMImeKeys omacvm_ime_keys;
++static NSTextInputContext *omacvm_ime_ctx;
++static NSEvent *omacvm_ime_event;       /* the key the input method has now */
++static bool omacvm_ime_event_sent;      /* ... which went to the VM as a key */
++static NSString *omacvm_ime_marked;     /* the marked text (nil: none) */
++static double omacvm_ime_focus_at;      /* CACurrentMediaTime() of the last focus */
++static double omacvm_ime_click_at;      /* ... of the last click in the VM */
++static NSPoint omacvm_ime_click;        /* where (screen points) */
++static NSString *omacvm_ime_source;     /* the Mac's input source now ... */
++static NSString *omacvm_ime_source_before;   /* ... and the one before */
++static bool omacvm_ime_was_active;
++static int omacvm_ime_said;
++
++static void omacvm_ime_connect(void);
++
++static void omacvm_ime_send(NSDictionary *msg)
++{
++    NSData *json;
++    NSMutableData *d;
++
++    if (omacvm_ime_fd < 0) {
++        return;
++    }
++    json = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
++    if (!json) {
++        return;
++    }
++    d = [NSMutableData dataWithData:json];
++    [d appendBytes:"\n" length:1];
++    const char *p = [d bytes];
++    size_t left = [d length];
++    while (left) {
++        ssize_t n = write(omacvm_ime_fd, p, left);
++        if (n > 0) {
++            p += n;
++            left -= n;
++        } else if (n < 0 && errno == EINTR) {
++            continue;
++        } else {
++            /* The guest is not reading: it says hello again when it is back. */
++            break;
++        }
++    }
++}
++
++/* To the guest's module, once it said hello. */
++static void omacvm_ime_write(NSDictionary *msg)
++{
++    if (omacvm_ime.hello) {
++        omacvm_ime_send(msg);
++    }
++}
++
++static void omacvm_ime_set_marked(NSString *s)
++{
++    [omacvm_ime_marked release];
++    omacvm_ime_marked = [s length] ? [s copy] : nil;
++}
++
++/* Chosen text, in pieces of at most OMACVM_IME_MAX_TEXT bytes (whole characters). */
++static void omacvm_ime_commit(NSString *text)
++{
++    NSUInteger i = 0, len = [text length];
++
++    while (i < len) {
++        NSUInteger end = i;
++        size_t bytes = 0;
++        while (end < len) {
++            NSRange r = [text rangeOfComposedCharacterSequenceAtIndex:end];
++            size_t b = [[text substringWithRange:r] lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
++            if (end > i && bytes + b > OMACVM_IME_MAX_TEXT) {
++                break;
++            }
++            bytes += b;
++            end = NSMaxRange(r);
++        }
++        omacvm_ime_write(@{ @"t": @"commit", @"text": [text substringWithRange:NSMakeRange(i, end - i)] });
++        i = end;
++    }
++}
++
++/* Code points before UTF-16 index i of s. */
++static NSUInteger omacvm_ime_cp(NSString *s, NSUInteger i)
++{
++    NSUInteger len = [s length];
++    unichar *u = malloc(MAX(len, 1) * sizeof(unichar));
++    size_t n;
++
++    [s getCharacters:u range:NSMakeRange(0, len)];
++    n = omacvm_ime_code_points(u, len, i);
++    free(u);
++    return n;
++}
++
++/*
++ * The marked text as the guest's preedit: the cursor, and its clauses
++ * (NSMarkedClauseSegment runs; the one being converted is the selected range
++ * or has the thick underline) as highlight or underline.
++ */
++static void omacvm_ime_preedit(NSString *s, NSRange sel, NSAttributedString *attr)
++{
++    NSUInteger len;
++    NSMutableArray *segs = [NSMutableArray array];
++
++    /* At most OMACVM_IME_MAX_TEXT bytes: the rest of a very long one is not shown. */
++    while ([s lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > OMACVM_IME_MAX_TEXT && [s length]) {
++        NSRange last = [s rangeOfComposedCharacterSequenceAtIndex:[s length] - 1];
++        s = [s substringToIndex:last.location];
++    }
++    len = [s length];
++    if (!len) {
++        omacvm_ime_write(@{ @"t": @"cancel" });
++        return;
++    }
++    if (sel.location == NSNotFound || sel.location > len) {
++        sel = NSMakeRange(len, 0);
++    }
++    sel.length = MIN(sel.length, len - sel.location);
++    if (attr && [attr length] >= len) {
++        __block NSUInteger at = 0;
++        [attr enumerateAttribute:NSMarkedClauseSegmentAttributeName
++                         inRange:NSMakeRange(0, len)
++                         options:0
++                      usingBlock:^(id value, NSRange r, BOOL *stop) {
++            if (!value || [segs count] >= 64) {
++                return;
++            }
++            id ul = [attr attribute:NSUnderlineStyleAttributeName atIndex:r.location effectiveRange:NULL];
++            bool thick = [ul isKindOfClass:[NSNumber class]] && ([ul integerValue] & NSUnderlineStyleThick);
++            bool active = (sel.length && NSIntersectionRange(r, sel).length) || thick;
++            NSUInteger a = omacvm_ime_cp(s, r.location), b = omacvm_ime_cp(s, NSMaxRange(r));
++            if (a >= at && b > a) {
++                [segs addObject:@[ @(a), @(b), @(active ? 1 : 0) ]];
++                at = b;
++            }
++        }];
++    }
++    if (![segs count] && sel.length) {
++        NSUInteger a = omacvm_ime_cp(s, sel.location), b = omacvm_ime_cp(s, NSMaxRange(sel));
++        NSUInteger n = omacvm_ime_cp(s, len);
++        if (a > 0) {
++            [segs addObject:@[ @0, @(a), @0 ]];
++        }
++        [segs addObject:@[ @(a), @(b), @1 ]];
++        if (b < n) {
++            [segs addObject:@[ @(b), @(n), @0 ]];
++        }
++    }
++    omacvm_ime_write(@{ @"t": @"preedit", @"text": s, @"cursor": @(omacvm_ime_cp(s, NSMaxRange(sel))),
++                        @"segs": segs });
++}
++
++static bool omacvm_ime_window_key(void)
++{
++    return [NSApp isActive] && omacvm_is_our_window([NSApp keyWindow]) && !omacvm_touchid_up;
++}
++
++/*
++ * After any change: the window's keyboard, the guest's focus, the Mac's
++ * input source. Leaving the input method's keys drops what it had marked
++ * (the guest's preedit goes too).
++ */
++static void omacvm_ime_update(void)
++{
++    omacvm_ime.window_key = omacvm_ime_window_key();
++    bool active = omacvm_ime_active(&omacvm_ime);
++    if (!active && omacvm_ime_marked) {
++        omacvm_ime_set_marked(nil);
++        [omacvm_ime_ctx discardMarkedText];
++        omacvm_ime_write(@{ @"t": @"cancel" });
++    }
++    if (active != omacvm_ime_was_active) {
++        omacvm_ime_was_active = active;
++        if (!active) {
++            [omacvm_ime_ctx deactivate];
++        }
++        if (omacvm_ime_said < 4) {
++            omacvm_ime_said++;
++            info_report("cocoa: mac-ime: keys %s", active ?
++                        "go to the Mac's input method (a text field in the VM has the focus)" :
++                        "go to the VM as keys");
++        }
++    }
+ }
+ 
++static void omacvm_ime_source_changed(void)
++{
++    TISInputSourceRef src = TISCopyCurrentKeyboardInputSource();
++    bool im = false;
++    NSString *sid = nil;
++
++    if (src) {
++        CFStringRef type = TISGetInputSourceProperty(src, kTISPropertyInputSourceType);
++        CFStringRef idr = TISGetInputSourceProperty(src, kTISPropertyInputSourceID);
++        im = type && (CFEqual(type, kTISTypeKeyboardInputMode) ||
++                      CFEqual(type, kTISTypeKeyboardInputMethodWithoutModes));
++        sid = idr ? [[(NSString *)idr copy] autorelease] : nil;
++        CFRelease(src);
++    }
++    if (sid && ![sid isEqualToString:omacvm_ime_source]) {
++        [omacvm_ime_source_before release];
++        omacvm_ime_source_before = omacvm_ime_source;
++        omacvm_ime_source = [sid retain];
++    }
++    omacvm_ime.source_im = im;
++    omacvm_ime_update();
++}
++
++/*
++ * macOS's "Select the previous input source" (the one used before) or "next
++ * source in Input menu", for the shortcuts and the globe key while they
++ * reach the VM (macOS's own shortcuts are off while it has the keyboard).
++ */
++static void omacvm_ime_switch(bool previous)
++{
++    NSDictionary *props = @{
++        (NSString *)kTISPropertyInputSourceCategory: (NSString *)kTISCategoryKeyboardInputSource,
++        (NSString *)kTISPropertyInputSourceIsSelectCapable: @YES,
++    };
++    CFArrayRef list = TISCreateInputSourceList((CFDictionaryRef)props, false);
++    CFIndex n, cur = -1, target = -1;
++
++    if (!list) {
++        return;
++    }
++    n = CFArrayGetCount(list);
++    for (CFIndex i = 0; i < n; i++) {
++        TISInputSourceRef s = (TISInputSourceRef)CFArrayGetValueAtIndex(list, i);
++        NSString *sid = (NSString *)TISGetInputSourceProperty(s, kTISPropertyInputSourceID);
++        if ([sid isEqualToString:omacvm_ime_source]) {
++            cur = i;
++        }
++        if (previous && [sid isEqualToString:omacvm_ime_source_before]) {
++            target = i;
++        }
++    }
++    if (target < 0 && n > 0) {
++        target = cur < 0 ? 0 : (cur + 1) % n;
++    }
++    if (target >= 0 && target != cur) {
++        TISSelectInputSource((TISInputSourceRef)CFArrayGetValueAtIndex(list, target));
++    }
++    CFRelease(list);
++}
++
++static void omacvm_ime_hotkey(NSDictionary *all, NSString *key, OmacVMImeHotKey *h,
++                              int keycode, uint32_t mods)
++{
++    NSDictionary *e = [all isKindOfClass:[NSDictionary class]] ? all[key] : nil;
++    NSDictionary *v;
++    NSArray *p;
++
++    /* macOS's defaults: on, Control-Space and Control-Option-Space. */
++    h->enabled = true;
++    h->keycode = keycode;
++    h->mods = mods;
++    if (![e isKindOfClass:[NSDictionary class]]) {
++        return;
++    }
++    if ([e[@"enabled"] isKindOfClass:[NSNumber class]]) {
++        h->enabled = [e[@"enabled"] boolValue];
++    }
++    v = e[@"value"];
++    p = [v isKindOfClass:[NSDictionary class]] ? v[@"parameters"] : nil;
++    if ([p isKindOfClass:[NSArray class]] && [p count] >= 3 &&
++        [p[1] isKindOfClass:[NSNumber class]] && [p[2] isKindOfClass:[NSNumber class]]) {
++        h->keycode = [p[1] intValue];
++        h->mods = [p[2] unsignedIntValue];
++    }
++}
++
++static void omacvm_ime_hotkeys_load(void)
++{
++    CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("AppleSymbolicHotKeys"),
++                                                    CFSTR("com.apple.symbolichotkeys"));
++    NSDictionary *all = v && CFGetTypeID(v) == CFDictionaryGetTypeID() ? (NSDictionary *)v : nil;
++
++    omacvm_ime_hotkey(all, @"60", &omacvm_ime_keys.prev, kVK_Space, OMACVM_IME_CONTROL);
++    omacvm_ime_hotkey(all, @"61", &omacvm_ime_keys.next, kVK_Space, OMACVM_IME_CONTROL | OMACVM_IME_OPTION);
++    if (v) {
++        CFRelease(v);
++    }
++}
++
++/* The globe key on its own, set to "Change Input Source", in a text field. */
++static bool omacvm_ime_globe(void)
++{
++    CFPropertyListRef v;
++    int use = -1;
++
++    omacvm_ime.window_key = omacvm_ime_window_key();
++    if (!omacvm_ime_on || !omacvm_ime_text_focus(&omacvm_ime)) {
++        return false;
++    }
++    v = CFPreferencesCopyAppValue(CFSTR("AppleFnUsageType"), CFSTR("com.apple.HIToolbox"));
++    if (v && CFGetTypeID(v) == CFNumberGetTypeID()) {
++        CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &use);
++    }
++    if (v) {
++        CFRelease(v);
++    }
++    if (use != 1) {
++        return false;
++    }
++    omacvm_ime_switch(false);
++    return true;
++}
++
++/* A box in the guest's logical pixels on the Mac's screen (points), or false. */
++static bool omacvm_ime_to_screen(double x, double y, double w, double h, NSRect *out)
++{
++    OmacVMImeBox outs[OMACVM_MAX_OUTPUTS];
++    double u0, v0, u1, v1;
++    int i;
++
++    if (!omacvm_guest_known) {
++        return false;
++    }
++    for (i = 0; i < omacvm_outputs; i++) {
++        OmacVMBox b = omacvm_guest_box[i];
++        bool shown = i == 0 || omacvm_heads[i].display;
++        outs[i] = (OmacVMImeBox){ b.x, b.y, shown ? b.w : 0, shown ? b.h : 0 };
++    }
++    i = omacvm_ime_output_for(outs, omacvm_outputs, x, y);
++    if (i < 0) {
++        return false;
++    }
++    NSView *view = i == 0 ? cocoaView : omacvm_heads[i].view;
++    if (!view || ![view window]) {
++        return false;
++    }
++    omacvm_ime_fractions(outs[i], x, y, w, h, &u0, &v0, &u1, &v1);
++    NSSize size = [view bounds].size;
++    CGFloat black = view == cocoaView ? [cocoaView omacvmBlackRows] : 0;
++    CGFloat gh = size.height - black;
++    NSRect r = NSMakeRect(u0 * size.width, black + (1 - v1) * gh,
++                          MAX(1, (u1 - u0) * size.width), MAX(1, (v1 - v0) * gh));
++    r = [view convertRect:r toView:nil];
++    *out = [[view window] convertRectToScreen:r];
++    return true;
++}
++
++/*
++ * Where the candidate window goes: the caret; without it (Chromium, foot:
++ * only the window is known) the last click in the VM after the focus came,
++ * else the bottom left of the focused window, else of the VM's window.
++ */
++static NSRect omacvm_ime_caret(void)
++{
++    NSRect r;
++
++    if (omacvm_ime.has_rect && omacvm_ime.exact &&
++        omacvm_ime_to_screen(omacvm_ime.x, omacvm_ime.y, omacvm_ime.w, omacvm_ime.h, &r)) {
++        return r;
++    }
++    if (omacvm_ime_click_at > omacvm_ime_focus_at) {
++        return NSMakeRect(omacvm_ime_click.x, omacvm_ime_click.y - 10, 1, 20);
++    }
++    if (omacvm_ime.has_rect &&
++        omacvm_ime_to_screen(omacvm_ime.x, omacvm_ime.y, omacvm_ime.w, omacvm_ime.h, &r)) {
++        return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
++    }
++    r = [[cocoaView window] frame];
++    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
++}
++
++/* The key the input method has now goes to the VM as a key, QEMU's way. */
++static void omacvm_ime_send_key(void)
++{
++    NSEvent *e = omacvm_ime_event;
++
++    if (!e || omacvm_ime_event_sent) {
++        return;
++    }
++    omacvm_ime_event_sent = true;
++    bool_with_bql(^{
++        return [cocoaView handleEventLocked:e];
++    });
++}
++
++/*
++ * Every event QEMU's window code gets (QemuCocoaView handleEvent:), before
++ * its own handling, only with mac-ime on. True: used here.
++ */
++static bool omacvm_ime_key(NSEvent *event)
++{
++    OmacVMImeKeyType kt;
++    OmacVMImeRoute route;
++    BOOL used;
++
++    switch ([event type]) {
++    case NSEventTypeKeyDown:
++        kt = OMACVM_IME_DOWN;
++        break;
++    case NSEventTypeKeyUp:
++        kt = OMACVM_IME_UP;
++        break;
++    case NSEventTypeFlagsChanged:
++        kt = OMACVM_IME_FLAGS;
++        break;
++    case NSEventTypeLeftMouseDown:
++    case NSEventTypeRightMouseDown:
++        if (omacvm_is_our_window([event window])) {
++            omacvm_ime_click = [NSEvent mouseLocation];
++            omacvm_ime_click_at = CACurrentMediaTime();
++        }
++        return false;
++    default:
++        return false;
++    }
++    omacvm_ime.window_key = omacvm_ime_window_key();
++    omacvm_ime.switch_keys = qatomic_read(&omacvm_shortcuts_off);
++    if (kt == OMACVM_IME_FLAGS) {
++        /* Modifiers go to the VM; the input method sees them too (Shift switches some to Latin). */
++        if (omacvm_ime_active(&omacvm_ime)) {
++            [omacvm_ime_ctx activate];
++            [omacvm_ime_ctx handleEvent:event];
++        }
++        return false;
++    }
++    route = omacvm_ime_route(&omacvm_ime_keys, &omacvm_ime, kt, [event keyCode],
++                             (uint32_t)[event modifierFlags]);
++    switch (route) {
++    case OMACVM_IME_PASS:
++        return false;
++    case OMACVM_IME_DROP:
++        return true;
++    case OMACVM_IME_SWITCH_PREV:
++    case OMACVM_IME_SWITCH_NEXT:
++        if (![event isARepeat]) {
++            omacvm_ime_switch(route == OMACVM_IME_SWITCH_PREV);
++        }
++        return true;
++    case OMACVM_IME_TO_IM:
++        break;
++    }
++    [omacvm_ime_ctx activate];
++    omacvm_ime_event = event;
++    omacvm_ime_event_sent = false;
++    used = [omacvm_ime_ctx handleEvent:event];
++    omacvm_ime_event = nil;
++    if (omacvm_ime_event_sent) {
++        return true;            /* went to the VM as a key: its release follows it */
++    }
++    if (!used) {
++        return false;           /* the input method did not want it: QEMU's path */
++    }
++    omacvm_ime_take(&omacvm_ime_keys, [event keyCode]);
++    return true;
++}
++
++/* One line from the guest's module. Anything unexpected is dropped. */
++static void omacvm_ime_line(const char *line, size_t len, void *opaque)
++{
++    @autoreleasepool {
++        id obj = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:line length:len]
++                                                 options:0 error:nil];
++        NSDictionary *d = [obj isKindOfClass:[NSDictionary class]] ? obj : nil;
++        NSString *t = [d[@"t"] isKindOfClass:[NSString class]] ? d[@"t"] : nil;
++        double v;
++
++        if ([t isEqualToString:@"hello"]) {
++            if (!omacvm_json_number(d[@"v"], &v) || v < 1) {
++                return;
++            }
++            if (!omacvm_ime.hello) {
++                info_report("cocoa: mac-ime: the VM's Fcitx5 module is there (protocol %d)", (int)v);
++            }
++            omacvm_ime.hello = true;
++            omacvm_ime.focus = false;
++            omacvm_ime.has_rect = false;
++            omacvm_ime_release_all(&omacvm_ime_keys);
++        } else if ([t isEqualToString:@"focus"] && [d[@"on"] isKindOfClass:[NSNumber class]]) {
++            if (![d[@"on"] boolValue]) {
++                omacvm_ime.focus = false;
++                omacvm_ime.has_rect = false;
++            } else {
++                NSString *kind = d[@"kind"];
++                NSArray *r = d[@"rect"];
++                double x, y, w, h;
++                bool rect = [r isKindOfClass:[NSArray class]] && [r count] == 4 &&
++                            omacvm_json_number(r[0], &x) && omacvm_json_number(r[1], &y) &&
++                            omacvm_json_number(r[2], &w) && omacvm_json_number(r[3], &h) &&
++                            omacvm_ime_rect_ok(x, y, w, h);
++                if (![kind isKindOfClass:[NSString class]] ||
++                    !([kind isEqualToString:@"text"] || [kind isEqualToString:@"password"])) {
++                    return;
++                }
++                /* Another field: what was marked for the last one goes. */
++                omacvm_ime.focus = false;
++                omacvm_ime_update();
++                omacvm_ime.focus = true;
++                omacvm_ime.password = [kind isEqualToString:@"password"];
++                omacvm_ime.has_rect = rect;
++                if (rect) {
++                    omacvm_ime.x = x; omacvm_ime.y = y; omacvm_ime.w = w; omacvm_ime.h = h;
++                    omacvm_ime.exact = [d[@"exact"] isKindOfClass:[NSNumber class]] && [d[@"exact"] boolValue];
++                }
++                omacvm_ime_focus_at = CACurrentMediaTime();
++            }
++            omacvm_ime_release_all(&omacvm_ime_keys);
++        } else if ([t isEqualToString:@"rect"] && omacvm_ime.focus) {
++            NSArray *r = d[@"rect"];
++            double x, y, w, h;
++            if ([r isKindOfClass:[NSArray class]] && [r count] == 4 &&
++                omacvm_json_number(r[0], &x) && omacvm_json_number(r[1], &y) &&
++                omacvm_json_number(r[2], &w) && omacvm_json_number(r[3], &h) &&
++                omacvm_ime_rect_ok(x, y, w, h)) {
++                omacvm_ime.has_rect = true;
++                omacvm_ime.x = x; omacvm_ime.y = y; omacvm_ime.w = w; omacvm_ime.h = h;
++                omacvm_ime.exact = [d[@"exact"] isKindOfClass:[NSNumber class]] && [d[@"exact"] boolValue];
++                [omacvm_ime_ctx invalidateCharacterCoordinates];
++            }
++        } else if ([t isEqualToString:@"reset"] && omacvm_ime_marked) {
++            /* The app moved its caret (a click): the input method starts over. */
++            omacvm_ime_set_marked(nil);
++            [omacvm_ime_ctx discardMarkedText];
++        }
++        omacvm_ime_update();
++    }
++}
++
++static void omacvm_ime_gone(void)
++{
++    omacvm_ime.hello = false;
++    omacvm_ime.focus = false;
++    omacvm_ime.has_rect = false;
++    omacvm_ime_update();
++}
++
++static void omacvm_ime_close(void)
++{
++    if (omacvm_ime_src) {
++        dispatch_source_cancel(omacvm_ime_src);
++        dispatch_release(omacvm_ime_src);
++        omacvm_ime_src = NULL;
++    }
++    omacvm_ime_fd = -1;
++    omacvm_ime_gone();
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
++                   dispatch_get_main_queue(), ^{ omacvm_ime_connect(); });
++}
++
++static void omacvm_ime_read(void)
++{
++    char buf[4096];
++    ssize_t n = read(omacvm_ime_fd, buf, sizeof(buf));
++
++    if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
++        omacvm_ime_close();
++        return;
++    }
++    if (n > 0) {
++        omacvm_ime_lines_feed(&omacvm_ime_lines, buf, (size_t)n, omacvm_ime_line, NULL);
++    }
++}
++
++static void omacvm_ime_connect(void)
++{
++    static int tries;
++    const char *path = getenv("OMACVM_IME_SOCKET");
++    struct sockaddr_un addr = { 0 };
++    int one = 1;
++
++    if (!path || !*path || omacvm_ime_fd >= 0 || strlen(path) >= sizeof(addr.sun_path)) {
++        return;
++    }
++    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
++    if (fd < 0) {
++        return;
++    }
++    addr.sun_family = AF_UNIX;
++    strcpy(addr.sun_path, path);
++    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
++    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
++        close(fd);
++        if (++tries < 120) {
++            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC),
++                           dispatch_get_main_queue(), ^{ omacvm_ime_connect(); });
++        }
++        return;
++    }
++    tries = 0;
++    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
++    omacvm_ime_fd = fd;
++    omacvm_ime_lines_reset(&omacvm_ime_lines);
++    omacvm_ime_src = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, fd, 0,
++                                            dispatch_get_main_queue());
++    dispatch_source_set_event_handler(omacvm_ime_src, ^{ omacvm_ime_read(); });
++    dispatch_source_set_cancel_handler(omacvm_ime_src, ^{ close(fd); });
++    dispatch_resume(omacvm_ime_src);
++    /* The guest's module answers with hello and its focus. */
++    omacvm_ime_send(@{ @"t": @"hello", @"v": @1 });
++}
++
++/* A guest reset (QEMU's thread, BQL): its Fcitx5 is gone until it says hello. */
++static void omacvm_ime_guest_reset(void *opaque)
++{
++    dispatch_async(dispatch_get_main_queue(), ^{ omacvm_ime_gone(); });
++}
++
++/* Main thread, with the BQL (from cocoa_display_init). */
++static void omacvm_ime_init(void)
++{
++    const char *path = getenv("OMACVM_IME_SOCKET");
++    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
++
++    if (!path || !*path) {
++        return;
++    }
++    omacvm_ime_on = true;
++    omacvm_ime_ctx = [[NSTextInputContext alloc] initWithClient:cocoaView];
++    omacvm_ime_hotkeys_load();
++    [[NSDistributedNotificationCenter defaultCenter]
++        addObserverForName:(NSString *)kTISNotifySelectedKeyboardInputSourceChanged
++                    object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) { omacvm_ime_source_changed(); }];
++    for (NSNotificationName name in @[NSApplicationDidResignActiveNotification,
++                                      NSWindowDidBecomeKeyNotification,
++                                      NSWindowDidResignKeyNotification]) {
++        [nc addObserverForName:name object:nil queue:[NSOperationQueue mainQueue]
++                    usingBlock:^(NSNotification *note) { omacvm_ime_update(); }];
++    }
++    /* Changed in System Settings meanwhile: read again when the VM comes back. */
++    [nc addObserverForName:NSApplicationDidBecomeActiveNotification object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) {
++        omacvm_ime_hotkeys_load();
++        omacvm_ime_update();
++    }];
++    qemu_register_reset(omacvm_ime_guest_reset, NULL);
++    omacvm_ime_source_changed();
++    info_report("cocoa: mac-ime: on (OMACVM_IME_SOCKET): the Mac's input methods type in the "
++                "VM's text fields once its Fcitx5 module says hello");
++    omacvm_ime_connect();
++}
++
++/* QEMU's view as the input method's client (only with mac-ime on). */
++@implementation QemuCocoaView (OmacVMIme)
++- (NSTextInputContext *)inputContext
++{
++    return omacvm_ime_on && omacvm_ime_active(&omacvm_ime) ? omacvm_ime_ctx : nil;
++}
++
++- (void)insertText:(id)string replacementRange:(NSRange)replacementRange
++{
++    NSString *s = [string isKindOfClass:[NSAttributedString class]] ? [string string] : string;
++    bool was = omacvm_ime_marked != nil;
++
++    if (![s isKindOfClass:[NSString class]]) {
++        return;
++    }
++    omacvm_ime_set_marked(nil);
++    /* Nothing was marked and it is the key's own character: the key itself. */
++    if (!was && omacvm_ime_event && [s isEqualToString:[omacvm_ime_event characters]]) {
++        omacvm_ime_send_key();
++        return;
++    }
++    if ([s length] && omacvm_ime_text_focus(&omacvm_ime)) {
++        omacvm_ime_commit(s);
++    } else if (was) {
++        omacvm_ime_write(@{ @"t": @"cancel" });
++    }
++}
++
++- (void)doCommandBySelector:(SEL)selector
++{
++    /* Return, Tab, arrows, Backspace with nothing marked: the key itself. */
++    omacvm_ime_send_key();
++}
++
++- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange
++     replacementRange:(NSRange)replacementRange
++{
++    NSAttributedString *attr = [string isKindOfClass:[NSAttributedString class]] ? string : nil;
++    NSString *s = attr ? [attr string] : string;
++    bool was = omacvm_ime_marked != nil;
++
++    if (![s isKindOfClass:[NSString class]]) {
++        return;
++    }
++    omacvm_ime_set_marked(s);
++    if (![s length]) {
++        if (was) {
++            omacvm_ime_write(@{ @"t": @"cancel" });
++        }
++        return;
++    }
++    if (omacvm_ime_text_focus(&omacvm_ime)) {
++        omacvm_ime_preedit(s, selectedRange, attr);
++    }
++}
++
++- (void)unmarkText
++{
++    /* The input method keeps the marked text as it is. */
++    NSString *s = [[omacvm_ime_marked retain] autorelease];
++
++    omacvm_ime_set_marked(nil);
++    if ([s length] && omacvm_ime_text_focus(&omacvm_ime)) {
++        omacvm_ime_commit(s);
++    }
++}
++
++- (NSRange)selectedRange
++{
++    return NSMakeRange(omacvm_ime_marked ? [omacvm_ime_marked length] : 0, 0);
++}
++
++- (NSRange)markedRange
++{
++    return omacvm_ime_marked ? NSMakeRange(0, [omacvm_ime_marked length]) : NSMakeRange(NSNotFound, 0);
++}
++
++- (BOOL)hasMarkedText
++{
++    return omacvm_ime_marked != nil;
++}
++
++- (NSArray<NSAttributedStringKey> *)validAttributesForMarkedText
++{
++    return @[NSMarkedClauseSegmentAttributeName, NSUnderlineStyleAttributeName];
++}
++
++/* The Mac never reads the guest's text. */
++- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
++                                                actualRange:(NSRangePointer)actualRange
++{
++    return nil;
++}
++
++- (NSUInteger)characterIndexForPoint:(NSPoint)point
++{
++    return NSNotFound;
++}
++
++- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange
++{
++    if (actualRange) {
++        *actualRange = range;
++    }
++    return omacvm_ime_caret();
++}
++
++- (NSInteger)windowLevel
++{
++    NSWindow *w = omacvm_is_our_window([NSApp keyWindow]) ? [NSApp keyWindow] : [self window];
++    return [w level];
++}
++@end
++
+ /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
+ static void omacvm_pointer_reset(void *opaque)
+ {
+@@ -8790,6 +9580,7 @@
+     }
+     omacvm_shortcuts_init();
+     omacvm_globe_init();
++    omacvm_ime_init();
+ 
+     if (opts->has_show_cursor && opts->show_cursor) {
+         cursor_hide = 0;
