@@ -383,6 +383,9 @@ jobs:
       - name: A feature that is off is off on every route (VM side, checks, Mac side)
         run: src/tests/features-off.sh
 
+      - name: omacvm features' checklist keeps one line per row (pseudo-terminal, #292)
+        run: src/tests/features-checklist.sh
+
       - name: Guest check accepts NOTCH right above the built-in display (offline)
         run: src/tests/notch-check.sh
 
