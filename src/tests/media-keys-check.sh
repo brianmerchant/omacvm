@@ -20,13 +20,15 @@ expect "media keys: waiting for Accessibility permission (System Settings > Priv
   fail "waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)"
 expect "media keys: cannot create the event tap although Accessibility is granted; retrying" \
   fail "cannot create the event tap although Accessibility is granted; retrying"
+expect "media keys: event tap armed (made while a VM is in front)" ok "event tap armed (made while a VM is in front)"
+expect "media keys: event tap removed, not enabled again: x" warn "event tap removed, not enabled again: x"
 expect "" fail "no event tap yet"
 # check.sh reads the same log lines and goes through media_keys_state.
 grep -q "last_line \"\$BRIDGE_LOG\" 'media keys: (event tap|waiting|cannot)'" "$R/src/cmd/check.sh" &&
   grep -q 'media_keys_state "$m"' "$R/src/cmd/check.sh" ||
   { echo "FAIL src/cmd/check.sh no longer uses media_keys_state for the Bridge's media keys line"; fails=$((fails + 1)); }
 # The Bridge still logs the lines this test knows.
-for l in 'media keys: event tap created again' 'media keys: event tap installed' 'keeping the old one'; do
+for l in 'media keys: event tap created again' 'media keys: event tap installed' 'keeping the old one' 'media keys: event tap armed' 'media keys: event tap removed'; do
   grep -qF "$l" "$R/src/bridge/mac/keys.swift" || { echo "FAIL keys.swift no longer logs '$l'"; fails=$((fails + 1)); }
 done
 (( fails == 0 )) && echo "media keys check: all passed" || { echo "media keys check: $fails failed"; exit 1; }

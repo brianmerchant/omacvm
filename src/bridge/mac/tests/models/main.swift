@@ -35,6 +35,86 @@ g.created([.accessibility])
 check(!g.lost([.accessibility]), "tap: made with Accessibility alone: stays without Input Monitoring")
 check(g.lost([.inputMonitoring]), "tap: ... and goes without Accessibility")
 
+// ---- TapGuard: "control the computer" (CGPreflightPostEventAccess, as in Gestures) ----
+let all: TapPermissions = [.accessibility, .inputMonitoring, .postEvent]
+var gp = TapGuard()
+check(gp.mayCreate([.accessibility]), "tap: a Mac that never answered 'control the computer': Accessibility decides")
+gp.created(all)
+check(gp.lost([.accessibility, .inputMonitoring]), "tap: 'control the computer' taken away: it goes")
+check(!gp.mayCreate([.accessibility, .inputMonitoring]), "tap: ... and none is made without it again")
+check(gp.mayCreate(all), "tap: ... until it is back")
+
+// ---- KeyTap: the tap must never hold the Mac's input (issue #290) ----
+func tapInputs(vm: Bool = true, pid: pid_t? = 600, perms: TapPermissions = all, tap: TapNow? = nil,
+               capture: Bool = true, active: Bool = true) -> TapInputs {
+  TapInputs(capture: capture, vmFront: vm, omacvmPid: vm ? pid : nil, active: active, perms: perms, tap: tap)
+}
+var k = KeyTap()
+check(k.check(tapInputs(vm: false), at: 0) == .none, "tap #290: no VM in front: no tap is made")
+check(k.check(tapInputs(), at: 1) == .create(nil), "tap #290: a VM comes to the front: made")
+k.created(all)
+check(k.check(tapInputs(tap: .enabled), at: 3) == .none, "tap #290: kept while the VM stays in front")
+check(k.check(tapInputs(vm: false, tap: .enabled), at: 5) == .remove(.noVM),
+      "tap #290: the VM goes (quit, killed, another app in front): the tap goes")
+check(k.check(tapInputs(vm: false, tap: nil), at: 7) == .none, "tap #290: ... and none while no VM is in front")
+check(k.check(tapInputs(), at: 9) == .create(nil), "tap #290: the VM in front again: made again")
+k.created(all)
+check(k.check(tapInputs(tap: .disabled), at: 10) == .remove(.disabled),
+      "tap #290: macOS disabled it on timeout: removed, never enabled again")
+check(k.check(tapInputs(), at: 11) == .none, "tap #290: ... no new one during the hold-off")
+check(k.check(tapInputs(), at: 12.5) == .create(nil), "tap #290: ... a new one after it")
+k.created(all)
+check(k.check(tapInputs(tap: .disabled), at: 20) == .remove(.disabled), "tap #290: disabled a second time: removed")
+check(k.check(tapInputs(), at: 40) == .none, "tap #290: ... a longer hold-off the second time")
+check(k.check(tapInputs(), at: 51) == .create(nil), "tap #290: ... then a new one")
+k.created(all)
+check(k.check(tapInputs(tap: .disabled), at: 60) == .remove(.parked),
+      "tap #290: the third time in 10 minutes: parked")
+check(k.check(tapInputs(), at: 60 + 3600) == .none, "tap #290: ... parked: no tap, even an hour later")
+k.accessibilityChanged()
+check(k.check(tapInputs(), at: 60 + 3601) == .create(nil), "tap #290: ... until macOS's Accessibility list changes")
+k.created(all)
+check(k.check(tapInputs(tap: .enabled, active: false), at: 3700) == .remove(.notActive),
+      "tap #290: the Mac goes to sleep or another user's session comes in front: the tap goes")
+check(k.check(tapInputs(active: false), at: 3702) == .none, "tap #290: ... and none until this session is back and awake")
+check(k.check(tapInputs(), at: 3704) == .create(nil), "tap #290: ... then it is made again")
+k.created(all)
+check(k.check(tapInputs(tap: .enabled, capture: false), at: 3706) == .remove(.captureOff), "tap #290: capture switched off: the tap goes")
+check(k.check(tapInputs(capture: false), at: 3708) == .none, "tap #290: ... none while capture is off")
+check(k.check(tapInputs(), at: 3710) == .create(nil), "tap #290: capture on again")
+k.created(all)
+check(k.check(tapInputs(perms: [.inputMonitoring, .postEvent], tap: .enabled), at: 3712) == .remove(.permission),
+      "tap #192: Accessibility taken away: removed")
+check(k.check(tapInputs(perms: [.inputMonitoring, .postEvent]), at: 3714) == .none, "tap #192: ... none without it")
+check(k.check(tapInputs(perms: [.inputMonitoring, .postEvent], tap: .disabled), at: 3716) == .remove(.permission),
+      "tap #192: a disabled tap without Accessibility: removed (never enabled again)")
+check(k.check(tapInputs(), at: 3718) == .create(nil), "tap #192: Accessibility back: made again")
+k.created(all)
+check(k.check(tapInputs(tap: .invalid), at: 3720) == .create("macOS invalidated it"), "tap: macOS invalidated it: made again")
+k.created(all)
+check(k.check(tapInputs(pid: 700, tap: .enabled), at: 3722) == .create("an OmacVM VM came to the front"),
+      "tap: another OmacVM VM in front: made again at the head of the chain")
+k.created(all)
+check(k.check(tapInputs(pid: 700, tap: .enabled), at: 3724) == .none, "tap: ... not again while it stays in front")
+var holdK = KeyTap()
+_ = holdK.check(tapInputs(), at: 0); holdK.created(all)
+_ = holdK.check(tapInputs(tap: .disabled), at: 1)
+check(holdK.check(tapInputs(pid: 800, tap: nil), at: 1.5) == .none, "tap #290: a VM coming to the front does not skip the hold-off")
+var forgetK = KeyTap()
+for t in [0.0, 700, 1400] {
+  _ = forgetK.check(tapInputs(), at: t); forgetK.created(all)
+  check(forgetK.check(tapInputs(tap: .disabled), at: t + 1) == .remove(.disabled), "tap #290: one stall per 10 minutes is never parked (\(Int(t)) s)")
+}
+
+// ---- TapWatch: the main thread stalled (issue #290) ----
+var wd = TapWatch()
+check(wd.tick(at: 0) == (true, false), "watchdog: first tick pings the main thread")
+check(wd.tick(at: 0.25) == (false, false), "watchdog: no second ping while one is open")
+wd.answered()
+check(wd.tick(at: 0.5) == (true, false), "watchdog: answered: the next tick pings again")
+check(wd.tick(at: 1.4) == (false, false), "watchdog: 0.9 s without an answer: not yet")
+check(wd.tick(at: 1.6) == (false, true), "watchdog: more than a second without an answer: stalled")
+
 // ---- WiFiSteady ----
 let t0 = Date(timeIntervalSince1970: 1_000_000)
 func at(_ s: Double) -> Date { t0 + s }

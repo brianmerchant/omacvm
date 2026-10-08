@@ -43,11 +43,14 @@ mac_helper_feature() {
 # log line -> "ok|warn|fail<TAB>detail". The tap is created again whenever an
 # OmacVM VM comes to the front or macOS invalidated it: that is how it works,
 # not a failure. A failed re-creation keeps the old tap (works, so warn).
+# Since #290 the tap exists only while a VM is in front ("armed" until then: ok);
+# one macOS disabled is removed and comes back after a hold-off (warn).
 media_keys_state() {
   local m=${1#media keys: }
   case $m in
     "event tap installed"*|"event tap created again"*) printf 'ok\tevent tap installed\n' ;;
-    *"keeping the old one"*) printf 'warn\t%s\n' "$m" ;;
+    "event tap armed"*) printf 'ok\tevent tap armed (made while a VM is in front)\n' ;;
+    *"keeping the old one"*|"event tap removed"*) printf 'warn\t%s\n' "$m" ;;
     "") printf 'fail\tno event tap yet\n' ;;
     *) printf 'fail\t%s\n' "$m" ;;
   esac

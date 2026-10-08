@@ -5,6 +5,13 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- Bridge: its media-key tap can no longer hold the Mac's keyboard and clicks (reported by
+  @brianmerchant, #290). The tap now exists only while a VM is in front (not while the Mac sleeps
+  or another user's session is in front); one macOS disabled is removed and never enabled again
+  (it was enabled again every 2 s, so a tap that did not answer held keys and clicks until the
+  Bridge was stopped); a watchdog disables it when the Bridge's main thread has not answered for
+  a second; after three such stops in 10 minutes the media keys stay macOS's until the
+  Accessibility list changes. Like Gestures, no tap without "control the computer" once a tap had it.
 - The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
   the animation ends at 5.5 s, before the desktop is ready).
 - The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in

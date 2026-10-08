@@ -35,24 +35,143 @@ struct TapRearm {
 /// it there but no longer took what it handed back and disabled it on
 /// timeout, and enabling it again held the Mac's keys and clicks until the
 /// process was killed. So it goes at once when Accessibility, or any
-/// permission it was created with, is missing, and is enabled or created
-/// again only once Accessibility is back. Same rule as the Gestures helper's.
+/// permission it was created with, is missing, and is created again only
+/// once Accessibility is back. `postEvent` is "control the computer"
+/// (CGPreflightPostEventAccess), what macOS checks before it takes the events
+/// an active tap hands back: once a tap had it, none is made without it.
+/// Same rule as the Gestures helper's.
 struct TapPermissions: OptionSet {
   let rawValue: Int
   static let accessibility = TapPermissions(rawValue: 1)
   static let inputMonitoring = TapPermissions(rawValue: 2)
+  static let postEvent = TapPermissions(rawValue: 4)
 }
 
 struct TapGuard {
   private(set) var made: TapPermissions = []
+  private var seen: TapPermissions = []   // every permission a tap of this process was made with
 
-  mutating func created(_ with: TapPermissions) { made = with }
+  mutating func created(_ with: TapPermissions) { made = with; seen.formUnion(with) }
 
   /// True: remove the tap now; never enable it again.
   func lost(_ now: TapPermissions) -> Bool { !now.contains(.accessibility) || !now.isSuperset(of: made) }
 
   /// True: a tap may be created.
-  func mayCreate(_ now: TapPermissions) -> Bool { now.contains(.accessibility) }
+  func mayCreate(_ now: TapPermissions) -> Bool {
+    now.contains(.accessibility) && !(seen.contains(.postEvent) && !now.contains(.postEvent))
+  }
+}
+
+// ---- the tap must never hold the Mac's input (issue #290) ----
+// An active tap at the head of the HID chain holds every event of its kind
+// until its callback answers. The media-key tap asks for NX_SYSDEFINED, which
+// macOS also sends for every mouse click (NX_SUBTYPE_AUX_MOUSE_BUTTONS), and
+// keys queue behind a held click: a tap that is not answered stops clicks and
+// keys host-wide while the pointer still moves. macOS disables such a tap on
+// timeout; the Bridge used to enable it again every 2 s, so the hold came back
+// until the Bridge was stopped. Now:
+// - the tap exists only while a VM app is in front, the session is the active
+//   one and the Mac is awake: no VM in front, no tap;
+// - a tap macOS (or the watchdog) disabled is removed, never enabled again; a
+//   new one only after a hold-off, and after three in 10 minutes none until
+//   macOS's Accessibility list changes;
+// - a watchdog off the main thread disables the tap when the main thread (the
+//   tap's callback) has not answered for a second (TapWatch).
+
+/// Why a tap went or must go.
+enum TapGone: String {
+  case permission = "a permission was taken away"
+  case disabled = "it was disabled (its callback did not answer in time: macOS's timeout or the watchdog)"
+  case captureOff = "media key capture is off"
+  case notActive = "the Mac sleeps or another user's session is in front"
+  case noVM = "no VM in front"
+  case invalid = "macOS invalidated it"
+  case parked = "taken out too often: paused until the Accessibility list changes"
+}
+
+enum TapAction: Equatable {
+  case none
+  case remove(TapGone)
+  case create(String?)   // a new tap (nil: the first); the old one goes after it
+}
+
+/// What check() sees (main thread).
+struct TapInputs {
+  var capture = true          // capture_keys
+  var vmFront = false         // a VM app is in front (OmacVM.app, Parallels, UTM, Fusion)
+  var omacvmPid: pid_t?       // ... and it is this OmacVM VM process
+  var active = true           // awake, and this login session is the one in front
+  var perms: TapPermissions = [.accessibility, .inputMonitoring, .postEvent]
+  var tap: TapNow?            // the tap now; nil: none
+}
+
+enum TapNow { case enabled, disabled, invalid }
+
+/// The hold-offs after a tap was disabled. Strikes older than `forget` s
+/// do not count; the `park`th within it parks the tap.
+struct TapPolicy {
+  static let holdOff: [Double] = [2, 30]
+  static let forget = 600.0
+  static let park = 3
+  private(set) var strikes: [Double] = []
+  private(set) var until = 0.0
+  private(set) var parked = false
+
+  /// A tap was disabled (macOS's timeout or the watchdog): no new one for a while.
+  mutating func disabled(at now: Double) {
+    strikes = strikes.filter { now - $0 < TapPolicy.forget } + [now]
+    if strikes.count >= TapPolicy.park { parked = true; return }
+    until = now + TapPolicy.holdOff[strikes.count - 1]
+  }
+
+  /// macOS's Accessibility list changed (the user granted again): a fresh start.
+  mutating func accessibilityChanged() { strikes = []; until = 0; parked = false }
+
+  func mayCreate(at now: Double) -> Bool { !parked && now >= until }
+}
+
+/// The media-key tap's state machine (keys.swift does what it says).
+struct KeyTap {
+  private(set) var guardTap = TapGuard()
+  private(set) var rearm = TapRearm()
+  private(set) var policy = TapPolicy()
+
+  mutating func check(_ i: TapInputs, at now: Double) -> TapAction {
+    let again = rearm.front(i.omacvmPid)
+    let may = guardTap.mayCreate(i.perms) && policy.mayCreate(at: now)
+    if let t = i.tap {
+      if guardTap.lost(i.perms) { return .remove(.permission) }
+      if t == .disabled { policy.disabled(at: now); return .remove(policy.parked ? .parked : .disabled) }
+      if !i.capture { return .remove(.captureOff) }
+      if !i.active { return .remove(.notActive) }
+      if !i.vmFront { return .remove(.noVM) }
+      if t == .invalid { return may ? .create(TapGone.invalid.rawValue) : .remove(.invalid) }
+      return again && may ? .create("an OmacVM VM came to the front") : .none
+    }
+    return i.capture && i.active && i.vmFront && may ? .create(nil) : .none
+  }
+
+  mutating func created(_ with: TapPermissions) { guardTap.created(with); rearm.worked() }
+  mutating func createFailed() -> Bool { rearm.failed() }
+  mutating func accessibilityChanged() { policy.accessibilityChanged() }
+}
+
+/// The watchdog's view of the main thread (it runs the tap's callback).
+/// Every tick it sends the main thread a ping, one at a time; a ping not
+/// answered within `limit` s is a stall: the tap is disabled from the
+/// watchdog's thread so macOS passes every event on.
+struct TapWatch {
+  static let limit = 1.0
+  private var asked: Double?
+
+  /// true: the main thread has not answered for longer than `limit`.
+  mutating func tick(at now: Double) -> (ping: Bool, stalled: Bool) {
+    if let a = asked { return (false, now - a > TapWatch.limit) }
+    asked = now
+    return (true, false)
+  }
+
+  mutating func answered() { asked = nil }
 }
 
 // ---- where a media key goes (keys.swift asks; test-models.sh checks) ----
