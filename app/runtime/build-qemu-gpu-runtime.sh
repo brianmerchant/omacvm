@@ -775,6 +775,13 @@ cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tes
   "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
   -framework OpenGL -o "$display_tests/test-boot-splash-fade"
 "$display_tests/test-boot-splash-fade"
+# The logo layer holds its display link (a link only the run loop held was
+# freed inside its -invalidate: QEMU aborted with the window not visible).
+awk '/^- \(void\)(makeLink|dropLink)$/ { on = 1 } on { print } on && /^}$/ { on = 0; print "" }' \
+  "$source_dir/ui/cocoa.m" > "$display_tests/link.inc"
+cc -fno-objc-arc -Wall -Wextra -Werror -I"$display_tests" "$native_dir/Tests/display/test-boot-splash-link.m" \
+  -framework Cocoa -framework QuartzCore -o "$display_tests/test-boot-splash-link"
+"$display_tests/test-boot-splash-link"
 # OmacVM: full screen is always macOS's own, in a Space of its own (beside the
 # notch too: Omanotch fills the strip); a display the escape combo moved off
 # the VM's Space is not pulled back by the VM's other window.
