@@ -43,13 +43,18 @@ final class StorageModel: ObservableObject {
     private var mover: FolderMover?
     private var refreshRun = 0
 
+    /// The window pictures (RenderVMWindow): this VMs folder and its VMs
+    /// instead of the Mac's.
+    var shownRoot: URL?
+
     func refresh() {
-        root = Paths.vmsRoot
-        disconnected = Paths.vmsRoots.compactMap { r in
+        root = shownRoot ?? Paths.vmsRoot
+        let roots = shownRoot.map { [$0] } ?? Paths.vmsRoots
+        disconnected = roots.compactMap { r in
             Storage.missingDrive(for: r).map { "\($0) is not connected: its VMs (\(r.path)) are back once it is." }
         }
         let legacy = Paths.vmsRoot.standardizedFileURL.path == Paths.legacyVMsRoot.path ? "" : Paths.legacyVMsRoot.path
-        vms = VMConfig.all().map {
+        vms = VMConfig.all(roots: roots).map {
             Entry(config: $0, size: nil,
                   legacy: $0.folder.deletingLastPathComponent().path == legacy)
         }
@@ -331,7 +336,9 @@ struct VMsFolderRow: View {
                 }
                 Button("Change…") { storage.changeRoot() }
                     .disabled(storage.moving != nil)
+                    .layoutProbe("folder-change")
             }
+            .layoutProbe("folder-row")
         }
         .onAppear { storage.refresh() }
     }
@@ -447,6 +454,7 @@ struct AllVMsView: View {
                         .accessibilityLabel("Delete \(vm.name)…")
                         .disabled(storage.moving != nil)
                 }
+                .layoutProbe("all-vms-row")
             }
             if storage.vms.isEmpty {
                 Text("No VMs.").foregroundStyle(.secondary)
@@ -465,6 +473,7 @@ struct AllVMsView: View {
                 Spacer()
                 Button("Done") { done() }
                     .keyboardShortcut(.defaultAction)
+                    .layoutProbe("all-vms-done")
             }
         }
         .padding(20)

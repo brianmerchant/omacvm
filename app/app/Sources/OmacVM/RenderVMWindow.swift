@@ -8,13 +8,17 @@ import SwiftUI
 /// app): draws the VM window before Start for a made-up VM in a temporary
 /// folder, light and dark, into DIR/*.png, writes each window's height into
 /// DIR/heights.txt and exits 1 when the usual state or the keyboard warning
-/// is taller than a 13-inch MacBook shows (WindowFit). CI runs it.
+/// is taller than a 13-inch MacBook shows (WindowFit), or when a part of a
+/// window is closer than 16 pt to its sides or its buttons at the end of a
+/// row do not end on one line (WindowLayout). CI runs it.
 @MainActor
 enum RenderVMWindow {
     /// What the pictures show instead of this Mac's answers.
     struct Preview {
         var keyNote: KeyNote?
         var terminal: CommandLineInstall.State?
+        /// The app's OmacVM: "OmacVM in this VM" and Update VM when the VM's is older.
+        var appVersion: String? = nil
     }
 
     static func allowed(bundleID: String?) -> Bool {
@@ -30,7 +34,10 @@ enum RenderVMWindow {
             print("could not make the VM folder in \(tmp.path)")
             exit(1)
         }
-        let state = AppState()
+        LayoutProbe.on = true
+        let state = AppState(watchDrives: false)
+        state.storage.shownRoot = tmp
+        state.storage.refresh()
         state.config = config
         state.screen = .ready
         state.message = nil
@@ -40,8 +47,18 @@ enum RenderVMWindow {
         var lines: [String] = []
         var failed = false
 
+        func sides(_ name: String, trailing: [String]) {
+            let p = WindowLayout.problems(LayoutProbe.boxes(), width: Double(lastWidth), trailing: trailing)
+            lines.append("\(name): sides " + (p.isEmpty ? "ok" : "WRONG: " + p.joined(separator: "; ")))
+            if !p.isEmpty {
+                lines.append("  width \(Int(lastWidth)): " + LayoutProbe.boxes().map { "\($0.name) \(Int($0.minX.rounded()))-\(Int($0.maxX.rounded()))" }.joined(separator: ", "))
+            }
+            if !p.isEmpty { failed = true }
+        }
+
         func picture(_ name: String, _ preview: Preview, mustFit: Bool) {
             let h = draw(name, into: dir) { RootView(state: state, scrolls: false, preview: preview) }
+            sides(name, trailing: ["folder-change", "update-vm", "start"])
             let window = WindowFit.windowHeight(content: h, titleBar: titleBar)
             let fits = WindowFit.fitsSmallScreen(content: h, titleBar: titleBar)
             lines.append("\(name): window \(Int(window.rounded())) pt (content \(Int(h.rounded())) + title bar \(Int(titleBar)))"
@@ -70,12 +87,59 @@ enum RenderVMWindow {
         u.showForRendering(staged: staged, notice: nil, enabled: true, waiting: false, previous: nil)
         picture("vm-window-4-update", Preview(keyNote: KeyNote.none, terminal: terminal), mustFit: false)
 
+        // Long names: a VMs folder deep in a long path, a VM name of 62
+        // characters, a message and an older OmacVM in the VM (Update VM).
+        let longRoot = tmp.appendingPathComponent("A folder with a rather long name for the VMs of this Mac/and-one-more-level-light-test/vms")
+        let longFolder = longRoot.appendingPathComponent("OmacVM Test with a very long VM name to check the window sides")
+        if let long = makeVM(longFolder, name: longFolder.lastPathComponent) {
+            try? Data("3.0.5\n".utf8).write(to: longFolder.appendingPathComponent("omacvm-version"))
+            state.storage.shownRoot = longRoot
+            state.storage.refresh()
+            state.config = long
+            state.message = "OmacVM in \(long.name) is now 3.0.5."
+            u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
+            picture("vm-window-8-long-names", Preview(keyNote: .needsUser, terminal: terminal, appVersion: "3.0.7"), mustFit: false)
+            // The new VM's form with the same VMs folder.
+            state.message = nil
+            state.screen = .setup
+            draw("setup-1-long-names", into: dir) { RootView(state: state, scrolls: false) }
+            sides("setup-1-long-names", trailing: ["folder-change", "start"])
+            state.screen = .ready
+            state.config = config
+            state.storage.shownRoot = tmp
+            state.storage.refresh()
+        } else {
+            lines.append("vm-window-8-long-names: could not make the VM folder")
+            failed = true
+        }
+        // The VMs folder of the window of 2026-10-08 (a test identity's, in
+        // the home folder; not read: no such folder).
+        state.storage.shownRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("OmacVM-render-none/work/night-test/vms")
+        state.storage.refresh()
+        try? Data("3.0.5\n".utf8).write(to: folder.appendingPathComponent("omacvm-version"))
+        picture("vm-window-9-home-folder", Preview(keyNote: KeyNote.none, terminal: terminal, appVersion: "3.0.6"), mustFit: false)
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent("omacvm-version"))
+        state.storage.shownRoot = tmp
+        state.storage.refresh()
+
+        // All VMs… with long names.
+        let all = StorageModel()
+        all.vms = [("Omarchy", 41), ("OmacVM Test with a very long VM name to check the window sides", 23), ("Bench", 9)].compactMap { n, gb in
+            var c = VMConfig()
+            c.name = n
+            c.location = longRoot.appendingPathComponent(n)
+            return StorageModel.Entry(config: c, size: Int64(gb) * DiskSize.gib, legacy: false)
+        }
+        draw("all-vms-long-names", into: dir) { AllVMsView(storage: all, selected: all.vms.first?.folder) {} }
+        sides("all-vms-long-names", trailing: ["all-vms-row", "all-vms-done"])
+
         // A short screen: the window stops at its height and the rest scrolls.
         let limit: CGFloat = 480
         u.showForRendering(staged: nil, notice: nil, enabled: true, waiting: false, previous: nil)
         let h = draw("vm-window-5-scrolls", into: dir) {
             FitScroll(limit: limit) { RootView(state: state, scrolls: false, preview: Preview(keyNote: .needsUser, terminal: terminal)) }
-                .frame(width: 568)
+                .frame(width: WindowLayout.width)
         }
         let scrolls = h <= Double(limit) + 1
         lines.append("vm-window-5-scrolls: content \(Int(h.rounded())) pt for a limit of \(Int(limit))" + (scrolls ? ", scrolls" : ", DOES NOT STOP"))
@@ -151,11 +215,11 @@ enum RenderVMWindow {
 
     /// A VM folder as a build leaves it: vm.env, a 64 GB sparse disk.img,
     /// efi-vars.fd, the ready mark.
-    private static func makeVM(_ folder: URL) -> VMConfig? {
+    private static func makeVM(_ folder: URL, name: String = "Omarchy") -> VMConfig? {
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: folder.appendingPathComponent("logs"), withIntermediateDirectories: true)
-            try "NAME='Omarchy'\nCPUS=6\nMEM_MB=12288\nDISK_GB=64\nSSH_PORT=52222\nVM_USER=omarchy\n"
+            try "NAME='\(name)'\nCPUS=6\nMEM_MB=12288\nDISK_GB=64\nSSH_PORT=52222\nVM_USER=omarchy\n"
                 .write(to: folder.appendingPathComponent("vm.env"), atomically: true, encoding: .utf8)
             fm.createFile(atPath: folder.appendingPathComponent("efi-vars.fd").path, contents: Data())
             fm.createFile(atPath: folder.appendingPathComponent("ready").path, contents: Data())
@@ -168,14 +232,19 @@ enum RenderVMWindow {
         return VMConfig.load(from: folder)
     }
 
+    /// The width of the last picture drawn.
+    private static var lastWidth: CGFloat = 0
+
     /// In an offscreen window that is never ordered in, light and dark (a
-    /// new view each); returns the content's height.
+    /// new view each); returns the content's height. LayoutProbe then has
+    /// the frames of the dark one.
     @discardableResult
     private static func draw<V: View>(_ name: String, into dir: URL, _ content: () -> V) -> Double {
         var height = 0.0
         for dark in [false, true] {
+            LayoutProbe.frames = [:]
             let view = NSHostingView(rootView: content().background(Color(nsColor: .windowBackgroundColor)))
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 568, height: 400), styleMask: [.borderless],
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: WindowLayout.width, height: 400), styleMask: [.borderless],
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
             w.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -188,6 +257,7 @@ enum RenderVMWindow {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.2))
             }
             height = Double(view.fittingSize.height)
+            lastWidth = view.fittingSize.width
             view.frame = NSRect(origin: .zero, size: view.fittingSize)
             view.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.2))

@@ -29,7 +29,9 @@ final class AppState: ObservableObject {
     /// This app's VM runs (main.swift sets it).
     var vmRunning: () -> Bool = { false }
 
-    init() {
+    /// watchDrives false: the window pictures, which must not switch to a
+    /// VM of this Mac when a drive comes or goes meanwhile.
+    init(watchDrives: Bool = true) {
         (config, screen) = Self.start()
         // --vm NAME that no VM has: said here, and nothing is started (main.swift).
         if let n = VMConfig.unknownRequested {
@@ -40,7 +42,7 @@ final class AppState: ObservableObject {
         storage.onMoved = { [weak self] in self?.reload() }
         // A drive plugged in or gone: the VMs on it come and go.
         let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] where watchDrives {
             driveObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.drivesChanged() }
             })
@@ -213,6 +215,7 @@ struct SetupView: View {
             Text("New Omarchy VM").font(.title2.bold())
             Text("\(Product.name) makes a new VM with Arch Linux ARM and Omarchy. It downloads one that is already built when there is one for this version (a few minutes), or builds it here (10 to 30 minutes).")
                 .foregroundStyle(.secondary)
+                .layoutProbe("header")
             Form {
                 // Shown at once; the choice comes when the lookup is done, so
                 // nothing changes under the user's hands later on.
@@ -274,6 +277,7 @@ struct SetupView: View {
                     Text(p).font(.caption).foregroundStyle(.red)
                 }
             }
+            .layoutProbe("form")
             if let m = state.message { Text(m).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Text("Keyboard \(state.config.keyboard), \(state.config.timeZone), \(state.config.language) (from the Mac)")
@@ -282,7 +286,9 @@ struct SetupView: View {
                 Button("Build") { build() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canBuild)
+                    .layoutProbe("start")
             }
+            .layoutProbe("buttons")
         }
         .task {
             if let pb = await PrebuiltImage.lookup() { prebuilt = .found(pb) } else { prebuilt = .none }
@@ -530,6 +536,7 @@ struct ReadyView: View {
                     InfoButton(topic: "memory", text: memoryText)
                 }
             }
+            .layoutProbe("header")
             Form {
                 Section { vmRows }
                 Section {
@@ -553,21 +560,26 @@ struct ReadyView: View {
                 Section { UpdateRow(updater: Updater.shared) }
             }
             .formStyle(.columns)
-            if let m = state.message { Text(m).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            .layoutProbe("form")
+            if let m = state.message {
+                Text(m).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true).layoutProbe("message")
+            }
             if let p = state.config.filesProblem {
                 Text(p).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
-            if let app = OmacVMVersion.app, OmacVMVersion.vmIsBehind(state.config.guestVersion, app: app) {
+            if let app = preview?.appVersion ?? OmacVMVersion.app, OmacVMVersion.vmIsBehind(state.config.guestVersion, app: app) {
                 guestUpdate(app: app)
             }
             UpdateBanner(updater: Updater.shared)
             HStack {
                 Button("Delete…") { state.storage.delete(state.config) }
                     .disabled(state.storage.moving != nil)
+                    .layoutProbe("delete")
                 Spacer()
                 Button("Start") { state.startVM() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
+                    .layoutProbe("start")
             }
         }
         .onAppear {
@@ -696,7 +708,9 @@ struct ReadyView: View {
                 state.screen = .building
             }
             .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
+            .layoutProbe("update-vm")
         }
+        .layoutProbe("version-row")
     }
 
     /// Shown when the VM's keyboard tap is refused (KeyAccess); checked
@@ -891,6 +905,7 @@ struct UpdateBanner: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .layoutProbe("update-banner")
         }
         // While it waits for the VM the banner says so already.
         if let n = updater.notice, !(banner && updater.installWhenIdle) {

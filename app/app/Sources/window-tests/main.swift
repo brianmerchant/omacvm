@@ -354,6 +354,22 @@ expect(WindowFit.fitsSmallScreen(content: 700, titleBar: 28) && !WindowFit.fitsS
 expect(WindowFit.contentHeight(content: 650, visible: 860, titleBar: 28) == 650, "fits: the whole content, no scrolling")
 expect(WindowFit.contentHeight(content: 900, visible: 700, titleBar: 28) == 672, "too tall: stops at the screen, the rest scrolls")
 expect(WindowFit.contentHeight(content: 900, visible: 200, titleBar: 28) == WindowFit.minimumContent, "a tiny screen: a few rows stay")
+// MARK: Window sides (the pictures' frames: OmacVM --render-vm-window)
+
+expect(WindowLayout.contentWidth == 528 && WindowLayout.inset >= WindowLayout.minimumInset, "568 pt window, 20 pt each side")
+typealias Box = WindowLayout.Box
+let even = [Box("title", minX: 20, maxX: 200), Box("change", minX: 460, maxX: 548),
+            Box("update", minX: 470, maxX: 548), Box("start", minX: 500, maxX: 548.4)]
+expect(WindowLayout.problems(even, width: 568, trailing: ["change", "update", "start"]).isEmpty, "20 pt each side, one right edge: fine")
+// The window of 2026-10-08 16:2x: a long VMs folder widened the form.
+let tight = [Box("title", minX: 4, maxX: 200), Box("change", minX: 470, maxX: 566),
+             Box("update", minX: 420, maxX: 486), Box("start", minX: 440, maxX: 486)]
+let found = WindowLayout.problems(tight, width: 568, trailing: ["change", "update", "start"])
+expect(found.contains { $0.hasPrefix("title: 4 pt from the left") }, "4 pt from the left edge: too close")
+expect(found.contains { $0.hasPrefix("change: 2 pt from the right") }, "Change… at the right edge: too close")
+expect(found.contains { $0.hasPrefix("right edges not on one line") }, "Change… 80 pt past Start: not one line")
+expect(WindowLayout.problems([Box("row", minX: -10, maxX: 600)], width: 568, trailing: []).count == 2, "past both edges")
+
 expect(CommandLineInstall.shortText(.installed(at: "/x")) == "Installed"
        && CommandLineInstall.shortText(.available(target: "/x", needsAdmin: true)) == "Not installed",
        "omacvm in Terminal: short text in the row, the rest in its (i)")
