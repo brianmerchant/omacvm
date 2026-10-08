@@ -81,6 +81,9 @@ for i in range(nf):
     if livepx < 25: kind.append("MISSING")
     if stray: kind.append("STRAY")
     if live and max(b[2] - b[0] for b in live) > 34 and (x1 - x0) < 8: kind.append("WIDE")
+    # two arrows one above the other, touching (a stale guest arrow right
+    # below the strip's edge and the Mac's on the strip): one blob, too tall
+    if live and max(b[3] - b[1] for b in live) > 34 and (y1 - y0) < 8: kind.append("TALL")
     px, py = pos_at(t)
     rows.append((i, t, px, py, livepx, len(live), ";".join(f"{b[0]},{b[1]},{b[2]},{b[3]},{b[4]}" for b in stray), "|".join(kind)))
     if kind: flagged.append(i)
