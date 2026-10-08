@@ -7,17 +7,16 @@ OmacVM on the Mac and in the VM.
 
 | | Parallels | UTM | VMware Fusion | OmacVM.app |
 |---|---|---|---|---|
-| Download | 3.7 GB | 3.5 GB | 6.0 GB | 3.6 GB (test image) |
-| `omacvm build --prebuilt` (measured, M4 Max, fast connection) | 6 min | about 4 min | about 5 min | 3 min plus the download (test image, see below) |
+| Download | 3.7 GB | 3.5 GB | 6.0 GB | 3.7 GB |
+| `omacvm build --prebuilt` (measured, M4 Max, fast connection) | 6 min | about 4 min | about 5 min | 1.5 min plus the download (see below) |
 | `omacvm build` (building it here) | 30-70 min | 30-70 min | 45-85 min | 10-30 min |
 
 The Fusion image is larger: it carries Hyprland with OmacVM's vmwgfx fix and
 VMware Tools, both built in the VM, and their build tools.
 
-The OmacVM.app numbers are test numbers: an OmacVM 2.7.0 test image, copied
-from a local folder (no download), and without the step that builds the Mac
-helpers (Bridge, Gestures), which every app user gets. They will be replaced
-with measured numbers when the first image for the app is released.
+The OmacVM.app numbers are for `prebuilt-3.0.8`, copied from a local folder:
+90 s on a MacBook Pro M4 Max, 94 s on a MacBook Air M2 with the Mac helpers
+(Bridge, Gestures). The download comes on top.
 
 ## Using one
 
