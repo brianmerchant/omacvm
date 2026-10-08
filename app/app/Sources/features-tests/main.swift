@@ -53,5 +53,27 @@ if let text = try? String(contentsOf: tsv, encoding: .utf8) {
     expect(false, "src/features.tsv readable at \(tsv.path)")
 }
 
+// The Mac's input methods (mac-ime): off unless the record says on; a new VM
+// never starts with it; its port is the one QEMU's window code serves.
+expect(!MacIME.isOn(features: nil) && !MacIME.isOn(features: "") &&
+       !MacIME.isOn(features: "bridge=on mac-ime=off") && !MacIME.isOn(features: "mac-ime=onn") &&
+       !MacIME.isOn(features: "xmac-ime=on"), "mac-ime: off without the record's mac-ime=on")
+expect(MacIME.isOn(features: "bridge=on mac-ime=on vulkan=off\n") && MacIME.isOn(features: "mac-ime=on"),
+       "mac-ime: on with the record's mac-ime=on")
+expect(MacIME.isOn(features: "mac-ime=on mac-ime=off") == false, "mac-ime: the last word counts")
+expect(notch["mac-ime"] == nil && noNotch["mac-ime"] == nil, "a new VM starts without mac-ime (off by default)")
+let imeArgs = MacIME.arguments(socket: "/tmp/x.ime")
+expect(imeArgs == ["-chardev", "socket,id=ime0,path=/tmp/x.ime,server=on,wait=off",
+                   "-device", "virtserialport,bus=vser0.0,nr=8,chardev=ime0,name=org.omacvm.ime"],
+       "mac-ime: port nr 8 on vser0, after Touch ID's 7")
+if let text = try? String(contentsOf: tsv, encoding: .utf8),
+   let row = text.split(separator: "\n").first(where: { $0.hasPrefix("mac-ime\t") }) {
+    let f = row.split(separator: "\t", omittingEmptySubsequences: false)
+    expect(f.count >= 4 && f[1] == "off" && f[2] == "vm" && f[3] == "experimental,app-only",
+           "mac-ime in src/features.tsv: off, vm, experimental, app-only")
+} else {
+    expect(false, "mac-ime in src/features.tsv")
+}
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

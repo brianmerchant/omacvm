@@ -247,6 +247,7 @@ struct VMConfig: Equatable {
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
     var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
     var authSocket: URL { Paths.runDir.appendingPathComponent("\(id).auth") }
+    var imeSocket: URL { Paths.runDir.appendingPathComponent("\(id).ime") }
     var touchIDPanelSocket: URL { Paths.runDir.appendingPathComponent("\(id).tid") }
 
     func write() throws {

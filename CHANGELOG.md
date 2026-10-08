@@ -5,6 +5,17 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- Experimental, off by default, OmacVM.app only: the Mac's input methods
+  type in Omarchy: the Mac's candidate window opens at the text cursor in
+  the VM, the chosen text goes into the VM's field (tested with Pinyin,
+  Japanese Romaji kana and 2-Set Korean in a GTK app, foot and Chromium;
+  Kotoeri's candidate list not confirmed yet); keys, Cmd shortcuts and
+  Hyprland's binds stay as they are, password fields get plain keys. On
+  with `omacvm enable mac-ime`, the control centre, or "Mac input methods
+  (experimental)" in the app's VM window while the VM runs, then one
+  restart of the VM. A VM with it off starts exactly as before. Requested
+  and scoped by @Vocllum (#273). Details: docs/features.md, design: docs/adr/0043-mac-ime.md.
+
 - Capture mode no longer makes the VM lag or the sound crackle
   ([troubleshooting 32](docs/troubleshooting.md#32-app-the-vm-lags-and-the-sound-crackles-while-recording-the-screen-or-taking-a-screenshot)).
   Screen recording: the Mac's video encoder works beside QEMU's main loop

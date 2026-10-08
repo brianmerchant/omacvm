@@ -8,7 +8,7 @@
 #   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction] [--allow-downgrade]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
 # mac-clock camera battery external-brightness chromium-video no-idle-lock autologin thp-kernel control-centre
-# fast-network vulkan x86-apps (idle-lock, its name before 3.0.1, still works the other way round:
+# fast-network vulkan x86-apps touch-id mac-ime (idle-lock, its name before 3.0.1, still works the other way round:
 # disable idle-lock = enable no-idle-lock). A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply --transaction: the

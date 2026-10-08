@@ -850,6 +850,13 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park.pa
 grep -q '\[self omacvmParkInNotch:event view:self output:0\];' "$source_dir/ui/cocoa.m" && \
   grep -q '\[cocoaView omacvmParkInNotch:e view:self output:output\];' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not park the guest's pointer in NOTCH (notch-park patch)"
+# Experimental, off by default (feature mac-ime, docs/adr/0043-mac-ime.md): the
+# Mac's input methods type into the VM; nothing of it runs without
+# OMACVM_IME_SOCKET (the app sets it only for a VM with the feature on).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-ime-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-ime.patch"
+"$native_dir/Tests/keys/test-ime.sh" "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: the Mac's input methods are not wired as tested (test-ime.sh)"
 # OmacVM: no App Nap while the VM runs: with its window out of sight (screen
 # locked, another Space) macOS slowed the whole VM to a few percent.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"

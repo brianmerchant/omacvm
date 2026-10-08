@@ -1,0 +1,3 @@
+# OmacVM mac-ime: the desktop user's Fcitx5 talks to the Mac's input methods
+# over this port (OmacVM.app adds it when mac-ime is on).
+SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.ime", TAG+="uaccess"

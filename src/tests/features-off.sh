@@ -35,6 +35,7 @@ thp-kernel:nothing of it talks to the Mac
 fast-network:apply takes the Mac's service off when no VM has it (src/net/mac/test.sh)
 vulkan:apply removes the VM's vulkan file (no Venus device from the next start) and venus/install.sh --remove; nothing of it talks to the Mac (src/tests/vulkan-feature.sh)
 x86-apps:x86/guest/install.sh off removes OmacVM's box64 package and its binfmt rule on every apply; nothing of it talks to the Mac (src/tests/x86-apps.sh)
+mac-ime:ime/guest/install.sh off removes OmacVM's Fcitx5 module, its port rule, the GTK line and the Chromium flag on every apply; OmacVM.app adds the org.omacvm.ime port and its socket only for a VM whose record says mac-ime=on, and QEMU's window code reads keys as before without OMACVM_IME_SOCKET (src/ime/tests/run.sh, app/runtime/Tests/keys/test-ime.sh)
 touch-id:apply deletes the Mac's Touch ID key (the Bridge then says off, no dialog); install.sh runs touchid.sh off: PAM lines, polkit rule, drop-in and the VM's keys gone (src/tests/touchid-client.sh)
 "
 while IFS=$'\t' read -r name _; do
@@ -277,12 +278,18 @@ EOF
     # Touch ID: off unless named on, but every start has its port (3.0.4):
     # turning it on later needs no restart. The record says both.
     expect "app: Touch ID off unless named on; the port all the same" \
-      "touchid=false record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID off, Touch ID port on" \
+      "touchid=false record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID off, Touch ID port on, Mac input methods off" \
       "$("$T/links" "$T/vm" x | sed 's/.* touchid=/touchid=/')"
     app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on touch-id=on"
     expect "app: touch-id=on: named in the record, the port as always" \
-      "touchid=true record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID on, Touch ID port on" \
+      "touchid=true record=Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID on, Touch ID port on, Mac input methods off" \
       "$("$T/links" "$T/vm" x | sed 's/.* touchid=/touchid=/')"
+    # mac-ime: its port only when named on (off by default; no port, no socket otherwise).
+    app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on mac-ime=on"
+    expect "app: mac-ime=on: its port this start" "Mac input methods on" \
+      "$("$T/links" "$T/vm" x | grep -o 'Mac input methods [a-z]*')"
+    app_features_write "$T/vm" "bridge=on gestures=on omanotch=on battery=on camera=on mac-ime=off"
+    expect "app: mac-ime=off: no port" "Mac input methods off" "$("$T/links" "$T/vm" x | grep -o 'Mac input methods [a-z]*')"
     mkdir -p "$T/old"
     expect "app: a VM from before: Touch ID off, its port all the same" "touchid=false" "$("$T/links" "$T/old" x | grep -o 'touchid=[a-z]*')"
     expect "app: a VM from before (no features file): as before" "ports=47811,47830,47831 battery=true camera=true test=47811>47911,47830>47930,47831>47931" "$("$T/links" "$T/old")"
@@ -305,6 +312,16 @@ expect "app: features as at the start: nothing" "" "$(app_links_stale "$V" "oman
 expect "app: a feature not named is on" "Bridge, battery" "$(app_links_stale "$V" "omanotch=off" on)"
 mkdir -p "$T/older/logs"; echo "OmacVM: network: user" > "$T/older/logs/qemu.log"
 expect "app: an app from before the line: nothing" "" "$(app_links_stale "$T/older" "$fs" on)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID off, Touch ID port on, Mac input methods off" > "$V/logs/qemu.log"
+expect "app: mac-ime on, no port this start" "the Mac's input methods" "$(app_links_stale "$V" "mac-ime=on" on)"
+expect "app: mac-ime off, no port: nothing" "" "$(app_links_stale "$V" "mac-ime=off" on)$(app_links_stale "$V" "mac-ime=off" off)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on, Mac input methods on" > "$V/logs/qemu.log"
+expect "app: mac-ime off, port still there this start" "the Mac's input methods" "$(app_links_stale "$V" "mac-ime=off" off)"
+expect "app: mac-ime on with its port: nothing" "" "$(app_links_stale "$V" "mac-ime=on" on)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on" > "$V/logs/qemu.log"
+expect "app: mac-ime off, an app from before it: nothing" "" "$(app_links_stale "$V" "mac-ime=off" off)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on" \
+  "OmacVM: Mac links: Omanotch off, Gestures on, Bridge off, battery off, camera on" > "$V/logs/qemu.log"
 
 # apply's lines for a running app VM.
 ap=$(awk '/^  # The app reads them only when the VM starts/ {on = 1} on {print} on && /^  fi$/ {exit}' "$R/src/cmd/apply.sh")
@@ -397,6 +414,12 @@ grep -q 'env\["OMACVM_SLIRP_HOST_PORTS"\] = links.hostPorts' "$R/app/app/Sources
   grep -q 'if links.battery { startBattery() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   grep -q 'if links.camera { startCamera() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   echo "ok   Runner.swift follows MacLinks" || { echo "FAIL Runner.swift does not follow MacLinks"; fail=1; }
+# mac-ime: the port and QEMU's socket only with the record's mac-ime=on.
+[[ $(grep -c 'if links.macIME {' "$R/app/app/Sources/OmacVM/Runner.swift") -eq 2 ]] &&
+  grep -q 'a += MacIME.arguments(socket: q(c.imeSocket.path))' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  grep -q 'env\[MacIME.socketVariable\] = c.imeSocket.path' "$R/app/app/Sources/OmacVM/Runner.swift" &&
+  echo "ok   Runner.swift: the mac-ime port and socket only with it on" ||
+  { echo "FAIL Runner.swift: the mac-ime port or socket is not behind links.macIME"; fail=1; }
 
 # off_lines under set -e: taking out the file's last lines is no failure
 # (grep then finds nothing; the control centre's "bridge off" stopped there).

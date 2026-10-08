@@ -8,7 +8,7 @@
 #                    [--graphics opengl|vulkan]   (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, no-idle-lock, autologin, thp-kernel, battery, external-brightness,
-# control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id) with its defaults; a feature
+# control-centre, fast-network, chromium-video, vulkan, x86-apps, touch-id, mac-ime) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -158,6 +158,7 @@ esac
 # Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
 [[ $TYPE == app ]] || F[chromium-video]=off
 [[ $TYPE == app ]] || F[vulkan]=off
+[[ $TYPE == app ]] || F[mac-ime]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 [[ $TYPE == fusion ]] && FUSION_DNS=1
@@ -381,6 +382,16 @@ if want x86-apps; then
     "$R/x86/guest/install.sh" on || not_set_up x86-apps "x86 apps"
   else
     "$R/x86/guest/install.sh" off || not_set_up x86-apps "x86 apps (off)"
+  fi
+fi
+# The Mac's input methods (OmacVM.app): OmacVM's Fcitx5 module, built once in
+# the VM as a pacman package, and its port's rule. Off on the other routes.
+if want mac-ime; then
+  if [[ ${F[mac-ime]} == on ]]; then
+    log "the Mac's input methods (experimental; the first time a small Fcitx5 module builds)"
+    "$R/ime/guest/install.sh" "$U" on || not_set_up mac-ime "Mac input methods"
+  else
+    "$R/ime/guest/install.sh" "$U" off || not_set_up mac-ime "Mac input methods (off)"
   fi
 fi
 if ! want battery; then
