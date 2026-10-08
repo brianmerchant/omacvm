@@ -1,5 +1,6 @@
 #!/bin/bash
-LABEL=org.omacvm.gestures
+source "$(dirname "$0")/../../lib/labels.sh"
+LABEL=$(omacvm_label gestures)
 launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
 # Gone before anything resets its permissions (src/mac/uninstall.sh): a helper
 # from before 3.0.4 that lost Accessibility while it ran held the Mac's keys

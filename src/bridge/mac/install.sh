@@ -7,7 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 APP=build/OmacVMBridge.app
 if [[ ${1:-} == --prebuilt ]]; then APP=${2:?--prebuilt APP}; else ./build.sh; fi
-LABEL=org.omacvm.bridge
+source ../../lib/labels.sh   # after the cd above
+LABEL=$(omacvm_label bridge)
 PL=~/Library/LaunchAgents/$LABEL.plist
 launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"

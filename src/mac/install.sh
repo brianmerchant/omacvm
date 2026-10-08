@@ -148,17 +148,17 @@ fi
 # The token first: a Bridge starting without one makes its own, and two at
 # once could end up with the file holding another token than the Bridge.
 (( BRIDGE || GESTURES != -1 )) && bridge_token_ensure
-(( BRIDGE )) && install_app "OmacVM Bridge" org.omacvm.bridge bridge/mac OmacVMBridge.app
+(( BRIDGE )) && install_app "OmacVM Bridge" "$(omacvm_label bridge)" bridge/mac OmacVMBridge.app
 # Gestures lets a VM in only when its daemon proves it knows the Bridge's
 # token (made here when the Bridge is not installed).
 case $GESTURES in
-  1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac OmacVMGestures.app ;;
-  0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac OmacVMGestures.app --keys-only ;;
+  1) install_app "OmacVM Gestures" "$(omacvm_label gestures)" gestures/mac OmacVMGestures.app ;;
+  0) install_app "OmacVM Gestures" "$(omacvm_label gestures)" gestures/mac OmacVMGestures.app --keys-only ;;
 esac
-(( CLIP )) && install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
+(( CLIP )) && install_app "OmacVM clipboard" "$(omacvm_label clip-in)" clipboard/mac
 # Omanotch's own installer (it builds the app, or takes OmacVM.app's copy, and
 # starts it at login).
-(( NOTCH )) && install_app "Omanotch" ch.gillesgoetsch.omanotch omanotch/mac Omanotch.app
+(( NOTCH )) && install_app "Omanotch" "$(omacvm_label omanotch)" omanotch/mac Omanotch.app
 # The permissions macOS asks for now, once per app (they stay with later updates).
 if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " == *" OmacVM Bridge "* ]]; then
   printf '\n  \033[1mmacOS asks for permissions now (once): please allow them.\033[0m\n'

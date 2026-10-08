@@ -6,7 +6,8 @@
 # instead of building one here, which needs Xcode's Command Line Tools.
 set -euo pipefail
 cd "$(dirname "$0")"
-LABEL=ch.gillesgoetsch.omanotch
+source ../../lib/labels.sh   # after the cd above
+LABEL=$(omacvm_label omanotch)
 APP="$HOME/Applications/Omanotch.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 

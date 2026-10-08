@@ -6,6 +6,7 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools.sh"
 tools_path
 source "$(dirname "${BASH_SOURCE[0]}")/version.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/labels.sh"
 
 # Progress for the control centre's jobs (OMACVM_PROGRESS=json, set by the
 # Bridge): one JSON line per step, "step n of m". A command that runs another

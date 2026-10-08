@@ -105,6 +105,8 @@ json_out() {   # the collected rows as JSON
   printf '\n]}\n'
 }
 running() { launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running'; }
+# The helpers' LaunchAgent labels (org.omacvm.test.* for a test HOME: src/lib/labels.sh).
+L_BRIDGE=$(omacvm_label bridge) L_GESTURES=$(omacvm_label gestures) L_CLIP=$(omacvm_label clip-in)
 # The test identity (OMACVM_TEST_IDENTITY=1): its own helpers (started with open,
 # no LaunchAgent) on their own ports.
 BRIDGE_PORT=47831 GESTURES_PORT=47830
@@ -112,8 +114,8 @@ if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   BRIDGE_PORT=47931 GESTURES_PORT=47930
   running() {
     case $1 in
-      org.omacvm.bridge) pgrep -af "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
-      org.omacvm.gestures) pgrep -af "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
+      "$L_BRIDGE") pgrep -af "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
+      "$L_GESTURES") pgrep -af "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
       *) return 1 ;;
     esac
   }
@@ -258,7 +260,7 @@ fi
 
 FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
-  if running org.omacvm.bridge; then
+  if running "$L_BRIDGE"; then
     a=$(listeners "$BRIDGE_PORT")
     if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"
     elif [[ " $a " == *" $HOST "* ]]; then ok "Bridge" "listening on $a"
@@ -329,7 +331,7 @@ else skip "Bridge" "off (chosen at setup)"; fi
 # The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
 FEATURE=camera
 if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
-  running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
+  running "$L_BRIDGE" && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
     || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
 fi
 [[ $(feat camera off) == off ]] && skip "camera" "off for this VM (chosen at setup)"
@@ -508,7 +510,7 @@ FEATURE=gestures
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
-  if running org.omacvm.gestures; then
+  if running "$L_GESTURES"; then
     a=$(listeners "$GESTURES_PORT")
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
     # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
@@ -519,7 +521,7 @@ if [[ $GESTURES == on ]]; then
       (( ${r:-0} > ${c:-0} )) &&
         bad "Gestures for this VM" "refused: its trackpad daemon is from OmacVM 2.3 or older (omacvm update --vm \"$VM\")"
     fi
-    keysonly=$(launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -c -- '--keys-only')
+    keysonly=$(launchctl print "gui/$(id -u)/$L_GESTURES" 2>/dev/null | grep -c -- '--keys-only')
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
@@ -564,7 +566,7 @@ if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
     pid=$(app_pid_dir "$(app_dir "$VM")" 2>/dev/null)
     if [[ -n $pid ]] && ps -o args= -p "$pid" | grep -q 'name=org.omacvm.battery'; then ok "battery (Mac)" "OmacVM.app passes it (virtio port)"
     else bad "battery (Mac)" "this OmacVM.app does not pass the battery: omacvm update, then shut the VM down and start it again"; fi
-  elif ! running org.omacvm.bridge; then
+  elif ! running "$L_BRIDGE"; then
     bad "battery (Mac)" "OmacVM Bridge is not running: it serves the battery to $TYPE VMs (omacvm apply)"
   else
     T=$OMA_BRIDGE_SUPPORT/token b=""
@@ -588,7 +590,7 @@ if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null
 else ok "menu bar in full screen" "hidden by macOS"; fi
 case $TYPE in
 parallels)
-  running org.omacvm.clip-in && ok "clipboard VM -> Mac" "org.omacvm.clip-in" || bad "clipboard VM -> Mac" "org.omacvm.clip-in not running"
+  running "$L_CLIP" && ok "clipboard VM -> Mac" "$L_CLIP" || bad "clipboard VM -> Mac" "$L_CLIP not running"
   # Parallels keeps both settings in undocumented files: hints, not failures.
   parallels_sends_shortcuts && ok "Cmd+Space etc. to the VM" "Send macOS system shortcuts: Always" \
     || skip "Cmd+Space etc. to the VM" "set Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always" human
@@ -639,7 +641,7 @@ if [[ $(feat touch_id off) == on ]]; then
   tm=""
   if [[ -z $tk ]]; then tm="no VM name (--ip): the Mac keeps Touch ID keys by VM name (omacvm apply --vm NAME)"
   elif [[ ! -s $tk ]]; then tm="no Touch ID key for this VM on the Mac: omacvm apply --vm NAME makes it, or omacvm enable touch-id"
-  elif ! running org.omacvm.bridge; then tm="OmacVM Bridge is not running, and it asks the Mac's Touch ID: omacvm update"
+  elif ! running "$L_BRIDGE"; then tm="OmacVM Bridge is not running, and it asks the Mac's Touch ID: omacvm update"
   elif [[ $TYPE == app && ! -S $OMA_BRIDGE_SUPPORT/relay.sock ]]; then tm="OmacVM Bridge has no socket for OmacVM.app's requests: omacvm update"
   fi
   # The last request the Bridge logged for this VM (never what it was for).
