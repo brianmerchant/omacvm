@@ -79,7 +79,7 @@ src/tests/features-off.sh
 src/tests/app-storage.sh
 (cd app/app && swift run update-tests)
 src/bridge/mac/tests/run.sh && python3 src/release/manifest.py parts > /dev/null
-(cd src/control && python3 -m pytest -q tests)   # in a venv with textual==8.2.8 and pytest
+(cd src/control && python3 -m pytest -q tests)   # in a venv: pip install --no-deps src/control/vendor/*.whl; pip install pytest pyte
 src/tests/bench-docs.sh
 src/tests/app-idle.sh
 src/tests/app-battery.sh
