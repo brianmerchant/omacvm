@@ -100,7 +100,9 @@ src/release/release.sh X.Y.Z rollback
    more (the command line needs the signed feed; the Bridge its manifest).
 3. The release before gets its own signed feed, so apps see "up to date".
 4. `main`: `git revert -m 1 M` in a PR, so `omacvm update` brings the old
-   command line back. Or fix forward.
+   command line back to checkouts that follow `main`. Or fix forward.
+   `install.sh`'s checkout follows the release tags and never goes back: it
+   stays at X.Y.Z until X.Y.Z+1.
 5. Prebuilt: `gh release edit prebuilt-X.Y.Z --draft` hides the image.
 
 An app that updated itself to X.Y.Z (from 3.0.0 on) can go back with OmacVM › Go Back.

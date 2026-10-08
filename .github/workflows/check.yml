@@ -282,6 +282,9 @@ jobs:
       - name: An older omacvm never takes a newer VM back (version order, apply/enable/disable/update stop first)
         run: src/tests/version-guard.sh
 
+      - name: install.sh's checkout follows the releases, not a main behind them (#291)
+        run: src/tests/follow-release.sh
+
       - name: The test app's own omacvm run by hand is the test identity
         run: src/tests/app-cli-identity.sh
 
@@ -381,6 +384,9 @@ jobs:
 
       - name: A feature that is off is off on every route (VM side, checks, Mac side)
         run: src/tests/features-off.sh
+
+      - name: omacvm features' checklist keeps one line per row (pseudo-terminal, #292)
+        run: src/tests/features-checklist.sh
 
       - name: Guest check accepts NOTCH right above the built-in display (offline)
         run: src/tests/notch-check.sh
