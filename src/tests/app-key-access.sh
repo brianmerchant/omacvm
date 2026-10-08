@@ -62,7 +62,12 @@ hasnt "... not Input Monitoring" 'CGRequestListenEventAccess'
 hasnt "... nor its pane" 'Privacy_ListenEvent'
 has "the window checks control the computer" 'static var allowed: Bool { post }'
 src=$R/app/app/Sources/OmacVM/Views.swift
-has "... and only that (not Input Monitoring)" 'KeyNote.decide(allowedNow: allowed,'
+has "... and only that (not Input Monitoring)" 'KeyNote.decide(allowedNow: allowed || fresh(),'
+has "... asked again in a new process (macOS keeps a process's first answer)" '"--key-access"'
+src=$R/app/app/Sources/OmacVM/main.swift
+has "the new process asks control the computer" 'print(CGPreflightPostEventAccess() ? "1" : "0")'
+hasnt "... not Input Monitoring there either" 'CGPreflightListenEventAccess() ? "1"'
+src=$R/app/app/Sources/OmacVM/Views.swift
 has "a red note clears an old entry once by itself" 'KeyAccess.clearOldEntryOnce'
 has "Allow… looks again when it is done" 'KeyAccess.request { refreshKeyNote() }'
 exit $fail
