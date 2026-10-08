@@ -31,7 +31,9 @@ unset OMACVM_TEST_IDENTITY OMACVM_APP_ID
 D=$HOME/OmacVM/Work
 mkdir -p "$D/logs"
 : > "$D/disk.img"
-PORT=$((52000 + RANDOM % 900))
+# A free port (not a random one: a VM on this Mac or another copy of this test
+# on another CI runner may hold it, then the stand-in below cannot listen).
+PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 printf "NAME='Work'\nSSH_PORT=%s\n" "$PORT" > "$D/vm.env"
 QMAC=52:54:00:aa:bb:cc
 
