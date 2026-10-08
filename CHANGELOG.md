@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.9 (unreleased)
+## 3.0.9
 
 - Bridge: its media-key tap can no longer hold the Mac's keyboard and clicks (reported by
   @brianmerchant, #290). The tap now exists only while a VM is in front (not while the Mac sleeps
