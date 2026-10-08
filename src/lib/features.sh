@@ -164,7 +164,7 @@ feature_drift() {   # PROBE NAME REAL WHERE
   i=$(feature_index "$2") || return 0
   copy=$(sed -n "s/^OMACVM_FEATURE_$(tr - _ <<<"$2")=//p" <<<"$1" | tail -1)
   [[ ${FV[$i]} == "$3" && ( -z $copy || $copy == "$3" ) ]] && return 0
-  DRIFT+=("$2"$'\t'"$3"$'\t'"$4"$'\t'"$( [[ $3 == on ]] && echo off || echo on)$( [[ ${FV[$i]} == "$3" ]] && printf '\tcopy')")
+  DRIFT+=("$2"$'\t'"$3"$'\t'"$4"$'\t'"$( [[ $3 == on ]] && echo off || echo on)$( [[ ${FV[$i]} == "$3" ]] && printf '\tcopy' || true)")
   FV[$i]=$3
 }
 # feature_copy_only NAME: its DRIFT entry is only the VM's copy behind the record.

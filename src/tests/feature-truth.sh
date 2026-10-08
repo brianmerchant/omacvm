@@ -94,6 +94,10 @@ block=$(awk '/^drift_of\(\) \{/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/
 eval "$block"; FIXED="fixed the record"
 expect "features --json: fixed empty for a copy behind" "" "$(drift_of fast-network)"
 grep -q '"synced": %s' "$R/src/cmd/features.sh" || { echo "FAIL features.sh --json has synced"; fail=1; }
+# Under set -e (features.sh, check.sh): a record that was wrong does not end the run.
+expect "set -e: a wrong record goes on" "1 ok" "$( set -e; printf 'fast-network=off\n' > "$d/features"
+  features_read_env "OMACVM_FEATURE_fast_network=off"; features_read_record "$d"
+  features_real "OMACVM_FEATURE_fast_network=off" "$d"; echo "${#DRIFT[@]} ok" )"
 # The record itself wrong: still said (the switch flipped outside OmacVM).
 printf 'bridge=on fast-network=off\n' > "$d/features"
 features_read_env "OMACVM_FEATURE_fast_network=off"; features_read_record "$d"; features_real "OMACVM_FEATURE_fast_network=off" "$d"
