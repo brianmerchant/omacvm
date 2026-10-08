@@ -42,3 +42,15 @@ check and the Mac answers fill in afterwards.
 - Status glyphs are Nerd Font glyphs in theme colours, not emoji: ⚠️ with
   VS16 has different widths in Alacritty, Ghostty and Kitty and breaks the
   columns.
+
+## Update (3.0.6)
+
+Textual no longer comes from pacman's `python-textual`. A VM whose package
+list is older than the mirrors (not updated for a few days) got a 404 for
+every file, and OmacVM never runs `pacman -Sy` alone (a partial update), so
+the control centre stayed plain text after an update (the Mac mini,
+2026-10-08). OmacVM ships Textual 8.2.8 and its pure-Python dependencies as
+wheels in `src/control/vendor` (MIT, BSD and PSF licences, about 2.5 MB,
+checked against `SHA256SUMS`); `omacvm_cc/vendor.py` unpacks them once into
+the desktop user's cache, where Python keeps its compiled files. CI runs the
+control centre's tests with the same wheels.

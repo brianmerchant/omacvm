@@ -235,11 +235,15 @@ def main(args: list) -> int:
         return plain.status(False)
     if not here and os.environ.get("OMACVM_WINDOW") != "1" and open_window():
         return 0
+    # OmacVM's own Textual (src/control/vendor), not pacman's: the version the
+    # tests ran with, and nothing a stale package list can keep out.
+    from omacvm_cc import vendor
+    why = vendor.use()
     try:
         from omacvm_cc import tui
-    except Exception:   # Textual missing or broken: the same table as text, never an empty window
+    except Exception as e:   # Textual missing or broken: the same table as text, never an empty window
         from omacvm_cc import plain
-        rc = plain.status(False, fallback=True)
+        rc = plain.status(False, fallback=True, why=why or f"{type(e).__name__}: {e}")
         wait_in_window()
         return rc
     try:

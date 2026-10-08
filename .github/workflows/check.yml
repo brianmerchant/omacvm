@@ -75,7 +75,9 @@ jobs:
       - name: Control centre tests (state, redaction, Textual Pilot against a fake Mac)
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest pyte
+          # Textual as the VM gets it: OmacVM's own wheels (src/control/vendor).
+          "$RUNNER_TEMP/venv/bin/pip" install -q --no-deps src/control/vendor/*.whl
+          "$RUNNER_TEMP/venv/bin/pip" install -q pytest pyte
           cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
 
       - name: Bridge's control centre and Touch ID requests (allow-list, limits, manifest signatures, LocalAuthentication mocked)
@@ -217,6 +219,9 @@ jobs:
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 
+      - name: Prebuilt image disk is packed sparse (holes for zeros, owner root)
+        run: src/tests/prebuilt-sparse.sh
+
       - name: Prebuilt images for Parallels, UTM and Fusion are checked (untrusted input)
         run: |
           command -v zstd >/dev/null || brew install zstd
@@ -282,6 +287,9 @@ jobs:
       - name: Feature state truth (the record against the fast network and SDDM autologin)
         run: src/tests/feature-truth.sh
 
+      - name: After an update from an older OmacVM (Textual without pacman, the Vulkan driver's words)
+        run: src/tests/upgrade-path.sh
+
       - name: A feature switch runs only its parts (no Hyprland reload for the rest)
         run: src/tests/feature-switch.sh
 
@@ -305,6 +313,9 @@ jobs:
 
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
+
+      - name: Stale-frame check reads the guest's scanout and finds changed pixels below the bar (#167)
+        run: src/tests/stale-frames-diff.sh
 
       - name: An app VM's address comes from its running QEMU (fast network turned off while it runs)
         run: src/tests/app-vm-address.sh

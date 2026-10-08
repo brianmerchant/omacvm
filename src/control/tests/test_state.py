@@ -238,10 +238,10 @@ def test_graphics_row_says_next_start():
 
 def test_graphics_row_vulkan_waiting_for_driver():
     st = {"graphics": {"graphics": "vulkan", "next_start": "opengl", "waiting_for_driver": True,
-                       "summary": "Vulkan (driver not built yet: runs on OpenGL until the next apply)",
-                       "this_start": "vulkan -> opengl (driver not built yet: runs on OpenGL until the next apply)"}}
+                       "summary": "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))",
+                       "this_start": "vulkan -> opengl (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))"}}
     r = S.graphics_row(st, "app")
-    assert r.note == "Vulkan (driver not built yet: runs on OpenGL until the next apply)"
+    assert r.note == "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))"
     # A Mac whose omacvm has no summary yet still says why.
     del st["graphics"]["summary"]
     assert "driver not built yet" in S.graphics_row(st, "app").note
@@ -301,18 +301,29 @@ def test_gpu_memory_row_explains_vm_vs_graphics_memory():
     assert "Graphics memory comes on top" in r.feature.summary
 
 
-@pytest.mark.parametrize("pressure", ["warn", "critical"])
-def test_gpu_memory_row_warns_under_pressure(pressure):
-    r = S.gpu_memory_row(dict(GM, pressure=pressure), "app")
+def test_gpu_memory_row_warn_alone_works():
+    """macOS's "warn" alone: a 16 GB Mac with an 8 GB VM sits there for good
+    (the Mac mini, 2026-10-08: 34 % free, nothing refused or lost). Works,
+    with a calm note; not "needs you"."""
+    r = S.gpu_memory_row(dict(GM, pressure="warn"), "app")
+    assert r.status is S.Status.WORKS
+    assert r.note == "1.1 GB (peak 1.6 GB); macOS memory is tight, the VM gives back what it can"
+    assert "short of memory" not in r.note and "close apps" not in r.note
+
+
+def test_gpu_memory_row_needs_you_when_critical():
+    r = S.gpu_memory_row(dict(GM, pressure="critical"), "app")
     assert r.status is S.Status.NEEDS_PERSON
-    assert r.note.startswith("1.1 GB (peak 1.6 GB); macOS is short of memory")
+    assert r.note.startswith("1.1 GB (peak 1.6 GB); macOS is out of memory: close apps")
 
 
-def test_gpu_memory_row_warns_after_refusals():
+def test_gpu_memory_row_warns_after_refusals_or_losses():
     r = S.gpu_memory_row(dict(GM, refused=3), "app")
     assert r.status is S.Status.NEEDS_PERSON and "3 refused this run" in r.note
+    r = S.gpu_memory_row(dict(GM, lost=2, pressure="warn"), "app")
+    assert r.status is S.Status.NEEDS_PERSON and "2 lost this run" in r.note
     both = S.gpu_memory_row(dict(GM, refused=1, pressure="critical"), "app")
-    assert "short of memory" in both.note and "1 refused" in both.note
+    assert "out of memory" in both.note and "1 refused" in both.note
 
 
 def test_gpu_memory_row_unknowns():

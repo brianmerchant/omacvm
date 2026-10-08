@@ -39,6 +39,14 @@ each file taken from them:
   `app/fonts/OFL.txt`: the font of the Touch ID panel (`app/fonts`, bundled
   unchanged in OmacVM.app's Contents/Resources/fonts).
 - **Omanotch** (`src/omanotch/`) has its own README and licence.
+- **Textual** and what it needs (`src/control/vendor/`, the VM's control
+  centre), unchanged wheels from PyPI, each with its licence inside
+  (`*.dist-info/licenses/`): Textual 8.2.8 and Rich 15.0.0 (MIT, (c) Will
+  McGugan), Pygments 2.21.0 (BSD-2-Clause, (c) the Pygments authors),
+  markdown-it-py 4.2.0 (MIT, (c) ExecutableBookProject), mdit-py-plugins
+  0.6.1 and mdurl 0.1.2 (MIT, (c) Vitaly Puzrin, Alex Kocharin and others),
+  linkify-it-py 2.2.0 (MIT, (c) tsutsu3), platformdirs 4.12.4 (MIT, (c) the
+  platformdirs developers), typing_extensions 4.16.0 (PSF-2.0).
 - In the VM, nothing else is bundled: Arch Linux ARM and Omarchy
   (omarchy-mac) come from their own servers, v4l2loopback too (built in the
   VM by DKMS, GPL-2.0), each package under its own licence.

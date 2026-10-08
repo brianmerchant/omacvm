@@ -518,8 +518,8 @@ def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = Non
     note = f"{title}: {now}" if now and now == nxt else f"{title}: {nxt} from the next start"
     if g.get("waiting_for_driver") is True:
         # Vulkan chosen, no Venus driver for the Mac's pages yet: OpenGL until
-        # an apply (or Space on this row while the VM runs) builds it.
-        note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until the next apply)")
+        # r on this row (or an apply) builds it; the Mac's summary says so.
+        note = str(g.get("summary") or "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))")
     elif str(g.get("summary") or "").startswith(GRAPHICS_DID_NOT_START):
         # A Vulkan start showed nothing on this Mac; the app started it on
         # OpenGL and stays there until Vulkan is chosen again (Space here).
@@ -575,14 +575,25 @@ def gpu_memory_row(answer: dict | None, vm_type: str, supported: bool | None = T
     now = _count(answer.get("in_use_mb"))
     peak = max(_count(answer.get("peak_mb")), now)
     note = f"{gb(now)} (peak {gb(peak)})"
+    # macOS's "warn" alone is no problem of the VM's: a Mac that gives a VM
+    # half its memory sits there for good (a 16 GB Mac mini with an 8 GB VM,
+    # 34 % free, 2026-10-08), and the app already hands the VM's cache back.
+    # Something for the person only once macOS is critical or graphics
+    # memory was refused or lost.
     warn = []
-    if answer.get("pressure") in ("warn", "critical"):
-        warn.append("macOS is short of memory: close apps on the Mac or in the VM")
+    if answer.get("pressure") == "critical":
+        warn.append("macOS is out of memory: close apps on the Mac or in the VM")
     refused = _count(answer.get("refused"))
     if refused:
         warn.append(f"{refused} refused this run: an app that draws nothing needs a restart")
+    lost = _count(answer.get("lost"))
+    if lost:
+        warn.append(f"{lost} lost this run: an app that went black needs a restart")
     if warn:
         return Row(GPU_MEMORY_FEATURE, True, Status.NEEDS_PERSON, "; ".join([note] + warn), checks=mine)
+    if answer.get("pressure") == "warn":
+        return Row(GPU_MEMORY_FEATURE, True, Status.WORKS,
+                   f"{note}; macOS memory is tight, the VM gives back what it can", checks=mine)
     return Row(GPU_MEMORY_FEATURE, True, Status.WORKS, note, checks=mine)
 
 

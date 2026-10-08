@@ -68,4 +68,13 @@ expect "helper of camera on Parallels: none" "" "$(helper_of camera)"
 TYPE=utm
 expect "helper of camera on UTM" "OmacVM Bridge" "$(helper_of camera)"
 expect "helper of scroll-momentum" "OmacVM Gestures" "$(helper_of scroll-momentum)"
+# A repair forces its helper's build, but the control centre's does not force
+# the Bridge (it restarted the Bridge under the job, 2026-10-08): it is built
+# only when missing, stopped or out of date.
+eval "$(sed -n '/^repair_forces() {/,/^}/p' "$R/src/cmd/apply.sh")"
+expect "repair of control-centre: no forced Bridge" "" "$(repair_forces control-centre)"
+expect "repair of bridge: the Bridge" "OmacVM Bridge" "$(repair_forces bridge)"
+expect "repair of scroll-momentum: Gestures" "OmacVM Gestures" "$(repair_forces scroll-momentum)"
+grep -q 'h=$(repair_forces "$f"); \[\[ -n $h \]\] && args+=(--force-app "$h")' "$R/src/cmd/apply.sh" ||
+  { echo "FAIL apply.sh forces helpers through repair_forces"; fail=1; }
 exit $fail

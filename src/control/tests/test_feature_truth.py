@@ -116,6 +116,32 @@ def test_controller_takes_the_macs_fixed_state(features):
     assert c.fixed_of("fast-network").endswith("fixed the record") and c.fixed_of("bridge") == ""
 
 
+
+def test_controller_takes_a_synced_state_without_a_note(features):
+    """The app's Fast network switch wrote the record; only this VM's copy
+    was behind (the Mac mini, 2026-10-08). The Mac's state, and no "OmacVM's
+    record said off: fixed": the record was right."""
+    from omacvm_cc.controller import Controller
+
+    c = Controller.__new__(Controller)
+
+    class Loc:
+        pass
+    c.local = Loc()
+    c.local.features, c.local.vm_type = features, "app"
+    c.local.on = {f.name: False for f in features}
+    c.local.installed_parts = lambda: {}
+    c.mac_status = {"features": [
+        {"name": "fast-network", "on": True, "available": True, "reason": "", "fixed": "", "synced": True},
+        {"name": "bridge", "on": True, "available": True, "reason": "", "fixed": "", "synced": False}]}
+    c.vm_checks, c.jobs, c.hello, c.mac_error, c.gpu_memory, c.mouse_swipe = [], {}, None, None, None, None
+    c.offer = lambda: {}
+    c.gpu_memory_supported = lambda: None
+    rows = {r.feature.name: r for r in c.rows(with_updates=False)}
+    assert rows["fast-network"].on is True and "record said" not in rows["fast-network"].note
+    assert rows["bridge"].on is False
+    assert c.fixed_of("fast-network") == ""
+
 # ---- tags in words ----
 
 def test_every_tag_shown_has_words(features):

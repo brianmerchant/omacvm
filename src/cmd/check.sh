@@ -194,8 +194,10 @@ if [[ -n $(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe") ]]; then
     elif features_record_fix "$IP" "$rd"; then fx="fixed the record"; else fx="could not fix the VM's copy (/etc/omacvm/env)"; fi
     for d in "${DRIFT[@]}"; do
       FEATURE=${d%%$'\t'*}
-      if [[ $fx == fixed* ]]; then ok "record" "$(DRIFT=("$d"); features_drift_lines "$fx")"
-      else warn "record" "$(DRIFT=("$d"); features_drift_lines "$fx")"; fi
+      dl=$(DRIFT=("$d"); features_drift_lines "$fx")
+      [[ -n $dl ]] || continue   # only the VM's copy was behind the record: fixed, nothing to say
+      if [[ $fx == fixed* ]]; then ok "record" "$dl"
+      else warn "record" "$dl"; fi
     done
     COPY=("${FV[@]}"); REC=("${FV[@]}")
   fi
