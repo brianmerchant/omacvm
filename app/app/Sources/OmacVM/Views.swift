@@ -542,6 +542,7 @@ struct ReadyView: View {
                 }
                 Section {
                     fastNetwork
+                    MacIMERow(state: state)
                     USBRow(folder: state.config.folder)
                     macFolderRows
                 }

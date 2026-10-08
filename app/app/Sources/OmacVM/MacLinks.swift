@@ -1,4 +1,5 @@
 import Foundation
+import OmacVMFeatures
 
 /// What of the Mac one VM may use, from its features: `omacvm apply` writes
 /// them into the VM's folder (`features`: "bridge=on gestures=off ...").
@@ -18,6 +19,11 @@ struct MacLinks: Equatable {
     /// from 3.0.4 every VM gets the org.omacvm.auth port and its relay
     /// (Runner), and the Bridge answers "off" while it is off.
     var touchID = false
+    /// The Mac's input methods (mac-ime): off unless the file says mac-ime=on.
+    /// Only then does this start get the org.omacvm.ime port and QEMU's
+    /// window code its socket (MacIME); turned on while the VM runs, it
+    /// waits for the next start.
+    var macIME = false
 
     init() {}
 
@@ -34,6 +40,7 @@ struct MacLinks: Equatable {
         battery = on["battery"] ?? true
         camera = on["camera"] ?? true
         touchID = on["touch-id"] ?? false
+        macIME = MacIME.isOn(features: text)
     }
 
     static func load(folder: URL) -> MacLinks {
@@ -60,10 +67,11 @@ struct MacLinks: Equatable {
     /// For qemu.log, which omacvm check reads: "Omanotch on, Gestures off, ...".
     /// "Touch ID port on": this start has the port whatever the setting, so
     /// turning Touch ID on needs no restart (src/lib/app.sh app_links_stale;
-    /// an older omacvm still reads "Touch ID on|off" as the port).
+    /// an older omacvm still reads "Touch ID on|off" as the port). "Mac input
+    /// methods on": this start has the org.omacvm.ime port.
     var record: String {
         [("Omanotch", omanotch), ("Gestures", gestures), ("Bridge", bridge), ("battery", battery), ("camera", camera),
-         ("Touch ID", touchID), ("Touch ID port", true)]
+         ("Touch ID", touchID), ("Touch ID port", true), ("Mac input methods", macIME)]
             .map { "\($0.0) \($0.1 ? "on" : "off")" }.joined(separator: ", ")
     }
 }

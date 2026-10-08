@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import OmacVMFeatures
 import OmacVMAuth
 import OmacVMNet
 import OmacVMUpdate
@@ -133,6 +134,12 @@ final class Runner {
         // device; the VM finds it by its name.
         a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
+        // The Mac's input methods (mac-ime, experimental; docs/adr/0042): only
+        // for a VM whose record says on, so every other VM starts as before.
+        // QEMU's window code serves it (OMACVM_IME_SOCKET below).
+        if links.macIME {
+            a += MacIME.arguments(socket: q(c.imeSocket.path))
+        }
         // The fast network: an empty PCIe slot for the user network's NIC
         // should vmnet fail while the VM runs (useUserNetwork). Last,
         // so no other device moves.
@@ -358,6 +365,11 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // And to the VM's Fcitx5 module over this one (mac-ime on only).
+        if links.macIME {
+            try? FileManager.default.removeItem(at: c.imeSocket)
+            env[MacIME.socketVariable] = c.imeSocket.path
+        }
         // "Features…" in QEMU's app menu asks this app to open the control
         // centre in the VM (ControlCentreRoute).
         let route = ControlCentreRoute(agentPath: c.agentSocket.path, vmName: c.name) { [weak self] line in
