@@ -18,6 +18,12 @@ in more words.
   screen once instead of on every frame (Hyprland 41 % to 11 % of a vCPU while
   picking), and big texture uploads from the VM take half the main loop's
   time.
+- Graphics: browser pages that change shader values before every draw (WebGL
+  Aquarium) are faster on the Mac's OpenGL. The values of a whole batch go to
+  the GPU in one upload; before, each draw set them with its own OpenGL call,
+  and Apple's OpenGL then redid its draw setup. Aquarium with 30,000 fish on a
+  MacBook Pro M4 Max: 32.9 to 41.8 frames a second
+  (`OMACVM_VIRGL_CONST_UBO=0` turns it off).
 
 ## 3.0.6
 
