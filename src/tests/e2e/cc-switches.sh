@@ -532,7 +532,7 @@ start_pass() {   # start the VM, the control centre's driver into it, the featur
 }
 
 baseline() {   # TAG: the control centre comes up linked; no row fails; the Mac reaches the VM
-  local s bad
+  local s bad env
   CC_UP=0
   cc start 120; s=$CCS
   if ccok; then
@@ -542,8 +542,13 @@ import json, re, sys
 o = json.load(open(sys.argv[1]))
 if "\uf00c" not in o["screen"] and "\uf10c" not in o["screen"]:
     print("no status marks on the screen (ASCII?): failing rows cannot be read"); sys.exit(0)
-print(" | ".join(l.strip(" │")[:90] for l in o["screen"].splitlines() if re.search("|", l))[:600])' "$CCJ")
-    [[ -z $bad ]] && res "baseline-$1" ok "$s" || res "baseline-$1" FAIL "rows failing or needing a person: $bad"
+bad = [l.strip(" \u2502")[:90] for l in o["screen"].splitlines() if re.search("\uf00d|\uf071", l)]
+# Not the product: macOS short of memory (other work on this test Mac) is said on Graphics memory.
+env = [b for b in bad if "Graphics memory" in b and "short of memory" in b]
+print(" | ".join(b for b in bad if b not in env)[:600])
+print(" ".join(env)[:200])' "$CCJ")
+    env=$(sed -n 2p <<<"$bad"); bad=$(sed -n 1p <<<"$bad")
+    [[ -z $bad ]] && res "baseline-$1" ok "$s${env:+; this Mac (not the product): $env}" || res "baseline-$1" FAIL "rows failing or needing a person: $bad"
   else
     res "baseline-$1" FAIL "$s"
   fi
@@ -642,7 +647,8 @@ step_fastnet() {   # the fast network: while the VM runs, and after a restart
     bmark
     if restart_vm; then
       net=$(head -1 "$VMD/logs/network" 2>/dev/null)
-      wantnet=$([[ $to == on ]] && echo vmnet || echo user)
+      # The VM's network record (FastNetwork.swift): "vmnet", or "slirp off" when it is off by choice.
+      wantnet=$([[ $to == on ]] && echo vmnet || echo "slirp off")
       why=""
       [[ $net == *"$wantnet"* ]] || why+="logs/network says '$net', want $wantnet; "
       [[ $(netcheck) == 200 ]] || why+="no internet in the VM; "
@@ -673,8 +679,9 @@ step_touchid() {   # Touch ID: the test Bridge's stand-in answers (README)
     echo yes > "$BDIR/touchid-test"
     # The first request right after a Bridge restart (enable touch-id restarts the installed Bridge).
     bmark; bridge_start; cc sudo yes 60; s=$CCS
-    b=$(bsince | grep -E 'touchid|unknown-vm|409' | tail -3 | tr '\n' '|')
-    ccok && [[ $b != *unknown-vm* && $b != *" 409"* ]] && res touchid-after-bridge-restart ok "${s:0:120}" \
+    # Its Touch ID answers (other requests may get a 409 while the new Bridge lists the VMs: not this check).
+    b=$(bsince | grep -E 'touchid' | tail -3 | tr '\n' '|')
+    ccok && [[ $b == *"sudo yes"* && $b != *unknown-vm* && $b != *" 409"* ]] && res touchid-after-bridge-restart ok "${s:0:120}" \
       || res touchid-after-bridge-restart FAIL "$s; Bridge: $b"
   else
     res touchid-restart FAIL "the VM or its control centre did not come back after Touch ID on: $(vminfo)"
@@ -746,9 +753,11 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
       for k in 1 2; do
         lbl=${sw:-$([[ -s $VMD/fast-network ]] && echo "Turn Off…" || echo "Turn On…")}
         "$OUT/ax" "$p" press "$lbl" > "$OUT/${PFX}ax-fastnet-$k.txt" 2>&1
-        # The switch works off the main thread (the service check reads QEMU's signature): until the file follows.
+        # The switch works off the main thread (the service check reads QEMU's signature): until the file
+        # follows and the switch takes presses again (it is disabled meanwhile).
         for ((i = 0; i < 20; i++)); do [[ $([[ -s $VMD/fast-network ]] && echo on || echo off) != "$was" ]] && break; sleep 1; done
-        sleep 2
+        for ((i = 0; i < 30; i++)); do "$OUT/ax" "$p" has "$lbl" >/dev/null 2>&1 && break; sleep 1; done
+        sleep 1
         now=$([[ -s $VMD/fast-network ]] && echo on || echo off)
         [[ $now != "$was" && $(mac_feature fast-network) == "$now" ]] && res "window-fastnet-$now" ok "$lbl -> the VM's fast-network file and record: $now" \
           || res "window-fastnet-$k" FAIL "$lbl: file $now, record $(mac_feature fast-network) ($(cat "$OUT/${PFX}ax-fastnet-$k.txt"); $("$OUT/ax" "$p" text | grep -iE 'fast|password|could' | head -2 | tr '\n' '|'))"

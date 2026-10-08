@@ -245,6 +245,9 @@ def cmd_start(a: list[str]) -> None:
             seconds=first, screen=text)
     # The Mac's checks fill the rows a little later: wait until no row says "asking the Mac".
     watch(lambda s: "asking the Mac" not in s and "checking" not in s, 30)
+    # It opens with the checks it saved last time ("last checked N min ago", maybe from before a
+    # switch); its own come a few seconds later: rows are read from those.
+    watch(lambda s: "last checked" not in s, 90)
     text = screen()
     out(ok and "Mac linked" in text, seconds=first, linked="Mac linked" in text, rows=[t for _, t in table(text)],
         trouble=seen, screen=text)
@@ -277,7 +280,11 @@ def cmd_toggle(a: list[str]) -> None:
     if not started:
         out(False, error="nothing happened after Space (no job, no change in 30 s)", before=before, asked=question,
             trouble=seen1, screen=screen())
-    done, text, seen2 = watch(lambda s: state_of(title, s)["on"] == want and state_of(title, s)["status"] not in ("working", None), secs)
+    # The control centre off closes it: nothing more to read once it quit.
+    done, text, seen2 = watch(lambda s: not alive() or state_of(title, s)["on"] == want and state_of(title, s)["status"] not in ("working", None), secs)
+    if not alive():
+        out(want == "off" and "control centre" in title, before=before, gone="the control centre quit", asked=question,
+            seconds=round(time.monotonic() - t0, 1), trouble=seen1 + [x for x in seen2 if x not in seen1], screen=text)
     after = state_of(title, text)
     first = None
     if done and after["status"] in ("failing", "needs you"):
