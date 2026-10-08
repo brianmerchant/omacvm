@@ -76,18 +76,18 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
          qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, true);
          qkbd_state_key_event(kbd, OMACVM_GLOBE_LINUX_KEY, false);
      }
-@@ -2033,6 +2044,10 @@
- {
+@@ -2034,6 +2045,10 @@
      if (omacvm_key_for_macos(event)) {
          return false;
-+    }
+     }
 +    /* OmacVM mac-ime: keys for the Mac's input method (off: not even looked at). */
 +    if (omacvm_ime_on && omacvm_ime_key(event)) {
 +        return true;
-     }
++    }
      return bool_with_bql(^{
          return [self handleEventLocked:event];
-@@ -8465,8 +8480,842 @@
+     });
+@@ -8465,8 +8480,855 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -325,8 +325,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                        "go to the VM as keys");
 +        }
 +    }
-+}
-+
+ }
+ 
 +static void omacvm_ime_source_changed(void)
 +{
 +    TISInputSourceRef src = TISCopyCurrentKeyboardInputSource();
@@ -340,6 +340,12 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                      CFEqual(type, kTISTypeKeyboardInputMethodWithoutModes));
 +        sid = idr ? [[(NSString *)idr copy] autorelease] : nil;
 +        CFRelease(src);
++    }
++    if (omacvm_ime_debug) {
++        NSWindow *k = [NSApp keyWindow];
++        fprintf(stderr, "omacvm-ime: input source %s (input method %d; key window %s, ours %d; marked %d)\n",
++                sid ? [sid UTF8String] : "?", im, k ? [NSStringFromClass([k class]) UTF8String] : "none",
++                omacvm_is_our_window(k), omacvm_ime_marked != nil);
 +    }
 +    if (sid && ![sid isEqualToString:omacvm_ime_source]) {
 +        [omacvm_ime_source_before release];
@@ -511,8 +517,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    r = [[cocoaView window] frame];
 +    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
- }
- 
++}
++
 +/*
 + * An input context remembers its own input source and selects it again when
 + * it is activated (AppKit's per-document input source). Ours is activated
@@ -797,7 +803,14 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                                      NSWindowDidBecomeKeyNotification,
 +                                      NSWindowDidResignKeyNotification]) {
 +        [nc addObserverForName:name object:nil queue:[NSOperationQueue mainQueue]
-+                    usingBlock:^(NSNotification *note) { omacvm_ime_update(); }];
++                    usingBlock:^(NSNotification *note) {
++            if (omacvm_ime_debug && [[note object] isKindOfClass:[NSWindow class]]) {
++                NSWindow *w = [note object];
++                fprintf(stderr, "omacvm-ime: %s: %s level %ld ours %d\n", [[note name] UTF8String],
++                        [NSStringFromClass([w class]) UTF8String], (long)[w level], omacvm_is_our_window(w));
++            }
++            omacvm_ime_update();
++        }];
 +    }
 +    /* Changed in System Settings meanwhile: read again when the VM comes back. */
 +    [nc addObserverForName:NSApplicationDidBecomeActiveNotification object:nil
@@ -930,7 +943,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9639,7 @@
+@@ -8790,6 +9652,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
