@@ -762,3 +762,22 @@ Findings 7, 11, 12, 13, 16 and 17 are notes for developers now:
 - **Where:** `app/app/Sources/OmacVM/DriveWatch.swift`, `Runner.driveLost`,
   `AppState.drivesChanged` and `UnavailableView`; test
   `src/tests/app-drive-drop.sh`.
+
+## 31. app: the VM crawls while its window is out of sight
+
+- **Symptom:** a job in the VM (a build, a download, an update) almost
+  stops while the Mac's screen is locked, the VM's full screen is on
+  another Space, or its window is minimized or covered; it runs at full
+  speed again once the window shows. Up to 3.0.4.
+- **Cause:** App Nap. macOS slows an app none of whose windows can be seen:
+  every QEMU thread, the vCPUs too, drops to background priority. Measured
+  on an M4 Max with the screen locked, 4 busy vCPUs: 2-20 % of the speed
+  (10-100 instead of ~550 million loops/s in the VM). UTM's and Parallels' VM
+  processes are never napped.
+- **Fix (3.0.5):** QEMU's window process tells macOS the VM is working
+  (an `NSProcessInfo` activity that still lets the idle Mac sleep), so it
+  is never napped. QEMU's log says "OmacVM: App Nap: off while the VM runs".
+  `OMACVM_APP_NAP=1` in QEMU's environment allows App Nap again (tests).
+  Before: keep the VM's window visible while a job runs.
+- **Where:** `app/runtime/patches/omacvm-cocoa-no-app-nap.patch`; test
+  `src/tests/app-nap.sh` (`--live PID` checks a running VM's vCPU threads).

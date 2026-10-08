@@ -85,6 +85,11 @@ in more words.
   as it was. `omacvm apply` moves a VM's existing proxy over (from its
   next login); `omacvm-proxy-env` in the VM and `omacvm check` say what a
   login gets.
+- OmacVM.app: a VM no longer crawls while its window is out of sight (the
+  Mac's screen locked, the VM's full screen on another Space, the window
+  minimized or covered). macOS's App Nap slowed every QEMU thread to
+  background priority, and a job in the VM ran at 2-20 % of its speed.
+  QEMU now tells macOS the VM is working; the idle Mac still sleeps.
 
 ## 3.0.4
 

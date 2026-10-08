@@ -835,6 +835,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-tap-permissio
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-borderless-no-rim.patch"
 "$native_dir/Tests/display/test-borderless-rim.sh" "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: a borderless window keeps its shadow and macOS 26's rim (test-borderless-rim.sh)"
+# OmacVM: no App Nap while the VM runs: with its window out of sight (screen
+# locked, another Space) macOS slowed the whole VM to a few percent.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.patch"
+grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
+  die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
