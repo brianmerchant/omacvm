@@ -47,6 +47,8 @@ has "the globe key: mac-ime only when on" "$(cat "$src")" '!(omacvm_ime_on && om
 has "the view's input context: none while off" "$(body "$src" '- (NSTextInputContext *)inputContext')" 'return omacvm_ime_on && omacvm_ime_active(&omacvm_ime) ? omacvm_ime_ctx : nil;'
 [[ $(grep -A1 -xF '    omacvm_globe_init();' "$src" | tail -1) == '    omacvm_ime_init();' ]] &&
   echo "ok   started with the display (after the globe key)" || { echo "FAIL omacvm_ime_init() is not called after omacvm_globe_init()"; fail=1; }
-has "the Mac never reads the guest's text" "$(body "$src" '- (NSAttributedString *)attributedSubstringForProposedRange:')" 'return nil;'
+as=$(body "$src" '- (NSAttributedString *)attributedSubstringForProposedRange:')
+has "the input method reads back only its own marked text" "$as" 'if (!omacvm_ime_marked || range.location == NSNotFound) {'
+has "... never more than it" "$as" 'r = NSIntersectionRange(range, NSMakeRange(0, [omacvm_ime_marked length]));'
 has "the guest's caret is checked before use" "$(cat "$src")" 'omacvm_ime_rect_ok(x, y, w, h)'
 exit $fail

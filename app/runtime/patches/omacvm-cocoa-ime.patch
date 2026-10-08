@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return bool_with_bql(^{
          return [self handleEventLocked:event];
      });
-@@ -8465,8 +8480,866 @@
+@@ -8465,8 +8480,881 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -200,8 +200,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        omacvm_ime_write(@{ @"t": @"commit", @"text": [text substringWithRange:NSMakeRange(i, end - i)] });
 +        i = end;
 +    }
-+}
-+
+ }
+ 
 +/* Code points before UTF-16 index i of s. */
 +static NSUInteger omacvm_ime_cp(NSString *s, NSUInteger i)
 +{
@@ -522,8 +522,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    r = [[cocoaView window] frame];
 +    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
- }
- 
++}
++
 +/*
 + * An input context remembers its own input source and selects it again when
 + * it is activated (AppKit's per-document input source). Ours is activated
@@ -924,11 +924,26 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    return @[NSMarkedClauseSegmentAttributeName, NSUnderlineStyleAttributeName];
 +}
 +
-+/* The Mac never reads the guest's text. */
++/*
++ * The input method reads back only what it marked itself (Kotoeri needs that
++ * to convert); the guest's own text is never known here, so never read.
++ */
 +- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
 +                                                actualRange:(NSRangePointer)actualRange
 +{
-+    return nil;
++    NSRange r;
++
++    if (!omacvm_ime_marked || range.location == NSNotFound) {
++        return nil;
++    }
++    r = NSIntersectionRange(range, NSMakeRange(0, [omacvm_ime_marked length]));
++    if (!r.length && range.location != [omacvm_ime_marked length]) {
++        return nil;
++    }
++    if (actualRange) {
++        *actualRange = r;
++    }
++    return [[[NSAttributedString alloc] initWithString:[omacvm_ime_marked substringWithRange:r]] autorelease];
 +}
 +
 +- (NSUInteger)characterIndexForPoint:(NSPoint)point
@@ -954,7 +969,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9663,7 @@
+@@ -8790,6 +9678,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
