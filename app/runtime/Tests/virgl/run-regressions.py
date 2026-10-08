@@ -236,7 +236,8 @@ run_api_test("test-vertex-binds", oracle=True, env={"OMACVM_VIRGL_VERTEX_CACHE":
 run_write_guard()
 run_test("test-index-range-cache", "vrend_renderer.c", oracle=True, sources=("virglrenderer.c",),
          envs=(None, {"OMACVM_VIRGL_INDEX_RANGE_CACHE": "0"}))
-# Shader constants through uniform buffers (virgl-const-uniform-buffer.patch), and as
-# uniforms as before (OMACVM_VIRGL_CONST_UBO=0).
+# Shader constants through uniform buffers (virgl-const-uniform-buffer.patch): vertex
+# shaders through a window and an index, a range per draw (=1), uniforms as before (=0).
 run_api_test("test-const-ubo", oracle=True)
+run_api_test("test-const-ubo", oracle=True, env={"OMACVM_VIRGL_CONST_UBO": "1"})
 run_api_test("test-const-ubo", oracle=True, env={"OMACVM_VIRGL_CONST_UBO": "0"})

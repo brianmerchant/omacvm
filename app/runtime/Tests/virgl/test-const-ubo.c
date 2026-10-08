@@ -22,9 +22,14 @@
  * 10 a constants command with no data (zeros), and a submit whose last constants command
  *    runs past the buffer's end: the draws before it are drawn;
  * 11 white-box (OMACVM_VIRGL_CACHE_STATS=1, set here): 4 constants commands and 4 draws in
- *    one submit are one upload and 4 binds, nothing one by one; the program has the block
- *    "vsconstblk" (OMACVM_VIRGL_CONST_UBO=0: no upload, no bind, a plain uniform).
- * Run as is and with OMACVM_VIRGL_CONST_UBO=0.
+ *    one submit are one upload, then one window bind and 4 index values for the vertex
+ *    shader (OMACVM_VIRGL_CONST_UBO=1: 4 range binds; =0: none, a plain uniform), nothing
+ *    one by one; the program has the block "vsconstblk";
+ * 12 800 draws with 8 vec4s each in one submit: more constants than one window holds, so
+ *    the window moves on; every draw still reads its own;
+ * 13 a vertex shader with 16 inputs (no location left for the index) keeps a range per
+ *    draw.
+ * Run as is, with OMACVM_VIRGL_CONST_UBO=1 and with OMACVM_VIRGL_CONST_UBO=0.
  * Usage: test-const-ubo [case] */
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
@@ -48,12 +53,13 @@ enum { RED = 0xff0000ff, GREEN = 0xff00ff00, BLUE = 0xffff0000, YELLOW = 0xff00f
 /* resources of a context: handle = 1000 * ctx + R_* */
 enum { R_RT = 1, R_POS, R_UBO, R_COUNT };
 /* objects */
-enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, FS_VARYING, FS_CONST, FS_MUL,
+enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, VS_IN16, FS_VARYING, FS_CONST, FS_MUL,
        VE = 20, SURFACE = 40, BLEND, RS };
 
 static CGLContextObj main_ctx;
 static int failures;
-static int const_ubo = 1;
+/* 0: uniforms, 1: a range per draw, 2: vertex shaders index a window */
+static int const_ubo = 2;
 
 static void check(int ok, const char *what)
 {
@@ -62,7 +68,9 @@ static void check(int ok, const char *what)
 }
 
 /* The renderer's constant buffer totals, from its log line when a context ends. */
-static struct totals { unsigned long long uploads, bytes, binds, own; } last;
+static struct totals {
+   unsigned long long uploads, bytes, binds, own, index, windows;
+} last;
 
 static void log_cb(enum virgl_log_level_flags level, const char *message, void *data)
 {
@@ -70,8 +78,9 @@ static void log_cb(enum virgl_log_level_flags level, const char *message, void *
    struct totals t;
    const char *p = strstr(message, "constant buffers (");
    if (p && (p = strstr(p, "totals uploads")) &&
-       sscanf(p, "totals uploads %llu upload-bytes %llu binds %llu own-uploads %llu",
-              &t.uploads, &t.bytes, &t.binds, &t.own) == 4)
+       sscanf(p, "totals uploads %llu upload-bytes %llu binds %llu own-uploads %llu "
+              "index-draws %llu window-binds %llu",
+              &t.uploads, &t.bytes, &t.binds, &t.own, &t.index, &t.windows) == 6)
       last = t;
    else if (level >= VIRGL_LOG_LEVEL_WARNING || strstr(message, "shader constants:"))
       fprintf(stderr, "virgl: %s", message);
@@ -114,7 +123,7 @@ static struct virgl_renderer_callbacks callbacks = {
 };
 
 struct cmds {
-   uint32_t dw[8192];
+   uint32_t dw[65536];
    unsigned n;
 };
 
@@ -298,6 +307,19 @@ static const char *vs_plain =
    "  1: MOV OUT[1], IMM[0]\n"
    "  2: END\n";
 
+/* 16 inputs, the colour from vec4 2 of 4 */
+static const char *vs_inputs16 =
+   "VERT\n"
+   "DCL IN[0]\n" "DCL IN[1]\n" "DCL IN[2]\n" "DCL IN[3]\n" "DCL IN[4]\n" "DCL IN[5]\n"
+   "DCL IN[6]\n" "DCL IN[7]\n" "DCL IN[8]\n" "DCL IN[9]\n" "DCL IN[10]\n" "DCL IN[11]\n"
+   "DCL IN[12]\n" "DCL IN[13]\n" "DCL IN[14]\n" "DCL IN[15]\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL OUT[1], GENERIC[0]\n"
+   "DCL CONST[0][0..3]\n"
+   "  0: MOV OUT[0], IN[0]\n"
+   "  1: MOV OUT[1], CONST[0][2]\n"
+   "  2: END\n";
+
 static const char *fs_varying =
    "FRAG\n"
    "DCL IN[0], GENERIC[0], PERSPECTIVE\n"
@@ -389,6 +411,7 @@ static void emit_state(struct cmds *c, int ctx)
    emit_shader(c, VS_INDEX, TEST_SHADER_VERTEX, vs_index);
    emit_shader(c, VS_UBO, TEST_SHADER_VERTEX, vs_ubo);
    emit_shader(c, VS_PLAIN, TEST_SHADER_VERTEX, vs_plain);
+   emit_shader(c, VS_IN16, TEST_SHADER_VERTEX, vs_inputs16);
    emit_shader(c, FS_VARYING, TEST_SHADER_FRAGMENT, fs_varying);
    emit_shader(c, FS_CONST, TEST_SHADER_FRAGMENT, fs_const);
    emit_shader(c, FS_MUL, TEST_SHADER_FRAGMENT, fs_mul);
@@ -716,13 +739,62 @@ static void check_counts(void)
    unsigned long long uploads = last.uploads - totals_before.uploads;
    unsigned long long binds = last.binds - totals_before.binds;
    unsigned long long own = last.own - totals_before.own;
-   char text[160];
-   snprintf(text, sizeof(text), "4 constants commands and 4 draws: %llu uploads, %llu binds, "
-            "%llu one by one", uploads, binds, own);
-   if (const_ubo)
-      check(uploads == 1 && binds == 4 && own == 0, text);
+   unsigned long long index = last.index - totals_before.index;
+   unsigned long long windows = last.windows - totals_before.windows;
+   char text[200];
+   snprintf(text, sizeof(text), "4 constants commands and 4 draws: %llu uploads, %llu range binds, "
+            "%llu index draws in %llu windows, %llu one by one", uploads, binds, index, windows, own);
+   if (const_ubo == 2)
+      check(uploads == 1 && binds == 0 && index == 4 && windows == 1 && own == 0, text);
+   else if (const_ubo == 1)
+      check(uploads == 1 && binds == 4 && index == 0 && windows == 0 && own == 0, text);
    else
-      check(uploads == 0 && binds == 0 && own == 0, text);
+      check(uploads == 0 && binds == 0 && index == 0 && own == 0, text);
+}
+
+static void case_many(struct cmds *c, int ctx)
+{
+   emit_bind_shaders(c, VS_CONST8, FS_VARYING);
+   for (int k = 0; k < 800; k++) {
+      emit_stripe(c, k % 4);
+      emit_colour_consts(c, TEST_SHADER_VERTEX, 8, 6, colours[(k / 4 + k) % 4]);
+      emit_draw(c);
+   }
+   check(submit(ctx, c) == 0, "800 draws with their own 8 vec4s, one submit");
+   uint32_t want[4];
+   for (int s = 0; s < 4; s++)
+      want[s] = colours[(796 / 4 + 796 + s) % 4];
+   check_stripes(ctx, 4, want, "the last 4 of 800 draws");
+}
+
+static void check_many_counts(void)
+{
+   unsigned long long index = last.index - totals_before.index;
+   unsigned long long windows = last.windows - totals_before.windows;
+   char text[160];
+   snprintf(text, sizeof(text), "800 draws: %llu index draws in %llu windows", index, windows);
+   check(const_ubo == 2 ? index == 800 && windows >= 2 : index == 0, text);
+}
+
+static void case_inputs16(struct cmds *c, int ctx)
+{
+   emit_bind_shaders(c, VS_IN16, FS_VARYING);
+   for (int s = 0; s < 4; s++) {
+      emit_stripe(c, s);
+      emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, colours[s]);
+      emit_draw(c);
+   }
+   check(submit(ctx, c) == 0, "a vertex shader with 16 inputs");
+   check_stripes(ctx, 4, colours, "16 inputs: a range per draw");
+}
+
+static void check_inputs16_counts(void)
+{
+   unsigned long long binds = last.binds - totals_before.binds;
+   unsigned long long index = last.index - totals_before.index;
+   char text[160];
+   snprintf(text, sizeof(text), "16 inputs: %llu range binds, %llu index draws", binds, index);
+   check(const_ubo ? binds == 4 && index == 0 : binds == 0, text);
 }
 
 static void check_stale_counts(void)
@@ -735,7 +807,7 @@ static void check_stale_counts(void)
 
 static void run_case(int n)
 {
-   struct cmds c;
+   static struct cmds c;
    int ctx = n;
    printf("case %d\n", n);
    c.n = 0;
@@ -752,12 +824,18 @@ static void run_case(int n)
    case 9: case_ubo(&c, ctx); break;
    case 10: case_odd(&c, ctx); break;
    case 11: case_counts(&c, ctx); break;
+   case 12: case_many(&c, ctx); break;
+   case 13: case_inputs16(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 4)
       check_stale_counts();
    if (n == 11)
       check_counts();
+   if (n == 12)
+      check_many_counts();
+   if (n == 13)
+      check_inputs16_counts();
    totals_before = last;
 }
 
@@ -767,8 +845,9 @@ int main(int argc, char **argv)
 
    setvbuf(stdout, NULL, _IONBF, 0);
    const char *env = getenv("OMACVM_VIRGL_CONST_UBO");
-   const_ubo = !(env && !strcmp(env, "0"));
-   printf("shader constants in uniform buffers: %s\n", const_ubo ? "on" : "off");
+   const_ubo = env && !strcmp(env, "0") ? 0 : env && !strcmp(env, "1") ? 1 : 2;
+   printf("shader constants: %s\n", const_ubo == 2 ? "uniform buffers, vertex window index" :
+          const_ubo == 1 ? "uniform buffers, a range per draw" : "uniforms");
    setenv("OMACVM_VIRGL_CACHE_STATS", "1", 1);
    setenv("VIRGL_USE_INTEGER", "1", 1);
 
@@ -785,7 +864,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 11; n++)
+   for (int n = 1; n <= 13; n++)
       if (!only || only == n)
          run_case(n);
 
