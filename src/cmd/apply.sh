@@ -191,6 +191,15 @@ helper_of() {
   esac
   return 0
 }
+# repair_forces FEATURE: the Mac helper a repair of it builds again even when
+# it is up to date (empty: none). The control centre's repair is about the
+# VM side: its Bridge is built only when it is missing, stopped or out of
+# date (src/mac/install.sh). Forced, it restarted the Bridge in the middle of
+# the job that the control centre was asking it about (2026-10-08: "OmacVM
+# Bridge does not answer" while the Bridge row said works).
+repair_forces() {
+  [[ $1 == control-centre ]] || helper_of "$1"
+}
 if (( MAC )); then
   step mac "the Mac side"
   # OmacVM.app's apply (apply-vm.sh, or the app's omacvm the Bridge runs):
@@ -199,7 +208,7 @@ if (( MAC )); then
   args=(--quiet)
   # A repair builds that feature's Mac helper again (the others stay as they are).
   for f in ${REINSTALL[@]+"${REINSTALL[@]}"}; do
-    h=$(helper_of "$f"); [[ -n $h ]] && args+=(--force-app "$h")
+    h=$(repair_forces "$f"); [[ -n $h ]] && args+=(--force-app "$h")
   done
   # What this run needs from the Mac: the helpers of the features it turns on
   # or repairs. A helper that failed to build with these sources before is
