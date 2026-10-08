@@ -95,7 +95,8 @@ fake_app() {   # VERSION
   plutil -insert CFBundleIdentifier -string org.omacvm.app.test "$a/Contents/Info.plist"
   plutil -insert CFBundleShortVersionString -string "$1" "$a/Contents/Info.plist"
 }
-D=$H/OmacVM/Test; mkdir -p "$D"
+# The test identity's VMs folder without a setting (never ~/OmacVM: app_vms_root).
+D="$H/OmacVM Test VMs/Test"; mkdir -p "$D"
 : > "$D/disk.img"
 printf "NAME='Test'\nKEYBOARD='us'\n" > "$D/vm.env"
 FEATS="fast-network=on control-centre=on"

@@ -300,6 +300,12 @@ jobs:
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
+      - name: An unknown VM name never falls back to another VM; the test app never uses the installed app's VMs
+        run: src/tests/app-vm-pick.sh
+
+      - name: e2e harnesses put the test app's settings back and start only test VMs
+        run: src/tests/e2e-test-vms.sh
+
       - name: An app VM's address comes from its running QEMU (fast network turned off while it runs)
         run: src/tests/app-vm-address.sh
 

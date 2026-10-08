@@ -274,6 +274,7 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>OmacVMCommit</key><string>$COMMIT</string>
   <key>OmacVMControlRun</key><true/>
+  <key>OmacVMTestVMs</key><true/>
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>

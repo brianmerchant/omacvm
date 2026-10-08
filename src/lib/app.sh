@@ -54,10 +54,18 @@ APP_BUNDLE_ID=org.omacvm.app
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,
 # else ~/OmacVM (the app makes it on first use), unless that name is taken by
 # something else: then the old place, ~/Library/Application Support/OmacVM/VMs.
+# The test identity never uses a folder of the installed app (TestVMs in
+# app/app/Sources/OmacVM/VMPick.swift): its own setting unless that is one,
+# else ~/OmacVM Test VMs.
 APP_VMS_OLD="Library/Application Support/OmacVM/VMs"
+APP_TEST_VMS="OmacVM Test VMs"
 app_vms_root() {
   local r new=$HOME/OmacVM
   r=$(defaults read "$APP_ID" vmsRoot 2>/dev/null)
+  if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+    [[ -n $r ]] && ! app_prod_dir "${r%/}" && { echo "${r%/}"; return; }
+    echo "$HOME/$APP_TEST_VMS"; return
+  fi
   [[ -n $r ]] && { echo "${r%/}"; return; }
   app_vms_ours "$new" && { echo "$new"; return; }
   # Taken by something else (a file, ~/omacvm on a case-insensitive drive).
@@ -75,11 +83,43 @@ app_vms_roots() {
   for ((i = 0; i < 64; i++)); do
     r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
     r=${r%/}
-    [[ -n $r ]] && ! app_same_dir "$r" "${seen[@]}" && { echo "$r"; seen+=("$r"); }
+    [[ -n $r ]] && ! app_same_dir "$r" "${seen[@]}" || continue
+    [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && app_prod_dir "$r" && continue
+    echo "$r"; seen+=("$r")
   done
   # The old place holds the installed app's VMs from 2.9 and older: not the test identity's.
   [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && return
   app_same_dir "$HOME/$APP_VMS_OLD" "${seen[@]}" || echo "$HOME/$APP_VMS_OLD"
+}
+
+# app_prod_dir DIR: DIR is (in) a VMs folder of the installed app
+# (org.omacvm.app): its setting, its older folders, ~/OmacVM, the old place.
+# By name in any case (macOS drives mostly ignore it) and on disk.
+app_prod_dir() {
+  local d p i r roots=() up h
+  p=$(defaults export "${OMACVM_PROD_APP_ID:-org.omacvm.app}" - 2>/dev/null)
+  r=$(plutil -extract vmsRoot raw -o - - <<<"$p" 2>/dev/null) && [[ -n $r ]] && roots+=("${r%/}")
+  for ((i = 0; i < 64; i++)); do
+    r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
+    [[ -n $r ]] && roots+=("${r%/}")
+  done
+  roots+=("$HOME/OmacVM" "$HOME/$APP_VMS_OLD")
+  # The account's own home too, when HOME is another folder.
+  h=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')
+  [[ -n $h && $h != "$HOME" ]] && roots+=("$h/OmacVM" "$h/$APP_VMS_OLD")
+  d=$(printf '%s' "${1%/}" | tr '[:upper:]' '[:lower:]')
+  for r in "${roots[@]}"; do
+    r=$(printf '%s' "$r" | tr '[:upper:]' '[:lower:]')
+    [[ $d == "$r" || $d == "$r"/* ]] && return 0
+  done
+  # The same folder under another name (a link, a firmlink): DIR or a folder above it.
+  up=${1%/}
+  while [[ -n $up ]]; do
+    for r in "${roots[@]}"; do [[ -e $up && $up -ef $r ]] && return 0; done
+    [[ $up == */* ]] || break
+    up=${up%/*}
+  done
+  return 1
 }
 
 # app_same_dir DIR DIR...: DIR is one of the others, by name or as the same
@@ -310,7 +350,8 @@ app_other_running() {   # NAME -> another app VM that runs (the app runs one at 
 app_start() {
   # -n: a new launcher passes the request on when one already runs. Only the
   # app app_boot_app allows: never any copy LaunchServices knows (open -b can
-  # pick an old one), never one older than the VM.
+  # pick an old one, or the installed OmacVM for the test identity), never one
+  # older than the VM.
   local a
   a=$(app_boot_app "$1") || return 1
   open -n "$a" --args --start --vm "$1" || return 1
@@ -318,12 +359,24 @@ app_start() {
 }
 
 # app_boot_app NAME: the app that may start that VM (app_bundle's), or why
-# not on stderr (status 1): no app, or one older than the OmacVM the VM has
+# not on stderr (status 1): no app, a test app from before 3.0.6 (the test
+# identity), or one older than the OmacVM the VM has
 # (its folder's omacvm-version, written by omacvm apply). An older app would
 # run the VM with older Mac links and helpers than its OmacVM expects (#233).
 app_boot_app() {
   local a av d v=""
-  a=$(app_bundle) || { echo "omacvm: no OmacVM.app here to start '$1' (~/Applications, /Applications): install it, or start the VM yourself" >&2; return 1; }
+  if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
+    a=$(app_bundle) || { echo "omacvm: no OmacVM Test.app here (in ~/Applications, /Applications or running this omacvm): '$1' not started" >&2; return 1; }
+    # Only a test app that keeps to its own VMs folder (OmacVMTestVMs in its
+    # Info.plist, 3.0.6). An older one looks in ~/OmacVM and, not finding
+    # NAME, started the person's own VM.
+    if [[ $(defaults read "$a/Contents/Info" OmacVMTestVMs 2>/dev/null) != 1 ]]; then
+      echo "omacvm: $a is a test app from before 3.0.6 (it may start another VM for a name it does not find): build it again; '$1' not started" >&2
+      return 1
+    fi
+  else
+    a=$(app_bundle) || { echo "omacvm: no OmacVM.app here to start '$1' (~/Applications, /Applications): install it, or start the VM yourself" >&2; return 1; }
+  fi
   av=$(app_version "$a") || av=
   d=$(app_dir "$1") && v=$(head -1 "$d/omacvm-version" 2>/dev/null | tr -cd '0-9A-Za-z.+-' | cut -c1-40)
   if [[ -n $v ]] && { [[ -z $av ]] || app_version_lt "$av" "$v"; }; then

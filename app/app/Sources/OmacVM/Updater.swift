@@ -771,7 +771,10 @@ final class Updater: ObservableObject {
         // Test builds answer it with OMACVM_RESTART_FORCE (1: force, else OK).
         let force: Bool
         if let hook = TestHooks.value("OMACVM_RESTART_FORCE", bundleID: bundleID) {
-            force = hook == "1"
+            // Never forces off a VM outside this test build's own VMs folder.
+            let why = Paths.hookProblem(runningVM()?.folder)
+            if let why { log("OMACVM_RESTART_FORCE refused: \(why)") }
+            force = hook == "1" && why == nil
         } else {
             NSApp.activate()
             force = Self.shutdownTimeoutAlert().runModal() == .alertSecondButtonReturn

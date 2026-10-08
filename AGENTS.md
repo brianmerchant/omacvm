@@ -489,6 +489,15 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   grant, not the Terminal's); small tools without a bundle run as children of your shell (the Terminal's grants).
   Never `src/mac/install.sh` from a test: that installs over the user's helpers. The test app's own
   `Contents/Resources/omacvm/omacvm` (and its VM scripts) run by hand is the test identity too (src/lib/identity.sh).
+  Its VMs folder is its own `vmsRoot` (`defaults write org.omacvm.app.test vmsRoot DIR`), else
+  `~/OmacVM Test VMs`; never `~/OmacVM`, the old hidden place or another folder of the installed app (a setting
+  that names one is not used: `TestVMs` in `VMPick.swift`, `app_vms_root` in `src/lib/app.sh`). `--vm NAME`
+  that is not there starts nothing. No test build (any non-release bundle id) starts, updates or resizes a VM of
+  the installed app, and it hands a start only to its own copy; `app_start` with the test identity needs a test app
+  with `OmacVMTestVMs` (build-app.sh) and never opens the installed app by bundle id. Destructive test hooks (`OMACVM_TEST_DISK_GB`, `OMACVM_RESTART_FORCE`,
+  `--update-restart`) act only on a VM directly in the build's own `vmsRoot`. e2e harnesses source
+  `src/tests/e2e/test-vms.sh`: `e2e_settings_save`/`_restore` for the settings they change, `e2e_vm_guard`
+  before every start.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
   `journalctl --user -u omacvm-bridge-osd` (and `-u omacvm-bridge-events`, the shared event stream), `journalctl -u omacvm-gestures`,
   Omarchy shell `/run/user/1000/quickshell/by-id/*/log.log`.

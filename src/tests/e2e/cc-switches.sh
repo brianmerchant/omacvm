@@ -225,7 +225,9 @@ codesign --verify --deep --strict "$APP" 2>/dev/null && res app ok "$(plist "$AP
 TESTED_COMMIT=$(plist "$APP" OmacVMCommit); TESTED_VERSION=$(plist "$APP" CFBundleShortVersionString)
 OLDROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null)
 if [[ -n $ROOTARG ]]; then mkdir -p "$ROOTARG"; ROOTARG=$(cd "$ROOTARG" && pwd); defaults write "$APPID" vmsRoot "$ROOTARG"; fi
-ROOT=$(defaults read "$APPID" vmsRoot 2>/dev/null || echo "$HOME/OmacVM")
+# The test app's own VMs folder, never the installed app's (test-vms.sh; the
+# test app does not use ~/OmacVM either: TestVMs in VMPick.swift).
+ROOT=$(source "$HERE/test-vms.sh" && e2e_vms_root "$APPID") || die "no test VMs folder: pass --root DIR or set $APPID vmsRoot"
 VMD=$ROOT/$VM
 
 # ---- tools ----
@@ -306,6 +308,8 @@ bridge_start() {   # the test Bridge with its log here (as src/mac/install.sh st
 start_vm() {
   local i
   for ((i = 0; i < 60; i++)); do [[ -z $(qemu_pid) ]] && break; sleep 1; done
+  # Before every start: VM is a test VM in the test app's own VMs folder (test-vms.sh).
+  (source "$HERE/test-vms.sh" && e2e_vm_guard "$APPID" "$VM") >/dev/null || return 1
   # The VM's clipboard on a pasteboard of its own, never the Mac's (STANDARDS 25).
   local hide=()
   (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1 --env OMACVM_BACKGROUND=1)
