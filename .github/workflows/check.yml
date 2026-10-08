@@ -188,6 +188,9 @@ jobs:
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
+      - name: Two builds at once (build-live.sh waits for the other one's work folder)
+        run: src/tests/build-live-lock.sh
+
       - name: The control centre opened from the Mac (the VM's script, a made-up Hyprland)
         run: src/tests/cc-open.sh
       - name: omacvm check's media keys line (normal Bridge log lines are not failures)
