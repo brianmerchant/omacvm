@@ -110,6 +110,15 @@ elif [[ $mon == 1160x768* ]]; then bad "display" "$mon: still the firmware mode 
 else ok "display" "$mon"; fi
 bg=$H/.local/state/omarchy/current/background
 if [[ -L $bg && ! -e $bg ]]; then bad "desktop background" "$(readlink "$bg") is missing: omacvm apply, then log in again"; fi
+# Omarchy's default keyring: without one Chromium asks for a keyring password.
+# The one gnome-keyring takes: named in "default", else "login" (as
+# default-keyring.sh; the Mac sends this file alone, over SSH).
+kd=$H/.local/share/keyrings; kr=login
+[[ -s $kd/default ]] && kr=$(head -1 "$kd/default")
+if [[ $kr =~ ^[A-Za-z0-9_.-]+$ && -f $kd/$kr.keyring ]]; then ok "keyring" "$kr (default)"
+elif compgen -G "$kd/*.keyring" >/dev/null; then
+  bad "keyring" "none is the default: apps like Chromium ask for a keyring password (pick one in Passwords and Keys)" human
+else bad "keyring" "none: Chromium asks for a keyring password at its first start; omacvm apply makes Omarchy's default keyring"; fi
 if [[ $TYPE == app ]]; then
   # Which UEFI firmware OmacVM.app started the VM with (SMBIOS BIOS version).
   fw=$(cat /sys/class/dmi/id/bios_version 2>/dev/null)
@@ -280,7 +289,8 @@ if [[ $TYPE == parallels ]]; then
   if compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then skip "battery" "Parallels gives the VM the Mac's battery itself"
   else skip "battery" "none: this Mac has no battery (on a MacBook Parallels passes it itself)"; fi
 elif [[ $BATTERY == on ]]; then
-  if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
+  if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then
+    ok "battery module" "omacvm_battery $(cat /sys/module/omacvm_battery/version 2>/dev/null) loaded"
   else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
   # Every kernel that boots must have it (DKMS builds it with each kernel's headers).
   for k in /usr/lib/modules/*; do k=${k##*/}
@@ -299,6 +309,17 @@ elif [[ $BATTERY == on ]]; then
   if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
   elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update$(restart_hint))"
   else bad "battery in UPower" "no BAT0$(restart_hint)"; fi
+  # Watts and time left need the Mac's current (module 1.1.0, Mac side 3.0.6):
+  # without it UPower guesses watts from charge steps, and the guess is noise.
+  if [[ $st == charging || $st == discharging ]]; then
+    if w=$(cat /sys/class/power_supply/BAT0/power_now 2>/dev/null); then
+      ok "battery watts" "$(awk -v w="$w" 'BEGIN { printf "%.1f W", w / 1000000 }') $st (the Mac's)"
+    elif [[ -e /sys/class/power_supply/BAT0/power_now ]]; then
+      # Not a restart matter: the Mac's side is older than 3.0.6.
+      if [[ $TYPE == app ]]; then bad "battery watts" "OmacVM.app sends no current: update the app"
+      else bad "battery watts" "the Bridge sends no current: omacvm update on the Mac"; fi
+    else bad "battery watts" "the module is older than 1.1.0: omacvm apply, or reboot"; fi
+  fi
   if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
     ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
   else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi

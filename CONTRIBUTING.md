@@ -63,13 +63,14 @@ src/tests/vm-names.sh
 src/tests/proxy.sh
 src/tests/mac-install.sh
 src/tests/release-keys.sh && src/tests/release-script.sh
-src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh && src/tests/build-ctrlc.sh
+src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh && src/tests/build-ctrlc.sh && src/tests/build-space.sh
 src/net/mac/test.sh
 src/gestures/mac/test.sh
 src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
 src/tests/venus-driver.sh
 src/tests/vulkan-feature.sh && src/tests/venus-build-tools.sh && src/tests/graphics-setting.sh && src/tests/pkg-safe.sh
 src/tests/app-paths.sh
+src/tests/ci-app-build.sh
 app/runtime/Tests/display/test-pointer-guard.sh
 app/runtime/Tests/display/test-pointer-start.sh
 src/tests/app-fullscreen-space.sh
@@ -86,6 +87,7 @@ python3 src/app/guest/tests/test_omacvm_displays.py
 python3 src/app/guest/tests/test_idle_waits.py
 python3 src/camera/guest/tests/test_frames.py
 src/tests/audio-timing.sh
+src/tests/app-nap.sh
 ```
 
 `src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to

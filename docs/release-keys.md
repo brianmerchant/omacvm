@@ -132,6 +132,13 @@ example an app that is not a published release, or a fake app signed with
 someone else's Developer ID, it trusts only that exact build of the QEMU
 (its cdhash), as for an app built from source.
 
+"The QEMU" means OmacVM's QEMU identifier, `org.omacvm.app.qemu`. Installed
+for the test app (OmacVM Test.app, `build-app.sh --test-identity`), whose
+QEMU is `org.omacvm.app.test.qemu`, it takes both identifiers of that team,
+so the next test build needs no new password and OmacVM.app of the same
+team is served too. An install for OmacVM.app keeps taking only
+`org.omacvm.app.qemu`. No other identifier gets team trust.
+
 The root daemon itself comes from the app (signed and built with it) only
 in the same two cases: a team the signed feed lists, or the app's own copy
 of the script. For any other app the script builds the daemon from its own

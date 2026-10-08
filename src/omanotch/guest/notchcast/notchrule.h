@@ -127,4 +127,34 @@ static inline void geom_line(char *out, size_t size, const char *l, const char *
     snprintf(out, size, "%s %s %s %s\n", *l ? l : "0", *r ? r : "0", *strip ? strip : "0", *bar ? bar : "0");
 }
 
+// /run/omacvm/host.env (what OmacVM.app tells the VM at start): how the
+// guest's own cursor goes while the pointer is on the strip.
+//  - HOST_CURSOR_STAYS (OMACVM_HWCURSOR=1): the Mac's cursor shows the
+//    guest's pointer, so there is only one cursor: never hidden, never moved.
+//  - HOST_CURSOR_PARKED (OMACVM_NOTCHPOINTER=1): the app moves the guest's
+//    pointer up into NOTCH (out of sight) in the same moment the Mac's
+//    pointer leaves for the strip, and back with the next motion over the
+//    VM. Hiding it through Hyprland's cursor:invisible lagged by its tick
+//    (85-540 ms): two arrows on the way up, none on the way back. Never
+//    moved; hidden only when it did not get to NOTCH (notchcast checks).
+//  - HOST_CURSOR_HIDES: hidden for the strip, shown again at the exit point
+//    (Parallels, UTM, Fusion, older apps).
+enum { HOST_CURSOR_HIDES = 0, HOST_CURSOR_STAYS = 1, HOST_CURSOR_PARKED = 2 };
+
+static inline int host_env_cursor(FILE *f) {
+    char line[128];
+    int hw = 0, parked = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!strcmp(line, "OMACVM_HWCURSOR=1")) hw = 1;
+        if (!strcmp(line, "OMACVM_NOTCHPOINTER=1")) parked = 1;
+    }
+    return hw ? HOST_CURSOR_STAYS : parked ? HOST_CURSOR_PARKED : HOST_CURSOR_HIDES;
+}
+
+// The guest's pointer (cx, cy) is on NOTCH (x, y, w, h: logical px).
+static inline int pointer_on_box(double cx, double cy, double x, double y, double w, double h) {
+    return w > 0 && h > 0 && cx >= x && cx < x + w && cy >= y && cy < y + h;
+}
+
 #endif

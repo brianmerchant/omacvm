@@ -58,12 +58,18 @@ expect "no VMs folder given: the Mac's" "$HOME/Library/Caches/omacvm" \
 
 # Another build running: downloads it may read stay. Not one this script
 # started (its own children are its own), so through a shell that exits.
+# others_building sees only this run's stand-ins (named under $T): a second
+# copy of this test (another CI runner on the same Mac) or a real build would
+# count too.
+ps() {
+  if [[ $* == *args=* ]]; then command ps "$@" | awk -v t="$T/" 'index($0, t)'; else command ps "$@"; fi
+}
 fake_build() {
-  /bin/bash -c '(exec -a "/bin/bash /x/create-vm.sh /y/Omarchy" sleep 30) >/dev/null 2>&1 & echo $!'
+  T=$T /bin/bash -c '(exec -a "/bin/bash $T/x/create-vm.sh $T/y/Omarchy" sleep 30) >/dev/null 2>&1 & echo $!'
   sleep 0.3
 }
 expect "no other build" 1 "$(others_building; echo $?)"
-( exec -a "/bin/bash /x/create-vm.sh /y/Mine" sleep 30 ) & mine=$!
+( exec -a "/bin/bash $T/x/create-vm.sh $T/y/Mine" sleep 30 ) & mine=$!
 sleep 0.3
 expect "a build this script started is its own" 1 "$(others_building; echo $?)"
 kill "$mine"; wait "$mine" 2>/dev/null || true

@@ -1,10 +1,13 @@
 #!/bin/bash
 # VMware Fusion guest specifics. Runs as root in the VM:
-#   install.sh <desktop-user> <WxH@Hz: the Mac's display>
+#   install.sh <desktop-user> <WxH@Hz: the Mac's display> [SCALE]
+# SCALE: a new VM's display scale, the Mac display's (2 on Retina).
 set -euo pipefail
-U=${1:?usage: install.sh <desktop-user> <WxH@Hz>}
-MODE=${2:?usage: install.sh <desktop-user> <WxH@Hz>}
+U=${1:?usage: install.sh <desktop-user> <WxH@Hz> [SCALE]}
+MODE=${2:?usage: install.sh <desktop-user> <WxH@Hz> [SCALE]}
+DSCALE=${3:-}
 [[ $MODE =~ ^[0-9]+x[0-9]+(@[0-9.]+)?$ ]] || { echo "install.sh: --display WxH@Hz, not '$MODE'" >&2; exit 2; }
+[[ -z $DSCALE || $DSCALE =~ ^[1-4](\.[0-9]+)?$ ]] || { echo "install.sh: scale 1 to 4, not '$DSCALE'" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 H=$(getent passwd "$U" | cut -d: -f6)
 
@@ -39,7 +42,7 @@ HOOK
 # screen, the window size in a window) to vmwgfx; omacvm-fusion-displays puts
 # Hyprland's monitors where it says. monitors.lua starts every output at its
 # preferred mode, the Mac's display mode until the layout arrives. Scale: what
-# Omarchy's scaling menu chose, else 2 on a Retina-size display.
+# Omarchy's scaling menu chose, else the Mac display's (SCALE), else 2.
 "$here/build-open-vm-tools.sh" "$U"
 install -m644 "$here/omacvm-fusion-displays.service" /etc/systemd/user/omacvm-fusion-displays.service
 systemctl --global disable omacvm-fusion-displays.service >/dev/null 2>&1 || true   # older versions: every user
@@ -90,11 +93,19 @@ M=$H/.config/hypr/monitors.lua
 # reloads on every write.
 tmp=$(mktemp "$M.XXXXXX")
 # Ours already: only the first mode changes, the rest stays as you left it.
+# A new VM from a prebuilt image is ours too, with the scale of the Mac the
+# image was made on: SCALE (only given for a new VM) replaces it.
 if head -1 "$M" 2>/dev/null | grep -q '^-- OmacVM, VMware Fusion'; then
-  sed "s|^\(hl.monitor({ output = \"Virtual-1\", mode = \)\"[^\"]*\"|\1\"$MODE\"|" "$M" > "$tmp"
+  ed=(-e "s|^\(hl.monitor({ output = \"Virtual-1\", mode = \)\"[^\"]*\"|\1\"$MODE\"|")
+  [[ -z $DSCALE ]] || ed+=(-e "s|^local omarchy_monitor_scale = .*|local omarchy_monitor_scale = $DSCALE|"
+                           -e "s|^local omarchy_gdk_scale = .*|local omarchy_gdk_scale = $(printf '%.0f' "$DSCALE")|")
+  sed "${ed[@]}" "$M" > "$tmp"
 else
-scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
-[[ -n $scale ]] || { w=${MODE%%x*}; (( w >= 3000 )) && scale=2 || scale=1; }
+# A number in Omarchy's own file is a choice (Omarchy's default is "auto").
+# Not a guess from the mode: 2940 px wide is a Retina MacBook Air at 2x, and
+# 2560 px a plain display at 1x as much as a 13" Retina one at 2x.
+scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1) || scale=""   # none yet
+[[ -n $scale ]] || scale=${DSCALE:-2}
 gdk=$(printf '%.0f' "$scale")
 cat > "$tmp" <<LUA
 -- OmacVM, VMware Fusion: every output VMware Fusion gives the VM (one per Mac

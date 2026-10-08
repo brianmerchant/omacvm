@@ -40,6 +40,9 @@ sections 7-8 before fixing anything by hand.
 
 - Features: `./omacvm features --vm NAME --json`, then
   `./omacvm enable|disable FEATURE... --vm NAME --yes`, then check.
+  Listing (features, check, vms) never starts a VM: one that is off is
+  shown from its folder ("running": false). enable, disable and apply start
+  a stopped VM only when it is named with --vm.
 - CPUs and memory: `./omacvm resources --vm NAME --json` (what it has, the
   limits, the tiers), then `./omacvm resources --vm NAME --resources TIER`
   or `--cpus N --memory-gb N`. Parallels, UTM and Fusion VMs must be stopped

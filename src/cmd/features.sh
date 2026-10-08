@@ -15,14 +15,17 @@
 # Mac side they need, then the VM; if a feature it switches does not set up,
 # the VM goes back to what it had and the run ends with exit code 4, so the
 # record never says on for a feature that is not there. (--transaction is
-# still taken, for older callers.) A stopped VM is started.
-# --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
+# still taken, for older callers.) A stopped VM is started only when it was
+# named with --vm; without --vm, one that is off is not (exit 3).
+# --json (features): {"vm", "type", "ip", "running", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "reason", "needs", "title", "summary",
 # "fixed"}]}; reason: why this Mac or VM cannot have it ("" when available);
 # on: as the VM really is (src/lib/features.sh: features_real); fixed: what
 # OmacVM's record had wrong and that it was fixed ("" when it was right).
-# Without --vm it starts nothing: the state of the VM it would pick if that
-# one runs, else the defaults ("vm": null).
+# Listing never starts a VM. Without --vm: the state of the VM it would pick
+# if that one runs, else the defaults ("vm": null). A named VM that is off
+# ("running": false): an OmacVM.app VM's record and version from its folder,
+# else the defaults.
 # --in-vm: the VM must run with someone logged in to its desktop, and have the
 # control centre (on by default); else it says what is missing (exit 3).
 # A VM with a newer OmacVM than this omacvm: no switch (exit 3, nothing
@@ -49,7 +52,7 @@ while (( $# )); do
     --yes|-y) YES=1; shift ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
     --allow-downgrade) APPLY_ARGS+=(--allow-downgrade); export OMACVM_ALLOW_DOWNGRADE=1; shift ;;
-    -h|--help) sed -n '2,32s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) read -r f v <<<"$(feature_alias "$1" "$( [[ $MODE == enable ]] && echo on || echo off)")"
        feature_index "$f" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
@@ -80,9 +83,16 @@ if (( INVM )); then
   exit 0
 fi
 NOTCH=$(mac_tool mac-notch 2>/dev/null || echo none)
+# Listing never starts a VM (named or not): a stopped one is shown from what
+# the Mac has of it. enable/disable start a stopped VM only when it was named
+# (resolve_vm).
+OFF=0
 if [[ $MODE == features && -z $VM ]] && (( JSON )); then
   resolve_vm soft || { VM=""; TYPE=""; IP=""; }
   [[ -n $IP ]] || { VM=""; TYPE=""; }
+elif [[ $MODE == features ]]; then
+  resolve_vm
+  [[ -n $IP ]] || OFF=1
 else
   resolve_vm start
 fi
@@ -105,12 +115,21 @@ if [[ -n $version ]] && version_lt "$(cat "$R/src/VERSION")" "$version"; then
 fi
 features_read_env "$probe"
 DRIFT=(); FIXED=""
-if [[ -z $version ]]; then   # not an OmacVM VM yet: what it would get
+rd=""; [[ $TYPE == app && -n $VM ]] && { rd=$(app_dir "$VM" 2>/dev/null) || rd=""; }
+if (( OFF )); then
+  # An OmacVM.app VM's folder has its OmacVM version and its record (what
+  # apply wrote last); the other apps' VMs keep nothing of OmacVM on the Mac:
+  # the defaults.
+  for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
+  if [[ -n $rd ]]; then
+    version=$(head -1 "$rd/omacvm-version" 2>/dev/null | tr -cd '0-9A-Za-z.+-' | cut -c1-40)
+    features_read_record "$rd"
+  fi
+elif [[ -z $version ]]; then   # not an OmacVM VM yet: what it would get
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 else
   # The record (an OmacVM.app VM's features file), then what was switched
   # outside OmacVM as it really is; the record is fixed to match.
-  rd=""; [[ $TYPE == app && -n $VM ]] && { rd=$(app_dir "$VM" 2>/dev/null) || rd=""; }
   features_read_record "$rd"
   features_real "$probe" "$rd"
   if [[ -n ${DRIFT[*]+x} ]] && (( newer )); then
@@ -147,9 +166,9 @@ set_on() {
 }
 
 if (( JSON )); then
-  printf '{"vm": %s, "type": %s, "ip": %s, "omacvm": %s, "features": [' \
+  printf '{"vm": %s, "type": %s, "ip": %s, "running": %s, "omacvm": %s, "features": [' \
     "$( [[ -n $VM ]] && json_str "$VM" || echo null)" "$( [[ -n $TYPE ]] && json_str "$TYPE" || echo null)" "$(json_str "$IP")" \
-    "$( [[ -n $version ]] && json_str "$version" || echo null)"
+    "$( [[ -n $IP ]] && echo true || echo false)" "$( [[ -n $version ]] && json_str "$version" || echo null)"
   for ((i = 0; i < ${#FN[@]}; i++)); do
     available "$i" && av=true || av=false
     printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s, "fixed": %s}' \
@@ -180,7 +199,10 @@ label() {   # INDEX -> one line for the list
 if [[ $MODE == features ]]; then
   if [[ -t 1 ]]; then printf '\n\033[1m%s\033[0m (%s%s)\n' "$VM" "$TYPE" "${version:+, OmacVM $version}"
   else printf '%s (%s%s)\n' "$VM" "$TYPE" "${version:+, OmacVM $version}"; fi
-  [[ -n $version ]] || say "    OmacVM is not on this VM yet: these are the defaults it would get."
+  if (( OFF )); then
+    if [[ -n $rd && -f $rd/features ]]; then say "    VM is off: as OmacVM last set them up (its record on the Mac). Nothing was started."
+    else say "    VM is off: these are the defaults; start it to see its own. Nothing was started."; fi
+  elif [[ -z $version ]]; then say "    OmacVM is not on this VM yet: these are the defaults it would get."; fi
   while IFS= read -r l; do [[ -z $l ]] || say "    $l"; done < <(features_drift_lines "$FIXED")
   if (( ! interactive )); then
     for ((i = 0; i < ${#FN[@]}; i++)); do
@@ -252,6 +274,7 @@ if (( ${#changes[@]} == 0 )); then
   exit 0
 fi
 printf '\n  On %s:\n%s' "$VM" "$summary"
+(( ! OFF )) || printf '  %s is off: applying starts it.\n' "$VM"
 if (( ! YES )) && (( interactive )); then
   ask_yn "Apply?" y || exit 1
 fi
