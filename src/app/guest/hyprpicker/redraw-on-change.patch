@@ -19,10 +19,21 @@ index 3243cc8..aa247fc 100644
  
  void CLayerSurface::sendFrame() {
 diff --git a/src/hyprpicker.cpp b/src/hyprpicker.cpp
-index 2f03fdc..e441ac2 100644
+index 2f03fdc..70a62e3 100644
 --- a/src/hyprpicker.cpp
 +++ b/src/hyprpicker.cpp
-@@ -285,6 +285,8 @@ void CHyprpicker::recheckACK() {
+@@ -14,6 +14,10 @@
+ 
+ static void sigHandler(int sig) {
+     g_pHyprpicker->m_bRunning.store(false);
++    // Nothing wakes the event loop to see the flag once frames are drawn only
++    // on change (OmacVM): leave now, as hyprpicker 0.4.6 did. The compositor
++    // takes the surfaces away when the connection closes.
++    std::_Exit(0);
+ }
+ 
+ void CHyprpicker::init() {
+@@ -285,6 +289,8 @@ void CHyprpicker::recheckACK() {
  
  void CHyprpicker::markDirty() {
      for (auto& ls : m_vLayerSurfaces) {
@@ -31,7 +42,7 @@ index 2f03fdc..e441ac2 100644
          if (ls->frameCallback)
              continue;
  
-@@ -774,7 +776,10 @@ void CHyprpicker::initMouse() {
+@@ -774,7 +780,10 @@ void CHyprpicker::initMouse() {
  
          m_vLastCoords = {x, y};
  
