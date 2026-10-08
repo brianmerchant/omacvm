@@ -87,6 +87,7 @@ python3 src/app/guest/tests/test_omacvm_displays.py
 python3 src/app/guest/tests/test_idle_waits.py
 python3 src/camera/guest/tests/test_frames.py
 src/tests/audio-timing.sh
+src/tests/app-nap.sh
 ```
 
 `src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to
