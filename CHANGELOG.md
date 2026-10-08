@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.6 (unreleased)
+## 3.0.6
 
 - OmacVM.app: a VM named with `--vm` (by `omacvm`, a start request or a
   script) that is not there is an error ("No VM named … Nothing was
