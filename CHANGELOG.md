@@ -3,6 +3,26 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- OmacVM.app: a VM named with `--vm` (by `omacvm`, a start request or a
+  script) that is not there is an error ("No VM named … Nothing was
+  started."), never the VM shown or the first VM. A new VM's suggested name
+  is never the name of a folder that is there already, and Build is off for
+  such a name: a build into it would take over that VM's disk.
+- The test build ("OmacVM Test") never uses the installed app's VMs
+  folders: without a VMs folder of its own (or with one of the installed
+  app's), its VMs go into ~/OmacVM Test VMs; `omacvm` with the test identity
+  agrees. Test hooks that change a VM (the disk size, forcing a VM off for
+  an update) act only on a VM in the folder the test build was given, and
+  the test build never starts a VM of the installed app. On 2026-10-07 a
+  test run with a lost setting started a person's VM and made its disk
+  smaller.
+- Tests: the e2e harnesses save and restore the test app's settings with
+  quoted paths (a missing save no longer deletes a setting) and start only a
+  test VM in the test app's own folder (`src/tests/e2e/test-vms.sh`,
+  `src/tests/e2e/drive-drop.sh`).
+
 ## 3.0.5
 
 - OmacVM.app's VM window is compact and fits a 13-inch MacBook without
