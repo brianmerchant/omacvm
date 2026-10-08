@@ -3,6 +3,128 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- Troubleshooting 29 (no sound at all after a start, fixed in 3.0.4) names
+  the real cause: WirePlumber meeting Chromium's video decoder before its
+  daemon is ready. A kernel update alone never did it: the module is built
+  during the update and loads early at the next start. The VM test for it
+  (`src/tests/vdec-wireplumber.sh --vm NAME`) also checks WirePlumber
+  starting with the decoder there.
+
+- The test app OmacVM Test.app: its own `omacvm`, run by hand from a shell,
+  now works as the test app (its own Bridge and Gestures), as when the app
+  runs it. Before, it set up the normal helpers from the test app. The
+  Bridge also counts a re-signed copy of the test app as the test app, as
+  the app and Gestures do, and such a copy's omacvm starts VMs in that copy.
+  The test app's omacvm never opens OmacVM.app.
+
+- A VM made from a prebuilt image had no default keyring, so the first start
+  of Chromium or Chrome stopped at "Choose password for new keyring". The
+  first boot now makes Omarchy's default keyring (no password) for the new
+  user, as a full build does; `omacvm apply` makes it in VMs from older
+  images, and `omacvm check` has a "keyring" line.
+
+- `omacvm build` checked for 30 GB free on the Mac's own disk even when the
+  VM goes to another drive (an SD card or external drive, with `--vm-dir` or
+  OmacVM.app's VMs folder there). It now checks the drive the VM goes to, and
+  the Mac's disk only for the download when that stays there, and says which
+  drive is short.
+
+- UTM VMs can go on an external drive: `omacvm build --vm-type utm
+  --vm-dir PATH` (or another folder in the build's "Where should the VM
+  go?"). The drive needs about 30 GB free, the Mac's own disk only a little
+  ([UTM route](docs/routes/utm.md#utm-on-an-external-drive)).
+- A UTM build no longer stops at "Could not write domain" when macOS keeps
+  the terminal out of UTM's data: it says so and builds the VM without
+  UTM's speed settings.
+
+- CI now builds OmacVM.app with app/scripts/build-app.sh on every pull
+  request and push to main (on the Mac mini, QEMU runtime from its cache), so
+  a break in the app build shows on the pull request, not at release time.
+
+- Graphics memory guard: when an app in the VM is stopped for taking too
+  much graphics memory, Hyprland can still show the app's last buffer (an
+  empty window now) and keeps drawing. Before, Hyprland lost its GPU context
+  there too and the VM went black, as in 3.0.3. The log now says "apps'
+  share reached" when an app stops at its share, not "budget reached".
+
+- OmacVM.app: browser pages that draw many objects one by one (WebGL
+  Aquarium) are faster: on the Mac's OpenGL a draw no longer sets its
+  vertex buffers and selects its shaders again when nothing changed.
+
+- Graphics: browser pages that draw many objects with the same indices (WebGL
+  Aquarium, one draw per fish) no longer read those indices back from the
+  GPU on every draw; the safety check reads them once per change
+  (`OMACVM_VIRGL_INDEX_RANGE_CACHE=0` turns it off).
+
+- The Mac's battery in the VM (UTM, VMware Fusion, OmacVM.app): Omarchy's
+  battery panel now shows the real watts and the time left. The Mac never
+  sent the battery's current, so UPower guessed watts from charge steps:
+  0, then numbers from 1 to over 200 W (85 W at 85 % looked like the
+  percentage), and no time left while the guess was 0. The Mac now sends
+  current and power, and the VM's battery module (1.1.0, rebuilt by
+  `omacvm update`) shows them as `current_now` and `power_now`. Needs both
+  sides updated; `omacvm check` says which one is missing. No charge limit
+  in macOS: the module says 100 % instead of nothing.
+
+- Fast network: installed for the test app OmacVM Test.app (Developer ID),
+  the service now trusts the test app's QEMU by its team, as for OmacVM.app,
+  not only that exact build. A test Mac gives the admin password once, not
+  after every new test build. Same rules as before: only OmacVM's QEMU
+  identifiers of a team that OmacVM's release key vouches for; ad hoc builds
+  and other teams still get their exact build only. Installs for OmacVM.app
+  are unchanged and stay valid.
+
+- OmacVM.app's keyboard note stayed red with OmacVM on under Accessibility.
+  macOS keeps "control the computer" (what the VM's key tap needs) as an
+  entry of its own, tied to the build that made it. One left by an older
+  build no longer matches, and macOS refuses the tap whatever the
+  Accessibility switch shows; Allow… could not replace it. The app now
+  clears its own old entry (once, when the note would be red) and Allow…
+  clears both of its entries before it asks again, so with OmacVM on under
+  Accessibility the note goes away by itself. The (i) and `omacvm check`
+  name the Terminal way too: `tccutil reset PostEvent org.omacvm.app`.
+
+- VMware Fusion: a new VM on a MacBook Air (or another Retina display under
+  3000 pixels wide) came up at scale 1, with tiny text, also in full screen.
+  The scale came from the display's width; it is now the Mac display's own
+  (2 on Retina, 1 on a plain display), as on the other routes. A scale you
+  pick later in Omarchy (Super + /, or the top bar's Display panel) still
+  stays over updates. A Fusion VM that is at 1 now: pick 2 there once.
+
+- OmacVM.app: a VM started while its window was not visible (screen
+  locked, the window on another Space, the app hidden) could
+  crash in its first seconds, in the start animation. Since 3.0.0 the
+  animation replaces a display link that gives no frames, and dropping
+  one freed it while macOS still used it. The animation now holds its
+  link until it is done with it.
+
+- `omacvm features` without `--vm` started the VM named Omarchy when it was
+  off, to read its features, and did it through an old copy of the app
+  ("OmacVM Bench 2.9.1.app" sorted before OmacVM.app). Listing and reading
+  (`features`, `features --json`, `check`, `vms`) now never start a VM: one
+  that is off is shown from its folder on the Mac ("VM is off", `"running":
+  false` in the JSON). `enable`, `disable` and `apply` start a stopped VM
+  only when it is named with `--vm`; without it they say so (exit 3).
+  omacvm takes OmacVM.app by its name before any other copy (a renamed
+  install next, test, bench, RC and lane copies last), and never starts a
+  VM with an app older than the OmacVM the VM has, nor while another copy
+  of the app is open (that copy would take the start).
+
+- OmacVM.app: a VM no longer crawls while its window is out of sight (the
+  Mac's screen locked, the VM's full screen on another Space, the window
+  minimized or covered). macOS's App Nap slowed every QEMU thread to
+  background priority, and a job in the VM ran at 2-20 % of its speed.
+  QEMU now tells macOS the VM is working; the idle Mac still sleeps.
+
+- Notch: moving the pointer between the VM and Omanotch's strip beside the
+  camera in full screen no longer flickers. For up to half a second at each
+  crossing there were two arrows (the VM's stayed on its top rows) or none
+  (on the way back). The VM's arrow now moves out of sight in the same
+  moment the Mac's shows on the strip, and comes back with the next move.
+  Full screen keeps its own Space.
+
 ## 3.0.5
 
 - OmacVM.app's VM window is compact and fits a 13-inch MacBook without
