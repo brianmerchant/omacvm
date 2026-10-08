@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.7 (unreleased)
+## 3.0.7
 
 - Omanotch: after Update VM to 3.0.6 the bar could be missing from the notch
   strip. The update builds notchcast again at the next login; until then the
