@@ -51,6 +51,11 @@ done
 # run wants are started when they are not running yet, and that is all.
 if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   H=${OMACVM_HELPERS:-$HOME/Applications/OmacVM Test.app/Contents/Helpers}
+  # The running helper shows the app's real path: through a link to the app
+  # (a test Mac keeps it on another drive), pgrep would not find it and a
+  # second Bridge would start beside the first (they took the relay socket
+  # from each other every second, 2026-10-08 on the MacBook Air).
+  H=$(cd -P "$H" 2>/dev/null && pwd) || H=${OMACVM_HELPERS:-$HOME/Applications/OmacVM Test.app/Contents/Helpers}
   test_helper() {   # NAME LOG: start "NAME.app" from H (output to ~/Library/Logs/LOG) unless it runs
     local app="$H/$1.app"
     [[ -d $app ]] || { echo "src/mac/install.sh: test identity: $app is missing" >&2; return 1; }
