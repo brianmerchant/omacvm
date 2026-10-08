@@ -91,6 +91,20 @@ in more words.
   background priority, and a job in the VM ran at 2-20 % of its speed.
   QEMU now tells macOS the VM is working; the idle Mac still sleeps.
 
+- An older `omacvm` no longer puts its OmacVM over a VM that has a newer
+  one. An old command line checkout (`~/.omacvm` from `install.sh`) first on
+  the PATH beside a newer OmacVM.app turned a feature switch into a downgrade:
+  `omacvm disable fast-network` replaced a 3.0.3 VM's OmacVM with 2.9.1, and
+  its control centre stopped opening (#233). `apply`, `enable`, `disable`,
+  a repair and `update` now compare the VM's OmacVM with their own and stop
+  before anything changes on the Mac or in the VM, naming both versions and
+  OmacVM.app's own `omacvm` (or `omacvm update` first); `--allow-downgrade`
+  goes back on purpose. `omacvm features --json` and `omacvm check` leave
+  such a VM's feature record alone. `omacvm` says when OmacVM.app on the Mac
+  is newer than itself, `install.sh` too, and the app's "omacvm in Terminal"
+  row says when the one Terminal runs is older. The control centre's jobs
+  run OmacVM.app's `omacvm` instead of a checkout with an older OmacVM.
+
 ## 3.0.4
 
 - Fast network after an app update: the service from an earlier app keeps

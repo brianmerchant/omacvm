@@ -29,7 +29,9 @@ jobs:
     # A fork's pull request has another head repository (or none, once the fork
     # is deleted): false, so macos-15. fromJSON gives the runner's label list.
     runs-on: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","macOS","ARM64","omacvm-mini"]') || 'macos-15' }}
-    timeout-minutes: 35
+    # the mini: fresh test binaries can wait minutes before they start (macOS); the
+    # job then needs more than 35 min although nothing is wrong (#258)
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -249,6 +251,9 @@ jobs:
 
       - name: Only OmacVM writes the Bridge's cli file (test copies keep away)
         run: src/tests/app-cli-file.sh
+
+      - name: An older omacvm never takes a newer VM back (version order, apply/enable/disable/update stop first)
+        run: src/tests/version-guard.sh
 
       - name: The desktop restarts by itself after a lost GPU context (app rules, VM script)
         run: src/tests/app-desktop-recovery.sh
