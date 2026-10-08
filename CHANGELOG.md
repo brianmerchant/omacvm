@@ -5,6 +5,8 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
+  the animation ends at 5.5 s, before the desktop is ready).
 - The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in
   System Settings, without quitting the app first (macOS kept the old answer for the running
   app; the app now asks in a fresh process).

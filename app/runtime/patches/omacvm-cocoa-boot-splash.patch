@@ -3,8 +3,8 @@ Subject: [PATCH] ui/cocoa: start animation, then Omarchy's logo until the deskto
 
 What: when the window opens, OMACVM turns into Omarchy's logo (O, M and A
 stay, the cells of C, V and M fly and land as R, C, H and Y), Omarchy green
-on Omarchy's background: OMACVM holds 0.6 s, the cells fly for about 2.6 s,
-the glow goes by 3.56 s. Then the logo holds until Omarchy's desktop (or its
+on Omarchy's background: OMACVM holds 2.5 s, the cells fly for about 2.6 s,
+the glow goes by 5.46 s. Then the logo holds until Omarchy's desktop (or its
 login or lock screen) is there, over the firmware's progress bar, GRUB's
 text and Linux's console, and fades into it. The desktop is there when the
 guest's picture is lit almost everywhere (a wallpaper, not text on black nor
@@ -615,8 +615,8 @@ QEMU; the logo layer now holds its link.
 +/*
 + * OmacVM start animation: when the window opens, OMACVM turns into Omarchy's
 + * logo (O, M and A stay, the cells of C, V and M fly and land as R, C, H and
-+ * Y), Omarchy green on Omarchy's background: OMACVM holds 0.6 s, the cells
-+ * fly for about 2.6 s, the glow goes by 3.56 s (omacvm-splash.h has the
++ * Y), Omarchy green on Omarchy's background: OMACVM holds 2.5 s, the cells
++ * fly for about 2.6 s, the glow goes by 5.46 s (omacvm-splash.h has the
 + * timeline). This is the preview the user picked (a-pixel-morph), slowed
 + * down, drawn natively: the cells are a Core Animation shape layer, sharp at
 + * any size, the soft glow a small image under them, worked out as the
@@ -1486,11 +1486,11 @@ QEMU; the logo layer now holds its link.
 + * flying cells, then 0.4 s of the glow going. The table's starts are the
 + * preview's seconds.
 + */
-+#define INTRO_HOLD    0.6   /* s OMACVM holds */
++#define INTRO_HOLD    2.5   /* s OMACVM holds */
 +#define INTRO_SLOW    1.6
 +#define PREVIEW_START 0.55  /* s of the preview: the first movement */
 +#define PREVIEW_END   2.4   /* s of the preview: the last */
-+#define INTRO_END     (INTRO_HOLD + (PREVIEW_END - PREVIEW_START) * INTRO_SLOW)   /* 3.56 s */
++#define INTRO_END     (INTRO_HOLD + (PREVIEW_END - PREVIEW_START) * INTRO_SLOW)   /* 5.46 s */
 +#define INTRO_FLIGHT  0.8   /* s of the preview a cell flies */
 +#define INTRO_SHIFT   2.5   /* cells OMACVM sits right of the logo (76 vs 81 wide) */
 +#define INTRO_MAX     (SPLASH_ROWS * MORPH_KEEP_COLS + MORPH_PARTS)

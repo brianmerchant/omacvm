@@ -250,12 +250,12 @@ static void test_timeline(void)
             CHECK(moving, "nothing moves 0.1 s after OMACVM's hold");
         }
     }
-    /* The user's ask: OMACVM about 0.6 s, the morph 2.5 to 3 s. */
-    CHECK(first_move >= 0.55 && first_move <= 0.7, "OMACVM holds %.2f s, not about 0.6",
+    /* The user's ask (2026-10-08): OMACVM about 2.5 s (was 0.6), the morph 2.5 to 3 s. */
+    CHECK(first_move >= 2.45 && first_move <= 2.6, "OMACVM holds %.2f s, not about 2.5",
           first_move);
     CHECK(last - INTRO_HOLD >= 2.5 && last - INTRO_HOLD <= 3.0,
           "the cells fly for %.2f s, not 2.5 to 3", last - INTRO_HOLD);
-    CHECK(INTRO_END >= last && INTRO_END <= 4.0, "the animation ends at %.2f s", INTRO_END);
+    CHECK(INTRO_END >= last && INTRO_END <= 6.0, "the animation ends at %.2f s", INTRO_END);
 }
 
 /* A w x h picture of 32-bit pixels, all of colour c. */
