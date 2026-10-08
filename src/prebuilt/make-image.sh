@@ -171,7 +171,8 @@ stage_package() {
       # from the disk's fallback path (\EFI\BOOT\BOOTAA64.EFI).
       log "copying the disk without its free space"
       stage="$WORK/$name"; mkdir -p "$stage"
-      dd if="$b/disk.img" of="$stage/disk.img" bs=4m conv=sparse status=none ;;
+      dd if="$b/disk.img" of="$stage/disk.img" bs=4m conv=sparse status=none
+      sparse_disk "$stage/disk.img" ;;
     fusion)
       log "compacting the disk"
       "$FUSION_LIB/vmware-vdiskmanager" -k "$b/omarchy.vmdk" >/dev/null
@@ -182,6 +183,19 @@ stage_package() {
       python3 "$R/src/prebuilt/vmconfig.py" vmx-generalize "$stage/$name.vmx" "$name" ;;
   esac
   compress_stage "$stage"
+}
+
+# sparse_disk FILE: every zeroed MiB of a raw disk becomes a hole, then a
+# check. dd conv=sparse alone once (2026-10-08) left the app's 64 GB disk
+# 62 GB allocated: tar packs allocated zeros as data, and every VM made from
+# that image took 60 GB on the Mac instead of 7.
+sparse_disk() {
+  local f=$1 kb
+  kb=$(python3 "$R/src/prebuilt/sparsify.py" "$f" | awk '{ print $2 }') || die "could not make $f sparse"
+  [[ $kb =~ ^[0-9]+$ ]] || die "could not make $f sparse"
+  (( kb < PREBUILT_DISK_GB * 1048576 / 2 )) ||
+    die "$f still takes $((kb / 1048576)) GB of its $PREBUILT_DISK_GB GB after making it sparse: is its free space zeroed?"
+  log "disk: $((kb / 1024)) MB in use"
 }
 
 # compress_stage DIR: the bundle into parts, manifest, sums.
@@ -196,7 +210,9 @@ compress_stage() {
   rm -f "$OUT/$base".tar.zst.* "$OUT/$base.json" "$OUT/$base.json.sig"
   log "compressing (zstd -19, a while)"
   local t0; t0=$(date +%s)
-  COPYFILE_DISABLE=1 tar --no-xattrs -C "$WORK" -cf - "$(basename "$stage")" |
+  # Owner root in the archive, not this Mac's user (unpacking gives the files
+  # to whoever unpacks them anyway).
+  COPYFILE_DISABLE=1 tar --no-xattrs --uid 0 --gid 0 --uname root --gname root -C "$WORK" -cf - "$(basename "$stage")" |
     zstd -19 --long=27 -T8 -q -c | split -b 1900m -a 2 - "$OUT/$base.tar.zst.part-"
   log "compressed in $(( ($(date +%s) - t0) / 60 )) minutes"
   # Signed with OmacVM's release key (the main one from the Keychain, or
@@ -229,7 +245,7 @@ stage_repack() {
   cat "$OUT/$base".tar.zst.part-* | zstd -dc --long=27 -q | { tar -xSf - -C "$WORK" && cat > /dev/null; }   # as prebuilt_unpack
   stage=$(ls -d "$WORK"/"$PREBUILT_NAME"*)
   case $ROUTE in
-    app) ;;   # a disk only: nothing to generalize again
+    app) sparse_disk "$stage/disk.img" ;;   # a disk only: nothing to generalize again
     parallels) python3 "$R/src/prebuilt/vmconfig.py" pvs-generalize "$stage/config.pvs" "$PREBUILT_NAME" ;;
     utm) python3 "$R/src/prebuilt/vmconfig.py" utm-generalize "$stage/config.plist" "$PREBUILT_NAME" ;;
     fusion) python3 "$R/src/prebuilt/vmconfig.py" vmx-generalize "$stage/$PREBUILT_NAME.vmx" "$PREBUILT_NAME" ;;

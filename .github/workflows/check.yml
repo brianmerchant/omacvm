@@ -217,6 +217,9 @@ jobs:
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 
+      - name: Prebuilt image disk is packed sparse (holes for zeros, owner root)
+        run: src/tests/prebuilt-sparse.sh
+
       - name: Prebuilt images for Parallels, UTM and Fusion are checked (untrusted input)
         run: |
           command -v zstd >/dev/null || brew install zstd
