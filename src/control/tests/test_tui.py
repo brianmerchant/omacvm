@@ -1513,6 +1513,71 @@ def test_a_repair_sets_old_checks_aside_until_new_ones_come(slow_world):
     asyncio.run(go())
 
 
+def test_old_package_list_says_why_and_offers_omarchy_update(slow_world, monkeypatch):
+    """WebGPU and GPU compute on failed on the mini without a reason, and
+    "space tries again" could not work: the VM's package list was older than
+    the mirrors. Now the reason and the one way on, and omarchy update is
+    offered (in its own window, only on yes)."""
+    mac, _ = slow_world
+    from omacvm_cc import tui
+    opened = []
+    monkeypatch.setattr(tui.system, "open_window", lambda: opened.append(1) or True)
+    with open(os.environ["OMACVM_ENV"], "a") as f:
+        f.write("OMACVM_VM_TYPE=app\n")
+    # src/cmd/apply.sh what_failed's text for the mini's job log (src/tests/vulkan-feature.sh).
+    mac.job_end = ("rolled-back", "WebGPU and GPU compute was not set up: Omarchy's package list is older than "
+                                  "the mirrors (omarchy update first)")
+    mac.job_extra = {"failed_part": "vulkan"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "vulkan" in rows(a))
+            _move_to(a, "vulkan")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            assert a.last_result == (
+                "WebGPU and GPU compute on: WebGPU and GPU compute was not set up: Omarchy's package list is older "
+                "than the mirrors. This VM went back to its features from before. Run omarchy update in the VM "
+                "first (o on Updates, U), then space again (! reports the problem)."), a.last_result
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen))
+            assert a.screen.title_text == "Update the VM's system first" and "omarchy update" in a.screen.text
+            await pilot.press("n")
+            await pilot.pause(0.2)
+            assert not opened
+    asyncio.run(go())
+
+    async def again():   # y opens it
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and "vulkan" in rows(a))
+            _move_to(a, "vulkan")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen), 10)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: bool(opened))
+    asyncio.run(again())
+
+
+def test_other_failures_still_say_try_again(slow_world):
+    mac, _ = slow_world
+    mac.job_end = ("rolled-back", "the Mac's clock was not set up: timedatectl failed")
+    mac.job_extra = {"failed_part": "mac-clock"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            _move_to(a, "autologin")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            assert "space tries again" in a.last_result and "omarchy update" not in a.last_result
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            assert not isinstance(a.screen, ConfirmScreen)
+    asyncio.run(go())
+
+
 def test_graphics_row_fits_and_details_say_it_all(tmp_path, monkeypatch):
     """The mini's Graphics row was cut off ("... until it is built (Om"):
     the row says it short, enter shows the whole of it."""

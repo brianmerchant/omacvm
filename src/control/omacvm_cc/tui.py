@@ -47,6 +47,10 @@ LIVE_EVERY = 5.0
 # nothing started) is sent once more this much later (the Bridge looks again
 # at most every 5 s and waits for that look).
 JOB_RETRY_AFTER = 3.0
+# The end of a failure that needs the VM's whole system updated first
+# (src/cmd/apply.sh why_not: pkg-add found the package list older than the
+# mirrors, or refused a partial update). Trying again does not help until then.
+UPDATE_FIRST = " (omarchy update first)"
 # Said before Graphics -> Vulkan or its repair runs (src/cmd/graphics.sh).
 VULKAN_BUILD = ("The VM builds its Vulkan driver now, a few minutes (when its packages are too old for that, "
                 "after a whole system update with omarchy update, often 5-15 minutes); "
@@ -553,16 +557,11 @@ class UpdatesScreen(Screen):
         self.app.install_update()
 
     def action_omarchy(self) -> None:
-        def go(yes: bool | None) -> None:
-            if not yes:
-                return
-            if system.open_window():
-                self.app.notify("omarchy update opens in its own window")
-            else:
-                self.app.notify("no desktop window here: run omacvm update-system in a terminal", severity="warning")
-        self.app.push_screen(ConfirmScreen("Update Omarchy (the VM's system)",
-                                           system.WHAT + "\n\nIt runs in its own window and asks for your password. "
-                                           "At the end it checks the graphics and says whether a restart is safe."), go)
+        app: ControlCentre = self.app  # type: ignore[assignment]
+        app.push_screen(ConfirmScreen("Update Omarchy (the VM's system)",
+                                      system.WHAT + "\n\nIt runs in its own window and asks for your password. "
+                                      "At the end it checks the graphics and says whether a restart is safe."),
+                        app.system_update_answer)
 
     @work(thread=True, exclusive=True, group="updates")
     def action_check(self) -> None:
@@ -977,8 +976,23 @@ class ControlCentre(App):
         if part.startswith("The "):
             part = "t" + part[1:]   # mid-sentence
         failed = job.text.strip().rstrip(".") if job.text and "rolled back" not in job.text else ""
+        update_first = failed.endswith(UPDATE_FIRST)
+        if update_first:
+            failed = failed[: -len(UPDATE_FIRST)]
         head = f"{what}: {failed}." if failed else f"{what}: failed."
         vm = self.c.local.version
+        if update_first and job.failed_side != "mac":
+            # Trying again fails the same way until the VM's system is updated.
+            if job.state == "rolled-back" and (action == "update" or (job.mac_omacvm and job.mac_omacvm != vm)):
+                mac = f"OmacVM {job.mac_omacvm}" if job.mac_omacvm else "the new OmacVM"
+                where = f"The Mac keeps {mac}; this VM went back to OmacVM {vm} and its features. "
+            elif job.state == "rolled-back":
+                where = "This VM went back to its features from before. "
+            else:
+                where = ""
+            key = again.split(" ")[0] if again else "space"
+            return (f"{head} {where}Run omarchy update in the VM first (o on Updates, U), then {key} again "
+                    "(! reports the problem).")
         if job.failed_side == "mac":
             # A Mac helper did not build: its last build keeps running there.
             # Trying again from here would stop on it again; the Mac's own
@@ -1370,6 +1384,8 @@ class ControlCentre(App):
         else:
             self.last_result = self.outcome(what, action, job)
             self.call_from_thread(self.notify, self.last_result, severity="error", timeout=12)
+            if job.text.strip().rstrip(".").endswith(UPDATE_FIRST) and job.failed_side != "mac":
+                self.call_from_thread(self.offer_system_update, what)
         if action == "disable" and "control-centre" in features and job.state == "done":
             self.call_from_thread(self.exit)
             return
@@ -1407,6 +1423,24 @@ class ControlCentre(App):
         self.push_screen(ConfirmScreen("Restart the VM",
                                        f"OmacVM {self.restart_after}: kernel, memory and keyboard changes apply "
                                        "after a restart.\nSave your work first. Restart now?"), go)
+
+    def offer_system_update(self, what: str) -> None:
+        """A job that needs the VM's system updated first: omarchy update in
+        its own window, only on yes (as o on Updates)."""
+        self.push_screen(ConfirmScreen("Update the VM's system first",
+                                       f"{what}: it needs packages this VM's system is too old for. "
+                                       + system.WHAT +
+                                       "\n\nIt runs in its own window and asks for your password (often 5-15 "
+                                       "minutes). At the end it checks the graphics and says whether a restart is "
+                                       "safe. Then try again here."), self.system_update_answer)
+
+    def system_update_answer(self, yes: bool | None) -> None:
+        if not yes:
+            return
+        if system.open_window():
+            self.notify("omarchy update opens in its own window")
+        else:
+            self.notify("no desktop window here: run omacvm update-system in a terminal", severity="warning")
 
     def ask_retry(self, action: str, features: list[str], text: str) -> None:
         self.push_screen(ConfirmScreen("Try again?", text + "\nAsk the Mac again?"),

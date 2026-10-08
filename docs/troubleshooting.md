@@ -10,6 +10,13 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
 ## Common problems
 
 - **First stop**: `omacvm check` names what is wrong and what to do.
+- **A feature does not switch on: "Omarchy's package list is older than the
+  mirrors"**: the VM's system was not updated for a while, and the packages
+  the feature needs are no longer on the mirrors in those versions. OmacVM
+  never updates one package alone (a partial update can leave a black screen,
+  [27](#27-all-routes-black-screen-after-an-update-or-an-omacvm-job)). Update
+  the VM's system first with omarchy update (the control centre offers it:
+  y, or U then o), then switch the feature on again.
 - **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
   show it. System Settings › Menu Bar (on older macOS: Control Center) ›
   Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
