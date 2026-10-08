@@ -5,6 +5,13 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- The command line from `install.sh` (`~/.omacvm`) follows OmacVM's releases, as
+  OmacVM.app does: `omacvm update` and `install.sh` take it to the newest release,
+  or to OmacVM.app's version when the app is newer. Before, it followed `main`,
+  which could be behind the app's release, and `omacvm update` said "already up
+  to date". A checkout with local changes, another clone or an `OMACVM_REF` is
+  not moved; then the warning names the app's own `omacvm`. Takes effect from the
+  first release that has it. Reported by @brianmerchant (#291).
 - The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
   the animation ends at 5.5 s, before the desktop is ready).
 - The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in

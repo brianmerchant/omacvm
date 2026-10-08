@@ -99,8 +99,8 @@ Full comparison with benchmarks: [docs/compare.md](docs/compare.md).
 
 ## Get started
 
-The command at the top puts OmacVM in `~/.omacvm`, adds the `omacvm` command
-and starts it. Run `omacvm` any time after that: with no VM yet it builds one;
+The command at the top puts OmacVM in `~/.omacvm` (it follows the releases:
+`omacvm update` takes it to the newest), adds the `omacvm` command and starts it. Run `omacvm` any time after that: with no VM yet it builds one;
 otherwise it asks what you want to do (build another VM, switch features,
 update, check). Prefer git? `git clone https://github.com/gillesgoetsch/omacvm`
 and run `./install.sh` in it. Using a coding agent? [Copy the prompt](docs/agents.md).

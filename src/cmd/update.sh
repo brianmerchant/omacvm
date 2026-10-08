@@ -1,10 +1,10 @@
 #!/bin/bash
 # omacvm update [--vm NAME [--vm-type T]] [--no-pull] [--commit C] [--transaction] [--yes]
-# [--allow-downgrade]: OmacVM up to date everywhere. This
-# checkout (git pull, when it is a clean clone), the Mac side that is
-# installed (Omanotch with it), OmacVM.app when it is installed and a newer
-# one is published (not while it runs), then OmacVM in every running VM that
-# has it (or only --vm NAME; a stopped one is started).
+# [--allow-downgrade]: OmacVM up to date everywhere. This checkout
+# (install.sh's goes to the newest release; another clean clone: git pull),
+# the Mac side that is installed (Omanotch with it), OmacVM.app when it is
+# installed and a newer one is published (not while it runs), then OmacVM in
+# every running VM that has it (or only --vm NAME; a stopped one is started).
 # Each VM keeps its feature choices. Stopped VMs are listed, not started. Only
 # VMs OmacVM set up from this Mac (their SSH host key is remembered, or OmacVM
 # built them) get the update, and with it the Bridge's token.
@@ -51,11 +51,18 @@ if [[ ! -e $R/.git && -f $R/COMMIT ]]; then
 elif [[ -n $COMMIT && $(git -C "$R" rev-parse HEAD) != "$COMMIT" ]]; then
   [[ -z $(git -C "$R" status --porcelain --untracked-files=no) ]] || die "this checkout has local changes: not moved to the release ($R)"
   log "OmacVM: the release (${COMMIT:0:12})"
-  git -C "$R" fetch -q origin || die "git fetch failed in $R"
+  git -C "$R" fetch -q --tags origin || die "git fetch failed in $R"
   git -C "$R" cat-file -e "$COMMIT^{commit}" 2>/dev/null || die "the release's commit is not in $R's origin"
   git -C "$R" merge-base --is-ancestor HEAD "$COMMIT" || die "the release is not ahead of this checkout: not moved"
   git -C "$R" merge -q --ff-only "$COMMIT" || die "git merge failed in $R"
   exec "$R/omacvm" update --no-pull ${ARGS[@]+"${ARGS[@]}"}
+elif [[ -z $COMMIT ]] && (( PULL )) && "$R/src/lib/follow-release.sh" --check "$R"; then
+  # install.sh's checkout: the newest release (#291), not main.
+  log "OmacVM: the newest release"
+  frc=0; out=$("$R/src/lib/follow-release.sh" "$R") || frc=$?
+  (( frc == 2 )) && die "${out:-the newest release: git failed in $R}"
+  info "$out"
+  (( frc )) || exec "$R/omacvm" update --no-pull ${ARGS[@]+"${ARGS[@]}"}
 elif [[ -z $COMMIT ]] && (( PULL )) && git -C "$R" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
   if [[ -n $(git -C "$R" status --porcelain --untracked-files=no) ]]; then
     info "this checkout has local changes: not pulling ($R)"
