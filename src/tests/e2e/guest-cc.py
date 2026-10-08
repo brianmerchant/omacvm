@@ -196,7 +196,10 @@ def asked(text: str) -> bool:
     return bool(re.search(r"\by\b\s+go\b", text)) and bool(re.search(r"\bn\b\s+cancel", text))
 
 
-TROUBLE = re.compile(r"needs the Mac|409|unknown-vm|refused|rolled back|went back|failed|cannot reach|could not|error", re.I)
+# Also the control centre's notes when it sends nothing: the Bridge's job limit (429 "N jobs in
+# the last hour: try later"), "a job runs: wait for it", "still asking the Mac".
+TROUBLE = re.compile(r"needs the Mac|409|429|unknown-vm|refused|rolled back|went back|failed|cannot reach|could not|error"
+                     r"|try later|in the last hour|a job runs|still asking", re.I)
 
 
 def watch(until, seconds: float) -> tuple[bool, str, list[str]]:
@@ -276,8 +279,16 @@ def cmd_toggle(a: list[str]) -> None:
             trouble=seen1, screen=screen())
     done, text, seen2 = watch(lambda s: state_of(title, s)["on"] == want and state_of(title, s)["status"] not in ("working", None), secs)
     after = state_of(title, text)
+    first = None
+    if done and after["status"] in ("failing", "needs you"):
+        # Right after "done" the row may still show the checks from before the job (a service that
+        # the last job was stopping) until its own checks come, a few seconds: a row that stays so fails.
+        first = dict(after)
+        _, text, seen3 = watch(lambda s: state_of(title, s)["on"] == want and state_of(title, s)["status"] in ("works", "off"), 30)
+        after = state_of(title, text)
+        seen2 += [x for x in seen3 if x not in seen2]
     out(done and after["status"] in ("works", "off"), before=before, after=after, asked=question, started=started,
-        seconds=round(time.monotonic() - t0, 1), trouble=seen1 + [x for x in seen2 if x not in seen1], screen=text)
+        seconds=round(time.monotonic() - t0, 1), first=first, trouble=seen1 + [x for x in seen2 if x not in seen1], screen=text)
 
 
 def cmd_graphics(a: list[str]) -> None:

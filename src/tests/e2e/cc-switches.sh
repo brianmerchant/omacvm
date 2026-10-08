@@ -279,6 +279,8 @@ for k in ("error", "already", "seconds", "asked", "answer"):
 for k in ("before", "after"):
     v = o.get(k)
     if isinstance(v, dict): bits.append(f"{k}: {v.get('on')}, {v.get('status')} ({v.get('note', '')[:70]})")
+if o.get("status"):   # `row`: the row itself
+    bits.append(f"row: {o.get('on')}, {o['status']} ({str(o.get('note', ''))[:70]})")
 if o.get("trouble"): bits.append("trouble: " + " | ".join(o["trouble"])[:300])
 for k in ("got_in", "password_prompt", "linked"):
     if k in o: bits.append(f"{k}: {str(o[k])[:200]}")
@@ -293,14 +295,35 @@ ccok() { /usr/bin/python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.
 bmark() { BMARK=$(stat -f %z "$BLOG" 2>/dev/null || echo 0); }
 bsince() { local s; s=$(stat -f %z "$BLOG" 2>/dev/null || echo 0); if (( s < ${BMARK:-0} )); then cat "$BLOG"; else tail -c +$(( ${BMARK:-0} + 1 )) "$BLOG"; fi 2>/dev/null; }
 bproblems() {   # refusals and failed jobs since the mark, one line
-  bsince | grep -E ': (40[0-9]|41[0-9]|50[0-9])( |$)|unknown-vm|cannot reach|ended [1-9]' | tail -5 | sed 's/^.*omacvm-bridge: //' | tr '\n' '|'
+  bsince | grep -E ': (4[0-9][0-9]|50[0-9])( |$)|unknown-vm|cannot reach|ended [1-9]' | tail -5 | sed 's/^.*omacvm-bridge: //' | tr '\n' '|'
 }
 guest_feature() { gssh "sed -n 's/^OMACVM_FEATURE_${1//-/_}=//p' /etc/omacvm/env | tail -1"; }
 mac_feature() { tr ' ' '\n' < "$VMD/features" 2>/dev/null | sed -n "s/^$1=//p" | tail -1; }
 bridge_start() {   # the test Bridge with its log here (as src/mac/install.sh starts it for the test identity)
   pkill -f "OmacVM Test Bridge.app/Contents/MacOS/" 2>/dev/null; sleep 1
   open -g -n --stdout "$BLOG" --stderr "$BLOG" "$BRIDGE_APP"
-  local i; for ((i = 0; i < 20; i++)); do lsof -nP -iTCP:47931 -sTCP:LISTEN >/dev/null 2>&1 && return 0; sleep 0.5; done
+  local i; for ((i = 0; i < 20; i++)); do lsof -nP -iTCP:47931 -sTCP:LISTEN >/dev/null 2>&1 && { BSTART=$(stat -f %z "$BLOG" 2>/dev/null || echo 0); return 0; }; sleep 0.5; done
+  return 1
+}
+# The Bridge takes at most 20 jobs an hour per VM (jobsPerHour, src/bridge/mac/control_policy.swift;
+# it says "20 jobs in the last hour: try later"). One pass sends about 50. The count lives in the
+# Bridge's memory: before a step would go over it, the test Bridge starts again (from 0).
+jobs_sent() {   # jobs this Bridge took (202) since it started
+  local s; s=$(stat -f %z "$BLOG" 2>/dev/null || echo 0)
+  { if (( s < ${BSTART:-0} )); then cat "$BLOG"; else tail -c +$(( ${BSTART:-0} + 1 )) "$BLOG"; fi; } 2>/dev/null | grep -c 'POST /omacvm/jobs from relay.*: 202'
+}
+job_room() {   # [N]: room for N more jobs (default 3); else the test Bridge again, and the control centre on it
+  local n=${1:-3} m i
+  (( $(jobs_sent) + n <= 18 )) && return 0
+  log "the Bridge's job limit (20 an hour per VM) is near: the test Bridge starts again"
+  m=$(stat -f %z "$BLOG" 2>/dev/null || echo 0)
+  bridge_start || { res bridge-again FAIL "the test Bridge does not listen on 47931 again ($BLOG)"; return 1; }
+  # The control centre asks the Mac every 5 s: linked again once the new Bridge answered its status.
+  for ((i = 0; i < 30; i++)); do
+    tail -c +$(( m + 1 )) "$BLOG" 2>/dev/null | grep -qF "GET /omacvm/status from relay ($VM): 200" && { sleep 1; return 0; }
+    sleep 2
+  done
+  res bridge-again FAIL "the control centre did not ask the new test Bridge in 60 s"
   return 1
 }
 start_vm() {
@@ -343,6 +366,17 @@ window() {   # the launcher's window on this VM (the VM must be stopped): its pi
   return 1
 }
 close_window() { local p; p=$(launcher_pid); [[ -n $p ]] && kill "$p" 2>/dev/null; sleep 2; }
+inside_app() {   # the pids whose executable is inside the test app (what its updater waits for)
+  ps -axo pid=,comm= | awk -v a="$APP/" 'index(substr($0, index($0, $2)), a) == 1 {print $1}'
+}
+stop_inside_app() {   # the VM shut down first; then its helpers (they run from inside a test app)
+  local i p
+  [[ -n $(qemu_pid) ]] && { stop_vm || kill "$(qemu_pid)" 2>/dev/null; }
+  for p in $(inside_app); do kill "$p" 2>/dev/null; done
+  for ((i = 0; i < 15; i++)); do [[ -z $(inside_app) ]] && return 0; sleep 1; done
+  echo "still inside the app: $(for p in $(inside_app); do ps -o comm= -p "$p"; done | tr '\n' ' ')" >&2
+  return 1
+}
 
 
 # ---- the VM ----
@@ -440,11 +474,18 @@ prepare_system() {   # a kept VM older than the mirrors: OmacVM cannot install i
     runuser -u "$U" -- env HOME="/home/$U" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" GUM_CONFIRM_TIMEOUT=5s bash -c "source /usr/share/omarchy/default/bash/env-bootstrap; omarchy-update -y" > /var/tmp/omacvm-e2e-update.log 2>&1 < /dev/null
     rc=$?; rm -f /etc/sudoers.d/99-omacvm-e2e; tail -3 /var/tmp/omacvm-e2e-update.log; exit $rc' > "$OUT/${PFX}omarchy-update.txt" 2>&1
   rc=$?
-  if (( rc == 0 )) && tmo 1800 "$CLI" apply --vm "$VM" --yes > "$OUT/${PFX}apply.log" 2>&1 && gssh "pacman -Q python-textual" >/dev/null 2>&1; then
-    res system-update ok "omarchy update -y + omacvm apply in $(( $(date +%s) - t0 )) s (a kept VM older than the mirrors)"
+  if (( rc == 0 )) && tmo 1800 "$CLI" apply --vm "$VM" --yes > "$OUT/${PFX}apply.log" 2>&1; then
+    # Textual comes with the control centre: a kept VM may have it off until features_as_new.
+    SYSUPD="omarchy update -y + omacvm apply in $(( $(date +%s) - t0 )) s (a kept VM older than the mirrors)"
   else
-    res system-update FAIL "omarchy update exit $rc; python-textual $(gssh 'pacman -Q python-textual' 2>&1 | head -1) ($OUT/${PFX}omarchy-update.txt, ${PFX}apply.log)"
+    res system-update FAIL "omarchy update exit $rc; omacvm apply: $(tail -1 "$OUT/${PFX}apply.log" 2>/dev/null | cut -c1-120) ($OUT/${PFX}omarchy-update.txt, ${PFX}apply.log)"
   fi
+}
+system_update_done() {   # after features_as_new: the control centre's Textual is there now
+  [[ -n ${SYSUPD:-} ]] || return 0
+  if gssh "python3 -c 'import textual'" >/dev/null 2>&1; then res system-update ok "$SYSUPD; Textual there"
+  else res system-update FAIL "$SYSUPD, but no Textual with the control centre on: $(gssh 'pacman -Q python-textual' 2>&1 | head -1)"; fi
+  SYSUPD=""
 }
 features_as_new() {   # what a new VM has on that this one has off (a clone of a kept VM): on, as a person would
   local need
@@ -478,6 +519,7 @@ start_pass() {   # start the VM, the control centre's driver into it, the featur
     local before; before=$(cat "$VMD/features" 2>/dev/null)
     prepare_system
     features_as_new
+    system_update_done
     # What changed while it ran reaches the Mac from the next start (OmacVM.app's links): start it again.
     if [[ $(cat "$VMD/features" 2>/dev/null) != "$before" ]] || [[ -s $OUT/${PFX}omarchy-update.txt ]]; then
       log "start again (the switches set up while it ran apply from a start)"
@@ -511,6 +553,7 @@ print(" | ".join(l.strip(" │")[:90] for l in o["screen"].splitlines() if re.se
 switch_one() {   # NAME on|off: one press in the control centre, and every check
   local n=$1 to=$2 title s t0 b g m job why=""
   title=$(feat title "$n")
+  job_room
   bmark; t0=$(date +%s)
   cc toggle "$title" "$to" 900; s=$CCS
   b=$(bproblems); g=$(guest_feature "$n"); m=$(mac_feature "$n")
@@ -549,8 +592,8 @@ step_switches() {
       # Not for this Mac or VM: the row says so and Space changes nothing.
       title=$(feat title "$n")
       cc row "$title"; s=$CCS
-      [[ $s == *unavailable* || $s == *"off, off"* || $s == *"no row"* ]] \
-        && res "switch-$n" skip "not on this Mac ($(feat reason "$n")); row: ${s:0:120}" \
+      [[ $s == *"row: off, unavailable"* || $s == *"row: off, off"* || $s == *"no row"* ]] \
+        && res "switch-$n" skip "not on this Mac ($(feat reason "$n")); ${s:0:120}" \
         || res "switch-$n" FAIL "unavailable here ($(feat reason "$n")) but the row says: $s"
       continue
     fi
@@ -562,6 +605,7 @@ step_switches() {
   done
   [[ -z $FEATS || $FEATS == *",control-centre,"* ]] || return 0
   # The control centre itself: off closes it (asked first); the Mac brings it back.
+  job_room
   bmark
   cc toggle "OmacVM control centre" off 600; s=$CCS
   g=$(guest_feature control-centre)
@@ -582,6 +626,7 @@ step_fastnet() {   # the fast network: while the VM runs, and after a restart
   if [[ -n $blk ]]; then res fastnet BLOCKED "$blk"; return; fi
   local q0
   for to in on off; do
+    job_room
     bmark; q0=$(qemu_pid)
     cc toggle "Fast network" "$to" 600; s=$CCS
     sleep 10
@@ -614,6 +659,7 @@ step_touchid() {   # Touch ID: the test Bridge's stand-in answers (README)
   local s b
   if [[ $(feat available touch-id) != true ]]; then res touchid BLOCKED "not available here: $(feat reason touch-id)"; return; fi
   echo yes > "$BDIR/touchid-test"
+  job_room
   bmark
   cc toggle "Touch ID" on 600; s=$CCS
   ccok && res touchid-on ok "${s:0:200}" || res touchid-on FAIL "after the switch, before a restart: $s"
@@ -633,6 +679,7 @@ step_touchid() {   # Touch ID: the test Bridge's stand-in answers (README)
   else
     res touchid-restart FAIL "the VM or its control centre did not come back after Touch ID on: $(vminfo)"
   fi
+  job_room
   bmark
   cc toggle "Touch ID" off 600; s=$CCS
   ccok && res touchid-off ok "${s:0:160}" || res touchid-off FAIL "$s"
@@ -649,6 +696,7 @@ step_graphics() {   # each choice from the control centre; the Mac agrees; Vulka
   local g0 to s m b
   g0=$(graphics_mac | awk '{print $1}')
   for to in opengl vulkan auto; do
+    job_room
     bmark
     cc graphics "$to" 1500; s=$CCS
     m=$(graphics_mac); b=$(bproblems)
@@ -661,7 +709,7 @@ step_graphics() {   # each choice from the control centre; the Mac agrees; Vulka
       else res graphics-vulkan-start FAIL "the VM or its control centre did not come back: $(vminfo)"; fi
     fi
   done
-  [[ -n $g0 && $g0 != auto ]] && cc graphics "$g0" 1500
+  [[ -n $g0 && $g0 != auto ]] && { job_room; cc graphics "$g0" 1500; }
   return 0
 }
 
@@ -677,7 +725,7 @@ step_updates() {   # the control centre's update check, and the Bridge's log
 
 step_window() {   # the app's window (the VM stopped): update checks, the fast network button
   log "the app's window (limit 10 min)"
-  local p e was now lbl k blk
+  local p e was now lbl k blk sw i
   if (( HIDDEN )); then res window skip "hidden run: the window steps need a screen nobody works on"; return; fi
   stop_vm || res window-stop FAIL "the VM did not shut down"
   if ! p=$(window); then res window FAIL "the app's window did not show $VM"; start_vm; return; fi
@@ -687,15 +735,20 @@ step_window() {   # the app's window (the VM stopped): update checks, the fast n
   e=$(grep -iE 'could not|failed|not signed|refused|error' "$OUT/${PFX}window-check.txt" | head -2 | tr '\n' '|')
   [[ -z $e && $(cat "$OUT/${PFX}ax-check.txt") == pressed* ]] && res window-check-now ok "$(grep -iE 'up to date|is ready|checked|newest' "$OUT/${PFX}window-check.txt" | head -1)" \
     || res window-check-now FAIL "$(cat "$OUT/${PFX}ax-check.txt"); $e"
-  if "$OUT/ax" "$p" has "Turn On…" >/dev/null 2>&1 || "$OUT/ax" "$p" has "Turn Off…" >/dev/null 2>&1; then
+  # The switch of the compact window (3.0.5), or the Turn On…/Turn Off… button before it.
+  sw=""; "$OUT/ax" "$p" has "Fast network (experimental)" > "$OUT/${PFX}ax-fastnet-has.txt" 2>&1 && sw="Fast network (experimental)"
+  if [[ -n $sw ]] || "$OUT/ax" "$p" has "Turn On…" >/dev/null 2>&1 || "$OUT/ax" "$p" has "Turn Off…" >/dev/null 2>&1; then
     blk=$(netd_blocked)
     if [[ -n $blk ]]; then
       res window-fastnet BLOCKED "$blk"
     else
       was=$([[ -s $VMD/fast-network ]] && echo on || echo off)
       for k in 1 2; do
-        lbl=$([[ -s $VMD/fast-network ]] && echo "Turn Off…" || echo "Turn On…")
-        "$OUT/ax" "$p" press "$lbl" > "$OUT/${PFX}ax-fastnet-$k.txt" 2>&1; sleep 8
+        lbl=${sw:-$([[ -s $VMD/fast-network ]] && echo "Turn Off…" || echo "Turn On…")}
+        "$OUT/ax" "$p" press "$lbl" > "$OUT/${PFX}ax-fastnet-$k.txt" 2>&1
+        # The switch works off the main thread (the service check reads QEMU's signature): until the file follows.
+        for ((i = 0; i < 20; i++)); do [[ $([[ -s $VMD/fast-network ]] && echo on || echo off) != "$was" ]] && break; sleep 1; done
+        sleep 2
         now=$([[ -s $VMD/fast-network ]] && echo on || echo off)
         [[ $now != "$was" && $(mac_feature fast-network) == "$now" ]] && res "window-fastnet-$now" ok "$lbl -> the VM's fast-network file and record: $now" \
           || res "window-fastnet-$k" FAIL "$lbl: file $now, record $(mac_feature fast-network) ($(cat "$OUT/${PFX}ax-fastnet-$k.txt"); $("$OUT/ax" "$p" text | grep -iE 'fast|password|could' | head -2 | tr '\n' '|'))"
@@ -761,16 +814,16 @@ if [[ -n $PREV ]] && want update; then
         --preserve-metadata=entitlements,identifier "$CAND" 2>> "$OUT/relabel.log"
       res version skip "this build says $PV like the release before: offered to the updater as $CV"
     fi
-    # The release before, and a VM it set up (Update VM in its window).
+    # The release before, and a VM it set up as a person has it: Update VM in its window, the
+    # features a new VM has (a kept VM has the Bridge and the control centre off), its control centre.
+    PFX=previous-
     rm -rf "$APP"; ditto "$OUT/prev-app/OmacVM Test.app" "$APP"
     bridge_start
     if [[ -n $CLONE ]]; then use_vm "$VM-u" "$CLONE"; else use_vm "$VM"; fi
-    if d=$(update_vm_window); then res previous-update-vm ok "$PV: $d"; else res previous-update-vm FAIL "$PV: $d"; fi
-    if start_vm && reachable 90; then
-      gpush /var/lib/omacvm-e2e/guest-cc.py < "$HERE/guest-cc.py"
-      baseline previous
-    else res previous-start FAIL "$(vminfo)"; fi
-    stop_vm
+    if d=$(update_vm_window); then res update-vm ok "$PV: $d"; else res update-vm FAIL "$PV: $d"; fi
+    ONLY=""   # its prepare too, whatever --only said
+    start_pass && baseline start
+    PFX=update-
     # A local feed, signed with a throwaway key (test builds take OMACVM_APPCAST_KEY).
     F=$OUT/feed; mkdir -p "$F"
     swift "$R/src/release/sign.swift" keygen "$F/key" > "$F/key.pub" 2>/dev/null
@@ -784,8 +837,9 @@ if [[ -n $PREV ]] && want update; then
     sleep 1
     # The app updates itself (as the window's "Update to X" does, without the window: --update-now).
     close_window
-    # The test Bridge runs from inside the app (a person's lives outside it): the updater would wait for it.
-    pkill -f "OmacVM Test Bridge.app/Contents/MacOS/" 2>/dev/null; sleep 2
+    # The test Bridge and Gestures run from inside the app (a person's live outside it): the updater
+    # would wait for them ("A VM runs from OmacVM Test" is any process inside the app).
+    stop_inside_app
     hide=(); (( HIDDEN )) && hide=(--env OMACVM_COCOA_HIDDEN=1)   # the updated app starts again: no window either
     open -n -g --env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$F/key.pub")" \
       ${hide[@]+"${hide[@]}"} "$APP" --args --update-now
