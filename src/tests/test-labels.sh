@@ -12,7 +12,8 @@ fail=0
 expect() {   # WHAT WANT GOT
   if [[ $2 == "$3" ]]; then echo "ok   $1"; else echo "FAIL $1: want '$2', got '$3'"; fail=1; fi
 }
-own=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory | sed -n 's/^NFSHomeDirectory: //p')
+own=$(id -P | cut -d: -f9)
+[[ -d $own ]] || { echo "FAIL no home for $(id -un) in the user database"; exit 1; }
 labels() {   # HOME TEST_IDENTITY: the four labels
   HOME=$1 OMACVM_TEST_IDENTITY=$2 bash -c 'source "$0/src/lib/labels.sh"
     echo $(omacvm_label bridge) $(omacvm_label gestures) $(omacvm_label clip-in) $(omacvm_label omanotch)' "$R"

@@ -12,7 +12,8 @@
 omacvm_test_home() {
   [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && return 0
   local own
-  own=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')
+  # The user's home from the user database (dscl puts a path with a space on a line of its own).
+  own=$(id -P 2>/dev/null | cut -d: -f9)
   [[ -n $own ]] || return 1   # not known: the user's own (as before)
   [[ $(cd "$HOME" 2>/dev/null && pwd -P) != "$(cd "$own" 2>/dev/null && pwd -P)" ]]
 }

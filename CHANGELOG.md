@@ -25,6 +25,11 @@ in more words.
   scrolls in a short window and is drawn again when the window changes size. Reported by
   @brianmerchant (#292).
 
+- Tests and other HOMEs: the Mac helpers' LaunchAgents get `org.omacvm.test.*` labels with
+  the test identity or a HOME that is not the user's own, so a test run can no longer
+  replace the user's own Bridge, Gestures, clipboard helper or Omanotch (`src/lib/labels.sh`,
+  `src/tests/test-labels.sh`).
+
 ## 3.0.8
 
 - Capture mode no longer makes the VM lag or the sound crackle
