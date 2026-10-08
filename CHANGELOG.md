@@ -5,6 +5,9 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in
+  System Settings, without quitting the app first (macOS kept the old answer for the running
+  app; the app now asks in a fresh process).
 - Experimental, off by default, OmacVM.app only: the Mac's input methods
   type in Omarchy: the Mac's candidate window opens at the text cursor in
   the VM, the chosen text goes into the VM's field (tested with Pinyin,

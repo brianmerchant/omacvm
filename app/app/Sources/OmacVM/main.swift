@@ -747,6 +747,15 @@ if CommandLine.arguments.dropFirst().first == ControlRun.flag {
     ControlRun.main(Array(CommandLine.arguments.dropFirst(2)), test: TestIdentity.isOn)
 }
 
+// `OmacVM --key-access`: print macOS's current answer for "control the
+// computer" (1 or 0) and quit. macOS answers CGPreflightPostEventAccess once
+// per process and keeps that answer, so a grant given while the app runs only
+// shows in a new process: KeyAccess.fresh asks through this one.
+if CommandLine.arguments.dropFirst().first == "--key-access" {
+    print(CGPreflightPostEventAccess() ? "1" : "0")
+    exit(0)
+}
+
 // `OmacVM --vms-folder`: print where the VMs are and quit (no window), for
 // `omacvm check` and the tests.
 if CommandLine.arguments.dropFirst().first == "--vms-folder" {
