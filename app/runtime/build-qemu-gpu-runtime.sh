@@ -840,7 +840,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-borderless-no
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park-logic.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch-park.patch"
 "$native_dir/Tests/display/test-notch-park.sh"
-grep -q '\[self omacvmParkInNotch:event\];' "$source_dir/ui/cocoa.m" || \
+grep -q '\[self omacvmParkInNotch:event view:self output:0\];' "$source_dir/ui/cocoa.m" && \
+  grep -q '\[cocoaView omacvmParkInNotch:e view:self output:output\];' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m does not park the guest's pointer in NOTCH (notch-park patch)"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
