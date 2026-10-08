@@ -32,7 +32,7 @@ def app():
     return ControlCentre(Controller())
 
 
-async def settle(pilot, until, seconds=8.0):
+async def settle(pilot, until, seconds=30.0):   # returns as soon as until() holds; the cap is for busy CI Macs
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         await pilot.pause(0.05)
