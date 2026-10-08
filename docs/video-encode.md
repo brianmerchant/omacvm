@@ -225,7 +225,7 @@ on a MacBook Air M2, test VM with 4 vCPUs at 2940x1840 60 Hz, 20 s with the
 pointer moving and a 30 Hz tone playing (2026-10-08,
 `work/tracks/capture-perf.md` in the workspace):
 
-| | 3.0.5 | 3.0.7 |
+| | 3.0.5 | 3.0.8 |
 |---|---|---|
 | QEMU's main loop busy | 93 % (78 % waiting in EncodeFrame) | 14 % |
 | Main loop late 10 ms or more | 1,082 times, worst 216 ms | 2 times (at the start), worst 55 ms |
