@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.6 (unreleased)
+## 3.0.7 (unreleased)
 
 - Experimental, off by default, OmacVM.app only: the Mac's input methods
   type in Omarchy: the Mac's candidate window opens at the text cursor in
@@ -15,6 +15,8 @@ in more words.
   the app's VM window while the VM runs, then one restart of the VM. A VM
   with it off starts exactly as before. Requested and scoped by @Vocllum
   (#273). Details: docs/features.md, design: docs/adr/0042-mac-ime.md.
+
+## 3.0.6 (unreleased)
 
 - The control centre in the VM brings its own Textual (8.2.8 with Rich,
   Pygments and the rest, pure Python, in `src/control/vendor`). It came from
