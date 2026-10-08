@@ -21,8 +21,8 @@ was green; nobody had pressed the switches in a real VM.
 | touchid | Touch ID on, restart, `sudo` (stand-in yes, then no), Bridge restarted then `sudo` at once, off | in without a password / the password prompt; the Bridge's log |
 | graphics | Graphics: OpenGL, Vulkan (restart), Automatic | `omacvm graphics --json` agrees; this start is Vulkan |
 | updates | U, c (check again) | no error; the Bridge's `update check: X (N parts)` |
-| window | Check Now, Fast network Turn On…/Turn Off… in the app's window (VM stopped) | no error in the window; the VM's `fast-network` file |
-| update | the release before installed, its Update VM; the app updates itself to this build (local feed, throwaway key); Update VM; every switch again | the app's version and signature, `update.log`, the switches as above |
+| window | Check Now, the Fast network switch (Turn On…/Turn Off… before 3.0.5) in the app's window (VM stopped) | no error in the window; the VM's `fast-network` file |
+| update | the release before installed, its Update VM, the features a new VM has, its control centre (`previous-*`); the app updates itself to this build (local feed, throwaway key); Update VM; every switch again | the app's version and signature, `update.log`, the switches as above |
 
 The control centre is the real one: `omacvm` in tmux, started in the desktop
 user's service manager (`systemd-run --user`) as a terminal on the desktop
@@ -30,6 +30,13 @@ is, so Touch ID's PAM client sees a local session. Keys go in with
 `tmux send-keys`; answers are read from the terminal's screen
 (`guest-cc.py`). The app's window is driven through Accessibility on the
 launcher's own pid (`ax.swift`).
+
+The Bridge takes at most 20 jobs an hour per VM (`jobsPerHour`); one pass
+sends about 50. The count lives in the Bridge's memory, so the test starts
+its test Bridge again before a step would go over it, and waits until the
+control centre has asked the new one. Before the update, the test Bridge and
+Gestures (they run from inside a test app; a person's live outside it) are
+stopped, else the updater waits ("A VM runs from OmacVM Test").
 
 Touch ID needs a finger and a Mac with Touch ID. The test identity's Bridge
 (`org.omacvm.test.bridge`, never a release Bridge) reads a stand-in file,
@@ -45,7 +52,8 @@ skip), `result.json` (what the gate reads: the app's commit, `pass`), the
 screens (`cc-N-*.json`), `run.log`. FAIL: the product is wrong. BLOCKED: this
 Mac cannot run the step until a person does something once (below). Both
 fail the gate; a skip says why the step does not apply here (Omanotch on a
-Mac without a notch).
+Mac without a notch, or on a Mac with a notch but no test Omanotch on port
+47911: the person's own is never used).
 
 ## The test Mac, once
 

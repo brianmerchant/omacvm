@@ -150,6 +150,7 @@ def world(tmp_path):
     mac.on_job_end = ended
     term = Terminal(env)
     g = driver(term)
+    g.mac = mac
     ok, _, _ = g.watch(lambda s: "Mac linked" in s, 30)
     assert ok, term.render()
     yield g
@@ -189,3 +190,13 @@ def test_graphics_and_updates(world):
     assert r["ok"] and len(r["steps"]) == 2 and r["after"]["note"].startswith("Automatic:"), r
     r = call(g.cmd_updates, "8")
     assert "Updates" in r["body"] and "Update checks" in r["body"], r
+
+
+def test_job_limit_is_named(world):
+    """The Bridge's job limit (429 rate): the control centre sends nothing more and says so in a
+    note; the driver's answer names it instead of only "nothing happened" (the 3.0.5 gate)."""
+    g = world
+    g.mac.refuse_jobs = (429, "rate", "20 jobs in the last hour: try later")
+    r = call(g.cmd_toggle, "The Mac's clock", "off", "40")
+    assert not r["ok"] and "nothing happened" in r["error"], r
+    assert any("try later" in t or "in the last hour" in t for t in r["trouble"]), r

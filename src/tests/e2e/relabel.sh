@@ -20,6 +20,8 @@ for h in "$A"/Contents/Helpers/*.app; do
   case $($PB -c "Print :CFBundleIdentifier" "$h/Contents/Info.plist") in
     org.omacvm.bridge) new=org.omacvm.test.bridge; name="OmacVM Test Bridge" ;;
     org.omacvm.gestures) new=org.omacvm.test.gestures; name="OmacVM Test Gestures" ;;
+    # Omanotch (3.0.5 on) keeps its id and signature in test builds too (build-app.sh).
+    ch.gillesgoetsch.omanotch) continue ;;
     *) echo "relabel.sh: unknown helper $h" >&2; exit 1 ;;
   esac
   $PB -c "Set :CFBundleIdentifier $new" "$h/Contents/Info.plist"
