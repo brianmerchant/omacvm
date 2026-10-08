@@ -19,7 +19,7 @@ index 3243cc8..aa247fc 100644
  
  void CLayerSurface::sendFrame() {
 diff --git a/src/hyprpicker.cpp b/src/hyprpicker.cpp
-index 2f03fdc..70a62e3 100644
+index 2f03fdc..7d581fd 100644
 --- a/src/hyprpicker.cpp
 +++ b/src/hyprpicker.cpp
 @@ -14,6 +14,10 @@
@@ -33,7 +33,7 @@ index 2f03fdc..70a62e3 100644
  }
  
  void CHyprpicker::init() {
-@@ -285,6 +289,8 @@ void CHyprpicker::recheckACK() {
+@@ -285,9 +289,25 @@ void CHyprpicker::recheckACK() {
  
  void CHyprpicker::markDirty() {
      for (auto& ls : m_vLayerSurfaces) {
@@ -42,7 +42,24 @@ index 2f03fdc..70a62e3 100644
          if (ls->frameCallback)
              continue;
  
-@@ -774,7 +780,10 @@ void CHyprpicker::initMouse() {
++        // No frame pending: draw now. A frame request alone waits for the next
++        // commit, and once drawing stopped nothing else commits (the pointer
++        // would no longer redraw: the colour picker's zoom stood still).
++        if (ls->rendered) {
++            ls->dirty = false;
++            renderSurface(ls.get());
++            if (ls->frameCallback)
++                continue;
++            ls->dirty = true; // no free buffer: when the compositor's frame is done
++            ls->markDirty();
++            ls->pSurface->sendCommit();
++            continue;
++        }
++
+         ls->markDirty();
+     }
+ }
+@@ -774,7 +794,10 @@ void CHyprpicker::initMouse() {
  
          m_vLastCoords = {x, y};
  
