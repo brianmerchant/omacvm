@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.6 (unreleased)
+
+- OmacVM.app: a VM started while its window was not visible (screen
+  locked, the window on another Space, the app hidden) could
+  crash in its first seconds, in the start animation. Since 3.0.0 the
+  animation replaces a display link that gives no frames, and dropping
+  one freed it while macOS still used it. The animation now holds its
+  link until it is done with it.
+
 ## 3.0.5 (unreleased)
 
 - With OmacVM.app and the test app OmacVM Test.app on one Mac, each one's
