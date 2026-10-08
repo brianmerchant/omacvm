@@ -1513,6 +1513,32 @@ def test_a_repair_sets_old_checks_aside_until_new_ones_come(slow_world):
     asyncio.run(go())
 
 
+def test_a_look_from_before_a_job_end_keeps_its_checks_aside(slow_world):
+    """A look of the VM's checks or the Mac's status that started before a job
+    ended may say what was before it: it does not bring the old checks back."""
+    import threading
+    from omacvm_cc import state as S
+    from omacvm_cc.controller import Controller
+    mac, checks = slow_world
+    c = Controller()
+    c.refresh_mac()
+    c.refresh_vm_checks()
+    assert any(x.feature == "camera" for x in c.vm_checks)
+    checks.delay, mac.hello_delay = 1.0, 1.0
+    looks = [threading.Thread(target=c.refresh_vm_checks), threading.Thread(target=c.refresh_mac)]
+    for t in looks:
+        t.start()
+    time.sleep(0.3)
+    c.job_ended(S.Job("j1", "reinstall", ("camera",), "done"))
+    for t in looks:
+        t.join()
+    assert "camera" in c.stale_vm and "camera" in c.stale_mac
+    checks.delay, mac.hello_delay = 0.0, 0.0
+    c.refresh_vm_checks()
+    c.refresh_mac()
+    assert not c.stale_vm and not c.stale_mac
+
+
 def test_old_package_list_says_why_and_offers_omarchy_update(slow_world, monkeypatch):
     """WebGPU and GPU compute on failed on the mini without a reason, and
     "space tries again" could not work: the VM's package list was older than

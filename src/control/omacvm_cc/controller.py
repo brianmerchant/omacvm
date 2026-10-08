@@ -75,6 +75,7 @@ class Controller:
         # next look of each side (the VM's checks, the Mac's status).
         self.stale_vm: set[str] = set()
         self.stale_mac: set[str] = set()
+        self.job_ends = 0   # bumped at each job's end: a look that started before it clears nothing
 
     # ---- the Mac ----
     @property
@@ -98,6 +99,7 @@ class Controller:
         return ""
 
     def refresh_mac(self) -> None:
+        ends = self.job_ends
         try:
             self.hello = self.bridge.hello()
             self.mac_error = None
@@ -108,7 +110,8 @@ class Controller:
             st = self.bridge.status()
             if not st.get("pending"):
                 self.mac_status = st
-                self.stale_mac = set()
+                if ends == self.job_ends:
+                    self.stale_mac = set()
                 self.local.save_cache(mac_status=st)
         except BridgeError as e:
             self.mac_error = e
@@ -179,10 +182,12 @@ class Controller:
 
     # ---- the VM ----
     def refresh_vm_checks(self) -> None:
+        ends = self.job_ends
         checks = guest_checks()
         if checks is not None:
             self.vm_checks = checks
-            self.stale_vm = set()
+            if ends == self.job_ends:
+                self.stale_vm = set()
             self.checked_at = time.time()
             self.from_cache = False
             self.local.save_cache(vm_checks="\n".join(
@@ -215,6 +220,7 @@ class Controller:
         before it are set aside until the next look (seconds later), so its
         row does not wait for them, nor show what they said before."""
         self.reload_local()
+        self.job_ends += 1
         if job.state == "done" and job.action in ("enable", "disable", "reinstall"):
             self.stale_vm |= set(job.features)
             self.stale_mac |= set(job.features)
@@ -280,6 +286,9 @@ class Controller:
             for f in self.mac_status.get("features") or []:
                 if isinstance(f, dict) and f.get("name"):
                     avail[f["name"]] = S.Avail(bool(f.get("available", True)), str(f.get("reason") or ""))
+                    # A switch just made is newer than the Mac's look from before it.
+                    if f["name"] in self.stale_mac:
+                        continue
                     # The Mac found the record wrong (switched outside OmacVM) and fixed it:
                     # the real state, until the VM's copy (fixed too) is read again.
                     if f.get("fixed") and isinstance(f.get("on"), bool) and f["name"] in on:
