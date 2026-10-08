@@ -156,7 +156,7 @@ struct RootView: View {
 
     var body: some View {
         if scrolls {
-            FitScroll { content }.frame(width: 568)
+            FitScroll { content }.frame(width: WindowLayout.width)
         } else {
             content
         }
@@ -173,8 +173,9 @@ struct RootView: View {
             case .unavailable: UnavailableView(state: state)
             }
         }
-        .frame(width: 520)
-        .padding(24)
+        // One inset on every side for every screen (WindowLayout).
+        .frame(width: WindowLayout.contentWidth)
+        .padding(WindowLayout.inset)
     }
 }
 
@@ -259,7 +260,13 @@ struct SetupView: View {
                         Text("\(Mac.tierNames[t]): \(v.cpus) CPUs, \(v.memoryGB) GB").tag(t)
                     }
                 }
-                Toggle("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar", isOn: $bridge)
+                // Two lines: on one, the form grows past the window's sides.
+                Toggle(isOn: $bridge) {
+                    Text("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: RowNote.width + 40, alignment: .leading)
+                }
+                .layoutProbe("bridge")
                 Toggle("Trackpad gestures in full screen", isOn: $gestures)
                 if gestures && mouse.connected { MagicMouseRow() }
                 Toggle("Log in automatically (the Mac's own lock protects Omarchy)", isOn: $autologin)

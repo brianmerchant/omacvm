@@ -65,7 +65,8 @@ extension SwitchRow where Accessory == EmptyView {
 /// gives its right column no width of its own, so a long line would widen
 /// the window: it wraps at the column's width instead.
 struct RowNote: View {
-    /// The right column of the VM window's form (520 pt less the longest label).
+    /// The right column of the VM window's form (WindowLayout.contentWidth
+    /// less the longest label).
     static let width: CGFloat = 280
 
     let text: String

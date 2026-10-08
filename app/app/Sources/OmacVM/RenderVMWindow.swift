@@ -9,7 +9,7 @@ import SwiftUI
 /// folder, light and dark, into DIR/*.png, writes each window's height into
 /// DIR/heights.txt and exits 1 when the usual state or the keyboard warning
 /// is taller than a 13-inch MacBook shows (WindowFit), or when a part of a
-/// window is closer than 16 pt to its sides or its buttons at the end of a
+/// window is closer than its 20 pt inset to a side or its buttons at the end of a
 /// row do not end on one line (WindowLayout). CI runs it.
 @MainActor
 enum RenderVMWindow {
@@ -50,7 +50,8 @@ enum RenderVMWindow {
         func sides(_ name: String, trailing: [String]) {
             let p = WindowLayout.problems(LayoutProbe.boxes(), width: Double(lastWidth), trailing: trailing)
             lines.append("\(name): sides " + (p.isEmpty ? "ok" : "WRONG: " + p.joined(separator: "; ")))
-            if !p.isEmpty {
+            // The frames: on a failure, or always with OMACVM_RENDER_BOXES=1.
+            if !p.isEmpty || ProcessInfo.processInfo.environment["OMACVM_RENDER_BOXES"] != nil {
                 lines.append("  width \(Int(lastWidth)): " + LayoutProbe.boxes().map { "\($0.name) \(Int($0.minX.rounded()))-\(Int($0.maxX.rounded()))" }.joined(separator: ", "))
             }
             if !p.isEmpty { failed = true }

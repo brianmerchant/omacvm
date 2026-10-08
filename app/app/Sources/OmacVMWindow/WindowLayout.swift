@@ -12,9 +12,7 @@ public enum WindowLayout {
     /// What the content has between the insets.
     public static var contentWidth: Double { width - 2 * inset }
 
-    /// Closer to an edge than this looks cramped.
-    public static let minimumInset: Double = 16
-    /// Trailing edges this close count as one line.
+    /// Edges this close count as one line.
     public static let tolerance: Double = 1
 
     /// Where a part of the window is, left to right, in points from the
@@ -32,16 +30,16 @@ public enum WindowLayout {
     }
 
     /// What is wrong with these parts in a window `width` wide: closer than
-    /// `minimumInset` to an edge (or past it), and the `trailing` ones not
-    /// ending on one line. Empty: all fine.
-    public static func problems(_ boxes: [Box], width: Double, trailing: [String]) -> [String] {
+    /// `inset` to an edge (or past it), and the `trailing` ones not ending
+    /// on one line. Empty: all fine.
+    public static func problems(_ boxes: [Box], width: Double, trailing: [String], inset: Double = inset) -> [String] {
         var out: [String] = []
         for b in boxes {
-            if b.minX < minimumInset - 0.5 {
-                out.append("\(b.name): \(Int(b.minX.rounded())) pt from the left edge (\(Int(minimumInset)) at least)")
+            if b.minX < inset - tolerance {
+                out.append("\(b.name): \(Int(b.minX.rounded())) pt from the left edge (\(Int(inset)) at least)")
             }
-            if width - b.maxX < minimumInset - 0.5 {
-                out.append("\(b.name): \(Int((width - b.maxX).rounded())) pt from the right edge (\(Int(minimumInset)) at least)")
+            if width - b.maxX < inset - tolerance {
+                out.append("\(b.name): \(Int((width - b.maxX).rounded())) pt from the right edge (\(Int(inset)) at least)")
             }
         }
         let ends = boxes.filter { trailing.contains($0.name) }

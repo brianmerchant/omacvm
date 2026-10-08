@@ -356,7 +356,7 @@ expect(WindowFit.contentHeight(content: 900, visible: 700, titleBar: 28) == 672,
 expect(WindowFit.contentHeight(content: 900, visible: 200, titleBar: 28) == WindowFit.minimumContent, "a tiny screen: a few rows stay")
 // MARK: Window sides (the pictures' frames: OmacVM --render-vm-window)
 
-expect(WindowLayout.contentWidth == 528 && WindowLayout.inset >= WindowLayout.minimumInset, "568 pt window, 20 pt each side")
+expect(WindowLayout.contentWidth == 528 && WindowLayout.inset >= 16, "568 pt window, 20 pt each side")
 typealias Box = WindowLayout.Box
 let even = [Box("title", minX: 20, maxX: 200), Box("change", minX: 460, maxX: 548),
             Box("update", minX: 470, maxX: 548), Box("start", minX: 500, maxX: 548.4)]
@@ -369,6 +369,9 @@ expect(found.contains { $0.hasPrefix("title: 4 pt from the left") }, "4 pt from 
 expect(found.contains { $0.hasPrefix("change: 2 pt from the right") }, "Change… at the right edge: too close")
 expect(found.contains { $0.hasPrefix("right edges not on one line") }, "Change… 80 pt past Start: not one line")
 expect(WindowLayout.problems([Box("row", minX: -10, maxX: 600)], width: 568, trailing: []).count == 2, "past both edges")
+expect(WindowLayout.problems([Box("form", minX: 16, maxX: 552)], width: 568, trailing: []).count == 2,
+       "4 pt into the inset on each side (a row wider than the form's column): wrong")
+expect(WindowLayout.problems([Box("form", minX: 19.5, maxX: 548.5)], width: 568, trailing: []).isEmpty, "half a point: fine")
 
 expect(CommandLineInstall.shortText(.installed(at: "/x")) == "Installed"
        && CommandLineInstall.shortText(.available(target: "/x", needsAdmin: true)) == "Not installed",
