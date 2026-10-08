@@ -602,6 +602,11 @@ struct DiskSizeSheet: View {
             note = p
             return
         }
+        // A test build never changes the disk of a VM of the installed app.
+        if let p = Paths.startProblem(state.config.folder) {
+            note = p
+            return
+        }
         if newGB < currentGB {
             let alert = NSAlert()
             alert.messageText = "Make the disk \(newGB) GB?"

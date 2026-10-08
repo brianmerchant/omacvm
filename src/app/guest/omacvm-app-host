@@ -4,8 +4,9 @@
 # Today: omacvm.notch (rows beside the notch, in pixels, when the window
 # covers them; only an OmacVM.app before 3.0.0 sends it), omacvm.screen
 # (that full-screen size), omacvm.hdr, omacvm.vkwindows (the app shows Vulkan
-# windows Hyprland imports) and omacvm.hwcursor (the Mac's cursor shows the
-# pointer: omacvm_app.lua).
+# windows Hyprland imports), omacvm.hwcursor (the Mac's cursor shows the
+# pointer: omacvm_app.lua) and omacvm.notchpointer (QEMU parks the guest's
+# pointer in NOTCH as the Mac's leaves for the strip: notchcast does not hide it).
 set -euo pipefail
 out=/run/omacvm/host.env
 install -d -m755 /run/omacvm

@@ -1,0 +1,353 @@
+From: OmacVM
+Subject: [PATCH] ui: one pointer between the VM and Omanotch's strip in full screen
+
+What: when the pointer leaves a view of the VM up into Omanotch's strip
+(macOS full screen below a notch, absolute pointer, VM has it), QEMU sends
+one last tablet position: the top row of the guest's hidden NOTCH output,
+behind the camera (ui/omacvm-notch-park.h). The main view and the views of
+the other outputs (with an external display holding the main window, the
+MacBook's display is one of those). The guest's layout message now also
+keeps NOTCH's box. The next motion over the VM brings the guest's pointer
+back, as before. At that edge the Mac's cursor now changes with the guest's
+frame: hidden (up) or shown (back) until a guest frame drawn after the move
+is on the main window's layer, at most 80 ms (OMACVM_PARK_HOLD=0: at once,
+as before).
+
+Why: since full screen moved to its own Space (3.0.x), the strip is
+another app's window above ours. QEMU shows the Mac's arrow at once when
+the pointer leaves, but the guest's arrow stayed on the VM's top rows until
+notchcast hid it with Hyprland's cursor:invisible, which Hyprland applies
+only on a periodic tick (85-540 ms measured on the MacBook Air): two arrows
+on the way up, and on the way back no arrow until it was shown again.
+With the guest's pointer out of sight in NOTCH, the guest never has to hide
+it (notchcast reads omacvm.notchpointer=1, sent by OmacVM.app). Measured
+on the Air, 20 crossings each way (frames with a missing / an extra
+cursor): slow moves 255/98 -> 14/0, fast moves 37/251 -> 4/63 (single
+frames of render latency), tracks/notch-cursor-flicker.md.
+
+Upstream: not applicable (OmacVM's notch strip).
+Test: app/runtime/Tests/display/test-notch-park.c (the logic);
+src/tests/notch-cursor-flicker/ (recording on a notched Mac, manual).--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -47,6 +47,7 @@
+ #include "ui/omacvm-gpu-memory.h"
+ #include "ui/omacvm-desktop-restart.h"
+ #include "ui/omacvm-clean-size.h"
++#include "ui/omacvm-notch-park.h"
+ #include "hw/core/boards.h"
+ #include "system/system.h"
+ #include "system/runstate.h"
+@@ -505,6 +506,7 @@
+ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
+                   button:(int)button down:(bool)down;
+ - (void) omacvmUngrabAfterDrag;
++- (void) omacvmParkInNotch:(NSEvent *)event view:(NSView *)view output:(int)output;
+ - (void) omacvmGuestAtTop:(bool)top;
+ @end
+ 
+@@ -970,6 +972,12 @@
+ typedef struct OmacVMBox { double x, y, w, h; } OmacVMBox;
+ static bool omacvm_map_pointer(int output, double u, double v,
+                                double *nx, double *ny);
++static bool omacvm_notch_park_target(int output, double *nx, double *ny);
++static void omacvm_park_hold_start(bool up);
++static int omacvm_park_hold_now(void);
++static void omacvm_park_frame_shown(double flushed);
++static bool omacvm_parked;              /* the guest's pointer waits in NOTCH */
++static int omacvm_park_hold_on;         /* any thread: a hold waits for a frame */
+ static int omacvm_active_outputs(void);
+ static bool omacvm_is_our_window(NSWindow *w);
+ static bool omacvm_pointer_over_ours(void);
+@@ -1273,7 +1281,13 @@
+     bool hw = isMouseGrabbed && omacvm_hwc_active(&omacvm_hwc, isAbsoluteEnabled);
+     bool hide = !hw && omacvm_pointer_hide_mac(&omacvm_ptr, cursor_hide, isMouseGrabbed,
+                                                isAbsoluteEnabled);
++    int hold = omacvm_park_hold_now();
+ 
++    /* At the strip's edge: as the guest's frame says (omacvm_park_hold_start). */
++    if (hold) {
++        hide = hold < 0;
++    }
++
+     omacvm_hwc_apply(hw);
+     if (hide == omacvm_mac_cursor_hidden) {
+         return;
+@@ -2508,6 +2522,7 @@
+ - (void) mouseExited:(NSEvent *)event
+ {
+     omacvm_pointer_left(&omacvm_ptr);
++    [self omacvmParkInNotch:event view:self output:0];
+     /*
+      * OmacVM: with several outputs the pointer may just be on the next one,
+      * or crossing the strip between them in the middle of a drag (the
+@@ -2517,7 +2532,51 @@
+         (omacvm_active_outputs() < 2 ||
+          (!omacvm_pointer_over_ours() && ![NSEvent pressedMouseButtons]))) {
+         [self ungrabMouse];
++    }
++}
++
++/*
++ * OmacVM: up into Omanotch's strip in full screen below a notch, the guest's
++ * pointer goes into its hidden NOTCH output in the same moment (one cursor:
++ * the Mac's shows on the strip at once; ui/omacvm-notch-park.h says why).
++ * The next motion over the VM brings it back. The main view and the views
++ * of the other outputs (the MacBook's display can be one of those when an
++ * external display has the main window).
++ */
++- (void) omacvmParkInNotch:(NSEvent *)event view:(NSView *)view output:(int)output
++{
++    NSPoint p = [view convertPoint:[event locationInWindow] fromView:nil];
++    NSSize size = [view bounds].size;
++    NSWindow *w = [view window];
++    OmacVMParkIn in = {
++        .absolute = isAbsoluteEnabled,
++        .grabbed = isMouseGrabbed,
++        .full_screen = w && ([w styleMask] & NSWindowStyleMaskFullScreen),
++        .notch_inset = w ? [[w screen] safeAreaInsets].top : 0,
++        .exit_y = p.y,
++        .view_h = size.height,
++    };
++    double nx, ny;
++
++    if (!omacvm_park_wanted(&in) || !omacvm_notch_park_target(output, &nx, &ny)) {
++        return;
++    }
++    with_bql(^{
++        qemu_input_queue_abs(dcl.con, INPUT_AXIS_X, lround(nx * INPUT_EVENT_ABS_MAX),
++                             0, INPUT_EVENT_ABS_MAX);
++        qemu_input_queue_abs(dcl.con, INPUT_AXIS_Y, lround(ny * INPUT_EVENT_ABS_MAX),
++                             0, INPUT_EVENT_ABS_MAX);
++        qemu_input_event_sync();
++    });
++    /* the main window's frames are the ones QEMU watches (the hold below) */
++    omacvm_parked = output == 0;
++    if (omacvm_parked && omacvm_mac_cursor_hidden) {
++        omacvm_park_hold_start(true);
+     }
++    if (omacvm_pointer_debug) {
++        fprintf(stderr, "omacvm-pointer: up into the strip (output %d): guest pointer to NOTCH (%.4f, %.4f)\n",
++                output, nx, ny);
++    }
+ }
+ 
+ /* OmacVM: a drag that ended outside every window of ours lets go of the pointer. */
+@@ -2532,6 +2591,10 @@
+ - (void) mouseEntered:(NSEvent *)event
+ {
+     if (isAbsoluteEnabled && !isMouseGrabbed) {
++        /* back from the strip: the Mac's cursor until the guest's shows */
++        if (omacvm_parked) {
++            omacvm_park_hold_start(false);
++        }
+         [self grabMouse];
+     }
+ }
+@@ -6024,6 +6087,7 @@
+             omacvm_present_gravity(layer, surf);
+             [layer setContents:(id)surf];
+             [CATransaction commit];
++            omacvm_park_frame_shown(flushed);
+             IOSurfaceDecrementUseCount(surf);
+             CFRelease(surf);
+         });
+@@ -6115,7 +6179,7 @@
+ }
+ 
+ /* Any thread: put a finished frame on the layer. */
+-static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter)
++static void cocoa_gl_present_show(IOSurfaceRef surf, GLint filter, double flushed)
+ {
+     CALayer *layer = [cocoaView layer];
+     NSString *f = filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
+@@ -6128,6 +6192,11 @@
+     omacvm_present_gravity(layer, surf);
+     [layer setContents:(id)surf];
+     [CATransaction commit];
++    if (qatomic_read(&omacvm_park_hold_on)) {
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_park_frame_shown(flushed);
++        });
++    }
+ }
+ 
+ /* Main thread: give the link the rate present_sync.hz names. */
+@@ -6324,7 +6393,7 @@
+         surface_put(drop.surf);
+     }
+     if (show) {
+-        cocoa_gl_present_show(surf, filter);
++        cocoa_gl_present_show(surf, filter, flushed);
+         surface_put(surf);
+     }
+     if (wake) {
+@@ -6502,7 +6571,7 @@
+         surface_put(stale[i].surf);
+     }
+     if (show.surf) {
+-        cocoa_gl_present_show(show.surf, show.filter);
++        cocoa_gl_present_show(show.surf, show.filter, show.flushed);
+         surface_put(show.surf);
+         /* The guest may have drawn while the queue was full. */
+         qemu_bh_schedule(present_bh);
+@@ -6755,6 +6824,7 @@
+ static OmacVMBox omacvm_guest_box[OMACVM_MAX_OUTPUTS];
+ static OmacVMBox omacvm_guest_bounds;
+ static bool omacvm_guest_known;
++static OmacVMBox omacvm_guest_notch;    /* Omanotch's hidden output (w 0: none) */
+ static NSString *omacvm_last_layout;
+ 
+ /*
+@@ -6883,6 +6953,127 @@
+     return true;
+ }
+ 
++/* NOTCH's top row above an output's middle, from the layout the guest reported. */
++static bool omacvm_notch_park_target(int output, double *nx, double *ny)
++{
++    const OmacVMBox *s, *n = &omacvm_guest_notch;
++    const OmacVMBox *a = &omacvm_guest_bounds;
++
++    if (!omacvm_guest_known || output < 0 || output >= OMACVM_MAX_OUTPUTS) {
++        return false;
++    }
++    s = &omacvm_guest_box[output];
++    return omacvm_park_place((OmacVMParkBox){ s->x, s->y, s->w, s->h },
++                             (OmacVMParkBox){ n->x, n->y, n->w, n->h },
++                             (OmacVMParkBox){ a->x, a->y, a->w, a->h }, nx, ny);
++}
++
++/*
++ * At the strip's edge the Mac's cursor changes with the guest's frame, not
++ * before it. The guest draws its own pointer a frame or two after QEMU
++ * moved it (Hyprland, virgl, this present): up into the strip the guest's
++ * arrow still showed on the VM's top rows next to the Mac's for that long,
++ * and back into the VM there was no arrow at all. Now the Mac's cursor
++ * stays hidden (up) or shown (back) until a guest frame flushed after the
++ * move is on the layer, at most OMACVM_PARK_HOLD_MAX_MS. Main thread.
++ * OMACVM_PARK_HOLD=0: off (as before); OMACVM_PARK_MARGIN_MS: how long
++ * after the move a flushed frame may still be one drawn before it.
++ */
++#define OMACVM_PARK_HOLD_MAX_MS 80
++static int omacvm_park_hold;            /* -1 hidden (up), 1 shown (back), 0 none */
++static unsigned omacvm_park_hold_gen;
++static double omacvm_park_hold_at;      /* CACurrentMediaTime() of the move */
++
++static int omacvm_park_hold_now(void)
++{
++    return omacvm_park_hold;
++}
++
++static void omacvm_park_hold_end(const char *why)
++{
++    omacvm_park_hold = 0;
++    qatomic_set(&omacvm_park_hold_on, 0);
++    if (omacvm_pointer_debug) {
++        fprintf(stderr, "omacvm-pointer: %.4f strip hold ends (%s)\n", CACurrentMediaTime(), why);
++    }
++    [cocoaView omacvmUpdateMacCursor];
++}
++
++static double omacvm_park_margin(void)
++{
++    static double m = -1;
++    if (m < 0) {
++        const char *e = getenv("OMACVM_PARK_MARGIN_MS");
++        m = e ? MAX(0, atof(e)) / 1000.0 : 0.004;
++    }
++    return m;
++}
++
++static void omacvm_park_hold_start(bool up)
++{
++    static int on = -1;
++    unsigned gen;
++
++    if (on < 0) {
++        const char *e = getenv("OMACVM_PARK_HOLD");
++        on = !(e && !strcmp(e, "0"));
++    }
++    if (!up) {
++        omacvm_parked = false;
++    }
++    /* only where QEMU sees the guest's frames go on screen */
++    bool frames = false;
++#ifdef CONFIG_OPENGL
++    frames = present_ctx != NULL;
++#endif
++    if (!on || !frames) {
++        return;
++    }
++    omacvm_park_hold = up ? -1 : 1;
++    omacvm_park_hold_at = CACurrentMediaTime();
++    gen = ++omacvm_park_hold_gen;
++    qatomic_set(&omacvm_park_hold_on, 1);
++    if (omacvm_pointer_debug) {
++        fprintf(stderr, "omacvm-pointer: %.4f strip hold starts (%s)\n", omacvm_park_hold_at,
++                up ? "up: Mac cursor hidden" : "back: Mac cursor shown");
++    }
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, OMACVM_PARK_HOLD_MAX_MS * NSEC_PER_MSEC),
++                   dispatch_get_main_queue(), ^{
++        if (omacvm_park_hold && omacvm_park_hold_gen == gen) {
++            omacvm_park_hold_end("no frame in time");
++        }
++    });
++}
++
++/*
++ * Main thread: a guest frame flushed at `flushed` is on the main layer now.
++ * Up: the Mac's cursor shows at once. Back: it hides one refresh later
++ * (Core Animation shows the layer's new contents a refresh after the
++ * cursor's change: hidden now, there was no arrow for that refresh).
++ */
++static void omacvm_park_frame_shown(double flushed)
++{
++    unsigned gen = omacvm_park_hold_gen;
++    NSInteger hz;
++
++    if (!omacvm_park_hold || flushed < omacvm_park_hold_at + omacvm_park_margin()) {
++        return;
++    }
++    if (omacvm_park_hold < 0) {
++        omacvm_park_hold_end("the guest's frame is on screen");
++        return;
++    }
++    hz = [[[cocoaView window] screen] maximumFramesPerSecond];
++    omacvm_park_hold_at = INFINITY;     /* one end only */
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
++                                 (int64_t)(NSEC_PER_SEC / (hz > 0 ? hz : 60))),
++                   dispatch_get_main_queue(), ^{
++        if (omacvm_park_hold && omacvm_park_hold_gen == gen) {
++            omacvm_park_hold_end("the guest's frame is on screen, a refresh later");
++        }
++    });
++}
++
+ static int omacvm_active_outputs(void)
+ {
+     return omacvm_mac_count;
+@@ -7560,6 +7751,7 @@
+ - (void)mouseEntered:(NSEvent *)e { [self send:e button:-1 down:false]; }
+ - (void)mouseExited:(NSEvent *)e
+ {
++    [cocoaView omacvmParkInNotch:e view:self output:output];
+     if ([cocoaView isMouseGrabbed] && !omacvm_pointer_over_ours() &&
+         ![NSEvent pressedMouseButtons]) {
+         [cocoaView ungrabMouse];
+@@ -8058,6 +8250,7 @@
+     bool first = true;
+ 
+     memset(omacvm_guest_box, 0, sizeof(omacvm_guest_box));
++    memset(&omacvm_guest_notch, 0, sizeof(omacvm_guest_notch));
+     omacvm_guest_known = false;
+     for (NSDictionary *m in monitors) {
+         if (![m isKindOfClass:[NSDictionary class]]) {
+@@ -8083,6 +8276,8 @@
+                 omacvm_guest_box[index] = (OmacVMBox){ x, y, w, h };
+                 omacvm_guest_known = true;
+             }
++        } else if ([name isKindOfClass:[NSString class]] && [name isEqualToString:@"NOTCH"]) {
++            omacvm_guest_notch = (OmacVMBox){ x, y, w, h };
+         }
+     }
+     omacvm_guest_bounds = (OmacVMBox){ minx, miny, maxx - minx, maxy - miny };

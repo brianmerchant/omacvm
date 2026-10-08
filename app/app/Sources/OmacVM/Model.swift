@@ -22,7 +22,12 @@ enum Paths {
     /// external drive, say) in the setup or the settings; see VMsFolder.
     static var vmsRoot: URL {
         get {
-            if let custom = UserDefaults.standard.string(forKey: "vmsRoot"), !custom.isEmpty {
+            let custom = UserDefaults.standard.string(forKey: "vmsRoot")
+            // The test identity: never a folder of the installed app (TestVMs).
+            if TestIdentity.isOn {
+                return TestVMs.root(custom: custom, home: VMsFolder.home, production: productionVMsRoots)
+            }
+            if let custom, !custom.isEmpty {
                 return URL(fileURLWithPath: custom)
             }
             return defaultVMsRoot
@@ -32,6 +37,32 @@ enum Paths {
     /// Decided once per launch: the VMs folder must not change under a VM
     /// that runs or is being built.
     private static let defaultVMsRoot = VMsFolder.resolve(custom: nil, home: VMsFolder.home)
+
+    /// The installed app's (org.omacvm.app) VMs folders, read once per
+    /// launch: a test build never acts on a VM in one of them (TestVMs).
+    static let productionVMsRoots: [URL] = {
+        let id = TestHooks.releaseID as CFString
+        let custom = CFPreferencesCopyAppValue("vmsRoot" as CFString, id) as? String
+        let others = CFPreferencesCopyAppValue("otherVMsRoots" as CFString, id) as? [String] ?? []
+        var homes = [VMsFolder.home]
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            homes.append(URL(fileURLWithPath: String(cString: dir)))
+        }
+        return TestVMs.productionRoots(custom: custom, others: others, homes: homes)
+    }()
+
+    /// Why a destructive test hook must not act on this VM (nil: it may).
+    static func hookProblem(_ folder: URL?) -> String? {
+        TestVMs.hookProblem(folder: folder, ownRoot: UserDefaults.standard.string(forKey: "vmsRoot"),
+                            production: productionVMsRoots)
+    }
+
+    /// Why this build must not start or change the VM in FOLDER (nil: it may):
+    /// a test build never touches a VM of the installed app (TestVMs.startProblem).
+    static func startProblem(_ folder: URL) -> String? {
+        TestVMs.startProblem(folder: folder, testBuild: TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier),
+                             production: productionVMsRoots)
+    }
 
     /// Up to 2.9 the VMs were in this hidden folder. The app still finds them
     /// there until they are moved (it offers that once).
@@ -48,7 +79,11 @@ enum Paths {
     /// (app_vms_roots in src/lib/app.sh: the same list).
     static var vmsRoots: [URL] {
         var seen = Set<String>(), roots: [URL] = []
-        for r in [vmsRoot] + otherVMsRoots + [legacyVMsRoot] {
+        // The test identity: no folder of the installed app, and not its old place.
+        let candidates = TestIdentity.isOn
+            ? [vmsRoot] + otherVMsRoots.filter { !TestVMs.isProduction($0, production: productionVMsRoots) }
+            : [vmsRoot] + otherVMsRoots + [legacyVMsRoot]
+        for r in candidates {
             let p = r.standardizedFileURL.path
             if seen.insert(p).inserted { roots.append(r.standardizedFileURL) }
         }
@@ -298,14 +333,25 @@ struct VMConfig: Equatable {
     }
 
     /// The VM the app manages (one at a time): the one named with --vm NAME,
-    /// else the first folder with a vm.env.
+    /// else the first folder with a vm.env. A name no VM has gives nil (the
+    /// caller says so: VMPick.unknownText), never another VM.
     static func existing() -> VMConfig? {
         let all = all()
-        let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--vm"), i + 1 < args.count {
-            return all.first { $0.name == args[i + 1] || $0.folder.lastPathComponent == args[i + 1] }
+        switch VMPick.choose(requested: VMPick.requested(CommandLine.arguments),
+                             vms: all.map { ($0.name, $0.folder.lastPathComponent) }) {
+        case .vm(let i): return all[i]
+        case .new, .unknown: return nil
         }
-        return all.first
+    }
+
+    /// The name given with --vm when no VM has it.
+    static var unknownRequested: String? {
+        let all = all()
+        if case .unknown(let n) = VMPick.choose(requested: VMPick.requested(CommandLine.arguments),
+                                                vms: all.map { ($0.name, $0.folder.lastPathComponent) }) {
+            return n
+        }
+        return nil
     }
 }
 

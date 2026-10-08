@@ -49,16 +49,75 @@ enum KeyAccess {
     /// Behind the (i): the steps.
     static var missingText: String {
         let app = (Bundle.main.bundlePath as NSString).abbreviatingWithTildeInPath
-        return "Without it, ⌘ Tab, ⌘ Space and ⌘ ⇧ 4 go to macOS instead of Omarchy. Input Monitoring is not enough.\n\n1. Allow… opens System Settings › Privacy & Security › Accessibility.\n2. An OmacVM there already (an older build that macOS no longer counts): select it and remove it with −.\n3. Add \(app) with + and turn it on.\n4. Quit the VM and start it again."
+        let id = Bundle.main.bundleIdentifier ?? "org.omacvm.app"
+        return "Without it, ⌘ Tab, ⌘ Space and ⌘ ⇧ 4 go to macOS instead of Omarchy. Input Monitoring is not enough.\n\n1. Allow… clears what macOS kept for an older OmacVM build (OmacVM can show as on and still not count) and opens System Settings › Privacy & Security › Accessibility.\n2. Turn OmacVM on there. This note turns grey by itself.\n3. Quit the VM and start it again.\n\nStill red: select OmacVM there, remove it with −, add \(app) with + and turn it on. Or in Terminal: tccutil reset PostEvent \(id)"
     }
 
-    /// macOS's prompt for "control the computer" (once per app; after that
-    /// it does nothing; it also lists OmacVM under Accessibility) and the
-    /// Accessibility pane.
-    static func request() {
-        _ = CGRequestPostEventAccess()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
+    /// macOS keeps "control the computer" (kTCCServicePostEvent) as an entry
+    /// of its own next to Accessibility, tied to the signature of the build
+    /// that made it. Without that entry macOS takes the Accessibility answer
+    /// ("composed authorization" in tccd's log). An entry from an older build
+    /// no longer matches and macOS refuses, whatever Accessibility says, and
+    /// CGRequestPostEventAccess does not replace it. Seen on a MacBook
+    /// (2026-10-07): tccd "Failed to match existing code requirement for
+    /// subject org.omacvm.app and service kTCCServicePostEvent" (an entry
+    /// pinned to an old build's cdhash) at every VM start, OmacVM on in the
+    /// Accessibility list, the note red after Allow…. tccutil resets this
+    /// app's own entries without an admin password.
+    static func reset(_ service: String) {
+        guard let id = Bundle.main.bundleIdentifier else { return }   // unbundled build
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = resetArguments(service, id: id)
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return }
+        p.waitUntilExit()
+    }
+
+    static func resetArguments(_ service: String, id: String) -> [String] { ["reset", service, id] }
+
+    /// Allow…: an old "control the computer" entry goes first; with
+    /// Accessibility on that is all (allowed at once, no prompt). Else
+    /// Accessibility's own entry may be an old one too: it goes as well, then
+    /// macOS's prompt for "control the computer" (once per app; it lists
+    /// OmacVM under Accessibility, switched off) and the Accessibility pane.
+    /// The parts are passed in for the test.
+    static func allow(reset: (String) -> Void, post: () -> Bool, ask: () -> Void) {
+        reset("PostEvent")
+        guard !post() else { return }
+        reset("Accessibility")
+        ask()
+    }
+
+    /// Allow… in the window; tccutil off the main thread, then `done`.
+    static func request(done: @escaping @MainActor () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var ask = false
+            allow(reset: reset, post: { post }, ask: { ask = true })
+            DispatchQueue.main.async {
+                if ask {
+                    _ = CGRequestPostEventAccess()
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                MainActor.assumeIsolated { done() }
+            }
+        }
+    }
+
+    /// Once per app run, when the note would be red: an old "control the
+    /// computer" entry goes without a click (only this app's own entry, and
+    /// only while macOS refuses). With Accessibility on the note goes away;
+    /// else nothing changes (QEMU's next start asks again).
+    private static var clearedOnce = false   // main thread only
+    static func clearOldEntryOnce(done: @escaping @MainActor () -> Void) {
+        guard !clearedOnce else { return }
+        clearedOnce = true
+        DispatchQueue.global(qos: .utility).async {
+            reset("PostEvent")
+            DispatchQueue.main.async { MainActor.assumeIsolated { done() } }
         }
     }
 }

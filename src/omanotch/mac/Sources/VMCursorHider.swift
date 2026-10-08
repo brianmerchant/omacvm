@@ -1,6 +1,7 @@
 import AppKit
 
-/// Hides the macOS cursor while the pointer is over a full-screen VM window.
+/// Hides the macOS cursor while the pointer is over a full-screen VM window
+/// (not OmacVM.app's: QEMU hides it there itself).
 ///
 /// Over its VM windows the VM app normally swaps in a transparent cursor (the
 /// guest draws its own), but Parallels does not do so reliably when the pointer comes
@@ -86,7 +87,10 @@ final class VMCursorHider {
             lastCheck = now
             lastResult = topWindowIsVM(at: p)
         }
-        setHidden(lastResult)
+        // OmacVM.app hides the Mac's cursor over its VM itself, at once (QEMU's
+        // grab); hiding it here too only lagged behind (the 100 ms sample above,
+        // the strip's 45 ms delay): no cursor for a moment at the strip's edge.
+        setHidden(lastResult && activeOwner != OmacVMApp.owner)
         if lastResult && !wasInVM { onEnterVM?(p, rect) }
         wasInVM = lastResult
     }

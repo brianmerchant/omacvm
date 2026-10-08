@@ -5,7 +5,8 @@
 //   {"present": true, "percentage": 57, "state": "discharging", "acConnected": false,
 //    "timeToEmptySeconds": 8100, "timeToFullSeconds": null, "chargeLimit": 80,
 //    "chargeNowMicroAh": 2832900, "chargeFullMicroAh": 4970000,
-//    "chargeFullDesignMicroAh": 6075000, "voltageMicroV": 12537000, "cycleCount": 213}
+//    "chargeFullDesignMicroAh": 6075000, "voltageMicroV": 12537000, "cycleCount": 213,
+//    "currentMicroA": -573000, "powerMicroW": 7183701}
 // state: charging, discharging, full, not-charging, unknown. A Mac without a
 // battery: present false, percentage null, acConnected true.
 //
@@ -71,6 +72,8 @@ struct HostBatterySnapshot: Equatable {
       "chargeFullDesignMicroAh": details.chargeFullDesignMicroAh as Any? ?? NSNull(),
       "voltageMicroV": details.voltageMicroV as Any? ?? NSNull(),
       "cycleCount": details.cycleCount as Any? ?? NSNull(),
+      "currentMicroA": details.currentMicroA as Any? ?? NSNull(),
+      "powerMicroW": details.powerMicroW as Any? ?? NSNull(),
     ]
   }
 
@@ -88,13 +91,17 @@ struct HostBatterySnapshot: Equatable {
 }
 
 /// The battery's own readings (AppleSmartBattery), apart from the 0-100
-/// capacities above: charge in µAh and voltage in µV, as Linux wants them.
+/// capacities above: charge in µAh, voltage in µV, current in µA and power
+/// in µW, as Linux wants them. Current is signed: below 0 while the battery
+/// gives power (discharging), as AppleSmartBattery's "Amperage" (mA).
 struct HostBatteryDetails: Equatable {
   let chargeNowMicroAh: Int?
   let chargeFullMicroAh: Int?
   let chargeFullDesignMicroAh: Int?
   let voltageMicroV: Int?
   let cycleCount: Int?
+  let currentMicroA: Int?
+  let powerMicroW: Int?
 
   init(properties: [String: Any] = [:]) {
     let data = properties["BatteryData"] as? [String: Any] ?? [:]
@@ -111,6 +118,33 @@ struct HostBatteryDetails: Equatable {
     chargeFullDesignMicroAh = reading([properties["DesignCapacity"], data["DesignCapacity"]], multiplier: 1000, minimum: 1)
     voltageMicroV = reading([properties["Voltage"]], multiplier: 1000, minimum: 1)
     cycleCount = reading([properties["CycleCount"]])
+    // Amperage is averaged by the battery (InstantAmperage is not): steadier
+    // watts and time left. Power is current x voltage of the same reading,
+    // so the watts and UPower's time left (charge / current) agree.
+    let milliAmps = [properties["Amperage"], properties["InstantAmperage"]].lazy
+      .compactMap(HostBatteryDetails.signedMilliamps).first
+    currentMicroA = milliAmps.map { $0 * 1000 }
+    if let milliAmps, let millivolts = voltageMicroV.map({ $0 / 1000 }) {
+      let microWatts = abs(milliAmps) * millivolts   // mA x mV = µW
+      powerMicroW = microWatts <= Int(Int32.max) ? microWatts : nil
+    } else {
+      powerMicroW = nil
+    }
+  }
+
+  /// A signed current in mA from IOKit, or nil. IOKit keeps it as a signed
+  /// 32-bit number; ioreg prints it as unsigned 64-bit (-573 shows as
+  /// 18446744073709551043), so a wrapped 64- or 32-bit value is read back as
+  /// signed too. More than ±2147 A (beyond Int32 in µA) is not a reading.
+  static func signedMilliamps(_ candidate: Any?) -> Int? {
+    guard let number = candidate as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+    var value = number.int64Value              // UInt64 above Int64.max: its bit pattern
+    if value > Int64(Int32.max) && value <= Int64(UInt32.max) {
+      value = Int64(Int32(truncatingIfNeeded: value))
+    }
+    let limit = Int64(Int32.max / 1000)
+    guard value >= -limit && value <= limit else { return nil }
+    return Int(value)
   }
 
   static func capture() -> HostBatteryDetails {
@@ -181,10 +215,11 @@ func watchPowerSources(_ changed: @escaping () -> Void) {
 func batteryState() -> [String: Any] { HostBatterySnapshot.capture().dictionary }
 
 /// What a change sent at once is about; the battery's own readings
-/// (voltage, charge in µAh, time left) move all the time and go out at
-/// most every `minorSeconds`.
+/// (voltage, charge in µAh, time left, current, power) move all the time
+/// and go out at most every `minorSeconds`.
 func coarseBattery(_ s: [String: Any]) -> [String: Any] {
-  s.filter { !["voltageMicroV", "chargeNowMicroAh", "timeToEmptySeconds", "timeToFullSeconds"].contains($0.key) }
+  s.filter { !["voltageMicroV", "chargeNowMicroAh", "timeToEmptySeconds", "timeToFullSeconds",
+                "currentMicroA", "powerMicroW"].contains($0.key) }
 }
 
 func describeBattery(_ old: [String: Any], _ new: [String: Any]) -> String? {

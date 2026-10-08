@@ -64,5 +64,15 @@ awk '/^\+- \(void\)reveal:\(BOOL\)now$/ { on = 1 } on { print } on && /^\+}$/ { 
 awk '/^\+- \(void\)play$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" | grep -q 'watchLink' &&
   awk '/^\+- \(void\)watchLink$/ { on = 1 } on { print } on && /^\+}$/ { exit }' "$p" | grep -q 'makeLink' ||
   { echo "FAIL: a display link that stops mid-animation is not replaced" >&2; exit 1; }
+# The logo layer holds its display link: one that only the run loop held was
+# freed inside its -invalidate and QEMU aborted (a link without frames in a
+# window that is not visible). Only -dropLink invalidates it.
+awk '/^\+- \(void\)(makeLink|dropLink)$/ { on = 1 } on { print substr($0, 2) } on && /^\+}$/ { on = 0; print "" }' \
+  "$p" > "$tmp/link.inc"
+[ "$(grep -c '\[link invalidate\]' "$p")" = 1 ] && grep -q '\[link invalidate\]' "$tmp/link.inc" ||
+  { echo "FAIL: the boot logo invalidates its display link outside -dropLink" >&2; exit 1; }
+cc -fno-objc-arc -Wall -Wextra -Werror -I"$tmp" "$here/test-boot-splash-link.m" \
+  -framework Cocoa -framework QuartzCore -o "$tmp/test-boot-splash-link"
+"$tmp/test-boot-splash-link"
 echo "check-boot-splash: the display agent counts by its hello when the window talks to it"
 echo "check-boot-splash: the logo waits for the wallpaper; a desktop after the time limit is marked"

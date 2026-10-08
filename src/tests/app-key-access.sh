@@ -20,6 +20,12 @@ let a = CommandLine.arguments
 switch a[1] {
 case "tap": print(KeyAccess.tapFailed(folder: URL(fileURLWithPath: a[2])) ? "refused" : "fine")
 case "record": print(KeyAccess.record)
+case "reset-args": print(KeyAccess.resetArguments(a[2], id: a[3]).joined(separator: " "))
+case "allow":   // a[2]: what macOS says after the old "control the computer" entry is gone
+    var steps: [String] = []
+    KeyAccess.allow(reset: { steps.append("reset \($0)") }, post: { steps.append("check"); return a[2] == "allowed" },
+                    ask: { steps.append("ask") })
+    print(steps.joined(separator: ", "))
 default: exit(2)
 }
 SWIFT
@@ -39,6 +45,12 @@ case $r in
   "keys: Input Monitoring "*" for OmacVM") echo "ok   qemu.log line: $r" ;;
   *) echo "FAIL qemu.log line: '$r'"; fail=1 ;;
 esac
+# Allow… with an old entry (MacBook 2026-10-07: tccd "Failed to match existing
+# code requirement ... kTCCServicePostEvent", OmacVM on under Accessibility):
+# the app's own "control the computer" entry goes first, without a password.
+expect "tccutil resets only this app's entry" "reset PostEvent org.omacvm.app" "$("$T/key-access" reset-args PostEvent org.omacvm.app)"
+expect "Allow…, Accessibility on: the old entry goes, nothing else" "reset PostEvent, check" "$("$T/key-access" allow allowed)"
+expect "Allow…, still refused: both entries go, then macOS asks" "reset PostEvent, check, reset Accessibility, ask" "$("$T/key-access" allow refused)"
 # What the window asks for: what QEMU's active tap needs ("control the
 # computer", the Accessibility pane), not Input Monitoring.
 src=$R/app/app/Sources/OmacVM/KeyAccess.swift
@@ -51,4 +63,6 @@ hasnt "... nor its pane" 'Privacy_ListenEvent'
 has "the window checks control the computer" 'static var allowed: Bool { post }'
 src=$R/app/app/Sources/OmacVM/Views.swift
 has "... and only that (not Input Monitoring)" 'KeyNote.decide(allowedNow: allowed,'
+has "a red note clears an old entry once by itself" 'KeyAccess.clearOldEntryOnce'
+has "Allow… looks again when it is done" 'KeyAccess.request { refreshKeyNote() }'
 exit $fail
