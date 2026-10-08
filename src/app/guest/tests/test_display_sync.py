@@ -320,7 +320,8 @@ class Guard(SyncCase):
         self.assertEqual(len(self.evals()), 5)
         self.assertEqual(r.stderr.count("keeping"), 0)
         # one look is scheduled for when the hold ends
-        looks = subprocess.run(["pgrep", "-f", f"sleep 61; exec .*{SYNC.name}"],
+        # this checkout's path only: other CI jobs on the same Mac run this test too
+        looks = subprocess.run(["pgrep", "-f", "sleep 61; exec .*" + str(SYNC).replace(".", "[.]")],
                                capture_output=True, text=True).stdout.split()
         self.assertEqual(len(looks), 1)
 
