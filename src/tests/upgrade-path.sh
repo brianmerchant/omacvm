@@ -58,6 +58,12 @@ expect "  unpacked in the user's cache" yes "$(compgen -G "$T/home/.cache/omacvm
 expect "  pacman not asked" "" "$(cat "$T/pacman-calls" 2>/dev/null)"
 expect "  it loads from there" 8.2.8 "$("$PY" -I -c 'import glob, sys; sys.path.insert(0, glob.glob(sys.argv[1])[0]); import textual.app; print(textual.__version__)' \
   "$T/home/.cache/omacvm/python/*" 2>&1)"
+# A set unpacked before and damaged since (a file gone): a repair (install.sh) unpacks it again.
+rm -f "$T"/home/.cache/omacvm/python/*/textual/app.py
+out=$(tx 2>&1); rc=$?
+expect "a damaged cache: unpacked again" "0|" "$rc|$out"
+expect "  it loads again" 8.2.8 "$("$PY" -I -c 'import glob, sys; sys.path.insert(0, glob.glob(sys.argv[1])[0]); import textual.app; print(textual.__version__)' \
+  "$T/home/.cache/omacvm/python/*" 2>&1)"
 # A copy that is not as shipped: one line why (not fatal: install.sh goes on with `|| true`).
 cp -R "$R/src/control" "$T/control"; mkdir -p "$T/guest"; cp "$R/src/guest/pkg-add" "$T/guest/"
 w=$(ls "$T/control/vendor/"rich-*.whl); head -c 1000 "$w" > "$w.cut"; mv "$w.cut" "$w"

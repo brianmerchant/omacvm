@@ -92,13 +92,18 @@ window_rule() {
 # than the mirrors cannot get (every download a 404), and the control centre
 # stayed plain text. Not fatal: omacvm unpacks it itself at its next start.
 textual() {
-  local out
+  local out why try
   command -v python3 >/dev/null || ../../guest/pkg-add python || true
-  if out=$(sudo -u "$U" env HOME="$H" python3 -I ../omacvm_cc/vendor.py 2>&1) &&
-     sudo -u "$U" env HOME="$H" python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import textual.app' "$out" >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "  Textual is not ready (omacvm shows a plain table until it is): $(tail -n1 <<<"$out" | cut -c1-200)"
+  for try in 1 2; do
+    out=$(sudo -u "$U" env HOME="$H" python3 -I ../omacvm_cc/vendor.py 2>&1) || { why=$out; break; }
+    why=$(sudo -u "$U" env HOME="$H" python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import textual.app' "$out" 2>&1) && return 0
+    # Unpacked before and damaged since (a file gone from the cache): the
+    # finished set is never unpacked again by itself, so once more here (the
+    # control centre's repair runs this).
+    [[ $try == 1 && $out == "$H/.cache/omacvm/python/"* && $out != *..* && -d $out ]] || break
+    rm -rf "$out"
+  done
+  echo "  Textual is not ready (omacvm shows a plain table until it is): $(tail -n1 <<<"$why" | cut -c1-200)"
   return 1
 }
 
