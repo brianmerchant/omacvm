@@ -11,7 +11,7 @@
 #   CL_HEAD: lines above the list (the first one bold). CL_CUR: the row under
 #   the cursor. Returns 0 for Return, 1 for q, 2 when the terminal is gone.
 TTY=${TTY:-/dev/tty}
-CL_HEAD=(); CL_CUR=0
+CL_HEAD=(); CL_CUR=0; CL_HH=0
 
 # cl_fit TEXT WIDTH -> CL_OUT: TEXT, or its first WIDTH-1 characters and "…"
 # without its colours when it is longer (WIDTH counts what shows, not the
@@ -43,7 +43,7 @@ cl_leave() { { printf '\033[?25h\033[?1049l' > "$TTY"; stty echo < "$TTY"; } 2>/
 
 cl_draw() {
   local n=$1 top=$2 h=$3 i buf=$'\033[H' l ptr
-  for ((i = 0; i < ${#CL_HEAD[@]}; i++)); do
+  for ((i = 0; i < CL_HH; i++)); do
     cl_fit "${CL_HEAD[$i]}" $((CL_COLS - 1))
     if (( i == 0 )); then buf+=$'\033[1m'"$CL_OUT"$'\033[0m\033[K\r\n'; else buf+="$CL_OUT"$'\033[K\r\n'; fi
   done
@@ -76,7 +76,10 @@ cl_run() {
   stty -echo < "$TTY" 2>/dev/null || true
   while :; do
     cl_size
-    fixed=$(( ${#CL_HEAD[@]} + 3 ))   # the head, a blank line, the detail and the key line
+    # The head (as much as leaves one row), a blank line, the detail and the
+    # key line: never more lines than the window has, or it scrolls.
+    CL_HH=${#CL_HEAD[@]}; (( CL_HH <= CL_ROWS - 4 )) || CL_HH=$(( CL_ROWS > 4 ? CL_ROWS - 4 : 0 ))
+    fixed=$(( CL_HH + 3 ))
     h=$(( CL_ROWS - fixed )); (( h >= 1 )) || h=1
     (( CL_CUR < top )) && top=$CL_CUR
     (( CL_CUR >= top + h )) && top=$(( CL_CUR - h + 1 ))

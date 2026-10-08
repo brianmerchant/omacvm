@@ -185,6 +185,14 @@ wait_for(lambda: any("❯" in l and "F10 row" in l for l in scr.lines()) and
          any(l.startswith("  10/19") for l in scr.lines()), 4)
 screen_ok(10, f"resized to {ROWS}x{COLS}")
 check("no line is wider than the window", all(len(l) <= COLS for l in scr.lines()))
+# Shorter than the head and the list's lines: the head is cut, the screen
+# never scrolls (the title stays on top, the cursor's row shows).
+ROWS = 5
+winsize(ROWS, COLS); scr.resize(ROWS, COLS)
+wait_for(lambda: any(l.startswith("  10/19") for l in scr.lines()) and scr.lines()[0].startswith("Omarchy"), 4)
+check(f"resized to {ROWS}x{COLS}: title on top, the cursor's row and the keys shown",
+      scr.lines()[0].startswith("Omarchy") and any("❯" in l and "F10 row" in l for l in scr.lines())
+      and scr.lines()[-1].startswith("  10/19") and scr.wraps == 0)
 key(b"q")
 alive = wait_for(lambda: any(l.startswith("rc=") for l in scr.lines()), 4)
 L = scr.lines()
