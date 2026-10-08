@@ -77,4 +77,20 @@ expect "repair of bridge: the Bridge" "OmacVM Bridge" "$(repair_forces bridge)"
 expect "repair of scroll-momentum: Gestures" "OmacVM Gestures" "$(repair_forces scroll-momentum)"
 grep -q 'h=$(repair_forces "$f"); \[\[ -n $h \]\] && args+=(--force-app "$h")' "$R/src/cmd/apply.sh" ||
   { echo "FAIL apply.sh forces helpers through repair_forces"; fail=1; }
+# The test identity starts its helpers only when they do not run, also when
+# "OmacVM Test.app" is a link to a copy elsewhere (the running helper shows
+# the copy's real path). A stand-in open counts the starts.
+TA="$T/drive/OmacVM Test.app"
+mkdir -p "$TA/Contents/Helpers/OmacVM Test Bridge.app/Contents/MacOS" "$TA/Contents/Helpers/OmacVM Test Gestures.app/Contents/MacOS" \
+  "$T/home/Applications" "$T/bin"
+ln -s "$TA" "$T/home/Applications/OmacVM Test.app"
+REAL=$(cd -P "$TA/Contents/Helpers" && pwd)
+printf '#!/bin/bash\nwhile :; do sleep 1; done\n' > "$REAL/OmacVM Test Bridge.app/Contents/MacOS/omacvm-bridge"
+chmod +x "$REAL/OmacVM Test Bridge.app/Contents/MacOS/omacvm-bridge"
+"$REAL/OmacVM Test Bridge.app/Contents/MacOS/omacvm-bridge" & SP=$!
+printf '#!/bin/bash\necho "$*" >> "%s/opened"\n' "$T" > "$T/bin/open"; chmod +x "$T/bin/open"
+PATH=$T/bin:$PATH OMACVM_TEST_IDENTITY=1 "$T/src/mac/install.sh" --skip-clip --quiet > "$T/out" 2>&1
+expect "test identity through a link: the running Bridge is not started again" 0 "$(grep -c "Test Bridge" "$T/opened")"
+expect "... Gestures (not running) is" 1 "$(grep -c "Test Gestures" "$T/opened")"
+kill "$SP" 2>/dev/null; wait "$SP" 2>/dev/null
 exit $fail
