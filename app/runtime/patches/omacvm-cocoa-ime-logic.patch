@@ -23,7 +23,7 @@ diff --git a/ui/omacvm-ime.h b/ui/omacvm-ime.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-ime.h
-@@ -0,0 +1,257 @@
+@@ -0,0 +1,256 @@
 +/*
 + * OmacVM mac-ime: the Mac's input methods type into the VM
 + * (docs/adr/0042-mac-ime.md). The rules ui/cocoa.m follows, with no AppKit
@@ -106,7 +106,6 @@ new file mode 100644
 +    bool exact;            /* the caret itself, not the window's box */
 +    bool source_im;        /* the Mac's input source is an input method */
 +    bool window_key;       /* a window of the VM has the keyboard */
-+    bool switch_keys;      /* macOS's own shortcuts are off (the VM has them) */
 +} OmacVMImeState;
 +
 +/* A text field in the VM has the focus and the VM the keyboard. */
@@ -163,8 +162,8 @@ new file mode 100644
 +/*
 + * Where a key goes. With Cmd or Control held, and every modifier change, it
 + * is the VM's (its shortcuts and Hyprland's binds as before). macOS's input
-+ * source shortcuts switch the Mac's input source in a text field, but only
-+ * while macOS's own shortcuts are off (else macOS has them itself). The caller
++ * source shortcuts switch the Mac's input source in a text field: a key that
++ * reaches QEMU was not taken by macOS (its full-grab tap comes first). The caller
 + * marks a key down the input method used up (omacvm_ime_take), so its key up
 + * is dropped too; the switch shortcuts mark themselves.
 + */
@@ -181,7 +180,7 @@ new file mode 100644
 +        }
 +        return OMACVM_IME_PASS;
 +    }
-+    if (omacvm_ime_text_focus(s) && s->switch_keys) {
++    if (omacvm_ime_text_focus(s)) {
 +        if (omacvm_ime_hotkey_is(&k->prev, keycode, mods)) {
 +            k->taken[keycode] = true;
 +            return OMACVM_IME_SWITCH_PREV;

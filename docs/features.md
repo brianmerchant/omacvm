@@ -238,8 +238,9 @@ nothing changes at all. Password fields always get plain keys.
   source shortcuts (Control-Space and Control-Option-Space unless you
   changed them) and the globe key, when it is set to "Change Input Source",
   switch the Mac's input source, as in a Mac app. Elsewhere in the VM they
-  go to Omarchy as before. While macOS keeps its own shortcuts (the default),
-  macOS switches by itself.
+  go to Omarchy as before (so, in a text field, Control-Space is no longer
+  Fcitx5's own switch key while the feature is on). The Mac's menu bar
+  works too.
 - **Where the candidate window sits:** at the text cursor in Qt apps, GTK
   apps (ghostty, Nautilus; from the next login after turning it on) and
   kitty. In apps that tell the input method only that they have the focus

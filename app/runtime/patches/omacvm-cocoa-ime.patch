@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return bool_with_bql(^{
          return [self handleEventLocked:event];
      });
-@@ -8465,8 +8480,858 @@
+@@ -8465,8 +8480,857 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -200,8 +200,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        omacvm_ime_write(@{ @"t": @"commit", @"text": [text substringWithRange:NSMakeRange(i, end - i)] });
 +        i = end;
 +    }
-+}
-+
+ }
+ 
 +/* Code points before UTF-16 index i of s. */
 +static NSUInteger omacvm_ime_cp(NSString *s, NSUInteger i)
 +{
@@ -361,8 +361,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +/*
 + * macOS's "Select the previous input source" (the one used before) or "next
-+ * source in Input menu", for the shortcuts and the globe key while they
-+ * reach the VM (macOS's own shortcuts are off while it has the keyboard).
++ * source in Input menu", for the shortcuts and the globe key: QEMU's
++ * full-grab tap takes them before macOS while the VM has the keyboard.
 + */
 +static void omacvm_ime_switch(bool previous)
 +{
@@ -520,8 +520,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    }
 +    r = [[cocoaView window] frame];
 +    return NSMakeRect(NSMinX(r) + 16, NSMinY(r) + 16, 1, 20);
- }
- 
++}
++
 +/*
 + * An input context remembers its own input source and selects it again when
 + * it is activated (AppKit's per-document input source). Ours is activated
@@ -582,7 +582,6 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +        return false;
 +    }
 +    omacvm_ime.window_key = omacvm_ime_window_key();
-+    omacvm_ime.switch_keys = qatomic_read(&omacvm_shortcuts_off);
 +    if (kt == OMACVM_IME_FLAGS) {
 +        /* Modifiers go to the VM; the input method sees them too (Shift switches some to Latin). */
 +        if (omacvm_ime_active(&omacvm_ime)) {
@@ -946,7 +945,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9655,7 @@
+@@ -8790,6 +9654,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();

@@ -38,7 +38,7 @@ static void collect(const char *line, size_t len, void *opaque)
 static OmacVMImeState on_state(void)
 {
     OmacVMImeState s = { 0 };
-    s.hello = s.focus = s.source_im = s.window_key = s.switch_keys = true;
+    s.hello = s.focus = s.source_im = s.window_key = true;
     return s;
 }
 
@@ -111,7 +111,6 @@ int main(void)
         for (int m = 0; m < 32; m++) {
             OmacVMImeState s = { 0 };
             s.hello = m & 1; s.focus = m & 2; s.password = m & 4; s.source_im = m & 8; s.window_key = m & 16;
-            s.switch_keys = true;
             if (omacvm_ime_text_focus(&s)) {
                 continue;
             }
@@ -173,10 +172,6 @@ int main(void)
         EXPECT(omacvm_ime_route(&k, &s, OMACVM_IME_DOWN, SPACE, OMACVM_IME_CONTROL) == OMACVM_IME_SWITCH_PREV &&
                omacvm_ime_route(&k, &s, OMACVM_IME_DOWN, KEY_A, 0) == OMACVM_IME_PASS,
                "on a plain layout: the shortcut still switches (to the input method), letters go to the VM");
-        s = on_state();
-        s.switch_keys = false;
-        EXPECT(omacvm_ime_route(&k, &s, OMACVM_IME_DOWN, SPACE, OMACVM_IME_CONTROL) == OMACVM_IME_PASS,
-               "macOS keeps its own shortcuts: it switches itself, the key is the VM's as before");
         s = on_state();
         s.password = true;
         EXPECT(omacvm_ime_route(&k, &s, OMACVM_IME_DOWN, SPACE, OMACVM_IME_CONTROL) == OMACVM_IME_PASS &&

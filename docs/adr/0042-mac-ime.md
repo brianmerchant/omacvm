@@ -221,11 +221,13 @@ Then, in the key path (also for keys from the full-grab tap):
   shortcuts (symbolic hot keys 60 and 61, Ctrl+Space by default) and the
   globe key when System Settings says "Change Input Source" switch the
   Mac's input source (`TISSelectInputSource`) instead of going to the VM.
-  The shortcuts only while macOS's own shortcuts are off for the VM
-  (omacvm-cocoa-system-shortcuts.patch); while macOS keeps them (the
-  default) it switches by itself. The globe key goes to the VM while it has
-  the keyboard (omacvm-cocoa-globe-key.patch), so without this the user
-  could not switch to their input method inside the VM.
+  QEMU's full-grab tap gets these keys before macOS while the VM has the
+  keyboard (with or without omacvm-cocoa-system-shortcuts.patch's switch:
+  seen on the Air, Control-Option-Space reached the VM with macOS keeping
+  its shortcuts), and the globe key goes to the VM too
+  (omacvm-cocoa-globe-key.patch), so without this the user could not
+  switch to their input method inside the VM. A key macOS takes itself
+  never reaches QEMU, so nothing switches twice.
 
 ### Where it shows
 
