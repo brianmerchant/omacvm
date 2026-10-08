@@ -5,6 +5,10 @@ in more words.
 
 ## 3.0.8 (unreleased)
 
+- `omacvm features` (and option 2 of the menu): moving up and down the checklist no longer
+  doubles or overwrites rows. Every row now fits on one line (long ones are cut), the list
+  scrolls in a short window and is drawn again when the window changes size. Reported by
+  @brianmerchant (#292).
 - The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
   the animation ends at 5.5 s, before the desktop is ready).
 - The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in

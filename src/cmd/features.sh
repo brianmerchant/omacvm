@@ -201,11 +201,13 @@ label() {   # INDEX -> one line for the list
 if [[ $MODE == features ]]; then
   if [[ -t 1 ]]; then printf '\n\033[1m%s\033[0m (%s%s)\n' "$VM" "$TYPE" "${version:+, OmacVM $version}"
   else printf '%s (%s%s)\n' "$VM" "$TYPE" "${version:+, OmacVM $version}"; fi
+  NOTES=()   # also above the checklist
   if (( OFF )); then
-    if [[ -n $rd && -f $rd/features ]]; then say "    VM is off: as OmacVM last set them up (its record on the Mac). Nothing was started."
-    else say "    VM is off: these are the defaults; start it to see its own. Nothing was started."; fi
-  elif [[ -z $version ]]; then say "    OmacVM is not on this VM yet: these are the defaults it would get."; fi
-  while IFS= read -r l; do [[ -z $l ]] || say "    $l"; done < <(features_drift_lines "$FIXED")
+    if [[ -n $rd && -f $rd/features ]]; then NOTES+=("VM is off: as OmacVM last set them up (its record on the Mac). Nothing was started.")
+    else NOTES+=("VM is off: these are the defaults; start it to see its own. Nothing was started."); fi
+  elif [[ -z $version ]]; then NOTES+=("OmacVM is not on this VM yet: these are the defaults it would get."); fi
+  while IFS= read -r l; do [[ -z $l ]] || NOTES+=("$l"); done < <(features_drift_lines "$FIXED")
+  for l in ${NOTES[@]+"${NOTES[@]}"}; do say "    $l"; done
   if (( ! interactive )); then
     for ((i = 0; i < ${#FN[@]}; i++)); do
       printf '  %-4s %-16s %s\n' "${FV[$i]}" "${FN[$i]}" "$(label "$i")"
@@ -213,35 +215,21 @@ if [[ $MODE == features ]]; then
     echo "  Switch with: omacvm enable|disable FEATURE --vm \"$VM\""
     exit 0
   fi
-  # A checklist: ↑/↓ (or k/j) move, space toggles, Return applies, q leaves.
-  cur=0; n=${#FN[@]}; drawn=0
-  draw() {
-    (( drawn )) && printf '\033[%dA' $((n + 2)) > "$TTY"
-    for ((i = 0; i < n; i++)); do
-      local mark="[ ]" ptr=" "
-      [[ ${FV[$i]} == on ]] && mark=$'[\033[32m✓\033[0m]'
-      (( i == cur )) && ptr=$'\033[1m❯\033[0m'
-      available "$i" || mark=$'\033[2m[–]\033[0m'
-      printf '\r\033[K  %s %s %s\n' "$ptr" "$mark" "$(label "$i")" > "$TTY"
-    done
-    printf '\r\033[K    \033[2m%s\033[0m\n' "${FSUM[$cur]}" > "$TTY"
-    printf '\r\033[K  ↑/↓ move · space switch · Return apply · q quit\n' > "$TTY"
-    drawn=1
+  # A checklist: ↑/↓ (or k/j) move, space toggles, Return applies, q leaves
+  # (src/lib/checklist.sh: full screen, one line per row, #292).
+  source "$R/src/lib/checklist.sh"
+  CL_HEAD=("$VM ($TYPE${version:+, OmacVM $version})")
+  for l in ${NOTES[@]+"${NOTES[@]}"}; do CL_HEAD+=("  $l"); done
+  cl_item() {
+    CL_MARK="[ ]"
+    [[ ${FV[$1]} == on ]] && CL_MARK=$'[\033[32m✓\033[0m]'
+    available "$1" || CL_MARK=$'\033[2m[–]\033[0m'
+    CL_TEXT=$(label "$1")
   }
-  echo
-  while :; do
-    draw
-    IFS= read -rsn1 k < "$TTY" || exit 1
-    case $k in
-      $'\033') IFS= read -rsn2 -t 1 k < "$TTY" || k=""
-               case $k in '[A') (( cur > 0 )) && cur=$((cur - 1)) ;; '[B') (( cur < n - 1 )) && cur=$((cur + 1)) ;; esac ;;
-      k) (( cur > 0 )) && cur=$((cur - 1)) ;;
-      j) (( cur < n - 1 )) && cur=$((cur + 1)) ;;
-      " ") if available "$cur"; then [[ ${FV[$cur]} == on ]] && set_on "$cur" off || set_on "$cur" on; fi ;;
-      "") break ;;
-      q) echo; exit 0 ;;
-    esac
-  done
+  cl_detail() { printf '%s' "${FSUM[$1]}"; }
+  cl_switch() { if available "$1"; then [[ ${FV[$1]} == on ]] && set_on "$1" off || set_on "$1" on; fi; }
+  rc=0; cl_run "${#FN[@]}" || rc=$?
+  case $rc in 1) exit 0 ;; 2) exit 1 ;; esac
 else
   for ((w = 0; w < ${#WANT[@]}; w++)); do
     i=$(feature_index "${WANT[$w]}")
