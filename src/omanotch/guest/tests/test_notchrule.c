@@ -117,24 +117,30 @@ int main(void) {
     CHECK(!notch_rule_due(&t, a, 10000), "something keeps moving it back: not chased every look (4 in 30 s)");
     CHECK(notch_rule_due(&t, a, 30001), "... again once the 30 s are over");
 
-    // The guest's cursor stays for the strip (host.env from omacvm-app-host).
+    // How the guest's cursor goes for the strip (host.env from omacvm-app-host).
     {
-        struct { const char *env; int keep; const char *what; } c[] = {
-            {"OMACVM_SCREEN=2560x1600\nOMACVM_VKWINDOWS=1\n", 0, "older app: the guest hides its cursor as before"},
-            {"OMACVM_VKWINDOWS=1\nOMACVM_NOTCHPOINTER=1\n", 1, "the app parks the pointer in NOTCH: never hidden"},
-            {"OMACVM_HWCURSOR=1\n", 1, "Mac pointer for the VM: never hidden"},
-            {"OMACVM_NOTCHPOINTER=1", 1, "last line without a newline"},
-            {"OMACVM_NOTCHPOINTER=0\nOMACVM_HWCURSOR=0\n", 0, "switched off"},
-            {"XOMACVM_NOTCHPOINTER=1\n", 0, "only the exact key"},
-            {"", 0, "empty"},
+        struct { const char *env; int mode; const char *what; } c[] = {
+            {"OMACVM_SCREEN=2560x1600\nOMACVM_VKWINDOWS=1\n", HOST_CURSOR_HIDES, "older app: the guest hides its cursor as before"},
+            {"OMACVM_VKWINDOWS=1\nOMACVM_NOTCHPOINTER=1\n", HOST_CURSOR_PARKED, "the app parks the pointer in NOTCH"},
+            {"OMACVM_HWCURSOR=1\n", HOST_CURSOR_STAYS, "Mac pointer for the VM: never hidden"},
+            {"OMACVM_NOTCHPOINTER=1\nOMACVM_HWCURSOR=1\n", HOST_CURSOR_STAYS, "both: the Mac pointer wins"},
+            {"OMACVM_NOTCHPOINTER=1", HOST_CURSOR_PARKED, "last line without a newline"},
+            {"OMACVM_NOTCHPOINTER=0\nOMACVM_HWCURSOR=0\n", HOST_CURSOR_HIDES, "switched off"},
+            {"XOMACVM_NOTCHPOINTER=1\n", HOST_CURSOR_HIDES, "only the exact key"},
+            {"", HOST_CURSOR_HIDES, "empty"},
         };
         for (size_t i = 0; i < sizeof c / sizeof c[0]; i++) {
             FILE *f = fmemopen((void *)c[i].env, strlen(c[i].env) + 1, "r");
-            CHECK(host_env_keeps_cursor(f) == c[i].keep, c[i].what);
+            CHECK(host_env_cursor(f) == c[i].mode, c[i].what);
             if (f) fclose(f);
         }
-        CHECK(!host_env_keeps_cursor(NULL), "no host.env (Parallels, UTM, Fusion)");
+        CHECK(host_env_cursor(NULL) == HOST_CURSOR_HIDES, "no host.env (Parallels, UTM, Fusion)");
     }
+    // Parked: the pointer is on NOTCH (0,-33 1470x33 on the Air) or it is not.
+    CHECK(pointer_on_box(735, -33, 0, -33, 1470, 33), "parked: NOTCH's top row, behind the camera");
+    CHECK(!pointer_on_box(735, 0, 0, -33, 1470, 33), "the screen's top row is not NOTCH");
+    CHECK(!pointer_on_box(1470, -20, 0, -33, 1470, 33), "right of NOTCH");
+    CHECK(!pointer_on_box(10, -20, 0, -33, 0, 33), "no NOTCH");
 
     printf(failures ? "%d failed\n" : "all passed\n", failures);
     return failures != 0;

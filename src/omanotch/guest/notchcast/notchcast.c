@@ -317,6 +317,7 @@ static char *ipc_call(int want_output, const char *fn, const char *a1, const cha
 static char *hypr_request(const char *req);
 static int json_int(const char *json, const char *key, double *out);
 static int monitor_field(const char *json, const char *name, const char *field, double *out);
+static int cursor_pos(double *x, double *y);
 
 // Runs Lua in Hyprland through its command socket (no hyprctl process).
 static void hypr_eval(const char *lua) {
@@ -453,25 +454,28 @@ static int on_vmware(void) {
     return v = strstr(vendor, "VMware") != NULL;
 }
 
-// OmacVM.app: the guest's cursor never hides for the strip (notchrule.h,
-// host_env_keeps_cursor; /run/omacvm/host.env is fixed for the VM's run):
-// with the Mac pointer for the VM there is only one cursor, and an app that
-// parks the guest's pointer in NOTCH as the Mac's leaves for the strip
-// already has it out of sight. Hiding it would leave no cursor for a moment
-// when the pointer comes back into the VM (Hyprland's tick).
-static int cursor_stays(void) {
+// How the guest's cursor goes for the strip (notchrule.h, host_env_cursor;
+// /run/omacvm/host.env is fixed for the VM's run).
+static int cursor_mode(void) {
     static int v = -1;
     if (v >= 0) return v;
     FILE *f = fopen("/run/omacvm/host.env", "r");
-    v = host_env_keeps_cursor(f);
+    v = host_env_cursor(f);
     if (f) fclose(f);
     return v;
 }
 
-// Hides or shows the guest's own cursor (while the pointer is over the strip
-// the helper shows the guest's cursor images itself).
-static void set_guest_cursor_visible(int visible) {
-    if (!visible && cursor_stays()) return;
+// Under OmacVM.app the guest's cursor stays for the strip: with the Mac
+// pointer for the VM there is only one cursor, and an app that parks the
+// guest's pointer in NOTCH as the Mac's leaves for the strip already has it
+// out of sight. Hiding it would leave no cursor for a moment when the
+// pointer comes back into the VM (Hyprland's tick).
+static int cursor_stays(void) {
+    return cursor_mode() != HOST_CURSOR_HIDES;
+}
+
+// Hides or shows the guest's own cursor, at once.
+static void apply_guest_cursor_visible(int visible) {
     atomic_store(&cursor_hidden_at, visible ? 0 : (long long)now_ms() + 1);
     if (visible) {
         hypr_eval("hl.config({ cursor = { invisible = false } })");
@@ -497,6 +501,50 @@ static void set_guest_cursor_visible(int visible) {
         hypr_eval("hl.config({ cursor = { invisible = true } })");
     }
     free(j);
+}
+
+// Each show/hide request counts one up: a check for an older one is void.
+static pthread_mutex_t cursor_lock = PTHREAD_MUTEX_INITIALIZER;
+static int cursor_gen;
+#define PARK_CHECK_MS 60
+
+// The app parks the guest's pointer in NOTCH as the Mac's leaves for the
+// strip. Where it did not (a layout QEMU had not heard of yet, an app or a
+// display arrangement that does not park), the guest's arrow would stay on
+// the screen's top row next to the Mac's on the strip for as long as the
+// pointer is there: hide it then, as before (late by Hyprland's tick, but
+// not for good).
+static void *park_check_thread(void *arg) {
+    int gen = (int)(intptr_t)arg;
+    usleep(PARK_CHECK_MS * 1000);
+    double cx, cy, x, y, w, h, s;
+    if (cursor_pos(&cx, &cy)) return NULL;
+    char *j = hypr_request("j/monitors all");
+    int on = j && !monitor_field(j, cfg_output, "x", &x) && !monitor_field(j, cfg_output, "y", &y) &&
+             !monitor_field(j, cfg_output, "width", &w) && !monitor_field(j, cfg_output, "height", &h) &&
+             !monitor_field(j, cfg_output, "scale", &s) && s > 0 && pointer_on_box(cx, cy, x, y, w / s, h / s);
+    free(j);
+    pthread_mutex_lock(&cursor_lock);
+    if (!on && gen == cursor_gen) {
+        LOG("guest pointer not parked in NOTCH (%.0f,%.0f): hiding it", cx, cy);
+        apply_guest_cursor_visible(0);
+    }
+    pthread_mutex_unlock(&cursor_lock);
+    return NULL;
+}
+
+// The pointer entered (0) or left (1) the strip: hides or shows the guest's
+// own cursor (while the pointer is over the strip the helper shows the
+// guest's cursor images itself).
+static void set_guest_cursor_visible(int visible) {
+    pthread_mutex_lock(&cursor_lock);
+    int gen = ++cursor_gen, mode = cursor_mode();
+    if (visible || mode == HOST_CURSOR_HIDES) apply_guest_cursor_visible(visible);
+    pthread_mutex_unlock(&cursor_lock);
+    if (!visible && mode == HOST_CURSOR_PARKED) {
+        pthread_t t;
+        if (!pthread_create(&t, NULL, park_check_thread, (void *)(intptr_t)gen)) pthread_detach(t);
+    }
 }
 
 // Shows the guest cursor again where the pointer leaves the strip: just below
