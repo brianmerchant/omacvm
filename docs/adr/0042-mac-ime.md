@@ -308,8 +308,17 @@ permission: AppKit's input context needs none.
   one restart): Pinyin and 2-Set Korean commit into a GTK field; Control
   chords and password fields stay keys; input sources switch with
   Control-Option-Space in a text field.
-- Open: Kotoeri composes kana and shows its candidates, but Return in the
-  candidate window commits nothing until the input source changes or the
-  field is left (the client sees `setMarkedText` for the reading, then no
-  call on Return). Next step: trace Kotoeri's calls in a plain Cocoa text
-  view on the same Mac and compare.
+- Review run on the Air (test app, `omacvm enable mac-ime` + restart):
+  Kotoeri Romaji `nihon` + Return commits にほん in GTK and Chromium;
+  Pinyin commit, Esc, Backspace while composing, focus moved to another
+  window while composing (dropped, nothing of it in the next field);
+  2-Set Korean with a Space between syllables keeps the order (한국 어);
+  foot via `cat`; Ctrl+A and Cmd+Return (Super+Return) with Pinyin
+  selected go to the VM. Feature off: no port, no socket, no module, keys
+  as scancodes with Pinyin selected on the Mac.
+- Kotoeri's candidate list + Return: with typed test keys (CGEvent) on the
+  Air, Space shows the list with the reading and Return commits nothing
+  until the input source changes. The same happens in a plain NSTextView
+  and in a minimal NSTextInputClient fed by AppKit or by `handleEvent:`
+  directly (a small probe app on the same Mac), so it is not this client;
+  open: a check with real typing.

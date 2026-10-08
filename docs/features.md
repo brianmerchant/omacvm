@@ -252,14 +252,18 @@ nothing changes at all. Password fields always get plain keys.
   working: with a plain layout on the Mac, keys go to the VM and Fcitx5
   composes as before.
 - **Tested** on a MacBook Air (macOS 26.6): Pinyin (`zhongwen` + Space
-  gives 中文) and 2-Set Korean (한국) type into the VM; a password field gets
-  plain keys; Control chords go to the VM.
-- **Not done yet:** Japanese (Kotoeri) composes kana in the field (にほん),
-  but choosing a conversion in its candidate window with Return does not
-  commit yet on macOS 26; the kana commit when you switch the input source
-  or leave the field. The Mac never reads the VM's text, so reconversion of
-  text already typed and suggestions from the text around the cursor do
-  not work. Control shortcuts of an input method (Kotoeri's Control-J/K/L)
+  gives 中文, Esc drops it, Backspace edits it), Japanese Romaji (`nihon` +
+  Return gives にほん) and 2-Set Korean (한국 어) in a GTK app; Pinyin in foot;
+  Pinyin and Japanese Romaji in Chromium. A password field gets plain keys;
+  Control and Cmd chords go to the VM; moving the focus while composing
+  drops the composition.
+- **Not confirmed yet:** picking a Japanese conversion from Kotoeri's
+  candidate list with Return. With typed test keys on that Mac, Return
+  there commits nothing until the input source changes, in the VM and in a
+  plain Mac text view (NSTextView) alike, so it is not the VM's side; a
+  check with real typing is open.
+- The Mac never reads the VM's text, so reconversion of text already
+  typed and suggestions from the text around the cursor do not work. Control shortcuts of an input method (Kotoeri's Control-J/K/L)
   go to the VM like every Control chord. A Fcitx5 update in the VM may need
   the module built again: `omacvm apply` does that, and `omacvm check` says
   when.
