@@ -85,8 +85,10 @@ appdir "$H/Applications/OmacVM.app" org.omacvm.app
 appdir "$T/Drive/OmacVM Test lane.app" org.omacvm.app.test.fixid
 appdir "$T/Drive/Tester.app" org.omacvm.app.tester
 lib() {   # TEST RUNTIME_APP CODE: CODE after sourcing app.sh
+  # ps: no copy of the app is open here. On a Mac that runs OmacVM.app (a CI runner on someone's Mac),
+  # app_start would otherwise see that one and refuse ("... is open and would start 'V' instead").
   env -u OMACVM_APP_ID HOME="$H" OMACVM_TEST_IDENTITY="$1" OMACVM_APP_RUNTIME="$2/Contents/Resources/runtime" \
-    bash -c 'set -euo pipefail; source "$1/src/lib/app.sh"; open() { echo "open $*"; }; app_ip() { :; }; eval "$2"' _ "$R" "$3" 2>&1
+    bash -c 'set -euo pipefail; source "$1/src/lib/app.sh"; open() { echo "open $*"; }; app_ip() { :; }; ps() { :; }; eval "$2"' _ "$R" "$3" 2>&1
 }
 expect "app_bundle, test identity, a lane's copy runs: that copy" "$T/Drive/OmacVM Test lane.app" \
   "$(lib 1 "$T/Drive/OmacVM Test lane.app" app_bundle)"
