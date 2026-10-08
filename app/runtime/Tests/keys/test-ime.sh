@@ -51,4 +51,7 @@ as=$(body "$src" '- (NSAttributedString *)attributedSubstringForProposedRange:')
 has "the input method reads back only its own marked text" "$as" 'if (!omacvm_ime_marked || range.location == NSNotFound) {'
 has "... never more than it" "$as" 'r = NSIntersectionRange(range, NSMakeRange(0, [omacvm_ime_marked length]));'
 has "the guest's caret is checked before use" "$(cat "$src")" 'omacvm_ime_rect_ok(x, y, w, h)'
+# A caret as tall as its field (a GTK entry taller than its line): the candidate
+# window goes to the field's middle, where GTK draws the line, not its top.
+has "a caret taller than a line: its middle" "$(body "$src" 'static NSRect omacvm_ime_caret(void)')" 'r.origin.y = NSMidY(r) - 20;'
 exit $fail

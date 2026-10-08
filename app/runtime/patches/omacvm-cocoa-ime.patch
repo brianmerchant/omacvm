@@ -506,9 +506,9 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +
 +    if (omacvm_ime.has_rect && omacvm_ime.exact &&
 +        omacvm_ime_to_screen(omacvm_ime.x, omacvm_ime.y, omacvm_ime.w, omacvm_ime.h, &r)) {
-+        /* A caret as tall as a whole field (an entry stretched over its window): its top line. */
++        /* A caret as tall as a whole field (an entry stretched over its window): GTK draws the line in its middle. */
 +        if (NSHeight(r) > 40) {
-+            r.origin.y = NSMaxY(r) - 40;
++            r.origin.y = NSMidY(r) - 20;
 +            r.size.height = 40;
 +        }
 +        return r;
