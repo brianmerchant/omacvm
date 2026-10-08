@@ -29,8 +29,9 @@ in more words.
 - Control centre: a switch shows its check mark within a second of "done".
   Before, the row waited 5-10 s for the VM's checks and the Mac's status;
   they now come in after it.
-- Control centre: the Graphics row fits on its line ("Vulkan: OpenGL until r
-  builds its driver"); enter shows the whole text, in the VM's own words.
+- Control centre: the Graphics row fits on its line, also in an 80-column
+  window ("Vulkan: OpenGL until r builds it"); enter shows the whole text, in
+  the VM's own words.
 
 ## 3.0.6
 

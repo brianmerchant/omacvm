@@ -489,14 +489,14 @@ GRAPHICS_CHOICES = ("auto", "opengl", "vulkan")
 GRAPHICS_TITLES = {"auto": "Automatic", "opengl": "OpenGL", "vulkan": "Vulkan"}
 # The Mac's words when Vulkan fell back (Graphics.didNotStart, src/lib/graphics.sh).
 GRAPHICS_DID_NOT_START = "Vulkan did not start on this Mac: using OpenGL"
-# The row's short words, whole in a 90-column window (the Mac's summary is
+# The row's short words, whole in an 80-column window (the Mac's summary is
 # for its own window and omacvm: about 100 characters, cut off in the row on
 # the Mac mini, 2026-10-08); the whole story under enter.
-GRAPHICS_WAITING_NOTE = "Vulkan: OpenGL until r builds its driver"
+GRAPHICS_WAITING_NOTE = "Vulkan: OpenGL until r builds it"
 GRAPHICS_WAITING_DETAIL = ("Vulkan is chosen, but this VM does not have its Vulkan driver yet, so it runs on OpenGL "
                            "until the driver is built. r builds it (a few minutes; when the VM's packages are too old "
                            "for that, after a whole system update with omarchy update, asked first).")
-GRAPHICS_FELL_BACK_NOTE = "Vulkan: did not start, OpenGL (r retries)"
+GRAPHICS_FELL_BACK_NOTE = "Vulkan failed: OpenGL (r retries)"
 GRAPHICS_FEATURE = Feature(
     name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
     summary="OpenGL, Vulkan, or Automatic (OpenGL on every Mac in 3.0.0); from the VM's next start")

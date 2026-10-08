@@ -1618,11 +1618,11 @@ def test_graphics_row_fits_and_details_say_it_all(tmp_path, monkeypatch):
 
     async def go():
         a = app()
-        async with a.run_test(size=(90, 30)) as pilot:
+        async with a.run_test(size=(80, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.linked and a.c.graphics() == "vulkan")
             await pilot.pause(0.2)
             cell = str(a.screen.query_one(DataTable).get_cell("graphics", "note"))
-            assert cell == "Vulkan: OpenGL until r builds its driver", cell
+            assert cell == "Vulkan: OpenGL until r builds it", cell
             _move_to(a, "graphics")
             await pilot.press("enter")
             assert await settle(pilot, lambda: isinstance(a.screen, DetailsScreen))

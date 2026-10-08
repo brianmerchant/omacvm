@@ -243,7 +243,7 @@ def test_graphics_row_vulkan_waiting_for_driver():
     r = S.graphics_row(st, "app")
     # Short in the row (the Mac's 97 characters were cut off on the Mac mini,
     # 2026-10-08), in the VM's words; the whole of it under enter.
-    assert r.note == "Vulkan: OpenGL until r builds its driver"
+    assert r.note == "Vulkan: OpenGL until r builds it"
     assert "OmacVM in the VM" not in r.note + r.detail and "OpenGL until the driver is built" in r.detail
     # A Mac whose omacvm has no summary yet says the same.
     del st["graphics"]["summary"]
@@ -251,16 +251,17 @@ def test_graphics_row_vulkan_waiting_for_driver():
 
 
 def test_graphics_row_notes_fit_the_row():
-    """Every Graphics note fits the row of a 100-column control centre (the
-    mini's was about 107; redraw: width - 13 - the longest title - 2 - 3)."""
+    """The Graphics notes that stand for the Mac's long summary fit the row of
+    an 80-column control centre (the mini's was about 107), the others a
+    100-column one; redraw: width - 13 - the longest title - 2 - 3."""
     why = ("Vulkan did not start on this Mac: using OpenGL (the firmware found no devices in 25 s: "
            "no boot disk, no picture; choose Vulkan again to try once more)")
     with open(os.path.join(os.path.dirname(__file__), "..", "..", "features.tsv"), encoding="utf-8") as f:
         titles = [p.title for p in S.parse_features_tsv(f.read())]
-    room = 100 - 13 - max(len(t) for t in titles) - 5
-    for g in ({"graphics": "vulkan", "next_start": "opengl", "waiting_for_driver": True, "this_start": ""},
-              {"graphics": "vulkan", "next_start": "opengl", "summary": why, "this_start": f"vulkan -> opengl ({why})"},
-              {"graphics": "auto", "next_start": "vulkan", "this_start": "auto -> opengl (macOS 26)"}):
+    for cols, g in ((80, {"graphics": "vulkan", "next_start": "opengl", "waiting_for_driver": True, "this_start": ""}),
+                    (80, {"graphics": "vulkan", "next_start": "opengl", "summary": why, "this_start": f"vulkan -> opengl ({why})"}),
+                    (100, {"graphics": "auto", "next_start": "vulkan", "this_start": "auto -> opengl (macOS 26)"})):
+        room = cols - 13 - max(len(t) for t in titles) - 5
         r = S.graphics_row({"graphics": g}, "app")
         assert len(r.note) <= room, (r.note, len(r.note), room)
 
@@ -271,7 +272,7 @@ def test_graphics_row_vulkan_fell_back():
     st = {"graphics": {"graphics": "vulkan", "next_start": "opengl", "waiting_for_driver": False, "summary": why,
                        "this_start": f"vulkan -> opengl ({why})"}}
     r = S.graphics_row(st, "app")
-    assert r.note == "Vulkan: did not start, OpenGL (r retries)" and r.status is S.Status.WORKS
+    assert r.note == "Vulkan failed: OpenGL (r retries)" and r.status is S.Status.WORKS
     # The Mac's reason under enter, with the VM's own way to try again.
     assert r.detail == why.replace("choose Vulkan again to try once more", "r on this row tries Vulkan again")
 
