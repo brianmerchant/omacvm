@@ -687,7 +687,7 @@ struct ReadyView: View {
             LabeledContent("Keyboard") {
                 HStack(spacing: 8) {
                     Text("Not allowed").foregroundStyle(.red)
-                    Button("Allow…") { KeyAccess.request() }
+                    Button("Allow…") { KeyAccess.request { refreshKeyNote() } }
                     InfoButton(topic: "the keyboard", text: KeyAccess.missingText)
                 }
             }
@@ -702,6 +702,10 @@ struct ReadyView: View {
 
     private func refreshKeyNote() {
         keyNote = preview?.keyNote ?? KeyAccess.note(folder: state.config.folder)
+        // Red: first clear an old "control the computer" entry (KeyAccess.reset).
+        if keyNote == .needsUser, preview == nil {
+            KeyAccess.clearOldEntryOnce { refreshKeyNote() }
+        }
     }
 
     private func setGraphics(_ g: GraphicsChoice) {

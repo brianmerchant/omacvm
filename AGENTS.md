@@ -473,6 +473,9 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   (gestures), none for Omanotch, Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
   first uses it), Microphone (the VM's app). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and `org.omacvm.gestures`,
   `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omacvm.<app>`.
+  OmacVM.app's key tap: an old "control the computer" entry (`kTCCServicePostEvent`, tied to an earlier build;
+  tccd: "Failed to match existing code requirement ... kTCCServicePostEvent") refuses it whatever Accessibility shows;
+  the app clears its own (`KeyAccess.reset`), by hand `tccutil reset PostEvent org.omacvm.app`.
 - **Test identity (one per Mac, granted once)**: macOS keys a grant on the bundle id and the signing team, so
   every renamed or ad hoc test copy asks again. Test with only this one:
   `OMACVM_SIGN_ID=<Developer ID> app/scripts/build-app.sh --test-identity --install` builds "OmacVM Test"
