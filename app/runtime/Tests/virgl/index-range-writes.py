@@ -69,7 +69,7 @@ REVIEWED = {
         ("own", "vrend's system value uniform block"),
     ("vrend/vrend_renderer.c", "vrend_fill_sysval_uniform_block", "glBufferSubData"):
         ("own", "vrend's system value uniform block"),
-    ("vrend/vrend_renderer.c", "vrend_const_take", "glBufferData"):
+    ("vrend/vrend_renderer.c", "vrend_const_resolve", "glBufferData"):
         ("own", "vrend's buffers for shader constants"),
     ("vrend/vrend_renderer.c", "vrend_const_own_buffer", "glBufferData"):
         ("own", "vrend's buffers for shader constants"),

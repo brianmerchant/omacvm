@@ -28,7 +28,16 @@
  * 12 800 draws with 8 vec4s each in one submit: more constants than one window holds, so
  *    the window moves on; every draw still reads its own;
  * 13 a vertex shader with 16 inputs (no location left for the index) keeps a range per
- *    draw.
+ *    draw;
+ * 14 a vertex shader reading CONST[0][3000] with 4 constants declared, then 800 draws with
+ *    red constants in the same submit: the shader is refused as before (uniforms and a
+ *    block of 4 do not compile); a window must not let it read the other draws' constants;
+ * 15 separable shaders linked early (LINK_SHADER): the vertex window still works (the index
+ *    attribute is bound before that link), not only a fallback to uniforms; skipped where
+ *    the host refuses the separable link in every mode (Apple's GL, gl_PerVertex);
+ * 16 a submit of a pattern, then small vertex and fragment constants: the buffer the GPU
+ *    reads holds those constants and zeros, nothing of the earlier submit (the gaps between
+ *    entries and the window pad are zeroed).
  * Run as is, with OMACVM_VIRGL_CONST_UBO=1 and with OMACVM_VIRGL_CONST_UBO=0.
  * Usage: test-const-ubo [case] */
 #include <OpenGL/OpenGL.h>
@@ -54,7 +63,7 @@ enum { RED = 0xff0000ff, GREEN = 0xff00ff00, BLUE = 0xffff0000, YELLOW = 0xff00f
 enum { R_RT = 1, R_POS, R_UBO, R_COUNT };
 /* objects */
 enum { VS_CONST = 10, VS_CONST8, VS_INDEX, VS_UBO, VS_PLAIN, VS_IN16, FS_VARYING, FS_CONST, FS_MUL,
-       VE = 20, SURFACE = 40, BLEND, RS };
+       VE = 20, VS_FAR = 30, VS_SEP, FS_SEP, SURFACE = 40, BLEND, RS };
 
 static CGLContextObj main_ctx;
 static int failures;
@@ -71,6 +80,9 @@ static void check(int ok, const char *what)
 static struct totals {
    unsigned long long uploads, bytes, binds, own, index, windows;
 } last;
+/* the host refused a separable link (Apple's GL: a separable vertex shader must redeclare
+ * gl_PerVertex, which vrend does not: separable vertex programs never draw on macOS) */
+static int separable_refused;
 
 static void log_cb(enum virgl_log_level_flags level, const char *message, void *data)
 {
@@ -82,7 +94,11 @@ static void log_cb(enum virgl_log_level_flags level, const char *message, void *
               "index-draws %llu window-binds %llu",
               &t.uploads, &t.bytes, &t.binds, &t.own, &t.index, &t.windows) == 6)
       last = t;
-   else if (level >= VIRGL_LOG_LEVEL_WARNING || strstr(message, "shader constants:"))
+   else if (strstr(message, "(separable link)"))
+      separable_refused = 1;
+   if (p)
+      return;
+   if (level >= VIRGL_LOG_LEVEL_WARNING || strstr(message, "shader constants:"))
       fprintf(stderr, "virgl: %s", message);
 }
 
@@ -319,6 +335,37 @@ static const char *vs_inputs16 =
    "  0: MOV OUT[0], IN[0]\n"
    "  1: MOV OUT[1], CONST[0][2]\n"
    "  2: END\n";
+
+/* reads vec4 3000 of 4 */
+static const char *vs_far =
+   "VERT\n"
+   "DCL IN[0]\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL OUT[1], GENERIC[0]\n"
+   "DCL CONST[0][0..3]\n"
+   "  0: MOV OUT[0], IN[0]\n"
+   "  1: MOV OUT[1], CONST[0][3000]\n"
+   "  2: END\n";
+
+/* vs_const and fs_varying as separable programs */
+static const char *vs_sep =
+   "VERT\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL IN[0]\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL OUT[1], GENERIC[0]\n"
+   "DCL CONST[0][0..3]\n"
+   "  0: MOV OUT[0], IN[0]\n"
+   "  1: MOV OUT[1], CONST[0][2]\n"
+   "  2: END\n";
+
+static const char *fs_sep =
+   "FRAG\n"
+   "PROPERTY SEPARABLE_PROGRAM 1\n"
+   "DCL IN[0], GENERIC[0], PERSPECTIVE\n"
+   "DCL OUT[0], COLOR\n"
+   "  0: MOV OUT[0], IN[0]\n"
+   "  1: END\n";
 
 static const char *fs_varying =
    "FRAG\n"
@@ -805,6 +852,130 @@ static void check_stale_counts(void)
    check(const_ubo ? own >= 1 : own == 0, text);
 }
 
+static void case_far(struct cmds *c, int ctx)
+{
+   emit_shader(c, VS_FAR, TEST_SHADER_VERTEX, vs_far);
+   submit(ctx, c);   /* refused: a compile error (all modes) */
+   float green[4][4], red[4][4];
+   for (int k = 0; k < 4; k++)
+      for (int i = 0; i < 4; i++) {
+         green[k][i] = ((GREEN >> (8 * i)) & 0xff) / 255.0f;
+         red[k][i] = ((RED >> (8 * i)) & 0xff) / 255.0f;
+      }
+   /* the far read first, so a window would start at its constants */
+   emit_bind_shaders(c, VS_FAR, FS_VARYING);
+   emit_stripe(c, 0);
+   emit_consts(c, TEST_SHADER_VERTEX, 4, (const float (*)[4])green);
+   emit_draw(c);
+   emit_bind_shaders(c, VS_CONST, FS_VARYING);
+   for (int k = 0; k < 800; k++) {
+      emit_stripe(c, 1 + k % 3);
+      emit_consts(c, TEST_SHADER_VERTEX, 4, (const float (*)[4])red);
+      emit_draw(c);
+   }
+   submit(ctx, c);
+   uint32_t got[4];
+   read_stripes(ctx, got);
+   char text[160];
+   snprintf(text, sizeof(text), "CONST[0][3000] of 4: no other draw's constants (0x%08x)", got[0]);
+   check(got[0] != RED, text);
+}
+
+static void case_separable(struct cmds *c, int ctx)
+{
+   emit_shader(c, VS_SEP, TEST_SHADER_VERTEX, vs_sep);
+   emit_shader(c, FS_SEP, TEST_SHADER_FRAGMENT, fs_sep);
+   emit_bind_shaders(c, VS_SEP, FS_SEP);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_LINK_SHADER, 0, VIRGL_LINK_SHADER_SIZE));
+   emit(c, VS_SEP);
+   emit(c, FS_SEP);
+   for (int i = 0; i < 4; i++)
+      emit(c, 0);
+   check(submit(ctx, c) == 0, "separable shaders linked early");
+   for (int s = 0; s < 4; s++) {
+      emit_stripe(c, s);
+      emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, colours[s]);
+      emit_draw(c);
+   }
+   check(submit(ctx, c) == 0, "separable shaders: vertex constants before each draw");
+   if (separable_refused) {
+      printf("skip: the host refused the separable link (as with uniforms)\n");
+      return;
+   }
+   check_stripes(ctx, 4, colours, "separable shaders");
+}
+
+static void check_separable_counts(void)
+{
+   unsigned long long binds = last.binds - totals_before.binds;
+   unsigned long long index = last.index - totals_before.index;
+   char text[160];
+   snprintf(text, sizeof(text), "separable: %llu index draws, %llu range binds", index, binds);
+   if (separable_refused)
+      return;
+   check(const_ubo == 2 ? index == 4 : const_ubo == 1 ? binds == 4 : index == 0 && binds == 0,
+         text);
+}
+
+static void check_zeroed(float mark);
+
+static void case_zeroed(struct cmds *c, int ctx)
+{
+   const float mark = 0.123f;
+   float pattern[8][4];
+   for (int k = 0; k < 8; k++)
+      for (int i = 0; i < 4; i++)
+         pattern[k][i] = mark;
+   emit_bind_shaders(c, VS_CONST8, FS_VARYING);
+   for (int k = 0; k < 200; k++) {
+      emit_stripe(c, k % 4);
+      emit_consts(c, TEST_SHADER_VERTEX, 8, (const float (*)[4])pattern);
+      emit_draw(c);
+   }
+   check(submit(ctx, c) == 0, "a submit of 200 x 8 vec4s of a pattern");
+   emit_bind_shaders(c, VS_CONST, FS_MUL);
+   for (int s = 0; s < 4; s++) {
+      emit_stripe(c, s);
+      emit_colour_consts(c, TEST_SHADER_VERTEX, 4, 2, colours[s]);
+      emit_colour_consts(c, TEST_SHADER_FRAGMENT, 1, 0, WHITE);
+      emit_draw(c);
+   }
+   check(submit(ctx, c) == 0, "then small vertex and fragment constants");
+   if (const_ubo)
+      check_zeroed(mark);
+   check_stripes(ctx, 4, colours, "small constants after a big submit");
+}
+
+/* the buffer the last draw's fragment constants are bound from (the submit's upload):
+ * before a read-back binds another program */
+static void check_zeroed(float mark)
+{
+   GLint prog = 0, binding = -1, buf = 0, prev = 0, size = 0;
+   glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+   GLuint block = prog ? glGetUniformBlockIndex(prog, "fsconstblk") : GL_INVALID_INDEX;
+   if (block != GL_INVALID_INDEX)
+      glGetActiveUniformBlockiv(prog, block, GL_UNIFORM_BLOCK_BINDING, &binding);
+   if (binding >= 0)
+      glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, binding, &buf);
+   glGetIntegerv(GL_COPY_READ_BUFFER, &prev);   /* the binding (GL_COPY_READ_BUFFER_BINDING) */
+   unsigned marks = 0;
+   if (buf) {
+      glBindBuffer(GL_COPY_READ_BUFFER, buf);
+      glGetBufferParameteriv(GL_COPY_READ_BUFFER, GL_BUFFER_SIZE, &size);
+      uint32_t *words = calloc(1, size > 0 ? size : 4), want;
+      memcpy(&want, &mark, 4);
+      glGetBufferSubData(GL_COPY_READ_BUFFER, 0, size, words);
+      for (GLint i = 0; i < size / 4; i++)
+         marks += words[i] == want;
+      free(words);
+      glBindBuffer(GL_COPY_READ_BUFFER, prev);
+   }
+   char text[200];
+   snprintf(text, sizeof(text), "the uploaded constants buffer (%d bytes) holds %u words of the "
+            "earlier submit", size, marks);
+   check(buf && size > 0 && marks == 0, text);
+}
+
 static void run_case(int n)
 {
    static struct cmds c;
@@ -826,6 +997,9 @@ static void run_case(int n)
    case 11: case_counts(&c, ctx); break;
    case 12: case_many(&c, ctx); break;
    case 13: case_inputs16(&c, ctx); break;
+   case 14: case_far(&c, ctx); break;
+   case 15: case_separable(&c, ctx); break;
+   case 16: case_zeroed(&c, ctx); break;
    }
    teardown(ctx);
    if (n == 4)
@@ -836,6 +1010,8 @@ static void run_case(int n)
       check_many_counts();
    if (n == 13)
       check_inputs16_counts();
+   if (n == 15)
+      check_separable_counts();
    totals_before = last;
 }
 
@@ -864,7 +1040,7 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   for (int n = 1; n <= 13; n++)
+   for (int n = 1; n <= 16; n++)
       if (!only || only == n)
          run_case(n);
 

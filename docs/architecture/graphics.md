@@ -347,20 +347,26 @@ set with `glUniform4uiv` before the draw. Any `glUniform` call makes Apple's GL
 redo much of its draw setup (~0.53 us per draw on an M4 Max, whatever its
 size), and WebGL pages change uniforms before nearly every draw (Aquarium 30k:
 ~31,000 a frame). Now CONST[0] is the uniform block `<prefix>constblk` where it
-fits (desktop GL, not compute, inside `GL_MAX_UNIFORM_BLOCK_SIZE` and the
-stage's block limit). Before a submit is decoded, all its constants payloads
-are copied into one staging block (`vrend_const_prescan`); the first of them
-that runs uploads it with one `glBufferData` into the next of four buffers of
-the sub context. A vertex shader reads a window as large as a block may be,
-from `const0[virgl_cbase + i]`; `virgl_cbase` is an int attribute at the last
+fits (desktop GL, GLSL 1.40, not compute, inside `GL_MAX_UNIFORM_BLOCK_SIZE`
+and the stage's block limit). Before a submit is decoded, all its constants
+payloads are copied into one staging block (`vrend_const_prescan`, zeros
+between them); the first draw that needs any of them uploads it with one
+`glBufferData` into the next of four buffers of the sub context. A vertex
+shader reads a window as large as a block may be, from
+`const0[virgl_cbase + i]`; `virgl_cbase` is an int attribute at the last
 location (never an array), so a draw sets one attribute value and rebinds the
-window only when its constants leave it. Other stages bind their range per
-draw. Constants that missed the upload (another sub context in the submit, a
-ring buffer that took a later submit, fewer constants than the shader reads)
-go into the stage's own buffer, zero-padded. `OMACVM_VIRGL_CONST_UBO=1` binds
-a range per draw in vertex shaders too, `=0` keeps uniforms (the GL calls of
-before); qemu.log says which. `OMACVM_VIRGL_CACHE_STATS=1` logs uploads,
-binds, index draws and window binds. Test: `test-const-ubo` (all three modes).
+window only when its constants leave it (the upload is padded by a window of
+zeros). The shader reads only its own constants of the window: an index from
+ADDR is clamped to them, and a fixed index outside them does not compile, as
+with uniforms. Other stages bind their range per draw. Constants that missed
+the upload (another sub context in the submit, a ring buffer that took a later
+submit, an earlier submit, fewer constants than the shader reads) go into the
+stage's own buffer, zero-padded. A program whose blocks need more bindings than
+the GL has is built again with uniforms (shader key `const_uniforms`) and the
+draw selects again. `OMACVM_VIRGL_CONST_UBO=1` binds a range per draw in vertex
+shaders too, `=0` keeps uniforms (the GL calls of before); qemu.log says which.
+`OMACVM_VIRGL_CACHE_STATS=1` logs uploads, binds, index draws and window binds.
+Test: `test-const-ubo` (all three modes).
 
 ### Where the time goes
 
