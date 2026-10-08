@@ -53,7 +53,7 @@ ck=$(part "$R/src/cmd/check.sh" '^# Touch ID .ADR 0041., the Mac.s side' '^FEATU
 [[ $ck == *'"Touch ID (Mac)"'* ]] || { echo "FAIL check.sh: no Touch ID (Mac) row"; fail=1; }
 mkdir -p "$T/keys" "$T/support"; : > "$T/bridge.log"
 mac_check() {   # TYPE TOUCH_ID [BRIDGE-RUNNING]
-  ( TYPE=$1 VM=Omarchy TID=$2 RUNNING=${3:-1} OMA_BRIDGE_SUPPORT=$T/support BRIDGE_LOG=$T/bridge.log
+  ( TYPE=$1 VM=Omarchy TID=$2 RUNNING=${3:-1} OMA_BRIDGE_SUPPORT=$T/support BRIDGE_LOG=$T/bridge.log L_BRIDGE=org.omacvm.bridge
     feat() { [[ $1 == touch_id ]] && echo "$TID" || echo on; }
     vm_key_file() { echo "$T/keys/$1-$2"; }
     running() { (( RUNNING )); }
