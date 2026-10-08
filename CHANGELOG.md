@@ -7,6 +7,9 @@ in more words.
 
 - The OMACVM logo stays 1.9 s longer before it turns into Omarchy's (2.5 s instead of 0.6 s;
   the animation ends at 5.5 s, before the desktop is ready).
+- The keyboard row in the app's window turns "Allowed" as soon as OmacVM is allowed in
+  System Settings, without quitting the app first (macOS kept the old answer for the running
+  app; the app now asks in a fresh process).
 - Experimental, off by default, OmacVM.app only: the Mac's input methods
   type in Omarchy: the Mac's candidate window opens at the text cursor in
   the VM, the chosen text goes into the VM's field (tested with Pinyin,
@@ -60,6 +63,12 @@ in more words.
 - Control centre: the Graphics row fits on its line, also in an 80-column
   window ("Vulkan: OpenGL until r builds it"); enter shows the whole text, in
   the VM's own words.
+- Graphics: browser pages that change shader values before every draw (WebGL
+  Aquarium) are faster on the Mac's OpenGL. The values of a whole batch go to
+  the GPU in one upload; before, each draw set them with its own OpenGL call,
+  and Apple's OpenGL then redid its draw setup. Aquarium with 30,000 fish on a
+  MacBook Pro M4 Max: 32.9 to 41.8 frames a second
+  (`OMACVM_VIRGL_CONST_UBO=0` turns it off).
 
 ## 3.0.7
 

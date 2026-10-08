@@ -85,6 +85,25 @@ def run_api_test(name, frameworks=(), oracle=False, vulkan_stub=False, env=None)
     subprocess.run([str(binary)], check=True, env={**os.environ, **(env or {})})
 
 
+def run_const_ubo_random(seeds):
+    """test-const-ubo's random runs (case 21, as run_api_test built it) in all three modes:
+    each draw is checked by gl-oracle, and every mode must draw the same pixels."""
+    hashes = {}
+    for mode in ("default", "1", "0"):
+        env = {**os.environ, "SEED": "1", "SEEDS": str(seeds)}
+        env.pop("OMACVM_VIRGL_CONST_UBO", None)
+        if mode != "default":
+            env["OMACVM_VIRGL_CONST_UBO"] = mode
+        run = subprocess.run([str(output / "test-const-ubo"), "21"], check=True, env=env,
+                             capture_output=True, text=True)
+        hashes[mode] = [line for line in run.stdout.splitlines() if line.startswith("random seed")]
+        if len(hashes[mode]) != seeds:
+            sys.exit(f"test-const-ubo random runs ({mode}): {len(hashes[mode])} of {seeds} seeds")
+    if not hashes["default"] == hashes["1"] == hashes["0"]:
+        sys.exit("test-const-ubo random runs: the modes drew different pixels")
+    print(f"const ubo random runs: {seeds} seeds, same pixels in all three modes")
+
+
 def run_write_guard():
     """Every GL call in the renderer that can write a buffer is on the index range cache's
     reviewed list (index-range-writes.py)."""
@@ -236,3 +255,9 @@ run_api_test("test-vertex-binds", oracle=True, env={"OMACVM_VIRGL_VERTEX_CACHE":
 run_write_guard()
 run_test("test-index-range-cache", "vrend_renderer.c", oracle=True, sources=("virglrenderer.c",),
          envs=(None, {"OMACVM_VIRGL_INDEX_RANGE_CACHE": "0"}))
+# Shader constants through uniform buffers (virgl-const-uniform-buffer.patch): vertex
+# shaders through a window and an index, a range per draw (=1), uniforms as before (=0).
+run_api_test("test-const-ubo", oracle=True)
+run_api_test("test-const-ubo", oracle=True, env={"OMACVM_VIRGL_CONST_UBO": "1"})
+run_api_test("test-const-ubo", oracle=True, env={"OMACVM_VIRGL_CONST_UBO": "0"})
+run_const_ubo_random(seeds=24)
