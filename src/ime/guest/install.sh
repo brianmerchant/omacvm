@@ -1,6 +1,6 @@
 #!/bin/bash
 # The Mac's input methods in Omarchy (feature mac-ime, OmacVM.app only,
-# experimental; docs/adr/0042-mac-ime.md), as root in the VM:
+# experimental; docs/adr/0043-mac-ime.md), as root in the VM:
 #   install.sh USER on        build and install the Fcitx5 module if it is missing
 #                             or older, the port rule, GTK through Fcitx5 and the
 #                             Chromium/Electron flag (both from the next login)

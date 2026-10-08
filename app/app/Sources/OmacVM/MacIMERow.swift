@@ -3,7 +3,7 @@ import OmacVMFeatures
 import SwiftUI
 
 /// The Mac's input methods in the VM (feature mac-ime: experimental, off by
-/// default; docs/adr/0042-mac-ime.md) in the VM window's form: one switch,
+/// default; docs/adr/0043-mac-ime.md) in the VM window's form: one switch,
 /// the same feature as in the control centre (Features…) and `omacvm
 /// enable/disable mac-ime`. It runs this app's omacvm for the VM, so the VM
 /// must run (its Fcitx5 gets a small module); the port comes with the VM's

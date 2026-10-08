@@ -1,5 +1,5 @@
 // OmacVM mac-ime: the line protocol on the virtio port org.omacvm.ime
-// (docs/adr/0042-mac-ime.md), without Fcitx5 in it, so it is tested on its
+// (docs/adr/0043-mac-ime.md), without Fcitx5 in it, so it is tested on its
 // own (src/ime/tests/protocol-test.cpp, on the Mac and in CI).
 //
 // One JSON object per line, at most kMaxLine bytes; a longer line is dropped

@@ -1,0 +1,13 @@
+# OmacVM.app: hyprpicker that draws only when something changed, built again
+# for a new hyprpicker release (src/app/guest/hyprpicker/build.sh).
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = hyprpicker
+
+[Action]
+Description = OmacVM: hyprpicker for the frozen screen in screenshots (about a minute)
+When = PostTransaction
+Exec = /usr/local/lib/omacvm/hyprpicker/build.sh --hook

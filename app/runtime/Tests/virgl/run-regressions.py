@@ -136,9 +136,6 @@ VERTEX_STATE_REVIEWED = {
     "vrend_destroy_program": ("the sysval uniform buffer is never on a VAO; the program "
                               "generation it bumps also drops every recorded setup",
                               r"glDeleteBuffers\(1, &ent->ubo_sysval_buffer_id\)"),
-    "vrend_video_encode_completed": ("reached only from video commands, and "
-                                     "vrend_context_get_video_ctx() bumps the generation",
-                                     r"glBindBufferARB\(cdc->dest_res->target"),
 }
 VAO_CALL = re.compile(
     r"\bgl(?:BindBuffer(?:ARB)?\s*\(\s*(?!GL_(?!ELEMENT_ARRAY_BUFFER)\w+\s*,)"
@@ -208,6 +205,13 @@ run_test("test-integer-sampler-shader", "vrend_shader.c")
 run_api_test("test-video-decode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"))
 run_test("test-transfer-row-size", "vrend_formats.c")
 run_api_test("test-video-encode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"))
+# the same with QEMU's fences: reported by the sync thread, held for encoder frames there
+run_api_test("test-video-encode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"),
+             env={"OMACVM_TEST_THREAD_SYNC": "1"})
+# and with the low-latency constant QP session (encoders that refuse the QP range)
+run_api_test("test-video-encode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"),
+             env={"OMACVM_VIDEO_ENCODE_BASE_QP": "1"})
+run_api_test("test-upload-pbo")
 run_api_test("test-context-loss")
 run_api_test("test-transform-feedback")
 run_api_test("test-gpu-ranges", oracle=True)

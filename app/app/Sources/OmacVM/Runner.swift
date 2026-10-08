@@ -134,7 +134,7 @@ final class Runner {
         // device; the VM finds it by its name.
         a += ["-chardev", "socket,id=auth0,path=\(q(c.authSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=7,chardev=auth0,name=org.omacvm.auth"]
-        // The Mac's input methods (mac-ime, experimental; docs/adr/0042): only
+        // The Mac's input methods (mac-ime, experimental; docs/adr/0043): only
         // for a VM whose record says on, so every other VM starts as before.
         // QEMU's window code serves it (OMACVM_IME_SOCKET below).
         if links.macIME {

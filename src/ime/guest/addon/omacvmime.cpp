@@ -1,5 +1,5 @@
 // OmacVM mac-ime: an Fcitx5 module (not an input method engine) that lets
-// the Mac's input methods type into Omarchy (docs/adr/0042-mac-ime.md).
+// the Mac's input methods type into Omarchy (docs/adr/0043-mac-ime.md).
 //
 // It runs inside the Fcitx5 that Omarchy already starts, so every frontend
 // Fcitx5 has (Wayland input method v2, text-input-v1 for Chromium, D-Bus for

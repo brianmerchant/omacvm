@@ -1,4 +1,4 @@
-# The mac-ime feature's Fcitx5 module (docs/adr/0042-mac-ime.md): the Mac's
+# The mac-ime feature's Fcitx5 module (docs/adr/0043-mac-ime.md): the Mac's
 # input methods type into Omarchy through the Fcitx5 that Omarchy runs.
 # Built in the VM against its own Fcitx5 (install.sh here copies the sources
 # next to this file first), installed with pacman: `pacman -R

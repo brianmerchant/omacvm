@@ -215,7 +215,7 @@ Switch it off with `omacvm disable scroll-momentum`, on again with `omacvm enabl
 *Experimental, OmacVM.app only, off by default. Requested and scoped by
 [@Vocllum](https://github.com/Vocllum) in
 [#273](https://github.com/gillesgoetsch/OmacVM/issues/273). Design:
-[ADR 0042](adr/0042-mac-ime.md).*
+[ADR 0043](adr/0043-mac-ime.md).*
 
 With it on, the input method you use on the Mac also types in Omarchy:
 focus a text field in the VM, pick your input method in the Mac's menu

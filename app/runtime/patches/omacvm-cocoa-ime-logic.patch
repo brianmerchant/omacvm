@@ -16,7 +16,7 @@ Why its own file: so the rules are tested without QEMU, a display or an
 input method (app/runtime/Tests/keys/test-ime.sh applies this patch to an
 empty folder; at build time and in CI).
 
-Upstream: not applicable (OmacVM's Fcitx5 module in the guest, ADR 0042).
+Upstream: not applicable (OmacVM's Fcitx5 module in the guest, ADR 0043).
 Test: app/runtime/Tests/keys/test-ime.c.
 
 diff --git a/ui/omacvm-ime.h b/ui/omacvm-ime.h
@@ -26,7 +26,7 @@ new file mode 100644
 @@ -0,0 +1,256 @@
 +/*
 + * OmacVM mac-ime: the Mac's input methods type into the VM
-+ * (docs/adr/0042-mac-ime.md). The rules ui/cocoa.m follows, with no AppKit
++ * (docs/adr/0043-mac-ime.md). The rules ui/cocoa.m follows, with no AppKit
 + * in here, so they are tested on their own
 + * (app/runtime/Tests/keys/test-ime.c): the guest's lines (framing, numbers),
 + * when the Mac's input method gets keys, which key goes where, the caret's

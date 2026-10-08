@@ -1,5 +1,5 @@
 /// The Mac's input methods in the VM (feature mac-ime, experimental, off by
-/// default; docs/adr/0042-mac-ime.md). OmacVM.app gives a VM the virtio port
+/// default; docs/adr/0043-mac-ime.md). OmacVM.app gives a VM the virtio port
 /// org.omacvm.ime and tells QEMU's window code its socket only when the VM's
 /// record (its features file, written by `omacvm apply`) says mac-ime=on, so
 /// a VM with it off starts exactly as before: same devices, keys as before.

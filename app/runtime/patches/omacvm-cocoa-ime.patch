@@ -23,7 +23,7 @@ marked. The Mac never reads the guest's text.
 
 Why: #273 (requested and scoped by @Vocllum): Chinese, Japanese and Korean
 with the Mac's own input methods and candidate window in Omarchy
-(docs/adr/0042-mac-ime.md).
+(docs/adr/0043-mac-ime.md).
 
 Off: without OMACVM_IME_SOCKET omacvm_ime_on stays false; handleEvent:
 checks it before anything else and the globe key's tap only after its own
@@ -37,7 +37,7 @@ to the VM. Nothing new is allowed: no entitlement, no permission.
 
 Upstream: not applicable (OmacVM's guest side).
 Test: app/runtime/Tests/keys/test-ime.sh (the rules, and this patch's hooks
-in the patched ui/cocoa.m); typing on a test VM (docs/adr/0042-mac-ime.md).
+in the patched ui/cocoa.m); typing on a test VM (docs/adr/0043-mac-ime.md).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
 --- a/ui/cocoa.m
@@ -94,7 +94,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +}
 +
 +/*
-+ * OmacVM mac-ime (docs/adr/0042-mac-ime.md): the Mac's input methods type
++ * OmacVM mac-ime (docs/adr/0043-mac-ime.md): the Mac's input methods type
 + * into the VM. OmacVM.app sets OMACVM_IME_SOCKET only for a VM with the
 + * feature on; without it nothing here runs and every key takes QEMU's path
 + * as before. The VM's Fcitx5 module (src/ime/guest) says over the virtio

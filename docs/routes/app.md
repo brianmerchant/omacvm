@@ -438,7 +438,7 @@ the VM's SSH on `127.0.0.1:<port>`.
 
 The Mac's input methods type in Omarchy (feature `mac-ime`; what it does:
 [features](../features.md#mac-input-methods); design:
-[ADR 0042](../adr/0042-mac-ime.md); requested and scoped by @Vocllum in
+[ADR 0043](../adr/0043-mac-ime.md); requested and scoped by @Vocllum in
 [#273](https://github.com/gillesgoetsch/OmacVM/issues/273)).
 
 - Only for a VM whose record (its folder's `features`) says `mac-ime=on`
