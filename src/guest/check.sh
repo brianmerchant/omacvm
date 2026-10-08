@@ -535,7 +535,28 @@ app)
     ok "video encoding" "the Mac's media engine: $e"
     check "WebRTC encoding" "Chrome, Brave: VA-API encoder features in their flags (omacvm apply)" \
       python3 /usr/local/share/omacvm/app/guest/browser-video-encode.py "$U" check
-  elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi ;;
+  elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi
+  # The Mac's input methods (mac-ime, docs/adr/0042): OmacVM's Fcitx5 module
+  # built for this Fcitx5, the port (from the VM's start), Fcitx5 using both.
+  FEATURE=mac-ime
+  ime=$(/usr/local/share/omacvm/ime/guest/install.sh "$U" --status 2>/dev/null || true)
+  if [[ ${OMACVM_FEATURE_mac_ime:-off} == on ]]; then
+    port=/dev/virtio-ports/org.omacvm.ime
+    fpid=$(pgrep -u "$U" -x fcitx5 2>/dev/null | head -1 || true)
+    if [[ ${ime%% *} != ok ]]; then bad "Mac input methods" "${ime#* }"
+    elif [[ ! -e $port ]]; then
+      skip "Mac input methods" "on from the VM's next start: shut it down, then start it again (OmacVM.app adds its port at the start)" human
+    elif [[ -z $fpid ]]; then bad "Mac input methods" "Fcitx5 does not run (Omarchy's omarchy-fcitx5 service starts it with the desktop)"
+    elif ! grep -qs libomacvmime "/proc/$fpid/maps"; then skip "Mac input methods" "Fcitx5 loads the module at its next start (log out and in once)" human
+    elif ! ls -l "/proc/$fpid/fd" 2>/dev/null | grep -qF -- "$(readlink -f "$port")"; then
+      bad "Mac input methods" "Fcitx5 did not open the port (journalctl --user -u omarchy-fcitx5 in the VM)"
+    elif ! as_user systemctl --user show-environment 2>/dev/null | grep -qx 'GTK_IM_MODULE=fcitx'; then
+      ok "Mac input methods" "${ime#* }; GTK apps get the caret from the next login"
+    else ok "Mac input methods" "${ime#* }: an input method on the Mac types in Omarchy's text fields"; fi
+  elif [[ ${ime%% *} == ok || $ime == *"older"* || $ime == *"built for"* ]]; then
+    bad "Mac input methods" "off, but OmacVM's Fcitx5 module is still installed: omacvm apply"
+  else skip "Mac input methods" "off (experimental: omacvm enable mac-ime)"; fi
+  FEATURE="" ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx

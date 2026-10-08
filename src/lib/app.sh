@@ -217,6 +217,13 @@ app_links_stale() {
     [[ " $2 " == *" $k=off "* ]] && v=off
     [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
   done
+  # The Mac's input methods' port (mac-ime, off unless named): only with
+  # mac-ime on at the start ("Mac input methods on"; an app from before it
+  # never had the port, so off is never stale there).
+  if [[ $3 == on && " $2 " == *" mac-ime=on "* && ", $l, " != *", Mac input methods on, "* ]] ||
+     [[ $3 == off && " $2 " != *" mac-ime=on "* && ", $l, " == *", Mac input methods on, "* ]]; then
+    out+="${out:+, }the Mac's input methods"
+  fi
   echo "$out"
 }
 

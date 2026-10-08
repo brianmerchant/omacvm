@@ -35,6 +35,7 @@ thp-kernel:nothing of it talks to the Mac
 fast-network:apply takes the Mac's service off when no VM has it (src/net/mac/test.sh)
 vulkan:apply removes the VM's vulkan file (no Venus device from the next start) and venus/install.sh --remove; nothing of it talks to the Mac (src/tests/vulkan-feature.sh)
 x86-apps:x86/guest/install.sh off removes OmacVM's box64 package and its binfmt rule on every apply; nothing of it talks to the Mac (src/tests/x86-apps.sh)
+mac-ime:ime/guest/install.sh off removes OmacVM's Fcitx5 module, its port rule, the GTK line and the Chromium flag on every apply; OmacVM.app adds the org.omacvm.ime port and its socket only for a VM whose record says mac-ime=on, and QEMU's window code reads keys as before without OMACVM_IME_SOCKET (src/ime/tests/run.sh, app/runtime/Tests/keys/test-ime.sh)
 touch-id:apply deletes the Mac's Touch ID key (the Bridge then says off, no dialog); install.sh runs touchid.sh off: PAM lines, polkit rule, drop-in and the VM's keys gone (src/tests/touchid-client.sh)
 "
 while IFS=$'\t' read -r name _; do
@@ -305,6 +306,16 @@ expect "app: features as at the start: nothing" "" "$(app_links_stale "$V" "oman
 expect "app: a feature not named is on" "Bridge, battery" "$(app_links_stale "$V" "omanotch=off" on)"
 mkdir -p "$T/older/logs"; echo "OmacVM: network: user" > "$T/older/logs/qemu.log"
 expect "app: an app from before the line: nothing" "" "$(app_links_stale "$T/older" "$fs" on)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on, Touch ID off, Touch ID port on, Mac input methods off" > "$V/logs/qemu.log"
+expect "app: mac-ime on, no port this start" "the Mac's input methods" "$(app_links_stale "$V" "mac-ime=on" on)"
+expect "app: mac-ime off, no port: nothing" "" "$(app_links_stale "$V" "mac-ime=off" on)$(app_links_stale "$V" "mac-ime=off" off)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on, Mac input methods on" > "$V/logs/qemu.log"
+expect "app: mac-ime off, port still there this start" "the Mac's input methods" "$(app_links_stale "$V" "mac-ime=off" off)"
+expect "app: mac-ime on with its port: nothing" "" "$(app_links_stale "$V" "mac-ime=on" on)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on" > "$V/logs/qemu.log"
+expect "app: mac-ime off, an app from before it: nothing" "" "$(app_links_stale "$V" "mac-ime=off" off)"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on" \
+  "OmacVM: Mac links: Omanotch off, Gestures on, Bridge off, battery off, camera on" > "$V/logs/qemu.log"
 
 # apply's lines for a running app VM.
 ap=$(awk '/^  # The app reads them only when the VM starts/ {on = 1} on {print} on && /^  fi$/ {exit}' "$R/src/cmd/apply.sh")
