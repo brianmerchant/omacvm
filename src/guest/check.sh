@@ -535,7 +535,14 @@ app)
     ok "video encoding" "the Mac's media engine: $e"
     check "WebRTC encoding" "Chrome, Brave: VA-API encoder features in their flags (omacvm apply)" \
       python3 /usr/local/share/omacvm/app/guest/browser-video-encode.py "$U" check
-  elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi ;;
+  elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi
+  # The frozen screen of screenshots and the recording picker (hyprpicker -r -z): OmacVM's build
+  # draws it once per display, the package's on every frame (app/guest/hyprpicker/build.sh).
+  if hp=$(pacman -Q hyprpicker 2>/dev/null | awk '{ print $2 }') && [[ -n $hp ]]; then
+    if [[ -x /usr/local/bin/hyprpicker && "$(cut -d' ' -f1-2 /var/lib/omacvm/hyprpicker 2>/dev/null)" == "$hp $(sha256sum /usr/local/bin/hyprpicker | awk '{ print $1 }')" ]]; then
+      ok "screenshot freeze" "hyprpicker $hp, drawn only when it changes"
+    else skip "screenshot freeze" "the package's hyprpicker, which draws every frame (omacvm apply builds OmacVM's; it needs the network)"; fi
+  fi ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx

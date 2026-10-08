@@ -1,0 +1,45 @@
+diff --git a/src/helpers/LayerSurface.cpp b/src/helpers/LayerSurface.cpp
+index 3243cc8..aa247fc 100644
+--- a/src/helpers/LayerSurface.cpp
++++ b/src/helpers/LayerSurface.cpp
+@@ -66,7 +66,15 @@ CLayerSurface::~CLayerSurface() {
+ static void onCallbackDone(CLayerSurface* surf, uint32_t when) {
+     surf->frameCallback.reset();
+ 
++    // Draw again only when something changed (OmacVM). Drawing on every frame
++    // sends the compositor the whole screen 60 to 120 times a second per
++    // display, for a picture that does not change.
++    if (!surf->dirty)
++        return;
++    surf->dirty = false;
+     g_pHyprpicker->renderSurface(surf);
++    if (!surf->frameCallback)
++        surf->dirty = true; // not drawn (no free buffer yet): at the next chance
+ }
+ 
+ void CLayerSurface::sendFrame() {
+diff --git a/src/hyprpicker.cpp b/src/hyprpicker.cpp
+index 2f03fdc..e441ac2 100644
+--- a/src/hyprpicker.cpp
++++ b/src/hyprpicker.cpp
+@@ -285,6 +285,8 @@ void CHyprpicker::recheckACK() {
+ 
+ void CHyprpicker::markDirty() {
+     for (auto& ls : m_vLayerSurfaces) {
++        // drawn when the frame it waits for is done
++        ls->dirty = true;
+         if (ls->frameCallback)
+             continue;
+ 
+@@ -774,7 +776,10 @@ void CHyprpicker::initMouse() {
+ 
+         m_vLastCoords = {x, y};
+ 
+-        markDirty();
++        // Without the zoom (-z) nothing drawn follows the pointer: entering or
++        // leaving a display redraws, moving within one does not.
++        if (!m_bNoZoom)
++            markDirty();
+     });
+     m_pPointer->setButton([this](CCWlPointer* r, uint32_t serial, uint32_t time, uint32_t button, uint32_t button_state) { outputColor(); });
+     m_pPointer->setAxis([this](CCWlPointer* r, uint32_t time, uint32_t axis, wl_fixed_t value) {

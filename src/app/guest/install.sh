@@ -13,6 +13,8 @@
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 #  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
 #    (browser-video-encode.py)
+#  * a hyprpicker that draws the frozen screen of screenshots only when it
+#    changes (hyprpicker/; the package's drew every display on every frame)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
 #  * HDR's 10-bit virtio-gpu module builder (not built until the user asks)
@@ -119,6 +121,14 @@ rm -f /etc/environment.d/90-omacvm-vulkan.conf
 install -Dm755 omacvm-vulkan-present /usr/lib/systemd/user-environment-generators/90-omacvm-vulkan-present
 # The Venus driver check after each boot (a timer, only with Vulkan).
 venus/timer.sh || true
+# Screenshots and the screen recording picker freeze the screen with hyprpicker,
+# which drew every display again on every frame (a whole screen to the Mac's GPU
+# each time): a build that draws only when something changed, now and after
+# hyprpicker upgrades (hyprpicker/build.sh; the package's stays if it fails).
+install -Dm755 hyprpicker/build.sh /usr/local/lib/omacvm/hyprpicker/build.sh
+install -Dm644 hyprpicker/redraw-on-change.patch /usr/local/lib/omacvm/hyprpicker/redraw-on-change.patch
+install -Dm644 hyprpicker/95-omacvm-hyprpicker.hook /etc/pacman.d/hooks/95-omacvm-hyprpicker.hook
+hyprpicker/build.sh "$U" || true
 # Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
 # nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
 if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then
