@@ -165,6 +165,7 @@ private:
     LineReader reader_;
     std::string outbox_;
     std::string lastRect_;
+    bool lastPassword_ = false;
     bool composing_ = false;
 
     fcitx::EventLoop &loop() { return instance_->eventLoop(); }
@@ -280,7 +281,8 @@ private:
         }
         Caret c = caret(ic);
         lastRect_ = c.rect ? rectLine(*c.rect, c.exact) : "";
-        queue(focusLine(password(ic), c.rect, c.exact));
+        lastPassword_ = password(ic);
+        queue(focusLine(lastPassword_, c.rect, c.exact));
     }
 
     void focusIn(fcitx::InputContext *ic) {
@@ -301,8 +303,10 @@ private:
         queue(focusOffLine());
     }
 
+    // Apps change their capabilities often (GTK after each commit): only a
+    // field that turned into a password field or back is news for the Mac.
     void kindChanged(fcitx::InputContext *ic) {
-        if (ic && ic == focused()) {
+        if (ic && ic == focused() && password(ic) != lastPassword_) {
             sendFocus();
         }
     }

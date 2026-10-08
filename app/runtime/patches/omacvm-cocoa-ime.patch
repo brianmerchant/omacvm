@@ -87,7 +87,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
      return bool_with_bql(^{
          return [self handleEventLocked:event];
      });
-@@ -8465,8 +8480,792 @@
+@@ -8465,8 +8480,801 @@
      dispatch_source_set_event_handler(omacvm_chan_src, ^{ omacvm_chan_read(); });
      dispatch_source_set_cancel_handler(omacvm_chan_src, ^{ close(fd); });
      dispatch_resume(omacvm_chan_src);
@@ -178,8 +178,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +{
 +    [omacvm_ime_marked release];
 +    omacvm_ime_marked = [s length] ? [s copy] : nil;
-+}
-+
+ }
+ 
 +/* Chosen text, in pieces of at most OMACVM_IME_MAX_TEXT bytes (whole characters). */
 +static void omacvm_ime_commit(NSString *text)
 +{
@@ -612,19 +612,28 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +                    !([kind isEqualToString:@"text"] || [kind isEqualToString:@"password"])) {
 +                    return;
 +                }
-+                /* Another field: what was marked for the last one goes. */
-+                omacvm_ime.focus = false;
-+                omacvm_ime_update();
++                bool pw = [kind isEqualToString:@"password"];
++                /*
++                 * Another field (the guest says focus off before it) or a
++                 * password field now: what was marked goes. The same field
++                 * again (its module said hello again) keeps it.
++                 */
++                if (!omacvm_ime.focus || pw != omacvm_ime.password) {
++                    omacvm_ime.focus = false;
++                    omacvm_ime_update();
++                    omacvm_ime_focus_at = CACurrentMediaTime();
++                }
 +                omacvm_ime.focus = true;
-+                omacvm_ime.password = [kind isEqualToString:@"password"];
++                omacvm_ime.password = pw;
 +                omacvm_ime.has_rect = rect;
 +                if (rect) {
 +                    omacvm_ime.x = x; omacvm_ime.y = y; omacvm_ime.w = w; omacvm_ime.h = h;
 +                    omacvm_ime.exact = [d[@"exact"] isKindOfClass:[NSNumber class]] && [d[@"exact"] boolValue];
 +                }
-+                omacvm_ime_focus_at = CACurrentMediaTime();
 +            }
-+            omacvm_ime_release_all(&omacvm_ime_keys);
++            if (!omacvm_ime.focus) {
++                omacvm_ime_release_all(&omacvm_ime_keys);
++            }
 +        } else if ([t isEqualToString:@"rect"] && omacvm_ime.focus) {
 +            NSArray *r = d[@"rect"];
 +            double x, y, w, h;
@@ -679,8 +688,8 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
 +    if (n > 0) {
 +        omacvm_ime_lines_feed(&omacvm_ime_lines, buf, (size_t)n, omacvm_ime_line, NULL);
 +    }
- }
- 
++}
++
 +static void omacvm_ime_connect(void)
 +{
 +    static int tries;
@@ -880,7 +889,7 @@ diff --git a/ui/cocoa.m b/ui/cocoa.m
  /* A guest reset (QEMU's thread, BQL): its firmware and boot draw no pointer. */
  static void omacvm_pointer_reset(void *opaque)
  {
-@@ -8790,6 +9589,7 @@
+@@ -8790,6 +9598,7 @@
      }
      omacvm_shortcuts_init();
      omacvm_globe_init();
