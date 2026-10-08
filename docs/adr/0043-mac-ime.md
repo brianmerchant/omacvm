@@ -1,7 +1,7 @@
 # 0043: The Mac's input methods in the VM: macOS composes, Fcitx5 inserts
 
 Status: accepted, built (`mac-ime`: off by default, experimental,
-OmacVM.app only; for 3.0.7: 3.0.6's release candidate was cut before it). Requested and scoped by @Vocllum in
+OmacVM.app only; for 3.0.8: 3.0.7 is a notch-only hotfix of 3.0.6). Requested and scoped by @Vocllum in
 [#273](https://github.com/gillesgoetsch/OmacVM/issues/273).
 
 ## Context
