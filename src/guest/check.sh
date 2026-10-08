@@ -40,6 +40,15 @@ as_user() {
 user_active() { systemctl --user -M "$U@" is-active "$1" >/dev/null 2>&1; }
 connected_to() { ss -Htn state established "dst $1:$2" | grep -q .; }
 ev_device() { grep -q "^N: Name=\"$1\"" /proc/bus/input/devices; }
+# missing_pkgs PKG...: why a feature is not set up when pacman could not
+# install what it needs ("" when all are there). On a VM whose package list
+# is older than the mirrors every download is a 404 (guest/pkg-add exit 3):
+# another apply does not help, a whole system update does (2026-10-08: camera
+# and Chromium video said "omacvm apply" on a 2.9.1 VM after its update).
+missing_pkgs() {
+  local m; m=$(pacman -T "$@" 2>/dev/null | paste -sd' ' -)
+  [[ -z $m ]] || echo "$m not installed (an old package list?): update the system with omarchy update, then r on this row (omacvm apply)"
+}
 
 [[ -r /etc/omacvm/env ]] || { bad "OmacVM guest side" "not installed (run omacvm apply on the Mac)"; exit 1; }
 source /etc/omacvm/env
@@ -253,9 +262,12 @@ if [[ $CAMERA == on && $TYPE == parallels ]]; then
   if [[ -n $cams ]]; then ok "camera" "Parallels' own: $cams"
   else bad "camera" "no camera in the VM: turn on camera sharing in the VM's settings in Parallels Desktop (it shares the Mac's camera as a USB camera)"; fi
 elif [[ $CAMERA == on ]]; then
+  campkg=$(missing_pkgs dkms v4l2loopback-dkms)
   if [[ $(cat /sys/class/video4linux/video42/name 2>/dev/null) == "Mac Camera" ]]; then ok "camera device" "/dev/video42, Mac Camera"
+  elif [[ -n $campkg ]]; then bad "camera device" "no /dev/video42: $campkg"
   else bad "camera device" "no /dev/video42 (v4l2loopback not loaded: after a kernel update reboot, then omacvm apply)"; fi
   if user_active omacvm-camera.service; then ok "camera service" "omacvm-camera, asks the Mac only while an app reads"
+  elif [[ -n $campkg ]]; then bad "camera service" "not set up: $campkg"
   else bad "camera service" "omacvm-camera.service not running: omacvm apply"; fi
   cs=$(as_user /usr/local/bin/omacvm-camera --status 2>/dev/null)
   if [[ $TYPE == app ]]; then
@@ -516,7 +528,9 @@ app)
     if [[ $CHROMIUM_VIDEO != on ]]; then skip "video decoding in Chromium" "off (omacvm enable chromium-video)"
     elif [[ -z $v && -n $vafail ]]; then skip "video decoding in Chromium" "VA-API does not start (see video decoding)"
     elif [[ -z $v ]]; then skip "video decoding in Chromium" "no decoders on the Mac's side"
-    elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then bad "video decoding in Chromium" "not set up: omacvm apply"
+    elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then
+      vpkg=$(missing_pkgs dkms make gcc)
+      bad "video decoding in Chromium" "not set up: ${vpkg:-omacvm apply}"
     elif [[ ! -e /dev/omacvm-vdec ]]; then bad "video decoding in Chromium" "no module for kernel $(uname -r) yet: omacvm apply, or reboot after an update"
     elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then
       w=$(/usr/local/share/omacvm/vdec/guest/vdecd.sh why 2>/dev/null)
@@ -670,8 +684,9 @@ section "Control centre"
 FEATURE=control-centre
 if [[ $CONTROL == on ]]; then
   check "omacvm" "/usr/local/bin/omacvm opens the control centre" test -x /usr/local/bin/omacvm
-  if python3 -c 'import textual' >/dev/null 2>&1; then ok "Textual" "$(pacman -Q python-textual 2>/dev/null | cut -d' ' -f2)"
-  else bad "Textual" "python-textual missing: omacvm shows plain text and offers to install it from the Mac"; fi
+  # OmacVM's own copy (control/vendor), checked as shipped and loaded once (nothing written).
+  if tx=$(python3 -I /usr/local/share/omacvm/control/omacvm_cc/vendor.py --check 2>&1); then ok "Textual" "$tx"
+  else bad "Textual" "$(tail -n1 <<<"$tx" | cut -c1-200): omacvm shows plain text and offers a repair from the Mac"; fi
   check "checks for it" "omacvm-check.socket" systemctl is-active -q omacvm-check.socket
   if grep -q '"omacvm": {' "$H/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null; then ok "Omarchy menu" "OmacVM row"
   else bad "Omarchy menu" "no OmacVM row in ~/.config/omarchy/extensions/omarchy-menu.jsonc (omacvm apply)"; fi

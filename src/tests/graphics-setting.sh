@@ -46,7 +46,7 @@ summ() { grep "^$1 -> " "$T/swift.txt" | cut -d'|' -f2- | sed 's/^ //'; }
 expect "OpenGL: no Vulkan"                          opengl "$(line 'opengl 27 1 1 0 16 8 42 0')"
 expect "Vulkan with the driver: Vulkan"             vulkan "$(line 'vulkan 15 0 1 0 16 8 42 0')"
 expect "Vulkan without the driver: OpenGL"          opengl "$(line 'vulkan 15 0 0 0 16 8 42 0')"
-expect "  ... and says so" "Vulkan (driver not built yet: runs on OpenGL until the next apply)" "$(summ 'vulkan 27 1 0 0 16 8 42 0')"
+expect "  ... and says so" "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))" "$(summ 'vulkan 27 1 0 0 16 8 42 0')"
 expect "Automatic, macOS 27 + KosmicKrisp + driver: OpenGL (3.0.0)" opengl "$(line 'auto 27 1 1 0 16 8 42 0')"
 expect "Automatic waits for the VM's driver"        opengl "$(line 'auto 27 1 0 0 16 8 42 0')"
 expect "Automatic, macOS 26 without KosmicKrisp"    opengl "$(line 'auto 26 0 1 0 16 8 42 0')"
@@ -77,7 +77,7 @@ expect "fallback: OpenGL"                   opengl "$(line 'vulkan 26 1 1 0 8 4 
 expect "  ... and says so" "Vulkan did not start on this Mac: using OpenGL (the firmware found no devices; choose Vulkan again to try once more)" "$(summ 'vulkan 26 1 1 0 8 4 36 1')"
 expect "fallback: the vulkan feature too"   opengl "$(line 'opengl 27 1 1 1 16 8 42 1')"
 expect "fallback: OpenGL VM unchanged"      "OpenGL" "$(summ 'opengl 27 1 1 0 16 8 42 1')"
-expect "fallback waits behind the driver"   "Vulkan (driver not built yet: runs on OpenGL until the next apply)" "$(summ 'vulkan 27 1 0 0 16 8 42 1')"
+expect "fallback waits behind the driver"   "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))" "$(summ 'vulkan 27 1 0 0 16 8 42 1')"
 
 # The start watch (VenusStartWatch): the Air hang falls back 25 s after QMP
 # first answered and stays on OpenGL, a normal start never falls back, a stall
@@ -185,7 +185,7 @@ expect "omacvm graphics: set vulkan" True "$(cli vulkan --json | j changed)"
 expect "omacvm graphics: written" vulkan "$(cat "$H/OmacVM/Test VM/graphics")"
 expect "omacvm graphics: vulkan without the driver: OpenGL next start" opengl "$(cli --json | j next_start)"
 expect "omacvm graphics: ... waiting for the driver" True "$(cli --json | j waiting_for_driver)"
-expect "omacvm graphics: ... and says so" "Vulkan (driver not built yet: runs on OpenGL until the next apply)" "$(cli --json | j summary)"
+expect "omacvm graphics: ... and says so" "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))" "$(cli --json | j summary)"
 : > "$H/OmacVM/Test VM/venus-ready"
 expect "omacvm graphics: vulkan with the driver" vulkan "$(cli --json | j next_start)"
 expect "omacvm graphics: auto on macOS 27 + KK with the driver: OpenGL (3.0.0)" opengl "$(cli auto --json >/dev/null; MAJ=27 KK=1 cli --json | j next_start)"

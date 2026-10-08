@@ -5,6 +5,42 @@ in more words.
 
 ## 3.0.6 (unreleased)
 
+- The control centre in the VM brings its own Textual (8.2.8 with Rich,
+  Pygments and the rest, pure Python, in `src/control/vendor`). It came from
+  pacman's python-textual before, which a VM not updated for a few days
+  cannot get (the mirrors no longer have the files its package list names),
+  so after an update `omacvm` in the VM showed only plain text. Now nothing
+  is installed with pacman for it, on every VM, whatever OmacVM it had.
+  `omacvm check` checks that copy.
+
+- When Textual still does not load, the control centre's "repair it from the
+  Mac" waits through the Bridge restarting, as the full control centre does,
+  instead of saying "OmacVM Bridge does not answer" while the Bridge row said
+  works. It says "Textual is installed" only once Textual really loads, and
+  why not otherwise. A repair of the control centre no longer builds and
+  restarts the Mac's Bridge when it is up to date.
+
+- Fast network switched on in OmacVM.app: the control centre showed "OmacVM's
+  record said off: fixed", though only the VM's own copy was behind the
+  record. The copy now follows without a note; a record that was really
+  wrong is still named.
+
+- Vulkan chosen while the VM's driver is not built: the app, `omacvm
+  graphics` and the control centre now say how it gets built ("OmacVM in the
+  VM: r on Graphics") instead of "until the next apply". A repair of another
+  feature no longer says the Vulkan driver "did not build": it never tried.
+
+- The camera and Chromium video on a VM whose package list is older than
+  the mirrors (a VM updated from 2.9.1 without dkms, say): their rows said
+  "omacvm apply", which only meets the same missing files again. They now
+  name the packages that are missing and the way out: update the system
+  (omarchy update), then r on the row.
+
+- Graphics memory in the control centre: macOS's memory pressure "warn" alone
+  is fine now, with a short note (a Mac that gives the VM half its memory sits
+  there). "Needs you" only when macOS is out of memory or graphics memory was
+  refused or lost.
+
 - Troubleshooting 29 (no sound at all after a start, fixed in 3.0.4) names
   the real cause: WirePlumber meeting Chromium's video decoder before its
   daemon is ready. A kernel update alone never did it: the module is built

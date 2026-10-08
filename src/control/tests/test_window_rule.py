@@ -46,7 +46,7 @@ def test_install_requires_it_and_off_removes_both_lines():
 def test_on_off_round_trip(tmp_path):
     """window_rule on, again (no change), off: hyprland.lua is as it was."""
     sh = read("guest", "install.sh")
-    body = sh[sh.index("HY=$H/.config/hypr"):sh.index("# Textual from pacman")]
+    body = sh[sh.index("HY=$H/.config/hypr"):sh.index("# Textual: OmacVM's own copy")]
     hy = tmp_path / ".config" / "hypr"
     hy.mkdir(parents=True)
     before = 'require("default.hypr.omarchy")\n-- mine\n'

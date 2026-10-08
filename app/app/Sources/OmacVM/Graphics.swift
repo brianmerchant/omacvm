@@ -116,9 +116,10 @@ enum Graphics {
 
     /// Why a VM set to Vulkan still starts with OpenGL: without a Venus
     /// driver for 16 KiB pages every Vulkan app would fail with
-    /// ERROR_OUT_OF_HOST_MEMORY. `omacvm apply` (or `omacvm graphics` while
-    /// the VM runs) builds it and writes venus-ready. Same text in omacvm.
-    static let waitingForDriver = "driver not built yet: runs on OpenGL until the next apply"
+    /// ERROR_OUT_OF_HOST_MEMORY. `omacvm apply`, `omacvm graphics` while
+    /// the VM runs, or r on Graphics in the VM's control centre builds it
+    /// and writes venus-ready. Same text in omacvm.
+    static let waitingForDriver = "driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics)"
 
     /// Up to 2.9 a hidden switch (`defaults write org.omacvm.app venus -bool
     /// true`) put Vulkan in every VM. 3.0.0 moves it once into the Graphics
