@@ -17,6 +17,10 @@ in more words.
 - OmacVM.app: a VM that was not shut down cleanly, or whose folder was copied while it ran, asks
   before it starts (and before Update VM): "its disk may be damaged". While the app runs a VM,
   the file `running` in its folder names the Mac and QEMU; a clean shutdown removes it.
+- OmacVM.app: Update VM no longer waits forever on a VM whose disk fails. When the VM's console
+  or the update shows btrfs or ext4 errors or a read-only file system, the update stops at once
+  and says what to do (a VM copied while it ran: copy it again after shutting it down there). An
+  update that hangs is stopped after 40 minutes.
 
 ## 3.0.11
 
