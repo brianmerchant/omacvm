@@ -12,6 +12,8 @@ Vulkan by default on newer Macs.
   stay within 1 % with Vulkan on, and Vulkan apps and WebGPU work out of the box. A VM on Automatic
   builds its Vulkan driver at the next update and runs on OpenGL until then. OpenGL and Vulkan as a
   choice are unchanged.
+- OmacVM.app: **the app is notarized by Apple from 3.0.13 on.** Downloaded with a browser, it now
+  opens at once; the Open Anyway step in System Settings is no longer needed.
 
 ## 3.0.12
 
