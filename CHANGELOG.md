@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.12 (unreleased)
+## 3.0.12
 
 VMs that move between Macs: copied, on an external drive, or opened on a smaller Mac.
 
