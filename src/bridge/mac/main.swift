@@ -52,6 +52,25 @@ import Security
 setvbuf(stdout, nil, _IOLBF, 0)
 
 let env = ProcessInfo.processInfo.environment
+
+// Started by macOS itself (System Settings' "Quit & Reopen" after a grant, or
+// Finder) instead of its LaunchAgent, its output goes to /dev/null, and
+// omacvm check read the log of the process before it (#331). Then it writes
+// to its log itself. Only the installed Bridge (its bundle id, no test folder).
+func logToFile() {
+  guard env["OMACVM_BRIDGE_SUPPORT_DIR"] == nil,
+        let id = Bundle.main.bundleIdentifier, id == "org.omacvm.bridge" || id == "org.omacvm.test.bridge" else { return }
+  var out = stat(), devNull = stat()
+  guard stat("/dev/null", &devNull) == 0 else { return }
+  if fstat(1, &out) == 0, (out.st_mode & S_IFMT) != S_IFCHR || out.st_rdev != devNull.st_rdev { return }
+  let name = id == "org.omacvm.test.bridge" ? "omacvm-test-bridge" : "omacvm-bridge"
+  let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/\(name).log").path
+  let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+  guard fd >= 0 else { return }
+  dup2(fd, 1); dup2(fd, 2)
+  if fd > 2 { close(fd) }
+}
+logToFile()
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet) and VMware Fusion's NAT network (vmnet8, when Fusion
 // is installed), and for OmacVM.app 127.0.0.1 (its VMs reach it as 10.0.2.2)

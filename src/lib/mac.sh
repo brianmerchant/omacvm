@@ -57,6 +57,54 @@ media_keys_state() {
   esac
 }
 
+# helper_pid bridge|gestures [test]: this user's running OmacVM Bridge or
+# Gestures, whichever job started it: its LaunchAgent, or macOS itself
+# (System Settings' "Quit & Reopen" after a grant, Finder: an
+# application.<id>.* job, #331). The oldest one (Gestures asks a short-lived
+# copy of itself about its permissions). test: the test identity's.
+helper_pid() {
+  local exe
+  case $1-${2:-} in
+    bridge-test) exe="OmacVM Test Bridge\.app/Contents/MacOS/" ;;
+    gestures-test) exe="OmacVM Test Gestures\.app/Contents/MacOS/" ;;
+    bridge-) exe="OmacVMBridge\.app/Contents/MacOS/omacvm-bridge" ;;
+    gestures-) exe="OmacVMGestures\.app/Contents/MacOS/omacvm-gestures" ;;
+    *) return 1 ;;
+  esac
+  pgrep -o -u "$(id -u)" -f "$exe"
+}
+
+# proc_started PID: when it started (seconds since 1970), from ps's elapsed time.
+proc_started() {
+  local e p d=0 h=0 m=0 s=0
+  e=$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ') || return 1
+  [[ -n $e ]] || return 1
+  [[ $e == *-* ]] && { d=${e%%-*}; e=${e#*-}; }
+  IFS=: read -r -a p <<<"$e"
+  case ${#p[@]} in
+    3) h=${p[0]} m=${p[1]} s=${p[2]} ;;
+    2) m=${p[0]} s=${p[1]} ;;
+    *) return 1 ;;
+  esac
+  echo $(( $(date +%s) - ((10#$d * 24 + 10#$h) * 60 + 10#$m) * 60 - 10#$s ))
+}
+
+# helper_log PID LOG: the running helper's own lines of its log, from its last
+# "starting (pid PID" line (Bridge, Gestures from 3.0.14). A helper that does
+# not say it: the whole log when it was written since the process started,
+# else nothing and exit 1: the log is from a process before it (#331: a Bridge
+# macOS started again wrote to /dev/null, and check read the old one's
+# "permissions: ... MISSING").
+helper_log() {
+  local n started mt
+  n=$(grep -nE "omacvm-[a-z]+: starting \(pid $1[,)]" "$2" 2>/dev/null | tail -1 | cut -d: -f1)
+  if [[ -n $n ]]; then tail -n +"$n" "$2"; return 0; fi
+  started=$(proc_started "$1") || return 1
+  mt=$(stat -f %m "$2" 2>/dev/null) || return 1
+  (( mt >= started )) || return 1
+  cat "$2"
+}
+
 # gestures_state LOG: what OmacVM Gestures does, from its log (the running
 # process's lines): "listening", "waiting<TAB>the missing permissions" (it
 # waits for them at start and listens by itself once they are granted, #330)
