@@ -289,6 +289,59 @@ class ModeAndScale(SyncCase):
         r = self.run_sync()
         self.assertEqual(self.evals(), [])
         self.assertIn("its own rule", r.stderr)
+        self.assertFalse((self.state / "Virtual-1.rule").exists())
+
+
+class KeptRule(SyncCase):
+    """The rule an output shows is kept for omacvm_app.lua, which sets it again
+    while Hyprland reloads its config (a theme switch): no "auto" place."""
+
+    def kept(self, output: str = "Virtual-1") -> str:
+        return (self.state / f"{output}.rule").read_text().strip()
+
+    def test_sent_rule_is_kept(self):
+        self.set_window(5120, 2880)
+        self.run_sync()
+        self.assertEqual(self.kept(), self.evals()[-1])
+        self.assertIn('position = "0x0"', self.kept())
+
+    def test_kept_when_already_shown(self):
+        # An update of the guest side: Hyprland shows the rule already, so
+        # nothing is sent, but the rule is kept for the next reload.
+        self.set_window(5120, 2880)
+        self.run_sync()
+        (self.state / "Virtual-1.rule").unlink()
+        self.run_sync()
+        self.assertEqual(len(self.evals()), 1)
+        self.assertEqual(self.kept(), self.evals()[0])
+
+    def test_follows_a_scale_change(self):
+        self.set_window(5120, 2880)
+        self.run_sync()
+        self.set_scale("1.6")
+        self.run_sync()
+        self.assertEqual(self.kept(), self.evals()[-1])
+        self.assertIn('scale = "1.6"', self.kept())
+
+    def test_user_rule_drops_it(self):
+        self.set_window(5120, 2880)
+        self.run_sync()
+        self.config.write_text(self.config.read_text() +
+                               'hl.monitor({ output = "Virtual-1", mode = "2560x1440", scale = 1 })\n')
+        self.run_sync()
+        self.assertFalse((self.state / "Virtual-1.rule").exists())
+
+    def test_gone_output_drops_it(self):
+        self.set_window(4112, 2582)
+        self.set_window(6016, 3384, output="Virtual-2")
+        self.run_sync()
+        self.assertTrue((self.state / "Virtual-2.rule").exists())
+        (self.drm / "card0-Virtual-2" / "status").write_text("disconnected\n")
+        data = [m for m in json.loads((self.hypr / "monitors.json").read_text()) if m["name"] != "Virtual-2"]
+        (self.hypr / "monitors.json").write_text(json.dumps(data))
+        self.run_sync()
+        self.assertFalse((self.state / "Virtual-2.rule").exists())
+        self.assertTrue((self.state / "Virtual-1.rule").exists())
 
 
 class Guard(SyncCase):

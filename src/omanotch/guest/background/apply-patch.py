@@ -34,6 +34,13 @@ GPU context: black displays without bar. At the display's size this stays under
 that limit (16384 entries) up to about 4K (3840x2160: ~8100 pages); 5K
 (~14400 pages) is close to it and 6K (~19900) can still be refused there.
 
+The theme switch's reveal (a band that widens from the middle) runs on every
+output at once. Omarchy starts it on the first output whose new image is
+decoded, and an output whose image is ready a moment later sat it out: its
+picture only changed when the reveal ended. With the NOTCH output there are
+always two (the strip and the built-in display), so the display often skipped
+the animation. The patch lets a late output join the running reveal.
+
 The patch is versioned like the bar patch; an older version is restored from
 <Background.qml>.before-notchbar (kept by install.sh) and patched again.
 """
@@ -41,7 +48,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 6
+VERSION = 7
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
 
 
@@ -193,6 +200,15 @@ def main():
     text = replace_once(text, "          id: incomingFrame\n          anchors.fill: parent\n",
                         "          id: incomingFrame\n          anchors.fill: parent\n"
                         "          sourceSize: panel.notchImageSize\n")
+
+    # 6. An output whose new image is ready while the reveal runs joins it
+    #    (see the docstring): only a finished reveal is too late.
+    if text.count("root.revealProgress !== 0 || maskReady") != 2:
+        sys.exit("apply-patch: expected the reveal check twice in maybeStartReveal")
+    text = text.replace("root.revealProgress !== 0 || maskReady", "root.revealProgress >= 1 || maskReady")
+    text = replace_once(text, "      function maybeStartReveal() {\n",
+                        "      // omarchy-notch-bar: a late output joins a running reveal.\n"
+                        "      function maybeStartReveal() {\n")
 
     open(path, "w").write(text)
     print(f"patched (v{VERSION})")

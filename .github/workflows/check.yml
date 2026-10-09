@@ -552,10 +552,15 @@ jobs:
           src/ime/tests/build-addon.sh
           src/ime/tests/run.sh
 
-      - name: Hyprland Lua files parse (omacvm_app.lua)
+      - name: Hyprland Lua files parse (omacvm_app.lua), and keep the outputs' rules over a config reload
         run: |
-          sudo apt-get install -y -qq lua5.4 >/dev/null
-          luac5.4 -p src/app/guest/omacvm_app.lua
+          # Hyprland 0.56 runs Lua 5.5 (a loop variable is read-only there; 5.4 accepts it)
+          curl -fsSL -o /tmp/lua.tgz https://www.lua.org/ftp/lua-5.5.0.tar.gz
+          echo "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d  /tmp/lua.tgz" | sha256sum -c -
+          tar -xzf /tmp/lua.tgz -C /tmp && make -s -C /tmp/lua-5.5.0 linux >/dev/null
+          /tmp/lua-5.5.0/src/luac -p src/app/guest/omacvm_app.lua src/omanotch/guest/hypr/notchbar.lua
+          d=$(mktemp -d)
+          XDG_RUNTIME_DIR=$d XDG_CONFIG_HOME=$d /tmp/lua-5.5.0/src/lua src/app/guest/tests/omacvm_app_test.lua src/app/guest/omacvm_app.lua
 
       - name: Chromium's video decoder builds, and waits for a GPU that is not usable (no render node here)
         run: |
