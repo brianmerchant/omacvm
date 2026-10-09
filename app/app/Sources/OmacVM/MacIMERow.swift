@@ -14,11 +14,11 @@ struct MacIMERow: View {
     @State private var busy = false
     @State private var note: String?
 
-    static let info = "Type Chinese, Japanese, Korean and other languages in Omarchy with your Mac's own input methods: the Mac's candidate window opens at the text cursor in the VM, and the chosen text goes into the VM's text field. Keys, shortcuts and the VM's own input methods stay as they are; password fields always get plain keys. Switch it while the VM runs: it sets up a small part in the VM and works from the VM's next start. Experimental."
+    static let info = "Experimental. Type in Omarchy with the Mac's input method for Chinese, Japanese, Korean, Vietnamese and other languages that use a candidate window; normal keyboard layouts (accents included) do not need it. With it: the Mac's candidate window opens at the text cursor in the VM, and the chosen text goes into the VM's text field. Keys, shortcuts and the VM's own input methods stay as they are; password fields always get plain keys. Switch it while the VM runs: it sets up a small part in the VM and works from the VM's next start."
 
     var body: some View {
         let running = state.vmRunning()
-        SwitchRow("Mac input methods (experimental)",
+        SwitchRow("Mac input (Chinese, Japanese, Korean)",
                   isOn: Binding(get: { on }, set: { v in if v != on { flip(v) } }),
                   enabled: !busy && running && TerminalCommand.available) {
             if busy { ProgressView().controlSize(.small) }

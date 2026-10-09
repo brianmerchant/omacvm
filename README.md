@@ -78,7 +78,7 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 | Control centre in Omarchy | ✅ | ✅ | ✅ | ✅ |
 | Prebuilt VM (5 min) | ✅ | ✅ | ✅ | ✅ |
 | x86 Linux apps (experimental, slower) | ✅ | ✅ | ✅ | ✅ |
-| Mac input methods: Chinese, Japanese, Korean (experimental) | ✅ | ❌ | ❌ | ❌ |
+| Mac input methods (Chinese, Japanese, Korean…) (experimental) | ✅ | ❌ | ❌ | ❌ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
 ¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows reach the screen by a copy on the Mac, faster than the VM's software copy; OpenGL and browser speed are the same either way, and Vulkan gives Chromium WebGPU; OpenCL and WebGPU in Firefox opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
