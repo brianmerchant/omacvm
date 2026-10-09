@@ -57,6 +57,22 @@ media_keys_state() {
   esac
 }
 
+# gestures_state LOG: what OmacVM Gestures does, from its log (the running
+# process's lines): "listening", "waiting<TAB>the missing permissions" (it
+# waits for them at start and listens by itself once they are granted, #330)
+# or "" (nothing said yet, or a helper from before it said so).
+gestures_state() {
+  local l p
+  l=$(grep -E 'omacvm-gestures: (waiting for Accessibility|permissions granted|listening on|running)' "$1" 2>/dev/null | tail -1)
+  case $l in
+    *"waiting for Accessibility"*)
+      p=$(grep -E 'omacvm-gestures: permissions: ' "$1" | tail -1 | sed -E 's/^.*permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//')
+      printf 'waiting\t%s\n' "${p:-Accessibility}" ;;
+    "") ;;
+    *) echo listening ;;
+  esac
+}
+
 # cli_for_bridge OMACVM: true when OMACVM (a checkout's omacvm, resolved) is
 # the one the omacvm command runs: install.sh links it into one of these. So
 # another clone or worktree that runs src/mac/install.sh never becomes what

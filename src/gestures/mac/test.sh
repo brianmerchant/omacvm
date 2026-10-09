@@ -44,6 +44,10 @@
 # 9. A permission missing at start: the helper clears its own entry for it,
 #    once per build (one macOS kept for another build's signature), never one
 #    it has (#306, test-tcc.c).
+# 10. The wait for the permissions at start runs on the run loop: a grant given
+#    while it waits makes the tap and starts the listener without a restart;
+#    when only a new process gets it, the helper starts again, once (#330,
+#    test-wait.c).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -255,4 +259,11 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-tcc" "$HERE/test-tcc.c" "$HERE/
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-tcc" > "$T/tcc" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/tcc"
+# 10. The wait for the permissions at start: on the run loop, a grant seen without a restart; a new process
+#     that may while this one may not: started again once, through its LaunchAgent or open (#330).
+clang -O1 -Wall -Wno-unused-function -o "$T/test-wait" "$HERE/test-wait.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-wait" > "$T/wait" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/wait"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" "$T/identity" >&2; exit 1; }

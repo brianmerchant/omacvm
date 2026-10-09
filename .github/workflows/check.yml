@@ -195,6 +195,8 @@ jobs:
         run: src/tests/cc-open.sh
       - name: omacvm check's media keys line (normal Bridge log lines are not failures)
         run: src/tests/media-keys-check.sh
+      - name: omacvm check's Gestures line (waiting for a permission at start vs listening)
+        run: src/tests/gestures-state.sh
 
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null

@@ -513,7 +513,13 @@ FEATURE=gestures
 if [[ $GESTURES == on ]]; then
   if running "$L_GESTURES"; then
     a=$(listeners "$GESTURES_PORT")
-    [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
+    IFS=$'\t' read -r gst gmiss <<<"$(gestures_state "$GESTURES_LOG")"
+    if [[ " $a " == *" $HOST "* ]]; then ok "Gestures" "listening on $a"
+    # Running, but waiting at start for a permission: it listens by itself once
+    # that is granted (#330).
+    elif [[ $gst == waiting ]]; then
+      bad "Gestures" "running, but waiting for $gmiss permission (System Settings > Privacy & Security > $gmiss > OmacVM Gestures); it starts listening by itself once allowed" human
+    else bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"; fi
     # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
     # Gestures refuses it (and it tries again every 2 s) until it is updated.
     if [[ $TYPE != app ]]; then

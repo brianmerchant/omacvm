@@ -273,6 +273,7 @@ static void logf_(const char *fmt, ...) {
   fflush(stdout);
 }
 
+
 // ---- which VM is in front ----
 // Every VM of an app connects from the app's one network, so the network tells
 // the app, not the VM. The VM is told by its name (from its hello) in the title
@@ -834,9 +835,16 @@ static void permissionTimer(CFRunLoopTimerRef t, void *info) {
   // Every 10 s; every second while only one of those two keeps the tap away.
   if (++ticks % 10 == 0 || (inputPaused && (permFn() & PERM_AX))) refreshSlowPerms();
 }
+static int waiting;              // main thread: still waiting for the permissions at start (waitLook)
+static void waitLook(void);
 // macOS's Accessibility list changed: look now, and once more when it has settled.
 static void accessibilityChanged(CFNotificationCenterRef c, void *o, CFNotificationName n, const void *obj, CFDictionaryRef info) {
   (void)c; (void)o; (void)n; (void)obj; (void)info;
+  if (waiting) {
+    waitLook();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ waitLook(); });
+    return;
+  }
   tapPolicyReset();
   checkPermissions();
   refreshSlowPerms();
@@ -1006,6 +1014,119 @@ static void clearOldGrantsOnce(int perm) {
   snprintf(stamp, sizeof stamp, "%s/Library/Application Support/omacvm/%s.tcc-cleared", home, id);
   buildKey(build, sizeof build);
   clearOldGrants(perm, id, stamp, build);
+}
+
+// ---- the wait for the permissions at start (#330) ----
+// The helper listens only once it may make its event tap. It used to wait in
+// a sleep loop before the run loop ran: AXIsProcessTrusted is answered from
+// the process's own copy, which macOS updates through the run loop, so a grant
+// given while it waited was never seen (brianmerchant, 3.0.13: Accessibility
+// on in System Settings, the helper still waiting, nothing on 47830). Now it
+// waits on the run loop: every 3 s, and at once when macOS says its
+// Accessibility list changed. In case macOS still tells only a new process,
+// every third look asks a new copy of itself (--permissions, the same
+// identity, nothing cached); when that one may and this one may not, it
+// starts again, once (relaunchOnce).
+
+// --permissions: what a new process gets from macOS (PERM_AX | PERM_IM).
+static int permissionsChild(void) {
+  printf("%d\n", (AXIsProcessTrusted() ? PERM_AX : 0) | (CGPreflightListenEventAccess() ? PERM_IM : 0));
+  fflush(stdout);
+  return 0;
+}
+
+// Asks a new copy of this helper (-1: could not).
+static int freshPerm(void) {
+  char path[4096]; uint32_t len = sizeof path;
+  if (_NSGetExecutablePath(path, &len)) return -1;
+  int fds[2];
+  if (pipe(fds)) return -1;
+  posix_spawn_file_actions_t fa;
+  posix_spawn_file_actions_init(&fa);
+  posix_spawn_file_actions_adddup2(&fa, fds[1], 1);
+  posix_spawn_file_actions_addclose(&fa, fds[0]);
+  posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+  char *argv[] = { path, "--permissions", NULL };
+  pid_t pid;
+  int rc = posix_spawn(&pid, path, &fa, NULL, argv, environ);
+  posix_spawn_file_actions_destroy(&fa);
+  close(fds[1]);
+  if (rc) { close(fds[0]); return -1; }
+  char buf[16] = ""; ssize_t n, got = 0;
+  while (got < (ssize_t)sizeof buf - 1 && (n = read(fds[0], buf + got, sizeof buf - 1 - got)) != 0) {
+    if (n < 0) { if (errno == EINTR) continue; break; }
+    got += n;
+  }
+  close(fds[0]);
+  int st = 0;
+  while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+  if (!WIFEXITED(st) || WEXITSTATUS(st) || got <= 0 || buf[0] < '0' || buf[0] > '3') return -1;
+  return buf[0] - '0';
+}
+static int (*freshPermFn)(void) = freshPerm;
+
+// Once: the stamp keeps the build and when it started again; again only for
+// another build or after an hour (a person may take a permission away and
+// give it again later). Returns 1 and writes the stamp when it may.
+static int mayRelaunch(const char *stamp, const char *build, time_t now) {
+  char was[128] = "", wasBuild[128] = "";
+  long long at = 0;
+  FILE *f = fopen(stamp, "r");
+  if (f) { if (!fgets(was, sizeof was, f)) was[0] = 0; fclose(f); }
+  if (sscanf(was, "%127s %lld", wasBuild, &at) == 2 && !strcmp(wasBuild, build) && now - at < 3600) return 0;
+  f = fopen(stamp, "w");
+  if (!f) return 0;   // no stamp, no restart: never a loop
+  fprintf(f, "%s %lld\n", build, (long long)now);
+  fclose(f);
+  return 1;
+}
+
+// How it starts again: its LaunchAgent (launchd names the job by its label,
+// the bundle id: XPC_SERVICE_NAME; KeepAlive starts it again when it exits)
+// or, started by macOS or with open ("application.<id>..."), a new copy
+// through open. 0: neither (a test, a shell).
+#define RELAUNCH_LAUNCHD 'l'
+#define RELAUNCH_OPEN 'o'
+static int relaunchHow(const char *service, const char *id, const char *bundle) {
+  if (!service || !id || !*id) return 0;
+  if (!strcmp(service, id)) return RELAUNCH_LAUNCHD;
+  size_t n = bundle ? strlen(bundle) : 0;
+  char app[300];
+  snprintf(app, sizeof app, "application.%s.", id);
+  if (!strncmp(service, app, strlen(app)) && n > 4 && !strcmp(bundle + n - 4, ".app")) return RELAUNCH_OPEN;
+  return 0;
+}
+
+static int helperArgc;
+static char **helperArgv;
+static void relaunchOnce(void) {
+  CFStringRef cid = CFBundleGetIdentifier(CFBundleGetMainBundle());
+  CFURLRef url = CFBundleCopyBundleURL(CFBundleGetMainBundle());
+  char id[256] = "", bundle[2048] = "", stamp[1024], build[64];
+  const char *home = getenv("HOME");
+  if (cid) CFStringGetCString(cid, id, sizeof id, kCFStringEncodingUTF8);
+  if (url) { CFURLGetFileSystemRepresentation(url, true, (UInt8 *)bundle, sizeof bundle); CFRelease(url); }
+  int how = relaunchHow(getenv("XPC_SERVICE_NAME"), id, bundle);
+  if (!home || !how) return;
+  snprintf(stamp, sizeof stamp, "%s/Library/Application Support/omacvm/%s.relaunched", home, id);
+  buildKey(build, sizeof build);
+  if (!mayRelaunch(stamp, build, time(NULL))) return;
+  if (how == RELAUNCH_LAUNCHD) {
+    logf_("macOS gives the permissions only to a new process: starting again (its LaunchAgent, once)");
+    exit(75);
+  }
+  const char *argv[64] = { "/usr/bin/open", "-n", "-g", bundle };
+  int n = 4;
+  if (helperArgc > 1) argv[n++] = "--args";
+  for (int i = 1; i < helperArgc && n < 63; i++) argv[n++] = helperArgv[i];
+  argv[n] = NULL;
+  pid_t pid;
+  if (posix_spawn(&pid, argv[0], NULL, NULL, (char *const *)argv, environ)) return;
+  int st = 0;
+  while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+  if (!WIFEXITED(st) || WEXITSTATUS(st)) return;
+  logf_("macOS gives the permissions only to a new process: started a new copy (once)");
+  exit(0);
 }
 
 static void logPermissions(void) {
@@ -1250,6 +1371,25 @@ static int testIdentity(void) {
     identityTest = id && CFStringCompare(id, CFSTR("org.omacvm.test.gestures"), 0) == kCFCompareEqualTo;
   }
   return identityTest;
+}
+
+// Started by macOS itself (System Settings' "Quit & Reopen" after a grant, or
+// Finder) instead of its LaunchAgent, its output goes to /dev/null, and
+// omacvm check would read only the log of the process before (#331). Then it
+// writes to its log itself.
+static void logToFile(void) {
+  struct stat out, null;
+  if (fstat(1, &out) == 0 && (stat("/dev/null", &null) != 0 || !S_ISCHR(out.st_mode) || out.st_rdev != null.st_rdev))
+    return;   // a file, a pipe or a terminal: as started
+  const char *home = getenv("HOME");
+  if (!home) return;
+  char path[1024];
+  snprintf(path, sizeof path, "%s/Library/Logs/%s.log", home,
+           testIdentity() ? "omacvm-test-gestures" : "omacvm-gestures");
+  int fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+  if (fd < 0) return;
+  dup2(fd, 1); dup2(fd, 2);
+  if (fd > 2) close(fd);
 }
 
 // The code-signing identifier of a running process (the kernel's copy).
@@ -2790,43 +2930,10 @@ static void stopTrackpads(void) {
 
 static void appActivated(void) { updateCapture(captureTimer, NULL); }
 
-int main(int argc, char **argv) {
-  for (int i = 1; i < argc; i++) {
-    if (!strcmp(argv[i], "-v")) verbose = 1;
-    else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
-    else if (!strcmp(argv[i], "--record")) {
-      char path[1024]; snprintf(path, sizeof path, "%s/Library/Logs/omacvm-input.tsv", getenv("HOME"));
-      rec = fopen(path, "a");
-      if (rec) setvbuf(rec, NULL, _IOLBF, 0);
-    }
-    // A wrong option is not worth a launchd restart loop: say it and go on.
-    else logf_("unknown option %s, ignored", argv[i]);
-  }
-  signal(SIGPIPE, SIG_IGN);
-
-  tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
-  int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
-  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) tapMask |= (CGEventMask)1 << gestureTypes[i];
-  // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
-  // combo). Ask once, then wait for the grant instead of exiting, so launchd
-  // does not restart us into a loop of prompts.
-  CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
-  CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-  int asked = 0;
-  // (Before the run loop runs: Input Monitoring and the rest asked here, each time.)
-  while ((slowPerm = slowPermNow(), !installTap())) {
-    if (!asked) {
-      logf_("waiting for Accessibility and Input Monitoring permission");
-      logPermissions();   // which one is missing
-      clearOldGrantsOnce(permFn());
-      AXIsProcessTrustedWithOptions(opts);
-      CGRequestListenEventAccess();
-      asked = 1;
-    }
-    sleep(3);
-  }
-  CFRelease(opts);
-  if (asked) logf_("permissions granted");
+// Everything that needs the permissions: the tap is made (installTap), the
+// trackpads, the timers and the listeners start. Main thread, once.
+static void startRunning(void) {
+  waiting = 0;
   { pthread_t th; pthread_create(&th, NULL, tapWatchdog, NULL); pthread_detach(th); }
   logPermissions();
 
@@ -2858,8 +2965,6 @@ int main(int argc, char **argv) {
   CFRunLoopTimerRef perm = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 1, 1, 0, 0, permissionTimer, NULL);
   CFRunLoopTimerSetTolerance(perm, 0.1);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), perm, kCFRunLoopCommonModes);
-  CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), NULL, accessibilityChanged,
-                                  CFSTR("com.apple.accessibility.api"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();
@@ -2870,6 +2975,87 @@ int main(int argc, char **argv) {
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
   logf_(trackpad ? "running (escape: Ctrl+Option+Esc)" : "running, keys only: trackpad gestures stay with macOS");
+}
+
+// While waiting (main thread, run loop): every 3 s and when macOS's
+// Accessibility list changed. Every third look also asks a new process.
+static CFRunLoopTimerRef waitTimer;
+static int freshAsking, freshSays = -1;
+static int (*installTapFn)(void) = installTap;          // tests: stand-ins
+static void (*startRunningFn)(void) = startRunning;
+static void (*relaunchFn)(void) = relaunchOnce;
+static int (*slowPermFn)(void) = slowPermNow;
+static void waitLook(void) {
+  if (!waiting) return;
+  slowPerm = slowPermFn();
+  int perm = permFn();
+  permissionsSeen(perm);
+  if (installTapFn()) {
+    CFRunLoopTimerInvalidate(waitTimer);
+    logf_("permissions granted");
+    startRunningFn();
+    return;
+  }
+  static int looks, newSaw;
+  // A new process may make the tap and this one may not (twice in a row):
+  // macOS tells only new processes. Started again, once (relaunchOnce).
+  if (freshSays >= 0) {
+    newSaw = (freshSays & PERM_AX) ? newSaw + 1 : 0;
+    freshSays = -1;
+    if (newSaw >= 2) { newSaw = 0; relaunchFn(); }
+  }
+  if (++looks % 3 == 0 && !freshAsking) {
+    freshAsking = 1;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+      int p = freshPermFn();
+      dispatch_async(dispatch_get_main_queue(), ^{ freshAsking = 0; freshSays = p; });
+    });
+  }
+}
+static void waitTick(CFRunLoopTimerRef t, void *info) { (void)t; (void)info; waitLook(); }
+
+int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--permissions")) return permissionsChild();
+  logToFile();
+  logf_("starting (pid %d)", (int)getpid());
+  helperArgc = argc; helperArgv = argv;
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "-v")) verbose = 1;
+    else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
+    else if (!strcmp(argv[i], "--record")) {
+      char path[1024]; snprintf(path, sizeof path, "%s/Library/Logs/omacvm-input.tsv", getenv("HOME"));
+      rec = fopen(path, "a");
+      if (rec) setvbuf(rec, NULL, _IOLBF, 0);
+    }
+    // A wrong option is not worth a launchd restart loop: say it and go on.
+    else logf_("unknown option %s, ignored", argv[i]);
+  }
+  signal(SIGPIPE, SIG_IGN);
+
+  tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
+  int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
+  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) tapMask |= (CGEventMask)1 << gestureTypes[i];
+  // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
+  // combo). Ask once, then wait for the grant instead of exiting, so launchd
+  // does not restart us into a loop of prompts. The wait is on the run loop
+  // (waitLook), so macOS can tell this process about a grant.
+  CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), NULL, accessibilityChanged,
+                                  CFSTR("com.apple.accessibility.api"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+  slowPerm = slowPermNow();
+  if (installTap()) startRunning();
+  else {
+    waiting = 1;
+    logf_("waiting for Accessibility and Input Monitoring permission");
+    logPermissions();   // which one is missing
+    clearOldGrantsOnce(permFn());
+    CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
+    CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    AXIsProcessTrustedWithOptions(opts);
+    CFRelease(opts);
+    CGRequestListenEventAccess();
+    waitTimer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 3, 3, 0, 0, waitTick, NULL);
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(), waitTimer, kCFRunLoopCommonModes);
+  }
   CFRunLoopRun();
   return 0;
 }
