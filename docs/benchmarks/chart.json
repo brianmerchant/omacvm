@@ -1,32 +1,41 @@
 {
  "baseline": "mac",
  "sources": {
+  "geekbench-cpu-multi": "2026-10-03 round, single runs",
   "speedometer": "2026-10-09 MacBook Pro M4 Max round, median of 3 (docs/benchmarks/README.md, MacBook Pro M4 Max, every route (2026-10-09))",
   "aquarium": "2026-10-09 MacBook Pro M4 Max round, median of 3 (docs/benchmarks/README.md, MacBook Pro M4 Max, every route (2026-10-09))",
-  "basemark": "2026-10-09 MacBook Pro M4 Max round, median of 3 (docs/benchmarks/README.md, MacBook Pro M4 Max, every route (2026-10-09))"
+  "basemark": "2026-10-09 MacBook Pro M4 Max round, median of 3 (docs/benchmarks/README.md, MacBook Pro M4 Max, every route (2026-10-09))",
+  "geekbench-gpu-opencl": "2026-10-04, one locked batch (Mac 252722, VM 252731 on browser.geekbench.com); OmacVM.app with omacvm enable vulkan (experimental in 3.0.0)"
  },
  "medians": {
   "mac": {
+   "geekbench-cpu-multi": 27290,
    "speedometer": 61.5,
    "aquarium": 111.8,
-   "basemark": 3626
+   "basemark": 3626,
+   "geekbench-gpu-opencl": 95380
   },
   "app": {
+   "geekbench-cpu-multi": 26984,
    "speedometer": 42.7,
    "aquarium": 43.2,
-   "basemark": 2801
+   "basemark": 2801,
+   "geekbench-gpu-opencl": 42486
   },
   "utm": {
+   "geekbench-cpu-multi": 24414,
    "speedometer": 38.1,
    "aquarium": 25.6,
    "basemark": 2667
   },
   "fusion": {
+   "geekbench-cpu-multi": 27037,
    "speedometer": 44.8,
    "aquarium": 41.8,
    "basemark": 2511
   },
   "parallels": {
+   "geekbench-cpu-multi": 26218,
    "speedometer": 43.5,
    "aquarium": 27.9,
    "basemark": 2680
@@ -34,6 +43,7 @@
  },
  "note": [
   "Each VM alone in a window, 6 CPUs and 8 GB, Chrome's page 1440x900 at 2x. Median of 3 runs.",
+  "CPU and GPU compute (Geekbench 7) from the 2026-10-03/04 rounds; GPU compute with omacvm enable vulkan.",
   "glmark2 has no macOS version: see docs/benchmarks."
  ],
  "power": {
@@ -236,5 +246,16 @@
    "Same MacBook Air and VM for every version; only the app changes. Graphics OpenGL (what Automatic picks in each), vkmark with Vulkan.",
    "Median of 3 boots; the thin line runs from the lowest to the highest run. 3.0.0's Aquarium: the slowdown #173 fixed in 3.0.2."
   ]
+ },
+ "missing": {
+  "utm": {
+   "geekbench-gpu-opencl": "not available (no OpenCL or Vulkan)"
+  },
+  "fusion": {
+   "geekbench-gpu-opencl": "not available (no OpenCL or Vulkan)"
+  },
+  "parallels": {
+   "geekbench-gpu-opencl": "not available (no OpenCL or Vulkan)"
+  }
  }
 }
