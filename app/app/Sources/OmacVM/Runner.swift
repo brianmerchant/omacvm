@@ -32,7 +32,8 @@ final class Runner {
     /// menu-bar background below the notch. We pass values in tenths of Mac
     /// points (integer SMBIOS data), not guest pixels: the guest knows its
     /// current resolution and Hyprland scale and can adjust without a daemon.
-    static func fullPanelBarGeometry() -> (screenWidth10: Int, barHeight10: Int)? {
+    static func fullPanelBarGeometry() -> (screenWidth10: Int, barHeight10: Int,
+                                           notchLeft10: Int, notchRight10: Int)? {
         guard let screen = NSScreen.screens.first(where: { s in
             guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
                 return false
@@ -41,11 +42,21 @@ final class Runner {
                 && s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
         }) else { return nil }
         let width = screen.frame.width
+        // NSScreen auxiliary areas and frame use the same global point space.
+        // Pass relative x positions, never a hardcoded notch width or origin.
+        guard let leftArea = screen.auxiliaryTopLeftArea,
+              let rightArea = screen.auxiliaryTopRightArea else { return nil }
+        let left = leftArea.maxX - screen.frame.minX
+        let right = rightArea.minX - screen.frame.minX
+        guard left.isFinite, right.isFinite,
+              left > 0, right > left, right < width,
+              right - left < width / 3 else { return nil }
         let safe = screen.safeAreaInsets.top
         let macMenuBar = max(0, screen.frame.maxY - screen.visibleFrame.maxY)
         let wanted = max(macMenuBar, safe + 1.5)
         guard width > 0, wanted >= 5, wanted < width / 5 else { return nil }
-        return (Int((width * 10).rounded()), Int((wanted * 10).rounded()))
+        return (Int((width * 10).rounded()), Int((wanted * 10).rounded()),
+                Int((left * 10).rounded()), Int((right * 10).rounded()))
     }
 
     func arguments() -> [String] {
@@ -119,7 +130,9 @@ final class Runner {
            let panel = Runner.fullPanelBarGeometry() {
             a += ["-smbios", "type=11,value=omacvm.fullpanel=1",
                   "-smbios", "type=11,value=omacvm.fullpanelwidth10=\(panel.screenWidth10)",
-                  "-smbios", "type=11,value=omacvm.fullpanelbar10=\(panel.barHeight10)"]
+                  "-smbios", "type=11,value=omacvm.fullpanelbar10=\(panel.barHeight10)",
+                  "-smbios", "type=11,value=omacvm.fullpanelleft10=\(panel.notchLeft10)",
+                  "-smbios", "type=11,value=omacvm.fullpanelright10=\(panel.notchRight10)"]
         }
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {

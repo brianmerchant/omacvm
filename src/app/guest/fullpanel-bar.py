@@ -17,7 +17,8 @@ import argparse
 import pathlib
 import sys
 
-MARKER = "// omacvm-fullpanel-quickbar v1"
+V1_MARKER = "// omacvm-fullpanel-quickbar v1"
+MARKER = "// omacvm-fullpanel-quickbar v2"
 HOME_ANCHOR = '  property string home: Quickshell.env("HOME")\n'
 NOTCH_FLOOR = '''    readonly property int notchFloor: root.appleSiliconHost && root.position === "top"
       ? (Style.bar.notchHeight > 0
@@ -40,7 +41,7 @@ NEW_NOTCH_FLOOR = '''    // The real Apple panel's measured menu-bar height, sca
 # FileView is part of the already-loaded Quickshell.Io module in Bar.qml.
 # The VM startup host.env file is populated from QEMU SMBIOS and contains
 # no shell commands, only numeric values. Its creation precedes the shell.
-HOST_INFO = r'''
+HOST_INFO_V1 = r'''
   // FullPanel: OmacVM's startup metadata, passed through QEMU SMBIOS.
   // Native fullscreen passes no marker; the override is then always zero.
   // reactively updates when the guest display's dimensions/scale change.
@@ -108,6 +109,198 @@ HOST_INFO = r'''
 '''
 
 
+# Do not re-implement v1 by a loose string search: the old QML block is
+# preserved verbatim above so an existing live clone can be migrated safely.
+HOST_INFO = HOST_INFO_V1.replace(
+    "// omacvm-fullpanel-quickbar v1", "// omacvm-fullpanel-quickbar v2"
+).replace(
+    "enabled: false, screenWidth10: 0, barHeight10: 0",
+    "enabled: false, screenWidth10: 0, barHeight10: 0, left10: 0, right10: 0"
+).replace('''    var h = env.OMACVM_FULLPANELBAR10 || 0
+    return {''', '''    var h = env.OMACVM_FULLPANELBAR10 || 0
+    var l = env.OMACVM_FULLPANELLEFT10 || 0
+    var r = env.OMACVM_FULLPANELRIGHT10 || 0
+    var boundsValid = isFinite(l) && isFinite(r) && l > 0 && l < r
+                      && r < w && (r - l) < w / 3
+    return {''').replace('''      barHeight10: h
+    }''', '''      barHeight10: h,
+      // Older launchers only supply the height. Notch-aware layout is then
+      // disabled; height adjustment still works.
+      left10: boundsValid ? l : 0,
+      right10: boundsValid ? r : 0
+    }''')
+
+# Keep the FullPanel height guard as the single definition of built-in screen
+# eligibility; notch bounds never apply to a normal/windowed/external bar.
+FULLPANEL_BOUNDS = r'''
+  function fullPanelBounds(s) {
+    var info = fullPanelInfo
+    if (!info.enabled || !info.left10 || !info.right10) return null
+    if (root.fullPanelBarHeight(s) <= 0) return null
+    var w = Number(s.width)
+    var left = info.left10 * w / info.screenWidth10
+    var right = info.right10 * w / info.screenWidth10
+    if (!isFinite(left) || !isFinite(right)
+        || left <= 0 || left >= right || right >= w) return null
+    return { left: left, right: right }
+  }
+
+  function fullPanelSafeWidth(s, edge) {
+    var bounds = root.fullPanelBounds(s)
+    if (!bounds) return 0
+    // Style's edge margin is also applied by the anchors in horizontalBar.
+    // Add a few logical pixels beyond the measured camera housing.
+    var inset = Style.space(8) + 6
+    return Math.max(1, Math.floor(edge === "left"
+       ? bounds.left - inset : Number(s.width) - bounds.right - inset))
+  }
+'''
+HOST_INFO = HOST_INFO.replace("  function fullPanelBarHeight(s) {", FULLPANEL_BOUNDS + "\n  function fullPanelBarHeight(s) {")
+
+# Each side is a SINGLE ModuleList, not two arrangements. With no notch (or
+# with enough width), its bounds coincide with the old anchor positions.
+EDGE_COMPONENT = r'''
+  // OmacVM FullPanel v2: only the built-in top bar has a safe-width limit.
+  // The same widgets stay mounted while scrolling, so IPC handlers/timers
+  // are not duplicated and a long clock or larger font cannot push widgets
+  // under the physical camera cutout.
+  component FullPanelEdgeModules: Item {
+    id: fullPanelEdge
+    required property var targetScreen
+    property string edge: "right"
+    readonly property real safeWidth: root.fullPanelSafeWidth(targetScreen, edge)
+    readonly property bool notchAware: safeWidth > 0
+    readonly property bool overflow: notchAware && modules.width > safeWidth
+    readonly property real arrowSize: overflow ? Math.min(Style.space(5), safeWidth / 4) : 0
+    property bool userScrolled: false
+
+    width: notchAware ? Math.min(safeWidth, modules.width + 2 * arrowSize) : modules.width
+    height: modules.height
+
+    function snapToDefault() {
+      if (!overflow || userScrolled) return
+      viewport.contentX = edge === "right"
+        ? Math.max(0, viewport.contentWidth - viewport.width) : 0
+    }
+    function page(towardRight) {
+      userScrolled = true
+      var distance = Math.max(1, viewport.width * 0.75)
+      viewport.contentX = Math.max(0, Math.min(viewport.contentWidth - viewport.width,
+                           viewport.contentX + (towardRight ? distance : -distance)))
+    }
+    onOverflowChanged: {
+      userScrolled = false
+      Qt.callLater(snapToDefault)
+    }
+    Component.onCompleted: Qt.callLater(snapToDefault)
+
+    Flickable {
+      id: viewport
+      x: fullPanelEdge.arrowSize
+      width: Math.max(0, parent.width - 2 * fullPanelEdge.arrowSize)
+      height: parent.height
+      clip: fullPanelEdge.overflow
+      contentWidth: modules.width
+      contentHeight: modules.height
+      boundsBehavior: Flickable.StopAtBounds
+      // Dragging here would steal clicks and drag-to-reorder from widgets.
+      // Dedicated page arrows provide access to every slot instead.
+      interactive: false
+      ModuleList {
+        id: modules
+        entries: root.layoutEntries(fullPanelEdge.edge)
+        region: fullPanelEdge.edge
+        onWidthChanged: Qt.callLater(fullPanelEdge.snapToDefault)
+      }
+    }
+
+    Text {
+      visible: fullPanelEdge.overflow
+      x: 0
+      width: fullPanelEdge.arrowSize
+      height: parent.height
+      text: "‹"
+      horizontalAlignment: Text.AlignHCenter
+      verticalAlignment: Text.AlignVCenter
+      font.family: root.fontFamily
+      font.pixelSize: Math.max(10, Math.min(height, Style.font.body))
+      color: root.barForeground
+      opacity: viewport.contentX > 0.5 ? 1 : 0.35
+      MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        enabled: viewport.contentX > 0.5
+        onClicked: fullPanelEdge.page(false)
+      }
+    }
+    Text {
+      visible: fullPanelEdge.overflow
+      x: parent.width - fullPanelEdge.arrowSize
+      width: fullPanelEdge.arrowSize
+      height: parent.height
+      text: "›"
+      horizontalAlignment: Text.AlignHCenter
+      verticalAlignment: Text.AlignVCenter
+      font.family: root.fontFamily
+      font.pixelSize: Math.max(10, Math.min(height, Style.font.body))
+      color: root.barForeground
+      opacity: viewport.contentX < viewport.contentWidth - viewport.width - 0.5 ? 1 : 0.35
+      MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        enabled: viewport.contentX < viewport.contentWidth - viewport.width - 0.5
+        onClicked: fullPanelEdge.page(true)
+      }
+    }
+  }
+'''
+
+HORIZONTAL_OLD = '''        LeftModules {
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        RightModules {
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+        }
+'''
+HORIZONTAL_NEW = '''        FullPanelEdgeModules {
+          edge: "left"
+          targetScreen: barWindow.screen
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+        }
+
+        FullPanelEdgeModules {
+          edge: "right"
+          targetScreen: barWindow.screen
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+        }
+'''
+# Insert the component once, in the same root scope as ModuleList and LeftModules.
+EDGE_ANCHOR = '''  component LeftModules: ModuleList {
+'''
+OLD_HEIGHT = '    implicitHeight: root.vertical ? 0 : Math.max(root.barSize, notchFloor)\n'
+NEW_HEIGHT = '''    implicitHeight: root.vertical ? 0 : (root.fullPanelBarHeight(screen) > 0
+      ? root.fullPanelBarHeight(screen) : Math.max(root.barSize, notchFloor))
+'''
+# Omanotch wraps the stock height expression inside its own role choice.
+OLD_OMANOTCH_HEIGHT = '''    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === "" ? Math.max(root.barSize, notchFloor) : barWindow.parkedSize)
+'''
+NEW_OMANOTCH_HEIGHT = '''    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === ""
+      ? (root.fullPanelBarHeight(screen) > 0 ? root.fullPanelBarHeight(screen) : Math.max(root.barSize, notchFloor))
+      : barWindow.parkedSize)
+'''
+# The user's possible live one-line height override, written in the handoff.
+OLD_MANUAL_HEIGHT = '''    implicitHeight: root.vertical ? 0 : (root.fullPanelBarHeight(screen) > 0 ? root.fullPanelBarHeight(screen) : Math.max(root.barSize, notchFloor))
+'''
+
 def replace_exactly_once(text: str, original: str, changed: str, label: str) -> str:
     count = text.count(original)
     if count != 1:
@@ -115,14 +308,42 @@ def replace_exactly_once(text: str, original: str, changed: str, label: str) -> 
     return text.replace(original, changed, 1)
 
 
+def upgrade_height(text: str) -> str:
+    if NEW_HEIGHT in text or NEW_OMANOTCH_HEIGHT in text:
+        return text
+    for old, new in ((OLD_HEIGHT, NEW_HEIGHT),
+                     (OLD_MANUAL_HEIGHT, NEW_HEIGHT),
+                     (OLD_OMANOTCH_HEIGHT, NEW_OMANOTCH_HEIGHT)):
+        if old in text:
+            return replace_exactly_once(text, old, new, "FullPanel height")
+    raise ValueError("FullPanel height: no supported implicitHeight anchor")
+
+
 def patch_text(text: str) -> str:
     if MARKER in text:
-        # Partial/corrupt edits must not be mistaken for a full installation.
-        if "root.fullPanelBarHeight(screen)" not in text or "function fullPanelBarHeight(s)" not in text:
-            raise ValueError("FullPanel marker found without required code")
+        # Do not silently tolerate a half-installed or corrupted update.
+        if ("function fullPanelBounds(s)" not in text
+            or "component FullPanelEdgeModules: Item" not in text
+            or "root.fullPanelBarHeight(screen) > 0" not in text
+            or "OMACVM_FULLPANELRIGHT10" not in text):
+            raise ValueError("FullPanel v2 marker found without required code")
         return text
-    updated = replace_exactly_once(text, HOME_ANCHOR, HOME_ANCHOR + HOST_INFO, "bar root")
-    updated = replace_exactly_once(updated, NOTCH_FLOOR, NEW_NOTCH_FLOOR, "notchFloor")
+
+    if V1_MARKER in text:
+        if text.count(HOST_INFO_V1) != 1:
+            raise ValueError("FullPanel v1 metadata differs; refusing partial migration")
+        updated = text.replace(HOST_INFO_V1, HOST_INFO, 1)
+    else:
+        updated = replace_exactly_once(text, HOME_ANCHOR,
+                                       HOME_ANCHOR + HOST_INFO, "bar root")
+        updated = replace_exactly_once(updated, NOTCH_FLOOR,
+                                       NEW_NOTCH_FLOOR, "notchFloor")
+
+    updated = upgrade_height(updated)
+    updated = replace_exactly_once(updated, EDGE_ANCHOR,
+                                   EDGE_COMPONENT + "\n" + EDGE_ANCHOR, "edge component")
+    updated = replace_exactly_once(updated, HORIZONTAL_OLD, HORIZONTAL_NEW,
+                                   "horizontal module layout")
     return updated
 
 
