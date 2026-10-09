@@ -14,12 +14,41 @@ import Foundation
 /// The guest wants <addr> to be the address it connected to (127.0.0.1 for
 /// QEMU's 10.0.2.2, 192.168.77.1 on the app's fast network), so a proof that a
 /// listener fetched from Omanotch on another address fails.
+/// A test Omanotch's port and Bridge folder (OmacVM's test identity: 47911,
+/// omacvm-test-bridge) come only from its launch arguments
+/// (`open -n Omanotch.app --args -port 47911 -bridgeDir omacvm-test-bridge`),
+/// never from the saved settings: on 2026-10-09 a test had saved both into
+/// ch.gillesgoetsch.omanotch on a MacBook Air, and the person's own Omanotch
+/// then listened on the test port with the test Bridge's token, so their
+/// VM's notch stayed empty. Saved values of these keys are removed at start.
+enum TestEndpoint {
+    static let keys = ["port", "bridgeDir"]
+
+    static func port(arguments: [String: Any]) -> UInt16 {
+        let v = (arguments["port"] as? String).flatMap { UInt16($0) } ?? (arguments["port"] as? NSNumber)?.uint16Value
+        return v.flatMap { $0 == 0 ? nil : $0 } ?? 47811
+    }
+
+    static func bridgeDir(arguments: [String: Any]) -> String {
+        (arguments["bridgeDir"] as? String).flatMap { $0.isEmpty || $0.contains("/") || $0 == ".." ? nil : $0 } ?? "omacvm-bridge"
+    }
+
+    /// The keys a test left in the saved settings.
+    static func stale(saved: [String: Any]) -> [String] {
+        keys.filter { saved[$0] != nil }
+    }
+
+    /// The launch arguments (UserDefaults' argument domain).
+    static var arguments: [String: Any] {
+        UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+    }
+}
+
 enum GuestAuth {
     /// The Bridge's token, or nil when there is none (or it is too short).
-    /// The setting `bridgeDir` (a folder name in Application Support) points a
-    /// test Omanotch at the test Bridge's token (omacvm-test-bridge).
+    /// A test Omanotch takes the test Bridge's (TestEndpoint).
     static func token() -> [UInt8]? {
-        let dir = UserDefaults.standard.string(forKey: "bridgeDir").flatMap { $0.isEmpty || $0.contains("/") ? nil : $0 } ?? "omacvm-bridge"
+        let dir = TestEndpoint.bridgeDir(arguments: TestEndpoint.arguments)
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/\(dir)/token").path
         guard let s = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }

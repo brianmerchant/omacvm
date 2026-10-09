@@ -136,5 +136,18 @@ check(GuestAuth.same(Array("abc".utf8), Array("abc".utf8)), true, "same")
 check(GuestAuth.same(Array("abc".utf8), Array("abd".utf8)), false, "not same")
 check(GuestAuth.same(Array("abc".utf8), Array("ab".utf8)), false, "other length")
 
+// A test Omanotch's port and Bridge folder: launch arguments only (TestEndpoint).
+check(TestEndpoint.port(arguments: [:]), 47811, "no arguments: 47811")
+check(TestEndpoint.port(arguments: ["port": "47911"]), 47911, "-port 47911")
+check(TestEndpoint.port(arguments: ["port": "0"]), 47811, "-port 0: 47811")
+check(TestEndpoint.port(arguments: ["port": "x"]), 47811, "-port x: 47811")
+check(TestEndpoint.bridgeDir(arguments: [:]), "omacvm-bridge", "no arguments: the Bridge's folder")
+check(TestEndpoint.bridgeDir(arguments: ["bridgeDir": "omacvm-test-bridge"]), "omacvm-test-bridge", "-bridgeDir")
+check(TestEndpoint.bridgeDir(arguments: ["bridgeDir": "../x"]), "omacvm-bridge", "-bridgeDir with a slash: ignored")
+check(TestEndpoint.bridgeDir(arguments: ["bridgeDir": ".."]), "omacvm-bridge", "-bridgeDir ..: ignored")
+check(TestEndpoint.stale(saved: ["port": 47911, "bridgeDir": "omacvm-test-bridge", "flush": true]), ["port", "bridgeDir"],
+      "saved port and bridgeDir (the MacBook Air, 2026-10-09): removed at start")
+check(TestEndpoint.stale(saved: ["flush": true]), [], "other settings stay")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

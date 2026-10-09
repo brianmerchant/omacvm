@@ -24,7 +24,8 @@ struct Settings {
     var flush: Bool { defaults.bool(forKey: "flush") }
     /// Listen on this one address instead of every VM network interface.
     var listenHost: String? { defaults.string(forKey: "listenHost") }
-    var port: UInt16 { UInt16(defaults.integer(forKey: "port")).nonZero ?? 47811 }
+    /// 47811; a test Omanotch's from its launch arguments only (TestEndpoint).
+    var port: UInt16 { TestEndpoint.port(arguments: TestEndpoint.arguments) }
     /// Interfaces that carry VM networks: Parallels and UTM (vmnet) use
     /// bridgeNNN, older Parallels versions vnicN.
     var interfacePrefixes: [String] { defaults.stringArray(forKey: "vmInterfacePrefixes") ?? ["bridge", "vnic"] }
@@ -105,6 +106,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var activity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A test's port or Bridge folder in the saved settings: never used, removed.
+        let domain = Bundle.main.bundleIdentifier ?? "ch.gillesgoetsch.omanotch"
+        for key in TestEndpoint.stale(saved: UserDefaults.standard.persistentDomain(forName: domain) ?? [:]) {
+            UserDefaults.standard.removeObject(forKey: key)
+            Log.info("removed the saved setting \(key) (a test's; only launch arguments set it)")
+        }
         _ = BackgroundCursor.enabled
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],

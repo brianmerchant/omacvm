@@ -27,6 +27,11 @@ in more words.
   the key of the Mac that set it up, and Update VM on the other Mac waited for SSH. A VM set up
   before this gets the key at its next update on the Mac it came from.
 
+- Omanotch: a test can no longer leave your Omanotch on OmacVM's test port. The test port and the
+  test Bridge's folder (`port`, `bridgeDir`) now come only from a test Omanotch's launch arguments;
+  saved values are ignored and removed at start. On a MacBook Air a test had saved both, Omanotch
+  listened on 47911 with the test Bridge's token, and the VM's notch stayed empty.
+
 ## 3.0.11
 
 - Omanotch: the bar sits in the middle of the notch strip at every display scale, on the 14- and
