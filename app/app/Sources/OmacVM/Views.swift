@@ -66,6 +66,19 @@ final class AppState: ObservableObject {
         screen = c.isReady ? .ready : .setup
     }
 
+    /// "Open Existing VM…" (setup and settings): a VM from the Finder, shown
+    /// at once. Not while this app's VM runs.
+    func openExisting() {
+        if vmRunning() {
+            message = "Shut down \(config.name) first, then open another VM."
+            return
+        }
+        if let c = storage.openExisting() {
+            showOther(c)
+            storage.refresh()
+        }
+    }
+
     /// The VM's drive went away while it ran (main.swift, Runner.driveLost).
     /// The drive may be back already (a USB link that reset): its mount came
     /// while QEMU was still being stopped, when drivesChanged leaves the
@@ -213,7 +226,15 @@ struct SetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Omarchy VM").font(.title2.bold())
+            HStack {
+                Text("New Omarchy VM").font(.title2.bold())
+                Spacer()
+                // A VM copied here or on another drive: show it instead.
+                Button("Open Existing VM…") { state.openExisting() }
+                    .disabled(state.storage.moving != nil)
+                    .help("Show a VM that is somewhere else (copied, or on another drive): its folder, or the folder it is in.")
+                    .layoutProbe("open-existing")
+            }
             Text("\(Product.name) makes a new VM with Arch Linux ARM and Omarchy. It downloads one that is already built when there is one for this version (a few minutes), or builds it here (10 to 30 minutes).")
                 .foregroundStyle(.secondary)
                 .layoutProbe("header")
@@ -563,7 +584,8 @@ struct ReadyView: View {
                 Section {
                     DiskRow(state: state)
                     CommandLineRow(preview: preview?.terminal)
-                    StorageRows(storage: state.storage, selected: state.config.location == nil ? nil : state.config.folder)
+                    StorageRows(storage: state.storage, selected: state.config.location == nil ? nil : state.config.folder,
+                                open: { state.openExisting() })
                 }
                 Section { UpdateRow(updater: Updater.shared) }
             }
