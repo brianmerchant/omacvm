@@ -58,8 +58,11 @@ expect "4 KiB pages (no alignment)"      "venus=1 blob_alignment=4096" "1:26.2.3
 expect "old kernel (alignment unknown)"  "venus=1 blob_alignment=0" "1:26.2.3-1"    no-pages
 expect "Arch Linux ARM's 26.2.3"         "$V" "1:26.2.3-1"   needed
 expect "no Venus driver at all"          "$V" ""             needed
-O=1:26.2.4.omacvm1-1
+O=1:26.2.4.omacvm2-1
 expect "ours (26.2.4 + WebGPU patch)"    "$V" "$O"           ok
+expect "ours before 3.0.11 (omacvm1)"    "$V" "1:26.2.4.omacvm1-1" update
+[[ $(PATH="$T:$PATH" OMACVM_VENUS_PROBE=$V HAVE=1:26.2.4.omacvm1-1 "$D/vulkan-virtio.sh" --status) == *"has newer fixes"* ]] &&
+  pass "ours before 3.0.11: says the new build has fixes" || fail "ours before 3.0.11: wrong reason"
 expect "ours from 3.0.0 (26.2.4-0.1)"    "$V" "1:26.2.4-0.1" update
 expect "the distro's 26.2.4"             "$V" "1:26.2.4-1"   update
 expect "a distro rebuild of 26.2.4"      "$V" "1:26.2.4-3"   update
@@ -149,11 +152,14 @@ fixed=$(sed -n 's/^FIXED=\([^ ]*\).*/\1/p' "$D/vulkan-virtio.sh")
 [[ $("$T/vercmp" "$epoch:$pkgver-$pkgrel" "$epoch:26.3.0-1") == -1 ]] && pass "a newer Mesa replaces ours" ||
   fail "ours would hold back a newer Mesa"
 sum() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
-[[ ${#source[@]} == 2 && ${source[1]} == mesa-venus-opaque-fd-semaphores.patch &&
-   ${sha256sums[0]} =~ ^[0-9a-f]{64}$ && ${sha256sums[1]} == "$(sum "$D/patches/${source[1]}")" ]] &&
+[[ ${#source[@]} == 3 && ${source[1]} == mesa-venus-opaque-fd-semaphores.patch &&
+   ${source[2]} == mesa-venus-tls-after-unload.patch &&
+   ${sha256sums[0]} =~ ^[0-9a-f]{64}$ && ${sha256sums[1]} == "$(sum "$D/patches/${source[1]}")" &&
+   ${sha256sums[2]} == "$(sum "$D/patches/${source[2]}")" ]] &&
   pass "sources pinned by sha256 (the patch matches patches/)" || fail "sources not pinned, or the patch changed without its sha256"
-grep -q 'install -m644 PKGBUILD patches/mesa-venus-opaque-fd-semaphores.patch "$B/"' "$D/vulkan-virtio.sh" &&
-  pass "the build gets the patch" || fail "vulkan-virtio.sh does not hand the patch to makepkg"
+grep -q 'install -m644 PKGBUILD patches/mesa-venus-opaque-fd-semaphores.patch patches/mesa-venus-tls-after-unload.patch "$B/"' "$D/vulkan-virtio.sh" &&
+  grep -q 'patch .*< mesa-venus-tls-after-unload.patch' "$D/PKGBUILD" &&
+  pass "the build gets both patches" || fail "vulkan-virtio.sh/PKGBUILD do not hand both patches to makepkg"
 
 # Wired in: apply's app step runs it, check reads it.
 grep -q '^venus/vulkan-virtio.sh $want ||' src/app/guest/install.sh && pass "app install runs it" || fail "app install does not run it"

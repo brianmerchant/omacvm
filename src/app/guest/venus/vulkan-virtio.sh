@@ -33,7 +33,7 @@ cd "$(dirname "$0")"
 PKG_ADD=${OMACVM_PKG_ADD:-$PWD/../../../guest/pkg-add}
 SYSTEM_UPDATE=${OMACVM_SYSTEM_UPDATE:-$PWD/../../../guest/system-update}
 FIXED=1:26.2.4                       # the first Venus driver that honours blob alignment
-# This PKGBUILD's version (1:26.2.4.omacvm1): blob alignment and WebGPU's semaphores.
+# This PKGBUILD's version (1:26.2.4.omacvm2): blob alignment, WebGPU's semaphores, Mesa's TLS fix.
 OURS=$(bash -c 'source ./PKGBUILD && echo "$epoch:$pkgver"')
 LIB=${OMACVM_VENUS_LIB:-/usr/lib/libvulkan_virtio.so}
 LOG=/var/log/omacvm-vulkan-virtio.log
@@ -72,7 +72,8 @@ status() {
     if [[ $have == *omacvm* ]]; then echo "needed vulkan-virtio $have cannot load its libraries (after a distro update): rebuilt"
     else echo "ok vulkan-virtio $have (the distro's), but it misses libraries: pacman -Syu"; fi
   elif [[ -n $have ]] && (( $(vercmp "$have" "$FIXED") >= 0 )); then
-    echo "update vulkan-virtio $have sizes GPU memory to ${align}-byte pages; ${OURS#*:} adds WebGPU in Chrome"
+    if [[ $have == *omacvm* ]]; then echo "update vulkan-virtio $have: OmacVM's ${OURS#*:} has newer fixes"
+    else echo "update vulkan-virtio $have sizes GPU memory to ${align}-byte pages; ${OURS#*:} adds WebGPU in Chrome"; fi
   else
     echo "needed vulkan-virtio ${have:-not installed} cannot size GPU memory to ${align}-byte pages (needs ${FIXED#*:})"
   fi
@@ -185,7 +186,7 @@ if (( rc )); then
   cat "$B/pkg-add.err" >&2
   fail "the build tools are not installed"
 fi
-install -m644 PKGBUILD patches/mesa-venus-opaque-fd-semaphores.patch "$B/"
+install -m644 PKGBUILD patches/mesa-venus-opaque-fd-semaphores.patch patches/mesa-venus-tls-after-unload.patch "$B/"
 chown -R nobody: "$B"
 # makepkg refuses root: build as nobody (it downloads and checks the sha256 itself).
 ( cd "$B" && runuser -u nobody -- env HOME="$B" PKGDEST="$B" BUILDDIR="$B/build" SRCDEST="$B" LOGDEST="$B" PACKAGER="OmacVM <omacvm@users.noreply.github.com>" \
