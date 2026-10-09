@@ -14,6 +14,9 @@ in more words.
   or memory than this Mac has (16 CPUs and 48 GB on an 8 GB MacBook Air, say) starts, and runs
   Update VM, at this Mac's Best tier, and the window says so under Resources. Its vm.env keeps
   the full size, so it has it again on the Mac it came from.
+- OmacVM.app: a VM that was not shut down cleanly, or whose folder was copied while it ran, asks
+  before it starts (and before Update VM): "its disk may be damaged". While the app runs a VM,
+  the file `running` in its folder names the Mac and QEMU; a clean shutdown removes it.
 
 ## 3.0.11
 
