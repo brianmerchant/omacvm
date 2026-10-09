@@ -92,6 +92,9 @@ vm_load() {
   [[ -f $VM_DIR/vm.env ]] || die "no vm.env in $VM_DIR"
   source "$VM_DIR/vm.env"
   : "${NAME:?}" "${CPUS:?}" "${MEM_MB:?}" "${DISK_GB:?}" "${SSH_PORT:?}" "${VM_USER:?}"
+  # A VM from a bigger Mac: the app's size for this run (VMConfig.forThisMac); vm.env stays.
+  [[ ${OMACVM_START_CPUS:-} =~ ^[1-9][0-9]{0,3}$ ]] && CPUS=$OMACVM_START_CPUS
+  [[ ${OMACVM_START_MEM_MB:-} =~ ^[1-9][0-9]{3,6}$ ]] && MEM_MB=$OMACVM_START_MEM_MB
   LOG=$VM_DIR/logs; mkdir -p "$LOG"
   RUN_DIR=$(getconf DARWIN_USER_TEMP_DIR)omacvm
   mkdir -p "$RUN_DIR"; chmod 700 "$RUN_DIR"
