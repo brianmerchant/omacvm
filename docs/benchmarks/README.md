@@ -202,26 +202,23 @@ On the Mac, with all files in one folder:
 cd ~/bench
 ~/.omacvm/src/bench/report.py mac.jsonl parallels.jsonl utm.jsonl fusion.jsonl app.jsonl --json results.json
 ~/.omacvm/src/bench/chart.py ~/.omacvm/docs/benchmarks/chart.json ~/.omacvm/docs/images/benchmarks.svg \
-  "MacBook Pro M4 Max · macOS 15.7 · Google Chrome 154 · October 2026"
+  "MacBook Pro M4 Max · macOS 15.7 · Google Chrome 155 · October 2026"
 ```
 
 - `report.py` prints a Markdown table: the median of each test, and each route
   as a share of the first file (the Mac).
 - `chart.py` draws the bar chart for the README and
   [compare.md](../compare.md): OmacVM.app first, then UTM, VMware Fusion and
-  Parallels, each as a share of the Mac (the dashed line at 100 %). Five
-  rows: Geekbench 7 multi-core, Speedometer 3.1, WebGL Aquarium, Basemark Web
-  3.0 and Geekbench 7 GPU (OpenCL). Tests without a Mac value
-  (glmark2, vkmark) and MotionMark (no stable result) are left out.
-- The chart's input is [`chart.json`](chart.json): the medians from
-  `results.json` with the GPU rounds added. CPU and Speedometer come from the
-  2026-10-03 round, Aquarium and Basemark from the 2026-10-04 GPU round, both
-  in [Results](#results). OmacVM.app's Speedometer, Aquarium and Basemark are
-  3.0.0's, from the Mac mini run below (OmacVM.app 3.0.0). 3.0.1, measured
-  the same way on 2026-10-07, did not change them
-  ([OmacVM.app 3.0.1](#omacvmapp-301-2026-10-07)). Numbers from a
-  build that is not released yet are listed under `"unreleased"`; the chart
-  stripes those bars and tags them.
+  Parallels, each as a share of the Mac (the dashed line at 100 %). Three
+  rows: Speedometer 3.1, WebGL Aquarium and Basemark Web 3.0. Tests without a
+  Mac value (glmark2, vkmark) are left out.
+- The chart's input is [`chart.json`](chart.json): the medians of one round,
+  the latest on the MacBook Pro
+  ([2026-10-09](#macbook-pro-m4-max-every-route-2026-10-09)), plain bars, no
+  version tags. `src/tests/bench-docs.sh` checks that every test comes from
+  that one round. Older rounds, with Geekbench and GPU compute, stay on this
+  page. (`chart.py` still stripes and tags numbers listed under
+  `"unreleased"`, for drafts.)
 - The power chart in the README (`docs/images/power.svg`) comes from the
   `"power"` part of `chart.json`:
   `chart.py --panel power docs/benchmarks/chart.json docs/images/power.svg "<subtitle>"`.
@@ -250,6 +247,46 @@ scores from the page. Geekbench's site turns away plain downloads, so curl
 does not work. Your results are public on Geekbench's site.
 
 ## Results
+
+### MacBook Pro M4 Max, every route (2026-10-09)
+
+The round behind the README's speed chart. MacBook Pro 16" M4 Max, macOS
+15.7.4, at night with the screen locked and the display kept on
+(`caffeinate -d`). Each route alone: before every run a check that nothing
+else of ours ran (other VMs, VM apps, builds, CI runners paused), and the run
+counted only if the Mac's other load stayed below 250 % CPU and the page size
+was right.
+
+- OmacVM.app 3.0.9 as released (the zip, re-signed with a test app id so it
+  runs next to the user's own app), Graphics on Automatic (OpenGL).
+  UTM 5.0.6, VMware Fusion 26.0.1, Parallels Desktop 27.0.2.
+- Every VM 6 CPUs and 8 GB, Omarchy 4.0.3rc4, kernel 7.2.8, Mesa 26.2.3,
+  Hyprland 0.56.2, Google Chrome 155.0.8059.39, glmark2 2023.01.
+- Each VM in a window on the built-in display (3456x2160, 120 Hz), sized so
+  the guest's output is 2880x1800 at scale 2: Chrome's page is 1440x900 at
+  2x, the same as on the Mac (Chrome 155.0.8059.40, a window with a
+  1440x900 page). Parallels stops at 2880x1780 (page 1440x890). UTM does not
+  resize the guest to its window, so its guest output was set to 2880x1800
+  in Hyprland and UTM scales it to the window.
+- `bench.sh --runs 1` per test, three rounds, median of 3. Aquarium with
+  30,000 fish; glmark2 is `glmark2-es2-wayland --fullscreen` in the VM (no
+  macOS version).
+
+| | Mac | OmacVM.app 3.0.9 | UTM | VMware Fusion | Parallels |
+|---|---|---|---|---|---|
+| Speedometer 3.1 | 61.5 (62.3, 61.5, 61.3) | 42.7 (43.1, 42.7, 42.4) · 69 % | 38.1 (37.4, 38.4, 38.1) · 62 % | 44.8 (45.4, 44.8, 44.8) · 73 % | 43.5 (43.5, 43.5, 42.6) · 71 % |
+| WebGL Aquarium, 30,000 fish (fps) | 111.8 (111.5, 112.5, 111.8) | 43.2 (43.2, 43.8, 42.1) · 39 % | 25.6 (25.6, 29.8, 25.6) · 23 % | 41.8 (41.8, 41.5, 42.2) · 37 % | 27.9 (27.9, 21.0, 28.1) · 25 % |
+| Basemark Web 3.0 | 3626 (3637, 3343, 3626) | 2801 (2895, 2801, 2489) · 77 % | 2667 (2812, 2637, 2667) · 74 % | 2511 (2417, 2526, 2511) · 69 % | 2680 (2732, 2680, 2557) · 74 % |
+| glmark2 (score) | no macOS version | 3058 (3018, 3062, 3058) | 1077 (1077, 1086, 1076) | 2785 (2781, 2785, 2788) | 8297 (8624, 8297, 8259) |
+
+Median first, then the three runs in order, then the share of the Mac.
+
+Notes:
+
+- Two routes were measured again later the same night, under the same
+  rules. VMware Fusion: its first start failed on a lock file a stopped VM
+  had left behind. UTM: its VM still had Chrome 154; it was measured again
+  with the other VMs' Chrome 155. The Chrome 154 runs are not used.
 
 ### Results, MacBook Air M2 (2026-10-07)
 
