@@ -12,6 +12,16 @@ in more words.
   the VM when the pointer moves between a widget and the bar's free space, and the bar (patch v18)
   does what its hover does: the indicators show from the free space and stay until the pointer
   leaves the strip. Needs Omanotch and the VM's OmacVM from this version (Update VM).
+- Gestures: a permission macOS kept for another build no longer leaves it waiting for good
+  (reported by @brianmerchant, #306). macOS ties each permission entry to the signature of the
+  build that asked; one from another build (e.g. a helper built on the Mac before OmacVM.app's
+  signed copy) shows as on in System Settings but is refused, and switching it off and on does
+  not replace it. When Accessibility or Input Monitoring is missing at start, Gestures now clears
+  its own entry for that permission once per build (tccutil, only the missing one), then asks
+  again, as the app does for its keyboard entry since 3.0.6 (#255). `omacvm check` names the
+  tccutil commands on that row and no longer suggests `omacvm apply` for scroll momentum while
+  Gestures waits for its Mac permissions.
+
 
 ## 3.0.9
 
