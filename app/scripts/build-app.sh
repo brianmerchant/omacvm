@@ -21,9 +21,11 @@
 #                "OmacVM Test Bridge" (org.omacvm.test.bridge, port 47931) and
 #                "OmacVM Test Gestures" (org.omacvm.test.gestures, port 47930, own
 #                settings domain), never the installed ones' ids, ports or folders.
-#                Always Developer ID signed (OMACVM_SIGN_ID), so macOS keeps the
+#                Developer ID signed by default (OMACVM_SIGN_ID), so macOS keeps the
 #                grants given to it once (Accessibility, Input Monitoring, Bluetooth,
 #                Screen Recording) across rebuilds: tests use only this identity.
+#                OMACVM_TEST_ADHOC=1 explicitly permits ad-hoc signing without
+#                OMACVM_SIGN_ID, only for this non-release test identity.
 #     --install  with --test-identity: copy it over ~/Applications/OmacVM Test.app
 #                (always that path; refused while it runs)
 #   scripts/build-app.sh --runtime-inputs [--release]
@@ -46,11 +48,14 @@ while (( $# )); do
   esac
 done
 [[ $TEST == [01] ]] || { echo "OMACVM_TEST_IDENTITY is 0 or 1" >&2; exit 2; }
+[[ ${OMACVM_TEST_ADHOC:-0} != 1 || ( $TEST == 1 && $RELEASE == 0 ) ]] || \
+  { echo "OMACVM_TEST_ADHOC=1 is only for --test-identity without --release" >&2; exit 2; }
 BRIDGE_APP=OmacVMBridge.app; BRIDGE_ID=org.omacvm.bridge
 GESTURES_APP=OmacVMGestures.app; GESTURES_ID=org.omacvm.gestures
 if (( TEST )); then
   (( ! RELEASE )) || { echo "--test-identity is not a release" >&2; exit 2; }
-  [[ -n ${OMACVM_SIGN_ID:-} ]] || { echo "the test identity is always Developer ID signed: set OMACVM_SIGN_ID" >&2; exit 2; }
+  [[ -n ${OMACVM_SIGN_ID:-} || ${OMACVM_TEST_ADHOC:-0} == 1 ]] || \
+    { echo "the test identity requires OMACVM_SIGN_ID or explicit OMACVM_TEST_ADHOC=1" >&2; exit 2; }
   NAME="OmacVM Test"; ID=org.omacvm.app.test
   BRIDGE_APP="OmacVM Test Bridge.app"; BRIDGE_ID=org.omacvm.test.bridge
   GESTURES_APP="OmacVM Test Gestures.app"; GESTURES_ID=org.omacvm.test.gestures
