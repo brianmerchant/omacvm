@@ -28,6 +28,12 @@ got=$(helper_pid bridge)
   failed "helper_pid bridge: got '$got', the stand-in is $FAKE"
 [[ -z $(helper_pid gestures test 2>/dev/null | grep -x "$FAKE") ]] && pass "not taken for the test identity's Gestures" ||
   failed "the stand-in Bridge was taken for the test Gestures"
+# The Bridge runs omacvm check itself (the control centre's status), and pgrep
+# leaves its own ancestors out unless -a: the Bridge then never found itself.
+mkdir -p "$T/bin"; printf '#!/bin/bash\necho "$*" > "%s/pgrep-args"\n' "$T" > "$T/bin/pgrep"; chmod +x "$T/bin/pgrep"
+PATH="$T/bin:$PATH" helper_pid bridge >/dev/null || true
+[[ " $(cat "$T/pgrep-args" 2>/dev/null) " == *" -a "* ]] && pass "pgrep -a: found also when omacvm check runs as the Bridge's child" ||
+  failed "helper_pid's pgrep leaves out ancestors (args: $(cat "$T/pgrep-args" 2>/dev/null))"
 helper_pid nothing >/dev/null 2>&1 && failed "helper_pid takes an unknown helper" || pass "an unknown helper: none"
 
 # proc_started: a process that started a moment ago.

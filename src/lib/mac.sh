@@ -62,6 +62,9 @@ media_keys_state() {
 # (System Settings' "Quit & Reopen" after a grant, Finder: an
 # application.<id>.* job, #331). The oldest one (Gestures asks a short-lived
 # copy of itself about its permissions). test: the test identity's.
+# -a: also an ancestor of this shell. pgrep leaves its own ancestors out by
+# default, and the Bridge runs omacvm check for the control centre: without
+# -a the Bridge never found itself ("not running" while it runs, 3.0.14).
 helper_pid() {
   local exe
   case $1-${2:-} in
@@ -71,7 +74,7 @@ helper_pid() {
     gestures-) exe="OmacVMGestures\.app/Contents/MacOS/omacvm-gestures" ;;
     *) return 1 ;;
   esac
-  pgrep -o -u "$(id -u)" -f "$exe"
+  pgrep -a -o -u "$(id -u)" -f "$exe"
 }
 
 # proc_started PID: when it started (seconds since 1970), from ps's elapsed time.

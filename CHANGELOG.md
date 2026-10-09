@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.15
+
+- OmacVM.app: the control centre showed **OmacVM Bridge and Touch ID as failing** ("OmacVM Bridge
+  is not running") while both worked. 3.0.14's check finds the Bridge by its process, and macOS's
+  `pgrep` leaves out its own parent processes; the control centre's check runs as a child of the
+  Bridge, so the Bridge never found itself. Fixed with `pgrep -a`, with a test.
+
 ## 3.0.14
 
 Gestures start working as soon as you allow them, and `omacvm check` tells the truth about the Mac helpers.
