@@ -657,6 +657,8 @@ struct ReadyView: View {
                                  onCancel: { customResources = false })
         }
         if let n = resourcesNote { RowNote(n, error: n.hasPrefix("Could not")) }
+        // A VM from a bigger Mac: what it starts with here (main.swift startVM).
+        if let n = state.config.startSizeNote { RowNote(n) }
         GraphicsPicker(choice: $graphics, plan: Runner.graphicsPlan(state.config))
             .onChange(of: graphics) { _, v in setGraphics(v) }
         // Vulkan fell back and stays off (graphics-fallback): the picker

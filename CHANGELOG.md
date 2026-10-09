@@ -10,6 +10,10 @@ in more words.
   VM's folder (the one with vm.env) or the folder it is in. Before, the setup only offered a new
   VM, and a VMs folder set there needed a restart of the app. A VM that runs in another app or on
   another Mac is not started: the window says so instead of "QEMU exit 1".
+- OmacVM.app: a VM copied from a bigger Mac starts with what this Mac allows. A VM with more CPUs
+  or memory than this Mac has (16 CPUs and 48 GB on an 8 GB MacBook Air, say) starts, and runs
+  Update VM, at this Mac's Best tier, and the window says so under Resources. Its vm.env keeps
+  the full size, so it has it again on the Mac it came from.
 
 ## 3.0.11
 

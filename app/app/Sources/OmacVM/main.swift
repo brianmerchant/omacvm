@@ -417,7 +417,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             VMDisk.cutIfDue(state.config)
             reloadConfig()
         }
-        let r = Runner(config: state.config)
+        // A VM from a bigger Mac starts at the Best tier here; vm.env stays.
+        let r = Runner(config: state.config.forThisMac)
+        r.sizeNote = state.config.startSizeNote
         r.openGLOnce = openGLOnce
         r.userNetwork = userNetwork
         r.onExit = { [weak self, weak r] status in

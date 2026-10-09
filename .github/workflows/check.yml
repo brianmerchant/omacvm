@@ -324,6 +324,9 @@ jobs:
       - name: Open Existing VM picks the VM's folder or its parent; a VM in use elsewhere is not started
         run: src/tests/app-open-vm.sh
 
+      - name: A VM from a bigger Mac starts at this Mac's Best tier; vm.env keeps its size
+        run: src/tests/app-start-size.sh
+
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
 

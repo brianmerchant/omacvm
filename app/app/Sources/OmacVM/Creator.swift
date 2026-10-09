@@ -63,7 +63,10 @@ final class Creator: ObservableObject {
     /// settings stay as they are.
     func update(config: VMConfig) {
         reset(.update, folder: config.folder, route: .build)
-        launch(script: "update-vm.sh", folder: config.folder, log: "update.log", input: nil)
+        // A VM from a bigger Mac runs at this Mac's Best tier (vm-common.sh vm_load).
+        let fit = config.forThisMac
+        let size = fit == config ? [:] : ["OMACVM_START_CPUS": "\(fit.cpus)", "OMACVM_START_MEM_MB": "\(fit.memoryMB)"]
+        launch(script: "update-vm.sh", folder: config.folder, log: "update.log", input: nil, env: size)
     }
 
     /// The log of the last build or update.
@@ -82,7 +85,7 @@ final class Creator: ObservableObject {
         title = "Preparing"
     }
 
-    private func launch(script: String, folder: URL, log logFile: String, input text: String?) {
+    private func launch(script: String, folder: URL, log logFile: String, input text: String?, env extra: [String: String] = [:]) {
         let id = run
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -92,6 +95,7 @@ final class Creator: ObservableObject {
         // of the VMs folder (PrebuiltImage.environment).
         var env = PrebuiltImage.environment()
         env["OMACVM_PROGRESS"] = "1"
+        env.merge(extra) { _, new in new }
         p.environment = env
         let input = Pipe(), output = Pipe()
         p.standardInput = input
