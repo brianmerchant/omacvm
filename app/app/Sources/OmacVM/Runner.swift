@@ -308,6 +308,8 @@ final class Runner {
     /// This start on QEMU's user network although the fast network is on, and
     /// why (its service needs an update the person did not make now).
     var userNetwork: String?
+    /// The VM asks for more than this Mac allows (VMConfig.startSizeNote): logged at the start.
+    var sizeNote: String?
 
     private func networkArguments() -> [String] {
         let c = config
@@ -440,6 +442,7 @@ final class Runner {
         log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
         log.write(Data("OmacVM: Mac proxy: \(proxy.record(fastNetwork: network.vmnet))\n".utf8))
         log.write(Data("OmacVM: Mac folder: \(macFolder)\n".utf8))
+        if let n = sizeNote { log.write(Data("OmacVM: resources: \(c.cpus) CPUs, \(c.memoryMB) MB for this start: \(n)\n".utf8)) }
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
         log.write(Data("OmacVM: USB devices: \(usbRecord)\n".utf8))
         if Settings.firmwareWait > 0 {

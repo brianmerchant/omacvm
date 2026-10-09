@@ -34,6 +34,21 @@ public struct ResourceLimits: Equatable {
         return "More than \(safeMemoryGB) GB leaves macOS and the graphics too little memory: the Mac can slow down or swap."
     }
 
+    /// What a VM starts with on this Mac: vm.env's CPUs and memory, but a
+    /// value this Mac does not allow (a VM copied from a bigger Mac) is
+    /// BEST's (the Best tier), for this start only. vm.env stays as it is, so
+    /// the VM has its full size again on the bigger Mac. nil: as vm.env says.
+    public func startSize(cpus c: Int, memoryMB m: Int, best: (cpus: Int, memoryGB: Int)) -> (cpus: Int, memoryMB: Int)? {
+        let tooMany = c > cpus.upperBound, tooMuch = m > memoryGB.upperBound * 1024
+        guard tooMany || tooMuch else { return nil }
+        return (tooMany ? best.cpus : c, tooMuch ? best.memoryGB * 1024 : m)
+    }
+
+    /// The window's note for startSize.
+    public func startSizeText(cpus c: Int, memoryMB m: Int, start: (cpus: Int, memoryMB: Int)) -> String {
+        "More than this Mac allows (\(c) CPUs, \(m / 1024) GB): it starts with \(start.cpus) CPUs and \(start.memoryMB / 1024) GB here. Its settings keep \(c) CPUs and \(m / 1024) GB for the Mac it came from."
+    }
+
     /// A value read from vm.env kept inside the steppers' range.
     public func clamp(cpus c: Int, memoryGB m: Int) -> (cpus: Int, memoryGB: Int) {
         (min(max(c, cpus.lowerBound), cpus.upperBound), min(max(m, memoryGB.lowerBound), memoryGB.upperBound))
