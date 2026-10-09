@@ -14,8 +14,11 @@ so a future Omanotch reinstall retains this rule.
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
+import stat
 import sys
+import tempfile
 
 V1_MARKER = "// omacvm-fullpanel-quickbar v1"
 V2_MARKER = "// omacvm-fullpanel-quickbar v2"
@@ -558,12 +561,61 @@ def patch_text(text: str) -> str:
                                    "horizontal module layout")
     return upgrade_v3_to_v4(upgrade_v2_to_v3(updated))
 
+
+def install_text(path: pathlib.Path, original: str, changed: str) -> pathlib.Path | None:
+    """Back up and atomically replace an existing user-owned clone.
+
+    Stage both files beside the target. A failed write/replace leaves Bar.qml
+    intact. Resolve symlinks so an existing user's link stays a link.
+    """
+    if changed == original:
+        return None
+    path = path.resolve(strict=True)
+    before = path.stat()
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("bar clone is not a regular file")
+    original_bytes = path.read_bytes()
+    staged = []
+
+    def stage(contents: bytes, prefix: str) -> pathlib.Path:
+        fd, name = tempfile.mkstemp(prefix=prefix, dir=path.parent)
+        target = pathlib.Path(name)
+        staged.append(target)
+        with os.fdopen(fd, "wb") as f:
+            f.write(contents)
+            f.flush()
+            staged_stat = os.fstat(f.fileno())
+            if (staged_stat.st_uid, staged_stat.st_gid) != (before.st_uid, before.st_gid):
+                os.fchown(f.fileno(), before.st_uid, before.st_gid)
+            os.fchmod(f.fileno(), stat.S_IMODE(before.st_mode))
+            os.fsync(f.fileno())
+        return target
+
+    try:
+        replacement = stage(changed.encode("utf-8"), "." + path.name + ".fullpanel-")
+        # Refuse to overwrite edits made after the caller read the clone.
+        current = path.stat()
+        identity = lambda info: (info.st_dev, info.st_ino, info.st_size,
+                                 info.st_mtime_ns, info.st_ctime_ns)
+        if identity(current) != identity(before) or path.read_text(encoding="utf-8") != original:
+            raise ValueError("bar clone changed during patching; retry")
+        backup = stage(original_bytes, path.name + ".fullpanel-backup-")
+        if identity(path.stat()) != identity(before) or path.read_bytes() != original_bytes:
+            raise ValueError("bar clone changed during patching; retry")
+        staged.remove(backup)  # Retain the unique backup even if replace fails.
+        os.replace(replacement, path)
+        return backup
+    finally:
+        for target in staged:
+            target.unlink(missing_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install", action="store_true", help="rewrite an existing clone only if patchable")
     parser.add_argument("bar", type=pathlib.Path)
     args = parser.parse_args()
-    original = args.bar.read_text()
+    original = args.bar.read_text(encoding="utf-8")
     changed = patch_text(original)
     if original == changed:
         print("fullpanel-bar: already patched")
@@ -571,12 +623,8 @@ def main() -> int:
     if not args.install:
         print("fullpanel-bar: patchable (dry run; use --install to apply)")
         return 0
-    # Preserve the user's plugin file and owner/mode. Write in place, so the
-    # Quickshell file watcher sees a change and the clone's ownership stays.
-    with args.bar.open("r+", encoding="utf-8") as f:
-        f.write(changed)
-        f.truncate()
-    print(f"fullpanel-bar: patched {args.bar}")
+    backup = install_text(args.bar, original, changed)
+    print(f"fullpanel-bar: patched {args.bar} (backup: {backup})")
     return 0
 
 

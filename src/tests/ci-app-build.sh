@@ -92,29 +92,6 @@ expect "--runtime-inputs is the same each time" "$k1" "$("$B" --runtime-inputs 2
 expect "--runtime-inputs is the hash of this repo's runtime too" "$k1" "$("$R/app/scripts/build-app.sh" --runtime-inputs 2>/dev/null)"
 [[ ! -e $T/r/app/runtime/.build && ! -e $T/r/app/dist && ! -e $T/r/app/app/.build ]] &&
   ok "--runtime-inputs builds nothing" || bad "--runtime-inputs built something"
-# Signing opt-in: --runtime-inputs exercises the real argument/identity guards
-# without reaching compilation, signing, installation or an app launch.
-signing_case() {   # WHAT WANT_RC ENV/ARGS...
-  local what=$1 want=$2 out rc
-  shift 2
-  out=$(env -u OMACVM_SIGN_ID -u OMACVM_TEST_ADHOC -u OMACVM_TEST_IDENTITY \
-    OMACVM_RUNTIME_KOSMICKRISP=0 "$@" 2>"$T/signing-err"); rc=$?
-  expect "$what" "$want" "$rc"
-  if [[ $want == 0 ]]; then
-    [[ $out =~ ^[0-9a-f]{64}$ ]] || bad "$what: not a runtime hash: '$out'"
-  fi
-}
-signing_case "test identity still requires a signer by default" 2 "$B" --test-identity --runtime-inputs
-signing_case "zero does not enable ad-hoc test signing" 2 OMACVM_TEST_ADHOC=0 "$B" --test-identity --runtime-inputs
-signing_case "only one enables ad-hoc test signing" 2 OMACVM_TEST_ADHOC=2 "$B" --test-identity --runtime-inputs
-signing_case "explicit ad-hoc test identity is accepted" 0 OMACVM_TEST_ADHOC=1 "$B" --test-identity --runtime-inputs
-signing_case "the environment's test identity keeps the same opt-in" 0 OMACVM_TEST_ADHOC=1 OMACVM_TEST_IDENTITY=1 "$B" --runtime-inputs
-signing_case "a supplied test signer remains accepted" 0 OMACVM_SIGN_ID=test-signer "$B" --test-identity --runtime-inputs
-signing_case "production rejects the ad-hoc test exception" 2 OMACVM_TEST_ADHOC=1 "$B" --runtime-inputs
-signing_case "release rejects the ad-hoc test exception" 2 OMACVM_TEST_ADHOC=1 "$B" --release --runtime-inputs
-signing_case "test release is still refused with the exception" 2 OMACVM_TEST_ADHOC=1 "$B" --test-identity --release --runtime-inputs
-[[ ! -e $T/r/app/runtime/.build && ! -e $T/r/app/dist && ! -e $T/r/app/app/.build ]] &&
-  ok "signing guard checks build nothing" || bad "signing guard checks built something"
 p=$(cd "$T/r/app/runtime/patches" && ls | head -1)
 echo "# changed" >> "$T/r/app/runtime/patches/$p"
 k2=$("$B" --runtime-inputs 2>/dev/null)

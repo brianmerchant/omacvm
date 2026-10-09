@@ -62,8 +62,7 @@ def compat(text):
     return text
 
 
-
-def fullpanel_patch(text):
+def fullpanel_module():
     """Compose OmacVM FullPanel's scale-aware bar rule after Omanotch's.
 
     A standalone Omanotch checkout without OmacVM's app files still works.
@@ -73,17 +72,74 @@ def fullpanel_patch(text):
 
     source = Path(__file__).resolve().parents[3] / "app/guest/fullpanel-bar.py"
     if not source.is_file():
-        return text
-    return runpy.run_path(str(source))["patch_text"](text)
+        return None
+    return runpy.run_path(str(source))
+
+
+def fullpanel_patch(text):
+    module = fullpanel_module()
+    return module["patch_text"](text) if module else text
+
+
+def write_patch(path, original, changed):
+    if changed == original:
+        return
+    from pathlib import Path
+
+    module = fullpanel_module()
+    if module:
+        module["install_text"](Path(path), original, changed)
+        return
+
+    # Standalone Omanotch has no FullPanel writer. Use the same basic safety
+    # guarantees instead of truncating the user's QML file during a failed
+    # write. A successful replacement may require a Quickshell restart.
+    import stat
+    import tempfile
+
+    target = Path(path).resolve(strict=True)
+    before = target.stat()
+    if not stat.S_ISREG(before.st_mode) or target.read_text(encoding="utf-8") != original:
+        raise ValueError("bar clone changed or is not a regular file")
+    pending = []
+
+    def stage(contents, prefix):
+        fd, name = tempfile.mkstemp(prefix=prefix, dir=target.parent)
+        staged = Path(name)
+        pending.append(staged)
+        with os.fdopen(fd, "wb") as f:
+            f.write(contents)
+            f.flush()
+            info = os.fstat(f.fileno())
+            if (info.st_uid, info.st_gid) != (before.st_uid, before.st_gid):
+                os.fchown(f.fileno(), before.st_uid, before.st_gid)
+            os.fchmod(f.fileno(), stat.S_IMODE(before.st_mode))
+            os.fsync(f.fileno())
+        return staged
+
+    try:
+        replacement = stage(changed.encode("utf-8"), "." + target.name + ".omanotch-")
+        backup = stage(original.encode("utf-8"), target.name + ".omanotch-backup-")
+        current = target.stat()
+        identity = lambda item: (item.st_dev, item.st_ino, item.st_size,
+                                 item.st_mtime_ns, item.st_ctime_ns)
+        if identity(current) != identity(before) or target.read_text(encoding="utf-8") != original:
+            raise ValueError("bar clone changed during patching; retry")
+        pending.remove(backup)  # Retain unique pre-update backup on failure.
+        os.replace(replacement, target)
+    finally:
+        for staged in pending:
+            staged.unlink(missing_ok=True)
 
 
 def main():
     path = sys.argv[1]
     text = open(path).read()
+    original = text
     if VERSION_LINE in text:
         fixed = fullpanel_patch(compat(text))
         if fixed != text:
-            open(path, "w").write(fixed)
+            write_patch(path, original, fixed)
             print(f"patched (v{VERSION}, older-Omarchy compatibility)")
         else:
             print(f"already patched (v{VERSION})")
@@ -714,7 +770,7 @@ def main():
 ''')
 
     text = fullpanel_patch(text)
-    open(path, "w").write(text)
+    write_patch(path, original, text)
     print("patched")
 
 

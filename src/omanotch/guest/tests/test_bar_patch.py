@@ -96,6 +96,20 @@ Item {
 '''
 
 
+# Model the current Omarchy clone anchors used by the composed FullPanel
+# patch, rather than the former size-only bar fixture.
+import runpy
+FULLPANEL = runpy.run_path(str(ROOT / "src/app/guest/fullpanel-bar.py"))
+BAR = BAR.replace("    implicitHeight: root.vertical ? 0 : root.barSize\n",
+                  FULLPANEL["OLD_HEIGHT"])
+BAR = BAR.replace("    implicitWidth: root.vertical ? root.barSize : 0\n",
+                  FULLPANEL["NOTCH_FLOOR"] + "    implicitWidth: root.vertical ? root.barSize : 0\n")
+BAR = BAR.replace("        LeftModules {\n          anchors.left: parent.left\n        }\n",
+                  FULLPANEL["HORIZONTAL_OLD"])
+BAR = BAR.replace("\n}\n", "\n" + FULLPANEL["EDGE_ANCHOR"] +
+                  '    entries: root.layoutEntries("left")\n  }\n}\n')
+
+
 def patched():
     d = pathlib.Path(tempfile.mkdtemp())
     try:
@@ -133,8 +147,24 @@ class Patch(unittest.TestCase):
     def setUp(self):
         self.text = patched()
 
+    def test_fullpanel_composition_is_atomic_and_backs_up_user_clone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bar = pathlib.Path(directory) / "Bar.qml"
+            original = BAR + "// user content\n"
+            bar.write_text(original)
+            subprocess.run([sys.executable, str(PATCH), str(bar)], check=True, capture_output=True)
+            self.assertIn(FULLPANEL["MARKER"], bar.read_text())
+            self.assertIn("// user content", bar.read_text())
+            backups = list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), original)
+            once = bar.read_text()
+            subprocess.run([sys.executable, str(PATCH), str(bar)], check=True, capture_output=True)
+            self.assertEqual(bar.read_text(), once)
+            self.assertEqual(len(list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))), 1)
+
     def test_version(self):
-        self.assertIn("// omarchy-notch-bar patch v19", self.text)
+        self.assertIn("// omarchy-notch-bar patch v20", self.text)
 
     def test_state_files_read_fresh_after_reload(self):
         # blockLoading alone: text() right after reload() gives the old content
@@ -154,7 +184,7 @@ class Patch(unittest.TestCase):
             f = d / "Bar.qml"
             f.write_text(self.text)
             out = subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True, text=True)
-            self.assertIn("already patched (v19)", out.stdout)
+            self.assertIn("already patched (v20)", out.stdout)
             self.assertEqual(f.read_text(), self.text)
         finally:
             shutil.rmtree(d)

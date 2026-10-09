@@ -7,6 +7,9 @@ import importlib.util
 from math import ceil
 from pathlib import Path
 import unittest
+import stat
+import tempfile
+from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parent.parent / "fullpanel-bar.py"
 spec = importlib.util.spec_from_file_location("fullpanel_bar", MODULE)
@@ -27,6 +30,71 @@ class FullPanelBarTests(unittest.TestCase):
             + mod.EDGE_ANCHOR
             + '    entries: root.layoutEntries("left")\n  }\n}\n'
         )
+
+    def test_atomic_install_backup_mode_owner_and_idempotence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bar = Path(directory) / "Bar.qml"
+            original = self.source + "// user's customization\n"
+            bar.write_text(original)
+            bar.chmod(0o640)
+            before = bar.stat()
+            changed = mod.patch_text(original)
+            backup = mod.install_text(bar, original, changed)
+            self.assertEqual(backup.read_text(), original)
+            self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o640)
+            self.assertEqual(bar.read_text(), changed)
+            self.assertEqual(stat.S_IMODE(bar.stat().st_mode), 0o640)
+            self.assertEqual((bar.stat().st_uid, bar.stat().st_gid), (before.st_uid, before.st_gid))
+            self.assertIsNone(mod.install_text(bar, changed, mod.patch_text(changed)))
+            self.assertEqual(len(list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))), 1)
+            second = mod.install_text(bar, changed, changed + "// extra\n")
+            self.assertNotEqual(backup, second)
+            self.assertEqual(backup.read_text(), original)
+            self.assertEqual(second.read_text(), changed)
+
+    def test_failed_replace_keeps_original_and_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bar = Path(directory) / "Bar.qml"
+            bar.write_text(self.source)
+            with patch.object(mod.os, "replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    mod.install_text(bar, self.source, mod.patch_text(self.source))
+            self.assertEqual(bar.read_text(), self.source)
+            backups = list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(), self.source)
+            self.assertEqual(list(bar.parent.glob(".Bar.qml.fullpanel-*")), [])
+
+    def test_failed_staging_keeps_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bar = Path(directory) / "Bar.qml"
+            bar.write_text(self.source)
+            with patch.object(mod.os, "fsync", side_effect=OSError("write failed")):
+                with self.assertRaisesRegex(OSError, "write failed"):
+                    mod.install_text(bar, self.source, mod.patch_text(self.source))
+            self.assertEqual(bar.read_text(), self.source)
+            self.assertEqual(list(bar.parent.iterdir()), [bar])
+
+    def test_concurrent_edit_and_unpatchable_clone_stay_intact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bar = Path(directory) / "Bar.qml"
+            bar.write_text("// concurrent user edit\n")
+            with self.assertRaisesRegex(ValueError, "changed during patching"):
+                mod.install_text(bar, self.source, mod.patch_text(self.source))
+            self.assertEqual(bar.read_text(), "// concurrent user edit\n")
+            with self.assertRaises(ValueError):
+                mod.patch_text(bar.read_text())
+            self.assertEqual(list(bar.parent.iterdir()), [bar])
+
+    def test_symlink_clone_preserves_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "Owned.qml"
+            target.write_text(self.source)
+            link = Path(directory) / "Bar.qml"
+            link.symlink_to(target.name)
+            mod.install_text(link, self.source, mod.patch_text(self.source))
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(target.read_text(), mod.patch_text(self.source))
 
     def test_adds_dynamic_height_bounds_and_single_widget_instance_per_side(self):
         s = mod.patch_text(self.source)

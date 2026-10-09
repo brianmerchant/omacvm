@@ -33,7 +33,8 @@ systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover /usr/local/bin/
 # An additive patch to the existing user-owned Omarchy bar clone. Omanotch's
 # own installer also composes this patch after its clone upgrades, so they
-# cannot overwrite each other. This is an install-time action, NOT a daemon.
+# cannot overwrite each other. The patcher backs up and atomically replaces
+# a supported clone; failures leave it intact. No plugin is created or selected.
 install -Dm755 fullpanel-bar.py /usr/local/lib/omacvm/fullpanel-bar.py
 bar_clone="$H/.config/omarchy/plugins/$U.bar/Bar.qml"
 if [[ -f $bar_clone ]]; then

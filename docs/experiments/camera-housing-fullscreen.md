@@ -1,120 +1,109 @@
-# FullPanel port to OmacVM 3.0.12
+# FullPanel on OmacVM 3.0.14
 
-Status: **SOURCE-INTEGRATED**, not hardware-verified on this base.
+Full Panel (Experimental) keeps QEMU in a native macOS fullscreen Space and
+uses the physical display area beside a MacBook camera housing. Native is
+the default, including when the saved mode is unknown. Select **Full screen
+mode → Full Panel (Experimental)** in OmacVM.app before the next VM start.
+The launcher sets `OMACVM_CAMERA_HOUSING=1` for that start; Native removes an
+inherited flag. This setting does not change the VM's saved feature choices.
+Full Panel suppresses the Mac-side Omanotch rendering link for that start
+because the guest bar occupies the camera strip itself.
 
-- Target base: `83157df21a041043114a39ad63a12a3faf3c055a` (3.0.12).
-- Verified source: `2e7b47c46f247e507c16d2cbe3b288291f6b4517`.
-- Source tag: `fullpanel-2328-hardware-verified-2026-10-08`.
+The Cocoa transformer is an independent Objective-C implementation for
+QEMU's MIT-licensed Cocoa driver. UTM's camera-housing fullscreen work by
+Turing Software, LLC (PRs #7885 and #7910, Apache-2.0) is architectural prior
+art; its Swift source was not copied.
 
-The runtime transformer and its two regression tests are copied byte-for-byte
-from the verified source. The transformer credits UTM's camera-housing
-fullscreen work by Turing Software, LLC as its architectural prior art.
-The source's known brief flash on Mission Control return remains. Its
-restoration logic, window levels, Space management and diagnostic policies
-are unchanged; the app enables none of the experimental policy flags.
+## Geometry, reveal and fallback
 
-## Compatibility audit
+FullPanel verifies AppKit method encodings and the required SkyLight symbols
+before using private interfaces. A non-notched display, unavailable private
+dependency, incompatible AppKit method or the macOS preference to keep the
+fullscreen menu bar visible uses ordinary native fullscreen.
 
-The target was clean at the requested base before editing. Both worktrees
-were at their specified revisions, and the annotated source tag peeled to
-the verified source commit. The source worktree was read only throughout.
+The frame hook accepts the whole display only for an untiled fullscreen
+region. After acceptance, it retains that physical frame when AppKit
+re-queries the exact camera-safe tile or tries a safe-area shrink. Horizontal
+Split View remains eligible for AppKit's own geometry. If the physical area
+is lost, the state latches that loss and restores the normal menu bar; it
+does not repeatedly force a frame back into place.
 
-The current `Model.swift`, `Runner.swift` and `Views.swift` accept the
-existing setting, start hook and picker as additions. Native remains the
-default, including for an unknown saved mode. Runner snapshots the mode
-once per start, sets `OMACVM_CAMERA_HOUSING=1` only for FullPanel and removes
-an inherited camera-housing flag for Native. The Omanotch override changes
-only the start's in-memory `MacLinks`, leaving the saved feature record and
-the other links, including Mac input methods and Touch ID, intact.
+Menu-bar alpha changes target only the window's owned fullscreen Space
+(type 4). Pointer motion at the top edge permits menu reveal; AppKit's reveal
+callbacks also control the app's fullscreen toolbar. Exit/close restores
+presentation options, toolbar visibility and the Space's menu alpha.
+Space changes, key-window and visibility events retain bounded return
+recovery. Recovery checks WindowServer bounds before reapplying reveal state;
+it stops on missing evidence and expires after about two seconds, without
+changing geometry. The former tracing and A/B policy switches are removed.
 
-The pinned QEMU revision is unchanged. New Cocoa patches since the verified
-source are notch-park logic and hooks, IME logic and hooks, and no App Nap;
-the boot-splash patch also has newer timing and display-link ownership fixes.
-None changes FullPanel's required anchors. FullPanel runs after all these
-patches, preserving the entire upstream patch sequence and its checks.
-The newer virgl runtime patches are retained too.
+## Existing cloned bar: Quickbar v4
 
-Both clean-size patches and the guest display code are unchanged. FullPanel
-continues to use clean-size: a 3600×2338 backing area produces the verified
-3600×2328 guest mode with scale presets 1, 1.33333, 1.6, 2, 3 and 4.
-No height-trim bypass is added.
-`build-app.sh` already hashes `patches/*` and `Tests/display/*`, covering the
-transformer and both regression tests without changing the hashing code.
-The older source's ad hoc test-signing exception is not ported.
+The launcher passes measured built-in screen width, bar height and camera
+bounds as integer tenths of macOS points through SMBIOS. `omacvm-app-host`
+exposes these in `/run/omacvm/host.env`; the display agent identifies the
+built-in guest output in `$XDG_RUNTIME_DIR/omacvm/builtin`.
 
-## Static validation
+The guest installer patches only an existing
+`~/.config/omarchy/plugins/$USER.bar/Bar.qml`. It creates no plugin, selects
+no plugin, and changes neither `shell.json` nor `shell.toml`. The patcher
+validates unique known anchors, migrates v1/v2/v3 to v4 and is idempotent.
+Each changed install saves a unique `Bar.qml.fullpanel-backup-*` beside the
+clone, then atomically replaces it while preserving owner and mode. A failed
+transformation or write leaves the clone intact. Omanotch's bar patcher
+composes the same transformation and uses the same backup/replacement path;
+there is no second backup layer in the guest installer.
 
-Passed:
-
-- Swift parsing of the three changed app files; Bash 3.2 and Python syntax.
-- The verified frame-guard suite, including 24 clean-size cases, 72 mocked
-  window scenarios and 23 return/compositor scenarios, without a VM or GUI.
-- All seven exact transformer anchors traced to current upstream patch
-  contexts; source checks and byte-for-byte idempotence on an anchor fixture;
-  missing and duplicate anchors rejected without changing the input.
-- Isolated checks using the actual app setting and start snippets: Native
-  default/fallback, environment selection, other links retained, saved
-  features unchanged. Direct 3600×2328 scale-preset check.
-- Upstream clean-size, pointer guard/start, hardware cursor, notch park,
-  fullscreen-space/start/shutdown/quit/rim, tap-permission, IME, IME-start
-  and App Nap regressions. Keyboard shortcut rules: 1,654 checks.
-- Hash sensitivity to the transformer and each FullPanel regression test,
-  using temporary copies and `build-app.sh --runtime-inputs` only.
-- Complete changed-file review and `git diff --check`.
-
-The shortcut wrapper skipped the unavailable window-server list and hit
-Bash 3.2's empty-array error; its pure rules checker was run directly and
-passed. The IME-start check initially could not write Swift's compiler cache
-inside the sandbox; it passed when rerun with that access allowed.
-
-Neither worktree retains the complete patched `ui/cocoa.m`. Anchor and
-idempotence checks therefore used upstream patch contexts and a fixture,
-not the full final Cocoa translation unit. A complete patch replay and
-QEMU compilation remain unverified. No full Swift app build, QEMU build,
-full CI, VM check or hardware/UI test was run, and no application was launched.
-ShellCheck was not run because it is not installed.
-
-## Manual build
-
-A full QEMU runtime rebuild is necessary. The new inputs invalidate the
-existing runtime hash. With the output bundle stopped, run:
+For developer inspection of a supported existing clone, run as its owner:
 
 ```sh
-cd ~/Projects/OmacVM-Worktrees/fullpanel-latest-integration
-app/scripts/build-app.sh --name "OmacVM FullPanel 3.0.12"
+python3 /usr/local/lib/omacvm/fullpanel-bar.py "$HOME/.config/omarchy/plugins/$USER.bar/Bar.qml"
 ```
 
-This builds `app/dist/OmacVM FullPanel 3.0.12.app` locally, without installing
-or launching it. Hardware verification on a separate test VM is still required.
+This is a dry run. `--install` applies it with a backup. Customizations outside
+the validated blocks survive; changed anchors or modified FullPanel blocks
+are rejected for manual review. No background daemon is added. File replacement
+is atomic: the current QML remains intact if staging fails, and a unique
+pre-update backup is retained. A Quickshell watcher may not reload a replaced
+file automatically; after updating an active clone, run `omarchy-restart-shell`
+in an interactive Omarchy session. The installer does not restart the desktop.
 
-## FullPanel adaptive Quickbar (3.0.13 local integration)
+The QML converts the host dimensions using the QScreen logical width exactly
+once. Height and bounds follow guest resolution and 1x–4x scale, including
+1.33333 and 1.6. The measured FullPanel height replaces the ordinary horizontal
+bar height on an eligible built-in top bar; it is independent of font scaling.
+Native, windowed, non-notched and external outputs retain their normal layout.
+The existing clean-size trim and guest scale presets remain unchanged.
 
-The Mac launcher measures the built-in notched panel with `NSScreen` and sends
-`omacvm.fullpanel=1`, `omacvm.fullpanelwidth10` and `omacvm.fullpanelbar10`
-through QEMU SMBIOS. `omacvm-app-host` already translates these into
-`/run/omacvm/host.env`. Native mode sends none of them.
+Quickbar v4 keeps widget order and region identity. A disjoint prefix of the
+right-hand entries can borrow spare space left of the notch; the remaining
+entries stay right. Actual slot widths determine the split, without duplicate
+steady-state widget instances. Page arrows expose overflow. Rebalancing is
+paused during hover, popouts and dragging to prevent hover-dependent widths
+from repeatedly recreating widgets at 4x. The accepted 3x/4x layout is retained.
 
-`src/app/guest/fullpanel-bar.py` adds an idempotent QML rule to an existing
-Omarchy `Bar.qml` clone (compatible with the user bar clone from Omanotch).
-Omanotch's guest patcher also composes it on each bar upgrade. Its QML reads
-the host metadata and the built-in output name (runtime `omacvm/builtin`).
-It derives the minimum top-bar height from **the QScreen logical width** and
-the Mac's measured bar-to-screen-width ratio. That naturally follows Hyprland
-scale and guest resolution without multiplying the font scale a second time.
-The minimum applies only to the built-in FullPanel screen, and only when the
-screen's aspect ratio shows a plausible notch strip. External displays and
-native/windowed/ordinary 16:10 or 16:9 modes retain Omarchy's normal bar.
-The user's chosen size is a lower bound; the script never changes shell.toml.
+## Limitations and troubleshooting
 
-The existing Omanotch cloned bar is currently required. If an installation
-has no cloned bar, the guest installer leaves it alone rather than silently
-replacing the user's bar. A future general-purpose installer can offer a
-clone explicitly. The patch is staged locally until the user tests it.
+A brief camera-strip flash on Mission Control return remains. Matching
+WindowServer bounds is a recovery guard, not proof of which pixels the
+compositor displayed. Private macOS interfaces can change; Native remains
+the fallback. Host notch measurements are taken at VM start. An existing
+supported bar clone is required; no clone means no guest bar patch.
 
-To test locally after running `omacvm apply` on the VM (which installs guest
-updates and can restart Omanotch), first remove the experimental `size-horizontal`
-user override from `~/.config/omarchy/shell.toml` but preserve `[font]` settings.
-The custom FullPanel launcher must start the VM to transmit SMBIOS fields:
-using the signed stock launcher with only `OMACVM_RESOURCES` overridden does
-NOT send these fields. No background helper is added. Do not run the stock
-and custom launchers at the same time.
+Check the VM's `qemu.log` for the selected mode, private-dependency fallback,
+`FRAME HOOK rejected`, protected frame, `AREA LOST`, transaction failure or
+return timeout messages. For guest clearance, inspect the numeric FullPanel
+fields in `host.env`, the built-in output name and the v4 marker in the clone.
+A Native launcher supplies no FullPanel metadata. A rejected clone should be
+reviewed against its backup rather than overwritten.
+
+Fast offline coverage lives in
+`app/runtime/Tests/display/test-camera-housing-frame-guards.py`,
+`test-camera-housing-fullscreen.sh` and
+`src/app/guest/tests/test-fullpanel-bar.py`. It compiles the generated helper
+and geometry methods against fake AppKit objects, checks guarded restoration
+and tests bar migration/atomic installation. Standalone Omanotch safe-write
+checks run with `python3 src/omanotch/guest/tests/test_safe_write.py`; the full
+Omanotch bar suite also needs Node.js. These tests do not replace a complete
+QEMU translation-unit build or a future Mac runtime test of fullscreen entry,
+Split View, menu reveal, Space return, Mission Control and external displays.
