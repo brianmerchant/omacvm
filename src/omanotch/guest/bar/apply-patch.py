@@ -34,7 +34,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 18
+VERSION = 19
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -117,6 +117,20 @@ def main():
   // The strip then goes black, as macOS does over full-screen video.
   property bool notchFullscreen: false
   property bool notchFullscreenRecheck: false
+  // The NOTCH copy's height and top padding [height, pad] (logical px).
+  // The strip shows NOTCH's bottom `strip` px: notchcast rounds NOTCH up to
+  // whole pixels at fractional scales and the Mac cuts those extra rows off
+  // at the top. So the bar (`size` tall) is centred in that bottom part, or
+  // in its top `flush` px when the bar is only the camera housing's height,
+  // and the padding is snapped to whole pixels of the output (`scale`).
+  function notchBox(outH, strip, flush, size, scale) {
+    var full = Math.max(size, Math.round(strip), outH)
+    var cut = strip > 0 && strip < full ? full - strip : 0
+    var region = flush > 0 ? Math.max(size, Math.min(flush, full - cut)) : full - cut
+    var s = scale > 0 ? scale : 1
+    var pad = Math.round((cut + (region - size) / 2) * s) / s
+    return [flush > 0 ? Math.ceil(cut + region) : full, pad]
+  }
   function notchWorkspaceId() {
     var ms = Hyprland.monitors.values
     for (var i = 0; i < ms.length; i++)
@@ -494,20 +508,17 @@ def main():
     readonly property bool notchLayout: notchRole !== ""
     // The parked copy is 1 px tall: panels open at its height + gap, so they
     // appear right below the notch strip instead of a bar height lower.
-    // The NOTCH copy fills the whole strip (notchHeight) and centres its
-    // content in it.
-    // It fills the whole NOTCH output, whose height notchcast rounds up to
-    // whole pixels at fractional scales: nothing may show below the bar.
+    // The NOTCH copy fills the whole NOTCH output (nothing may show below the
+    // bar) and centres its content in the part the strip shows (notchBox).
     // Flush (notchBarHeight): only the camera housing's height, the wallpaper
     // below it; over fullscreen the whole strip again, to paint it black.
-    readonly property int notchFullSize: Math.max(root.barSize, Math.round(root.notchHeight),
-                                                  screen ? Math.ceil(screen.height) : 0)
+    readonly property var notchFit: root.notchBox(screen ? Math.ceil(screen.height) : 0, root.notchHeight,
+                                                  notchBlack ? 0 : root.notchBarHeight, root.barSize,
+                                                  screen ? screen.devicePixelRatio : 1)
     readonly property int parkedSize: notchRole === "parked" ? 1
-      : notchRole === "notch" ? (root.notchBarHeight > 0 && !notchBlack
-                                 ? Math.max(root.barSize, Math.min(Math.round(root.notchBarHeight), notchFullSize))
-                                 : notchFullSize) : root.barSize
-    readonly property int notchPadTop: notchRole === "notch" ? Math.floor((parkedSize - root.barSize) / 2) : 0
-    readonly property int notchPadBottom: notchRole === "notch" ? parkedSize - root.barSize - notchPadTop : 0
+      : notchRole === "notch" ? notchFit[0] : root.barSize
+    readonly property real notchPadTop: notchRole === "notch" ? notchFit[1] : 0
+    readonly property real notchPadBottom: notchRole === "notch" ? parkedSize - root.barSize - notchPadTop : 0
     exclusionMode: barWindow.parked ? ExclusionMode.Ignore : ExclusionMode.Auto
 
     // omarchy-notch-bar: Hyprland leaves a mapped layer surface at its old

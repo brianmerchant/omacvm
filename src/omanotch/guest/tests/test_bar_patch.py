@@ -7,6 +7,7 @@ With node installed, the patch's startup and watchdog logic also runs against
 fake state files: the right bar from the first frame after login.
 """
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -133,7 +134,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertIn("// omarchy-notch-bar patch v18", self.text)
+        self.assertIn("// omarchy-notch-bar patch v19", self.text)
 
     def test_state_files_read_fresh_after_reload(self):
         # blockLoading alone: text() right after reload() gives the old content
@@ -153,7 +154,7 @@ class Patch(unittest.TestCase):
             f = d / "Bar.qml"
             f.write_text(self.text)
             out = subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True, text=True)
-            self.assertIn("already patched (v18)", out.stdout)
+            self.assertIn("already patched (v19)", out.stdout)
             self.assertEqual(f.read_text(), self.text)
         finally:
             shutil.rmtree(d)
@@ -475,6 +476,64 @@ class Hover(unittest.TestCase):
 
     def test_ipc_entry(self):
         self.assertIn("return root.notchHover(x)", function(patched(), "hover"))
+
+
+# The notched Macs at their default resolution: strip height and display
+# width in points (safe-area top inset; 74 px on the 14- and 16-inch, 66 px
+# at the Air's 1470 pt), guest display width in pixels (the Mac's backing
+# pixels, or another resolution of the user's choice).
+MACS = [
+    ("14-inch", 37, 1512, 3024),
+    ("14-inch, guest 3600 px (#307)", 37, 1512, 3600),
+    ("16-inch", 37, 1728, 3456),
+    ("Air 13-inch", 33, 1470, 2940),
+    ("Air 13-inch at 1280 pt", 32, 1280, 2560),
+]
+SCALES = [1, 1.25, 1.5, 1.6, 5 / 3, 1.75, 2]
+
+
+def notch_mode(logical_h, scale):
+    """notchrule.h notch_mode: NOTCH's logical height, whole pixels at `scale`."""
+    lh = math.ceil(logical_h - 1e-6)
+    while abs(lh * scale - round(lh * scale)) > 1e-3:
+        lh += 1
+    return lh
+
+
+class Centre(unittest.TestCase):
+    """The bar in the middle of the strip at every scale (the strip shows NOTCH's bottom rows)."""
+
+    def boxes(self, cases):
+        js = "function notchBox(outH, strip, flush, size, scale) { %s }\n" % function(patched(), "notchBox")
+        js += "console.log(JSON.stringify(%s.map(function (c) { return notchBox.apply(null, c) })))" % json.dumps(cases)
+        return json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
+
+    def check(self, flush_pt):
+        cases, info = [], []
+        for name, strip_pt, width_pt, guest_px in MACS:
+            for s in SCALES:
+                strip = strip_pt * (guest_px / s) / width_pt   # notchrule.h strip_logical
+                out_h = notch_mode(strip, s)
+                flush = flush_pt * (guest_px / s) / width_pt if flush_pt else 0
+                # notchcast passes both on with two decimals.
+                cases.append([out_h, round(strip, 2), round(flush, 2), 26, s])
+                info.append((name, s, strip, out_h, flush, 2 * width_pt / (guest_px / s)))
+        for (name, s, strip, out_h, flush, dev), (height, pad) in zip(info, self.boxes(cases)):
+            with self.subTest(mac=name, scale=s):
+                self.assertEqual(height, out_h if not flush else math.ceil(out_h - strip + flush - 1e-6))
+                self.assertAlmostEqual(pad * s, round(pad * s), msg="whole pixels")
+                above = pad - (out_h - strip)            # the strip cuts NOTCH's extra rows at the top
+                below = (flush or strip) - above - 26
+                self.assertLessEqual(abs(above - below) / 2 * dev, 0.5 + 1e-9,
+                                     "%.2f device px above, %.2f below" % (above * dev, below * dev))
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_centred_in_the_strip(self):
+        self.check(0)
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_flush_centred_in_the_housing_height(self):
+        self.check(32)
 
 
 if __name__ == "__main__":

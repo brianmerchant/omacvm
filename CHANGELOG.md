@@ -12,6 +12,13 @@ in more words.
   builds it again on the next `omacvm apply` (a few minutes, while Vulkan is on). If you started
   Moonlight with `VK_ICD_FILENAMES=/nonexistent.json` (or a similar Vulkan override) to
   get around it, remove that now.
+- Omanotch: the bar sits in the middle of the notch strip at every display scale, on the 14- and
+  16-inch MacBook Pro and the MacBook Air. At scale 1.6 it was about 3 px too low, at scale 2 about
+  1 px too high. At fractional scales the hidden NOTCH output is rounded up to whole pixels, and
+  the strip meant to cut those extra rows at the top, but cut them at the bottom (AppKit flips a
+  flipped view's layer too). The bar also centred itself in the whole output rather than in the
+  part the strip shows, in whole logical px (5 above and 6 below at scale 2). Now the strip cuts
+  at the top and the bar centres in the shown part to the pixel.
 
 ## 3.0.10
 
