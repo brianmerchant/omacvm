@@ -106,15 +106,56 @@ lines.push(failed ? "JSFAIL" : "JSOK")
 lines.join("\\n")
 JS
 
+# A theme switch's reveal: the strip and the built-in display both take part,
+# whichever output's new image is decoded first (an Omarchy theme switch
+# showed the display's new picture only at the end of the reveal).
+reveal=$(awk '/function maybeStartReveal\(\) \{/ {on = 1} on {print} on && /^      \}$/ {exit}' "$qml")
+[[ -n $reveal ]] || { bad "maybeStartReveal not found in the patched file"; exit 1; }
+cat > "$out/r.js" <<JS
+var Image = { Ready: 1 }, Qt = { callLater: function (f) { f() } }
+var lines = [], failed = false, root
+function reset() {
+  root = { incomingBackground: "next.jpg", revealProgress: 0, started: false,
+           startReveal: function (p) { p.maskReady = true; if (!this.started) this.started = true } }
+}
+function Panel(name) {
+  var p = { name: name, maskReady: false, incomingFrame: { status: 0 } }
+  p.panel = p
+  with (p) { p.maybeStartReveal = eval("(" + $(printf '%s' "$reveal" | sed 's/^ *function maybeStartReveal/function/' | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))') + ")") }
+  return p
+}
+function ready(p) { p.incomingFrame.status = Image.Ready; p.maybeStartReveal() }
+function check(name, ok) { lines.push((ok ? "ok   " : "FAIL ") + name); if (!ok) failed = true }
+var orders = [["NOTCH", "Virtual-1"], ["Virtual-1", "NOTCH"]]
+for (var i = 0; i < orders.length; i++) {
+  reset()
+  var a = Panel(orders[i][0]), b = Panel(orders[i][1])
+  ready(a)
+  root.revealProgress = 0.3      // the reveal runs
+  ready(b)
+  check("reveal: " + b.name + " ready after " + a.name + " joins it", a.maskReady && b.maskReady)
+}
+reset()
+var late = Panel("Virtual-1")
+root.revealProgress = 1          // finished: the new picture shows anyway
+ready(late)
+check("reveal: an output ready after the end does not start it again", !late.maskReady && !root.started)
+lines.push(failed ? "JSFAIL" : "JSOK")
+lines.join("\\n")
+JS
+
 if command -v node >/dev/null; then
   res=$(node -p "$(cat "$out/t.js")" 2>&1)
+  res2=$(node -p "$(cat "$out/r.js")" 2>&1)
 elif command -v osascript >/dev/null; then
   res=$(osascript -l JavaScript "$out/t.js" 2>&1)
+  res2=$(osascript -l JavaScript "$out/r.js" 2>&1)
 else
-  echo "SKIP: no node and no osascript for the JavaScript part"; res="JSOK"
+  echo "SKIP: no node and no osascript for the JavaScript part"; res="JSOK"; res2="JSOK"
 fi
 echo "$res" | grep -v '^JS'
-[[ $res == *JSOK* ]] || fail=1
+echo "$res2" | grep -v '^JS'
+[[ $res == *JSOK* && $res2 == *JSOK* ]] || fail=1
 
 echo "notch-wallpaper: $([[ $fail == 0 ]] && echo all ok || echo FAILED)"
 exit $fail

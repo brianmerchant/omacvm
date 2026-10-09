@@ -25,6 +25,15 @@ in more words.
   the VM gets the input method port, and the app sets up the VM's part as soon as the VM is up,
   so it works from that start. Switching it off works the same way. While the VM runs, the
   control centre (or `omacvm enable|disable mac-ime`) switches it as before.
+- Omanotch: switching the Omarchy theme shows Omarchy's reveal again, instead of a black flash
+  and the desktop sliding in. A theme switch reloads Hyprland's config, which dropped the rule
+  omacvm-display-sync gives the screen; the screen fell back to an "auto" place, which is to the
+  right of the hidden NOTCH output, until display-sync put it back 0.3 s later. Hyprland slid the
+  picture along and the wallpaper hid while its output moved. omacvm_app.lua now sets the rule
+  the screen shows again during the reload (display-sync keeps it in the runtime folder), so
+  nothing moves. And the reveal ran on the strip only when its new image was ready first; the
+  built-in display then switched at the end without the animation. A late output now joins the
+  running reveal (background patch v7).
 
 ## 3.0.10
 
