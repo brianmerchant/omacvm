@@ -86,3 +86,35 @@ app/scripts/build-app.sh --name "OmacVM FullPanel 3.0.12"
 
 This builds `app/dist/OmacVM FullPanel 3.0.12.app` locally, without installing
 or launching it. Hardware verification on a separate test VM is still required.
+
+## FullPanel adaptive Quickbar (3.0.13 local integration)
+
+The Mac launcher measures the built-in notched panel with `NSScreen` and sends
+`omacvm.fullpanel=1`, `omacvm.fullpanelwidth10` and `omacvm.fullpanelbar10`
+through QEMU SMBIOS. `omacvm-app-host` already translates these into
+`/run/omacvm/host.env`. Native mode sends none of them.
+
+`src/app/guest/fullpanel-bar.py` adds an idempotent QML rule to an existing
+Omarchy `Bar.qml` clone (compatible with the user bar clone from Omanotch).
+Omanotch's guest patcher also composes it on each bar upgrade. Its QML reads
+the host metadata and the built-in output name (runtime `omacvm/builtin`).
+It derives the minimum top-bar height from **the QScreen logical width** and
+the Mac's measured bar-to-screen-width ratio. That naturally follows Hyprland
+scale and guest resolution without multiplying the font scale a second time.
+The minimum applies only to the built-in FullPanel screen, and only when the
+screen's aspect ratio shows a plausible notch strip. External displays and
+native/windowed/ordinary 16:10 or 16:9 modes retain Omarchy's normal bar.
+The user's chosen size is a lower bound; the script never changes shell.toml.
+
+The existing Omanotch cloned bar is currently required. If an installation
+has no cloned bar, the guest installer leaves it alone rather than silently
+replacing the user's bar. A future general-purpose installer can offer a
+clone explicitly. The patch is staged locally until the user tests it.
+
+To test locally after running `omacvm apply` on the VM (which installs guest
+updates and can restart Omanotch), first remove the experimental `size-horizontal`
+user override from `~/.config/omarchy/shell.toml` but preserve `[font]` settings.
+The custom FullPanel launcher must start the VM to transmit SMBIOS fields:
+using the signed stock launcher with only `OMACVM_RESOURCES` overridden does
+NOT send these fields. No background helper is added. Do not run the stock
+and custom launchers at the same time.

@@ -34,7 +34,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 19
+VERSION = 20
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -62,11 +62,26 @@ def compat(text):
     return text
 
 
+
+def fullpanel_patch(text):
+    """Compose OmacVM FullPanel's scale-aware bar rule after Omanotch's.
+
+    A standalone Omanotch checkout without OmacVM's app files still works.
+    """
+    import runpy
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[3] / "app/guest/fullpanel-bar.py"
+    if not source.is_file():
+        return text
+    return runpy.run_path(str(source))["patch_text"](text)
+
+
 def main():
     path = sys.argv[1]
     text = open(path).read()
     if VERSION_LINE in text:
-        fixed = compat(text)
+        fixed = fullpanel_patch(compat(text))
         if fixed != text:
             open(path, "w").write(fixed)
             print(f"patched (v{VERSION}, older-Omarchy compatibility)")
@@ -698,6 +713,7 @@ def main():
     }
 ''')
 
+    text = fullpanel_patch(text)
     open(path, "w").write(text)
     print("patched")
 

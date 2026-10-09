@@ -27,6 +27,27 @@ final class Runner {
     /// virtio-gpu outputs: the window and up to four more Mac displays.
     static let maxOutputs = 5
 
+    /// Physical Mac notch/menu-bar geometry for FullPanel. The bar is a few
+    /// points taller than the camera housing, matching macOS's thin strip of
+    /// menu-bar background below the notch. We pass values in tenths of Mac
+    /// points (integer SMBIOS data), not guest pixels: the guest knows its
+    /// current resolution and Hyprland scale and can adjust without a daemon.
+    static func fullPanelBarGeometry() -> (screenWidth10: Int, barHeight10: Int)? {
+        guard let screen = NSScreen.screens.first(where: { s in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return false
+            }
+            return CGDisplayIsBuiltin(CGDirectDisplayID(id.uint32Value)) != 0
+                && s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
+        }) else { return nil }
+        let width = screen.frame.width
+        let safe = screen.safeAreaInsets.top
+        let macMenuBar = max(0, screen.frame.maxY - screen.visibleFrame.maxY)
+        let wanted = max(macMenuBar, safe + 1.5)
+        guard width > 0, wanted >= 5, wanted < width / 5 else { return nil }
+        return (Int((width * 10).rounded()), Int((wanted * 10).rounded()))
+    }
+
     func arguments() -> [String] {
         let c = config
         // QEMU option values split at commas; a comma in a value is written twice.
@@ -91,6 +112,15 @@ final class Runner {
         // output when the Mac's pointer leaves for the strip (omacvm-cocoa-notch-park):
         // notchcast then never hides the guest's cursor (that lagged by Hyprland's tick).
         a += ["-smbios", "type=11,value=omacvm.notchpointer=1"]
+        // The FullPanel bar measures the real Mac's notch once at VM start.
+        // SMBIOS -> /run/omacvm/host.env (omacvm-app-host); the QML bar then
+        // follows the guest resolution/scale reactively. Native has no flag.
+        if Settings.fullScreenMode == .fullPanel,
+           let panel = Runner.fullPanelBarGeometry() {
+            a += ["-smbios", "type=11,value=omacvm.fullpanel=1",
+                  "-smbios", "type=11,value=omacvm.fullpanelwidth10=\(panel.screenWidth10)",
+                  "-smbios", "type=11,value=omacvm.fullpanelbar10=\(panel.barHeight10)"]
+        }
         // HDR: the guest's display sync reads it (omacvm-app-host).
         if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
