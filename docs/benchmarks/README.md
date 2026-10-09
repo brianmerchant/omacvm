@@ -880,9 +880,9 @@ GPU path, vkmark full screen 820, no context lost, no Mac GPU restart, QEMU
 at idle 10.6 % CPU in both modes, the Mac at 60 % free memory at the end
 either way.
 
-**Automatic = Vulkan on macOS 26 and newer from 3.0.2** (KosmicKrisp in the
-app; OpenGL on macOS 15 and before, where Venus runs on MoltenVK). 3.0.0 and
-3.0.1 kept Automatic on OpenGL until this A/B. One constant turns it back
+**Automatic = Vulkan on macOS 26 and newer from 3.0.13** (KosmicKrisp in the
+app; OpenGL on macOS 15 and before, where Venus runs on MoltenVK). 3.0.0 to
+3.0.12 kept Automatic on OpenGL. One constant turns it back
 (`Graphics.autoVulkan`, `GRAPHICS_AUTO_VULKAN`).
 
 Vulkan windows: a Venus image handed to Hyprland as a dma-buf cannot be
