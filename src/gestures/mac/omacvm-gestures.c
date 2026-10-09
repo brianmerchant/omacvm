@@ -97,7 +97,12 @@
 #include "scroll-model.h"
 #include "mouse-model.h"
 #include <IOKit/IOKitLib.h>
+#include <fcntl.h>
+#include <mach-o/dyld.h>
 #include <signal.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -931,6 +936,78 @@ static void permissionsSeen(int perm) {
   logf_("permissions: Accessibility %s, Input Monitoring %s", perm & PERM_AX ? "granted" : "MISSING",
         perm & PERM_IM ? "granted" : "MISSING");
 }
+// ---- permission entries macOS kept for another build (#306) ----
+// macOS keeps each permission as an entry tied to the code signature of the
+// build that asked. One from another signature (a helper built on this Mac,
+// before OmacVM.app's signed copy) no longer matches: System Settings shows
+// OmacVM Gestures as on, tccd refuses ("Failed to match existing code
+// requirement"), and switching it off and on again does not replace it
+// (brianmerchant, 3.0.9 on macOS 15.8: waiting for permissions for good,
+// fixed only by tccutil reset). The app's own keyboard entry had the same
+// (#255). So once per build, when a permission is missing at start, the
+// helper clears its own entry for it (tccutil, no admin password needed)
+// before it asks: a stale entry goes, and macOS asks again. A permission it
+// has is never touched.
+extern char **environ;
+static int tccReset(const char *service, const char *id) {
+  const char *argv[] = { "/usr/bin/tccutil", "reset", service, id, NULL };
+  posix_spawn_file_actions_t fa;
+  posix_spawn_file_actions_init(&fa);
+  posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
+  posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+  pid_t pid;
+  int rc = posix_spawn(&pid, argv[0], &fa, NULL, (char *const *)argv, environ);
+  posix_spawn_file_actions_destroy(&fa);
+  if (rc) return 0;
+  int st = 0;
+  while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+  return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+static int (*tccResetFn)(const char *service, const char *id) = tccReset;
+
+// perm: what macOS answers now; id: this helper's bundle identifier; stamp:
+// the file that keeps which build already did this; build: that build's key.
+// Returns how many entries were cleared.
+static int clearOldGrants(int perm, const char *id, const char *stamp, const char *build) {
+  if (!id || !*id || !stamp || !build || (perm & (PERM_AX | PERM_IM)) == (PERM_AX | PERM_IM)) return 0;
+  char was[128] = "";
+  FILE *f = fopen(stamp, "r");
+  if (f) { if (!fgets(was, sizeof was, f)) was[0] = 0; fclose(f); }
+  was[strcspn(was, "\n")] = 0;
+  if (!strcmp(was, build)) return 0;
+  int n = 0;
+  if (!(perm & PERM_AX)) {
+    n += tccResetFn("Accessibility", id);
+    n += tccResetFn("PostEvent", id);   // "control the computer", its own entry (#255)
+  }
+  if (!(perm & PERM_IM)) n += tccResetFn("ListenEvent", id);
+  f = fopen(stamp, "w");
+  if (f) { fprintf(f, "%s\n", build); fclose(f); }
+  logf_("cleared what macOS kept of %s's %s%s%s for an older build, so it can ask again (once per build)", id,
+        perm & PERM_AX ? "" : "Accessibility", (perm & (PERM_AX | PERM_IM)) ? "" : " and ", perm & PERM_IM ? "" : "Input Monitoring");
+  return n;
+}
+
+// This build: the executable's size and time (a new build is a new file).
+static void buildKey(char *out, size_t cap) {
+  char path[4096]; uint32_t len = sizeof path;
+  struct stat st;
+  if (_NSGetExecutablePath(path, &len) || stat(path, &st)) { snprintf(out, cap, "?"); return; }
+  snprintf(out, cap, "%lld-%ld", (long long)st.st_size, (long)st.st_mtimespec.tv_sec);
+}
+
+static void clearOldGrantsOnce(int perm) {
+  CFStringRef cid = CFBundleGetIdentifier(CFBundleGetMainBundle());
+  char id[256], stamp[1024], build[64];
+  const char *home = getenv("HOME");
+  if (!cid || !home || !CFStringGetCString(cid, id, sizeof id, kCFStringEncodingUTF8)) return;   // not the app (a test)
+  snprintf(stamp, sizeof stamp, "%s/Library/Application Support/omacvm", home);
+  mkdir(stamp, 0755);
+  snprintf(stamp, sizeof stamp, "%s/Library/Application Support/omacvm/%s.tcc-cleared", home, id);
+  buildKey(build, sizeof build);
+  clearOldGrants(perm, id, stamp, build);
+}
+
 static void logPermissions(void) {
   static CFAbsoluteTime at;
   CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
@@ -2741,6 +2818,7 @@ int main(int argc, char **argv) {
     if (!asked) {
       logf_("waiting for Accessibility and Input Monitoring permission");
       logPermissions();   // which one is missing
+      clearOldGrantsOnce(permFn());
       AXIsProcessTrustedWithOptions(opts);
       CGRequestListenEventAccess();
       asked = 1;

@@ -81,9 +81,12 @@ for page in ("README.md", "docs/compare.md"):
     expect(f"{page}: chart alt text matches the SVG for OmacVM.app", not diff,
            ", ".join(f"{b}: SVG {w}, alt {g}" for b, (w, g) in diff.items()))
 
-# 3a. The README's speed chart shows the latest round only, plain bars: one source for every test, no tagged bars.
-srcs = set(data.get("sources", {}).get(t, "") for t in mac)
-expect("speed chart: every test from one round (chart.json sources)", len(srcs) == 1 and "" not in srcs, sorted(srcs))
+# 3a. The README's speed chart shows the latest round only, plain bars: one source for every browser test, no
+# tagged bars. The Geekbench rows (CPU, GPU compute) come from their own round, named in the chart's note.
+srcs = set(data.get("sources", {}).get(t, "") for t in mac if not t.startswith("geekbench-"))
+expect("speed chart: every browser test from one round (chart.json sources)", len(srcs) == 1 and "" not in srcs, sorted(srcs))
+gb = [t for t in mac if t.startswith("geekbench-")]
+expect("speed chart: the Geekbench rows' round is named in the note", not gb or "Geekbench" in " ".join(data.get("note", []) if isinstance(data.get("note"), list) else [data.get("note", "")]), gb)
 expect("speed chart: plain bars, no version tags (no \"unreleased\")", not data.get("unreleased"), data.get("unreleased"))
 
 # 3b. The power chart: chart.py's output, hours that follow from the watts, every number in README's alt text.

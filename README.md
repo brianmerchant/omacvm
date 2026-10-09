@@ -85,7 +85,7 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 
 <!-- Benchmark chart: the latest MacBook Pro round (macOS = 100 %, OmacVM.app first), from docs/benchmarks/chart.json with src/bench/chart.py; src/tests/bench-docs.sh checks this alt text. -->
 <p align="center">
-  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. Web apps (Speedometer 3.1): 69, 62, 73, 71 percent. Browser graphics (WebGL Aquarium): 39, 23, 37, 25. Browser overall (Basemark Web 3.0): 77, 74, 69, 74. MacBook Pro M4 Max, 2026-10-09, each VM alone in a window, median of 3 runs." width="100%">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 69, 62, 73, 71 percent. Browser graphics (WebGL Aquarium): 39, 23, 37, 25. Browser overall (Basemark Web 3.0): 77, 74, 69, 74. GPU compute (Geekbench 7 GPU, OpenCL): 45, not available on UTM, VMware Fusion and Parallels. MacBook Pro M4 Max; browser tests 2026-10-09, each VM alone in a window, median of 3 runs; Geekbench from the 2026-10-03/04 rounds." width="100%">
 </p>
 
 <a name="power-draw"></a>

@@ -8,6 +8,16 @@ in more words.
 - The Mac input methods feature is named for what it is for: "Mac input (Chinese, Japanese,
   Korean)" in the app, "Mac input: Chinese, Japanese…" in the control centre; its info text says
   normal keyboard layouts (accents included) do not need it.
+- Gestures: a permission macOS kept for another build no longer leaves it waiting for good
+  (reported by @brianmerchant, #306). macOS ties each permission entry to the signature of the
+  build that asked; one from another build (e.g. a helper built on the Mac before OmacVM.app's
+  signed copy) shows as on in System Settings but is refused, and switching it off and on does
+  not replace it. When Accessibility or Input Monitoring is missing at start, Gestures now clears
+  its own entry for that permission once per build (tccutil, only the missing one), then asks
+  again, as the app does for its keyboard entry since 3.0.6 (#255). `omacvm check` names the
+  tccutil commands on that row and no longer suggests `omacvm apply` for scroll momentum while
+  Gestures waits for its Mac permissions.
+
 ## 3.0.9
 
 - Bridge: its media-key tap can no longer hold the Mac's keyboard and clicks (reported by
