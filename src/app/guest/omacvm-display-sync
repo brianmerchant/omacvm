@@ -550,6 +550,18 @@ sent_ok() {
   printf '%s\n' "$2" > "$state_dir/$1.sent"
 }
 
+# keep_rule OUTPUT RULE: the rule the output shows now. omacvm_app.lua sets it
+# again while Hyprland reloads its config (an Omarchy theme switch reloads it):
+# without it the output falls back to monitors.lua's rule ("auto" place) until
+# this script runs after the reload. With Omanotch's NOTCH output placed above
+# it, "auto" put the screen to the right of NOTCH for a moment, and the picture
+# slid in again (the theme switch flickered).
+keep_rule() {
+  local tmp
+  tmp=$(mktemp "$state_dir/.rule.XXXXXX") || return 0
+  printf '%s\n' "$2" > "$tmp" && mv -f "$tmp" "$state_dir/$1.rule"
+}
+
 # park_gone SHOWN OUTPUT...: an output this script placed that is gone now
 # (the Mac's other display left full screen) gets a rule with an automatic
 # place. Hyprland keeps the last rule per output: when the display comes back
@@ -567,7 +579,7 @@ park_gone() {
     # Still shown (its connector is not read yet): leave it.
     grep -q "\"name\": *\"$name\"" <<<"$shown" && continue
     if [[ $(hyprctl eval "hl.monitor({ output = \"$name\", mode = \"preferred\", position = \"auto-right\", scale = \"auto\" })" 2>&1) == ok ]]; then
-      rm -f "$sent" "$state_dir/$name.hdr"
+      rm -f "$sent" "$state_dir/$name.hdr" "$state_dir/$name.rule"
     fi
   done
 }
@@ -654,6 +666,7 @@ apply_preferred_modes() {
     # later): with one in monitors.lua, the user's rule stays and the screen no
     # longer follows the window.
     if user_rule "$output"; then
+      rm -f "$state_dir/$output.rule"
       if [[ -z ${said_user_rule:-} ]]; then
         printf 'omacvm-display-sync: %s has its own rule in %s; not following the window\n' "$output" "$monitor_config" >&2
         said_user_rule=1
@@ -667,8 +680,11 @@ apply_preferred_modes() {
       notch_bar "$mode" "$scale"
     fi
     digest=$(cksum <<<"$rule" | cut -d' ' -f1)
-    follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" ||
+    # 1: Hyprland shows it already (keep it for a reload), 2: held.
+    follow_check "$output" "$digest" "$mode" "$scale" "$position" "$hdr" "$shown" || {
+      (($? == 1)) && keep_rule "$output" "$rule"
       continue
+    }
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2
@@ -677,6 +693,7 @@ apply_preferred_modes() {
         "$mode" "$output" "$response" >&2
     else
       sent_ok "$output" "$digest" "$hdr"
+      keep_rule "$output" "$rule"
     fi
   done
   [[ -z ${lock_fd:-} ]] || exec {lock_fd}>&-
