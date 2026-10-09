@@ -19,6 +19,12 @@ in more words.
   flipped view's layer too). The bar also centred itself in the whole output rather than in the
   part the strip shows, in whole logical px (5 above and 6 below at scale 2). Now the strip cuts
   at the top and the bar centres in the shown part to the pixel.
+- OmacVM.app: the "Mac input (Chinese, Japanese, Korean)" switch in the VM's window can now be
+  used (#316). It was greyed out while the VM was stopped, and while the VM runs the window is
+  hidden. Now you switch it while the VM is stopped ("From the next start."): at the next start
+  the VM gets the input method port, and the app sets up the VM's part as soon as the VM is up,
+  so it works from that start. Switching it off works the same way. While the VM runs, the
+  control centre (or `omacvm enable|disable mac-ime`) switches it as before.
 
 ## 3.0.10
 
