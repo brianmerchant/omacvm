@@ -21,6 +21,11 @@ in more words.
   or the update shows btrfs or ext4 errors or a read-only file system, the update stops at once
   and says what to do (a VM copied while it ran: copy it again after shutting it down there). An
   update that hangs is stopped after 40 minutes.
+- OmacVM.app: a VM copied to another Mac can be reached there (Update VM, the Bridge, the control
+  centre, `omacvm`). Each VM folder now has its own SSH key (`ssh-key`), which `omacvm apply` and
+  Update VM put into the VM beside the Mac's own key; both keep working. Before, the VM knew only
+  the key of the Mac that set it up, and Update VM on the other Mac waited for SSH. A VM set up
+  before this gets the key at its next update on the Mac it came from.
 
 ## 3.0.11
 
