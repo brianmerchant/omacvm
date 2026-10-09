@@ -29,7 +29,7 @@ stop_vm() {
   qemu_wait_exit 90 || qemu_quit
 }
 WATCH=
-trap '[[ -z $WATCH ]] || kill "$WATCH" 2>/dev/null; stop_vm' EXIT
+trap 'if [[ -n $WATCH ]]; then kill "$WATCH" 2>/dev/null || true; fi; stop_vm' EXIT
 
 # Never waits forever: a disk that fails (the console or the apply shows
 # btrfs/ext4 errors or a read-only file system) or an update that takes more

@@ -51,7 +51,8 @@ cat > "$T/bin/ssh" <<'SSH'
 # Stand-in ssh: the VM answers unless it never comes up; poweroff stops QEMU.
 [[ $FAKE_MODE == btrfs || $FAKE_MODE == down ]] && exit 255
 kill -0 "$(cat "$FAKE_DIR/qemu.pid")" 2>/dev/null || exit 255
-[[ ${*: -1} == "systemctl poweroff" ]] && kill "$(cat "$FAKE_DIR/qemu.pid")"
+# A guest takes a few seconds to power off: the update's watch ends first.
+[[ ${*: -1} == "systemctl poweroff" ]] && { (sleep 5; kill "$(cat "$FAKE_DIR/qemu.pid")") & }
 exit 0
 SSH
 cat > "$A/scripts/apply-vm.sh" <<'APPLY'
@@ -59,6 +60,8 @@ cat > "$A/scripts/apply-vm.sh" <<'APPLY'
 # Stand-in apply: ok, or hangs (as an apply on a read-only VM did) until QEMU goes.
 case $FAKE_MODE in
   ok) echo "==> OmacVM applied"; exit 0 ;;
+  # The VM powers off by itself at the end, and the watch ends before the update does.
+  ok-off) echo "==> OmacVM applied"; kill "$(cat "$FAKE_DIR/qemu.pid")"; sleep 5; exit 0 ;;
   ro) echo "touch: cannot touch '/usr/local/share/omacvm/x': Read-only file system" ;;
 esac
 while kill -0 "$(cat "$FAKE_DIR/qemu.pid")" 2>/dev/null; do sleep 1; done
@@ -70,31 +73,37 @@ V=$T/VMs/Copied; mkdir -p "$V"
 printf "NAME='Copied'\nCPUS=2\nMEM_MB=4096\nDISK_GB=64\nSSH_PORT=52999\nVM_USER='me'\n" > "$V/vm.env"
 : > "$V/disk.img"; : > "$V/efi-vars.fd"; : > "$V/ready"; : > "$T/key"
 
-run() {   # MODE [VAR=VALUE...]: the update's ERROR or UPDATED line, and its seconds
-  local mode=$1 start out; shift
+run() {   # MODE [VAR=VALUE...]: seconds, exit status, the update's ERROR or UPDATED line
+  local mode=$1 start out rc; shift
   rm -f "$T/qemu.pid"; start=$(date +%s)
-  out=$(env PATH="$T/bin:$PATH" FAKE_DIR="$T" FAKE_MODE="$mode" OMACVM_KEY="$T/key" OMACVM_HOST_PORTS= "$@" \
-    /bin/bash "$A/scripts/update-vm.sh" "$V" 2>&1 | grep -E '^(ERROR|UPDATED)' | tail -1)
-  echo "$(( $(date +%s) - start )) $out"
+  env PATH="$T/bin:$PATH" FAKE_DIR="$T" FAKE_MODE="$mode" OMACVM_KEY="$T/key" OMACVM_HOST_PORTS= "$@" \
+    /bin/bash "$A/scripts/update-vm.sh" "$V" > "$T/out" 2>&1
+  rc=$?
+  out=$(grep -E '^(ERROR|UPDATED)' "$T/out" | tail -1)
+  echo "$(( $(date +%s) - start )) $rc $out"
 }
-r=$(run btrfs); s=${r%% *}; r=${r#* }
+r=$(run btrfs); s=${r%% *}; r=${r#* }; rc=${r%% *}; r=${r#* }
 expect "btrfs errors on the console: the update stops with the disk's error" "yes" \
   "$([[ $r == "ERROR: Copied's disk has errors, so the update stopped (the VM says: [    3.1] BTRFS error"* ]] && echo yes || echo "$r")"
 expect "... and says what to do" "yes" "$([[ $r == *"shut it down on the Mac it came from and copy it again"* ]] && echo yes)"
 expect "... within 40 s, not after the 5 minutes for SSH" "yes" "$( (( s < 40 )) && echo yes || echo "$s s")"
 expect "... and QEMU is gone" "gone" "$(kill -0 "$(cat "$T/qemu.pid")" 2>/dev/null && echo runs || echo gone)"
-r=$(run ro); s=${r%% *}; r=${r#* }
+r=$(run ro); s=${r%% *}; r=${r#* }; rc=${r%% *}; r=${r#* }
 expect "a read-only file system in the apply: stops, the disk's error" "yes" \
   "$([[ $r == *"disk has errors"*"Read-only file system"* ]] && echo yes || echo "$r")"
 expect "... within 40 s" "yes" "$( (( s < 40 )) && echo yes || echo "$s s")"
-r=$(run hang OMACVM_UPDATE_SECONDS=6); s=${r%% *}; r=${r#* }
+r=$(run hang OMACVM_UPDATE_SECONDS=6); s=${r%% *}; r=${r#* }; rc=${r%% *}; r=${r#* }
 expect "an apply that hangs: stopped after the update's time" "yes" \
   "$([[ $r == "ERROR: The update took too long, so it was stopped"* ]] && echo yes || echo "$r")"
 expect "... within 40 s" "yes" "$( (( s < 40 )) && echo yes || echo "$s s")"
-r=$(run down OMACVM_UPDATE_SECONDS=6); s=${r%% *}; r=${r#* }
+r=$(run down OMACVM_UPDATE_SECONDS=6); s=${r%% *}; r=${r#* }; rc=${r%% *}; r=${r#* }
 expect "a VM that never comes up: stopped after the update's time" "yes" \
   "$([[ $r == "ERROR: The update took too long"* ]] && echo yes || echo "$r")"
 expect "... within 40 s" "yes" "$( (( s < 40 )) && echo yes || echo "$s s")"
-r=$(run ok); r=${r#* }
+expect "a stopped update fails (exit 1)" "1" "$rc"
+r=$(run ok); r=${r#* }; rc=${r%% *}; r=${r#* }
 expect "a good update: no false alarm" "UPDATED Copied" "$r"
+expect "... and exits 0" "0" "$rc"
+r=$(run ok-off); r=${r#* }; rc=${r%% *}; r=${r#* }
+expect "the VM off before the update ends: still UPDATED, exit 0 (the watch had ended)" "0 UPDATED Copied" "$rc $r"
 exit $fail
