@@ -7,7 +7,8 @@
 # OpenGL: the VM's apps draw with OpenGL on the Mac's GPU (virgl). Vulkan: the
 # same plus Vulkan on the Mac's GPU (Venus: KosmicKrisp on macOS 26 and newer
 # when the app has it, else MoltenVK), once the VM has its Venus driver (until
-# then OpenGL). Automatic: OpenGL on every Mac in 3.0.0. A running VM with
+# then OpenGL). Automatic (3.0.13): Vulkan on macOS 26 and newer when the app
+# has KosmicKrisp, OpenGL before. A running VM with
 # Vulkan ahead builds its Venus driver now; when its packages are too old
 # for the build, it updates its whole system first (omarchy update, often
 # 5-15 minutes; asks first unless --yes).

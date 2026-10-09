@@ -1026,7 +1026,7 @@ struct GraphicsPicker: View {
         return Graphics.autoPicksVulkan(macOSMajor: major, kosmicKrisp: kk) ? "Vulkan on this Mac" : "OpenGL on this Mac"
     }
 
-    static let help = "OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before); Vulkan windows reach the screen by a copy on the Mac. Automatic: OpenGL on every Mac in this version."
+    static let help = "OpenGL: the VM's apps and browsers draw with OpenGL on the Mac's GPU. Vulkan: the same, plus Vulkan apps on the Mac's GPU (KosmicKrisp on macOS 26 and newer, MoltenVK before); Vulkan windows reach the screen by a copy on the Mac. Automatic: Vulkan on macOS 26 and newer (KosmicKrisp), OpenGL before."
 
     private var picker: some View {
         Picker("Graphics", selection: $choice) {
