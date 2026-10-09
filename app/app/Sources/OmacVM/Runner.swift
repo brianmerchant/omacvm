@@ -226,6 +226,8 @@ final class Runner {
     private(set) var venusFallback: (why: String, keep: Bool)?
     /// Set by the caller before start: Vulkan just fell back for this start.
     var openGLOnce: String?
+    /// QEMU stopped at once: another app or Mac has the VM's disk open (VMOpen.diskLocked).
+    private(set) var diskLocked = false
     /// The user (or the app) asked QEMU to stop: an exit is no Vulkan failure.
     private var stopAsked = false
     private var startedAt = Date()
@@ -775,6 +777,12 @@ final class Runner {
     /// option this QEMU refuses, Venus failing to set up): start once more on
     /// OpenGL. If that fails too, the error is not Vulkan's and shows as usual.
     private func noteEarlyExit(status: Int32, reason: Process.TerminationReason) {
+        if status != 0, Date().timeIntervalSince(startedAt) < 15,
+           let log = try? String(contentsOf: config.folder.appendingPathComponent("logs/qemu.log"), encoding: .utf8),
+           VMOpen.diskLocked(log: log) {
+            diskLocked = true
+            return
+        }
         guard venusFallback == nil, graphics?.venus == true, !stopAsked,
               reason == .exit, status != 0, Date().timeIntervalSince(startedAt) < 15 else { return }
         venusFallback = ("QEMU stopped at once with Vulkan (exit \(status))", false)

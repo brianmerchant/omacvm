@@ -394,6 +394,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // Another app on this Mac (another copy of this one) runs this VM: a
+        // second QEMU on its disk would damage it.
+        if runner == nil, VMOpen.qemuRuns(state.config.folder, lines: Storage.processLines()) {
+            state.message = "\(state.config.name) runs in another app on this Mac. Shut it down there first, then start it here."
+            showWindow()
+            return
+        }
         // The fast network on, and its service not for this app (after an app
         // update): asked first, never a start that cannot work.
         guard case .decided(let userNetwork) = network else {
@@ -415,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         r.userNetwork = userNetwork
         r.onExit = { [weak self, weak r] status in
             guard let self else { return }
-            let fellBack = r?.venusFallback, driveGone = r?.driveGone
+            let fellBack = r?.venusFallback, driveGone = r?.driveGone, diskLocked = r?.diskLocked == true
             let userNetwork = r?.userNetwork
             self.runner = nil
             // An update with a VM restart: it installs now; the new app starts the VM.
@@ -472,6 +479,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // after the update either.
                 if Updater.shared.installWhenIdle { Updater.shared.install(quiet: true) }
                 NSApp.terminate(nil)
+            } else if diskLocked {
+                // Another app or Mac has the VM's disk open: QEMU did not start.
+                self.state.message = VMOpen.diskLockedText(self.state.config.name)
+                self.showWindow()
             } else {
                 self.state.message = "The VM stopped unexpectedly (QEMU exit \(status)). Log: \(self.state.config.folder.path)/logs/qemu.log"
                 // A waiting update goes in after a crash too (if a QEMU of
