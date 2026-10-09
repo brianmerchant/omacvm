@@ -5,8 +5,9 @@ in more words.
 
 ## 3.0.10 (unreleased)
 
-- The Mac input methods feature is named for what it is for: "Mac input methods (Chinese,
-  Japanese, Korean…)"; its info text says normal keyboard layouts do not need it.
+- The Mac input methods feature is named for what it is for: "Mac input (Chinese, Japanese,
+  Korean)" in the app, "Mac input: Chinese, Japanese…" in the control centre; its info text says
+  normal keyboard layouts (accents included) do not need it.
 ## 3.0.9
 
 - Bridge: its media-key tap can no longer hold the Mac's keyboard and clicks (reported by
