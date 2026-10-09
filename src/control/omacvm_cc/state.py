@@ -499,7 +499,7 @@ GRAPHICS_WAITING_DETAIL = ("Vulkan is chosen, but this VM does not have its Vulk
 GRAPHICS_FELL_BACK_NOTE = "Vulkan: OpenGL now, r tries again"
 GRAPHICS_FEATURE = Feature(
     name="graphics", default="auto", sides=("mac",), tags=(), needs=None, title="Graphics",
-    summary="OpenGL, Vulkan, or Automatic (OpenGL on every Mac in 3.0.0); from the VM's next start")
+    summary="OpenGL, Vulkan, or Automatic (Vulkan on macOS 26 and newer, OpenGL before); from the VM's next start")
 
 
 def graphics_row(status: dict | None, vm_type: str, jobs: list[Job] | None = None,

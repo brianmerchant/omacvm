@@ -1131,7 +1131,7 @@ class ControlCentre(App):
             self.notify("Graphics: the Mac's OmacVM does not say this VM's setting (omacvm update on the Mac)", severity="warning")
             return
         nxt = S.next_graphics(cur)
-        text = {"auto": "Automatic: OpenGL on every Mac in this version (Vulkan is your choice).",
+        text = {"auto": "Automatic: Vulkan on macOS 26 and newer (KosmicKrisp), OpenGL before. With Vulkan the VM builds its Vulkan driver first, a few minutes; until it is there the VM runs on OpenGL.",
                 "opengl": "OpenGL only (no Vulkan in the VM).",
                 "vulkan": "OpenGL plus Vulkan on the Mac's GPU (experimental; faster Vulkan windows with OmacVM.app 3.0.1 and newer). " + VULKAN_BUILD}[nxt]
         self.push_screen(ConfirmScreen(f"Graphics: {S.GRAPHICS_TITLES[cur]} -> {S.GRAPHICS_TITLES[nxt]}",

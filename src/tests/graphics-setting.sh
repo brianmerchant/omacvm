@@ -47,7 +47,9 @@ expect "OpenGL: no Vulkan"                          opengl "$(line 'opengl 27 1 
 expect "Vulkan with the driver: Vulkan"             vulkan "$(line 'vulkan 15 0 1 0 16 8 42 0')"
 expect "Vulkan without the driver: OpenGL"          opengl "$(line 'vulkan 15 0 0 0 16 8 42 0')"
 expect "  ... and says so" "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))" "$(summ 'vulkan 27 1 0 0 16 8 42 0')"
-expect "Automatic, macOS 27 + KosmicKrisp + driver: OpenGL (3.0.0)" opengl "$(line 'auto 27 1 1 0 16 8 42 0')"
+expect "Automatic, macOS 27 + KosmicKrisp + driver: Vulkan (3.0.13)" vulkan "$(line 'auto 27 1 1 0 16 8 42 0')"
+expect "Automatic, macOS 26 + KosmicKrisp + driver: Vulkan" vulkan "$(line 'auto 26 1 1 0 16 8 42 0')"
+expect "Automatic after a kept fallback: OpenGL"    opengl "$(line 'auto 26 1 1 0 8 4 36 1')"
 expect "Automatic waits for the VM's driver"        opengl "$(line 'auto 27 1 0 0 16 8 42 0')"
 expect "Automatic, macOS 26 without KosmicKrisp"    opengl "$(line 'auto 26 0 1 0 16 8 42 0')"
 expect "Automatic, macOS 15 (MoltenVK)"             opengl "$(line 'auto 15 1 1 0 16 8 42 0')"
@@ -164,7 +166,7 @@ expect "spaces around: vulkan (omacvm)" vulkan "$(graphics_choice "$d")"
 # The constants are the same in both.
 s_auto=$(sed -n 's/.*static let autoVulkan = \([a-z]*\).*/\1/p' "$R/app/app/Sources/OmacVM/Graphics.swift")
 expect "Automatic gives Vulkan at all: same" "$([[ $s_auto == true ]] && echo 1 || echo 0)" "$GRAPHICS_AUTO_VULKAN"
-expect "3.0.0: Automatic is OpenGL on every Mac" 0 "$GRAPHICS_AUTO_VULKAN"
+expect "3.0.13: Automatic gives Vulkan (macOS 26+, KosmicKrisp)" 1 "$GRAPHICS_AUTO_VULKAN"
 expect "waiting-for-driver text: same" "$("$T/graphics" waiting)" "$GRAPHICS_WAITING_FOR_DRIVER"
 s_from=$(sed -n 's/.*static let autoVulkanFromMacOS = \([0-9]*\).*/\1/p' "$R/app/app/Sources/OmacVM/Graphics.swift")
 s_mvk=$(sed -n 's/.*static let autoVulkanOnMoltenVK = \([a-z]*\).*/\1/p' "$R/app/app/Sources/OmacVM/Graphics.swift")
@@ -188,7 +190,7 @@ expect "omacvm graphics: ... waiting for the driver" True "$(cli --json | j wait
 expect "omacvm graphics: ... and says so" "Vulkan (driver not built yet: runs on OpenGL until it is built (OmacVM in the VM: r on Graphics))" "$(cli --json | j summary)"
 : > "$H/OmacVM/Test VM/venus-ready"
 expect "omacvm graphics: vulkan with the driver" vulkan "$(cli --json | j next_start)"
-expect "omacvm graphics: auto on macOS 27 + KK with the driver: OpenGL (3.0.0)" opengl "$(cli auto --json >/dev/null; MAJ=27 KK=1 cli --json | j next_start)"
+expect "omacvm graphics: auto on macOS 27 + KK with the driver: Vulkan (3.0.13)" vulkan "$(cli auto --json >/dev/null; MAJ=27 KK=1 cli --json | j next_start)"
 echo "OmacVM: graphics: auto -> vulkan (macOS 27, KosmicKrisp), host memory window 4 GB" > "$H/OmacVM/Test VM/logs/qemu.log"
 expect "omacvm graphics: the last start" "auto -> vulkan (macOS 27, KosmicKrisp), host memory window 4 GB" "$(MAJ=27 KK=1 cli --json | j this_start)"
 echo "QEMU stopped answering for 30 s while Vulkan started" > "$H/OmacVM/Test VM/graphics-fallback"

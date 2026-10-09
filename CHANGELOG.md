@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.13
+
+- OmacVM.app: **Automatic graphics is now Vulkan on macOS 26 and newer** (KosmicKrisp), OpenGL
+  before. Measured on a Mac mini M4 and a MacBook Air M2: the OpenGL desktop, WebGL and glmark2
+  stay within 1 % with Vulkan on, and Vulkan apps and WebGPU work out of the box. A VM on Automatic
+  builds its Vulkan driver at the next update and runs on OpenGL until then. OpenGL and Vulkan as a
+  choice are unchanged.
+
 ## 3.0.12
 
 VMs that move between Macs: copied, on an external drive, or opened on a smaller Mac.
