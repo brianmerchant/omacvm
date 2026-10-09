@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import OmacVMUpdate
 
 /// The VMs folder, each VM's size and place, moves between folders and the
 /// downloaded images. Shared by the setup, the settings and the start-up offers.
@@ -136,6 +137,11 @@ final class StorageModel: ObservableObject {
     /// show, or nil (the note says why).
     func openExisting() -> VMConfig? {
         guard moving == nil else { return nil }
+        // Tests (test builds only): the folder named in this file, no panel.
+        if let f = TestHooks.value("OMACVM_TEST_OPEN_FILE", bundleID: Bundle.main.bundleIdentifier) {
+            let p = (try? String(contentsOfFile: f, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return p.isEmpty ? nil : open(URL(fileURLWithPath: p))
+        }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
