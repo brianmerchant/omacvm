@@ -23,4 +23,12 @@ struct StripLayout: Equatable {
         let top = shrink ? ((height - h) / 2).rounded(.down) : height - h
         return StripLayout(scale: s, left: ((width - w) / 2).rounded(.down), top: top)
     }
+
+    /// The image's frame in the strip view's layer (`height` points tall).
+    /// AppKit flips a flipped view's backing layer too (geometryFlipped), so
+    /// there y counts from the top like `top`; else from the bottom.
+    func frame(barWidth: CGFloat, barHeight: CGFloat, height: CGFloat, layerFlipped: Bool) -> CGRect {
+        let w = barWidth / scale, h = barHeight / scale
+        return CGRect(x: left, y: layerFlipped ? top : height - top - h, width: w, height: h)
+    }
 }

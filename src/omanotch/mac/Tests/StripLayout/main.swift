@@ -1,4 +1,5 @@
 // Offline test of StripLayout: the strip's bottom row is NOTCH's bottom row.
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -19,6 +20,20 @@ p = StripLayout.place(barWidth: 2160, barHeight: 50, width: 1728, height: 38)
 check(near(p.scale, 1.25), "scale 1.6: display's scale kept (\(p.scale))")
 check(near(p.top + 50 / p.scale, 38), "scale 1.6: image bottom at the strip's bottom (top \(p.top))")
 check(near((38 - p.top) * p.scale, 50), "scale 1.6: strip's bottom row is NOTCH's last row")
+
+// The strip view is flipped, and AppKit flips its backing layer with it:
+// the image's frame there counts from the top. (Placed as if from the
+// bottom, the extra rows were cut at the bottom and the bar sat 3 px low on
+// a 16-inch at scale 1.6.)
+final class FlippedView: NSView { override var isFlipped: Bool { true } }
+let view = FlippedView(frame: NSRect(x: 0, y: 0, width: 1728, height: 37))
+view.wantsLayer = true
+check(view.layer?.isGeometryFlipped == true, "a flipped view's layer is geometry-flipped")
+p = StripLayout.place(barWidth: 2160, barHeight: 50, width: 1728, height: 37)
+var f = p.frame(barWidth: 2160, barHeight: 50, height: 37, layerFlipped: true)
+check(near(f.minY, -3) && near(f.maxY, 37), "16-inch at 1.6, flipped layer: image bottom on the strip's bottom (\(f))")
+f = p.frame(barWidth: 2160, barHeight: 50, height: 37, layerFlipped: false)
+check(near(f.minY, 0) && near(f.maxY, 40), "unflipped layer: image bottom on the strip's bottom (\(f))")
 
 // Strip a fraction taller than NOTCH: the gap goes to the top, not the seam.
 p = StripLayout.place(barWidth: 1470, barHeight: 33, width: 1470, height: 33.4)

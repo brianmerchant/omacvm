@@ -56,6 +56,21 @@ int main(void) {
     lh = notch_mode(2940, 2, 33.0000001, &w, &h);
     CHECK(lh == 33, "rounding noise");
 
+    // NOTCH is never shorter than the strip (the strip is not rounded down
+    // first): 14-inch, 16-inch and Air at their default resolution, every
+    // scale; whole pixels tall.
+    {
+        const double macs[][3] = {{37, 1512, 3024}, {37, 1728, 3456}, {33, 1470, 2940}, {37, 1512, 3600}};
+        const double scales[] = {1, 1.25, 1.5, 1.6, 5.0 / 3, 1.75, 2};
+        for (size_t m = 0; m < sizeof macs / sizeof macs[0]; m++)
+            for (size_t i = 0; i < sizeof scales / sizeof scales[0]; i++) {
+                double ss = scales[i], strip = strip_logical(macs[m][0], macs[m][1], macs[m][2], ss);
+                lh = notch_mode(macs[m][2], ss, strip, &w, &h);
+                CHECK(lh >= strip - 1e-6 && fabs(h - lh * ss) < 1e-3, "NOTCH covers the strip in whole pixels");
+            }
+        CHECK(fabs(strip_logical(37, 1728, 3456, 1.6) - 46.25) < 1e-9, "16-inch at 1.6: 46.25 logical px");
+    }
+
     notch_rule_lua(buf, sizeof buf, "NOTCH", 2940, 66, 0, 0, 2);
     CHECK(!strcmp(buf, "hl.monitor({ output = \"NOTCH\", mode = \"2940x66@60\", position = \"0x0\", scale = 2.000000 })"),
           "monitor rule");
