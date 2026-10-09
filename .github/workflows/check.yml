@@ -321,6 +321,9 @@ jobs:
       - name: An unknown VM name never falls back to another VM; the test app never uses the installed app's VMs
         run: src/tests/app-vm-pick.sh
 
+      - name: Open Existing VM picks the VM's folder or its parent; a VM in use elsewhere is not started
+        run: src/tests/app-open-vm.sh
+
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
 

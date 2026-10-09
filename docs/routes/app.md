@@ -251,6 +251,13 @@ VM runs, and goes back by itself when a new version does not start
   something else already has the name ~/OmacVM (a file, a git clone
   ~/omacvm: the same folder on a case-insensitive disk), new VMs go to the
   old place below instead.
+- **Open Existing VM…** (in the setup, and in the settings below VMs
+  folder): shows a VM that is somewhere else, copied from another Mac or on
+  an external drive, without a restart. Pick the VM's folder (the one with
+  `vm.env`) or the folder it is in; that folder becomes the VMs folder, and
+  the VMs of the old one are still found. Nothing is copied. A VM that runs
+  in another app or on another Mac (its disk is locked) is not started: the
+  window says so.
 - **Another VMs folder** (an external drive, say): in the setup, or in the
   settings under Storage › Change. With VMs there already, the app asks:
   **Move** (on the same drive a rename; to another drive copied, read back

@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.12 (unreleased)
+
+- OmacVM.app: **Open Existing VM…** in the setup and in the settings (below VMs folder) shows a
+  VM that is somewhere else, copied from another Mac or on an external drive, at once. Pick the
+  VM's folder (the one with vm.env) or the folder it is in. Before, the setup only offered a new
+  VM, and a VMs folder set there needed a restart of the app. A VM that runs in another app or on
+  another Mac is not started: the window says so instead of "QEMU exit 1".
+
 ## 3.0.11
 
 - Omanotch: the bar sits in the middle of the notch strip at every display scale, on the 14- and

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import OmacVMUpdate
 
 /// The VMs folder, each VM's size and place, moves between folders and the
 /// downloaded images. Shared by the setup, the settings and the start-up offers.
@@ -127,6 +128,47 @@ final class StorageModel: ObservableObject {
             setRoot(url)
             say("New VMs go to \(Self.short(url)); the others stay where they are.")
         default: break
+        }
+    }
+
+    /// "Open Existing VM…": a VM's folder (with vm.env) or the folder it is
+    /// in, from the Finder. That folder's parent becomes the VMs folder at
+    /// once (no restart); the VMs of the old one are still found. The VM to
+    /// show, or nil (the note says why).
+    func openExisting() -> VMConfig? {
+        guard moving == nil else { return nil }
+        // Tests (test builds only): the folder named in this file, no panel.
+        if let f = TestHooks.value("OMACVM_TEST_OPEN_FILE", bundleID: Bundle.main.bundleIdentifier) {
+            let p = (try? String(contentsOfFile: f, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return p.isEmpty ? nil : open(URL(fileURLWithPath: p))
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = Storage.existingAncestor(root)
+        panel.prompt = "Open"
+        panel.message = "Pick the VM's folder (the one with vm.env in it), or the folder it is in."
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return open(url)
+    }
+
+    func open(_ url: URL) -> VMConfig? {
+        switch VMOpen.pick(url) {
+        case .none(let why):
+            say(why, error: true)
+            return nil
+        case .vm(let folder, let root):
+            if TestIdentity.isOn && TestVMs.isProduction(root, production: Paths.productionVMsRoots) {
+                say("\(root.path) is a folder of the installed OmacVM: a test build does not open its VMs.", error: true)
+                return nil
+            }
+            guard let c = VMConfig.load(from: folder) else {
+                say("Could not read \(folder.path)/vm.env.", error: true)
+                return nil
+            }
+            if root.path != Paths.vmsRoot.standardizedFileURL.path { setRoot(root) }
+            say("Opened \(c.name) (\(Self.short(folder))).")
+            return c
         }
     }
 
@@ -326,6 +368,8 @@ final class StorageModel: ObservableObject {
 /// The VMs folder with its free space and a Change button (setup and settings).
 struct VMsFolderRow: View {
     @ObservedObject var storage: StorageModel
+    /// The settings: an "Open Existing VM…" row below it (the setup has its own button).
+    var open: (() -> Void)? = nil
 
     var body: some View {
         LabeledContent("VMs folder") {
@@ -351,6 +395,16 @@ struct VMsFolderRow: View {
             .layoutProbe("folder-row")
         }
         .onAppear { storage.refresh() }
+        if let open {
+            LabeledContent("Another VM") {
+                HStack(spacing: 8) {
+                    Button("Open Existing VM…") { open() }
+                        .disabled(storage.moving != nil)
+                        .layoutProbe("folder-open")
+                    InfoButton(topic: "Open Existing VM", text: "Shows a VM that is somewhere else: copied from another Mac, or on an external drive. Pick its folder (the one with vm.env in it) or the folder it is in; that folder becomes the VMs folder. Nothing is copied.")
+                }
+            }
+        }
     }
 }
 
@@ -374,10 +428,12 @@ struct StorageRows: View {
     @ObservedObject var storage: StorageModel
     /// The VM the window shows.
     var selected: URL?
+    /// Open Existing VM… (AppState.openExisting).
+    var open: (() -> Void)? = nil
     @State private var showAll = false
 
     var body: some View {
-        VMsFolderRow(storage: storage)
+        VMsFolderRow(storage: storage, open: open)
         ForEach(storage.disconnected, id: \.self) { line in RowNote(line, error: true) }
         LabeledContent("Size on the Mac") {
             HStack(spacing: 8) {
