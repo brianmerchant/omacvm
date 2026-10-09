@@ -34,7 +34,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 17
+VERSION = 18
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -173,6 +173,26 @@ def main():
     if (notchParked && n === notchParkedScreen) return "parked"
     return ""
   }
+  // Omanotch's pointer over the strip (#308). The guest's pointer is not on
+  // this bar then, so its hover handlers see nothing. Omanotch says where the
+  // pointer is (x in bar px, -1: it left the strip), and the bar does what
+  // its own hover handlers do: the auto-hidden indicators show while the
+  // pointer is on the bar's free space and stay until it leaves the bar.
+  property bool notchHovering: false
+  function notchHover(x) {
+    var stock = typeof root.setCenterSectionHovered === "function" && typeof root.setBarHovered === "function"
+    if (x < 0 || root.barHidden || root.notchFullscreen) {
+      if (!root.notchHovering) return "off"
+      root.notchHovering = false
+      if (stock) { root.setCenterSectionHovered(false); root.setBarHovered(false) }
+      return "off"
+    }
+    if (!stock) return "unsupported"
+    if (!root.notchHovering) { root.notchHovering = true; root.setBarHovered(true) }
+    var t = root.notchTargetAt(x, 0)
+    root.setCenterSectionHovered(!t)
+    return t ? "widget" : "free"
+  }
   function notchTargetAt(x, y) {
     for (var i = clickTargets.length - 1; i >= 0; i--) {
       var t = clickTargets[i]
@@ -264,6 +284,9 @@ def main():
       if (!t || typeof t.wheelMoved !== "function") return "miss"
       t.wheelMoved(delta)
       return "ok"
+    }
+    function hover(x: real): string {
+      return root.notchHover(x)
     }
     function targets(): string {
       return JSON.stringify(root.barHidden || root.notchFullscreen ? [] : root.notchTargetRects())

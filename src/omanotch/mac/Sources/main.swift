@@ -490,6 +490,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.send("targets") }
     }
 
+    func stripPointer(x: CGFloat) {
+        send(String(format: "hover %.1f", max(x, 0)))
+        // A reveal widens the indicators: the hand cursor needs their new places.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.send("targets") }
+    }
+
     func stripScrolled(x: CGFloat, y: CGFloat, steps: Int) {
         send(String(format: "wheel %.1f %.1f %d", x, y, steps * 120))
     }
@@ -503,6 +509,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             cursorHider.pointerOnStrip(showAfter: 0.045)
             send("targets")
         } else if exit != nil {
+            send("hover -1")   // the bar lets go of the strip's hover at once (#308)
             // Show the guest cursor once the pointer lands in a VM window (at
             // that exact spot, see pointerEnteredVM). If it lands elsewhere,
             // show it anyway after a moment so it is never left hidden.

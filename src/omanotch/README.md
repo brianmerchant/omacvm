@@ -153,7 +153,9 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   Omanotch cannot change it without editing Omarchy's own files. The popups
   never reach into the strip, though.
 - Hover effects (tooltips, hover highlights) are not mirrored; clicks, right
-  and middle clicks and scrolling are. Tray icons show up but can't be clicked
+  and middle clicks and scrolling are. The one hover the strip passes on: the
+  pointer on the bar's free space shows Omarchy's auto-hidden indicators, and
+  they stay until it leaves the strip, as on the bar itself. Tray icons show up but can't be clicked
   in the strip.
 - The bar and background clones are forks of Omarchy's plugins. After an
   Omarchy update that changes them, re-clone and run `./guest/install.sh`

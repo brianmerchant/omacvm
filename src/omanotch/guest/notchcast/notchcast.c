@@ -474,6 +474,14 @@ static int cursor_stays(void) {
     return cursor_mode() != HOST_CURSOR_HIDES;
 }
 
+// Omanotch's pointer over the strip, for the bar's hover reveal (#308):
+// "hover X" from the Mac goes to the bar; it is let go (-1) once the pointer
+// leaves the strip or Omanotch goes, so the bar never keeps a hover.
+static atomic_int hover_on;
+static void hover_off(void) {
+    if (atomic_exchange(&hover_on, 0)) free(ipc_call(0, "hover", "-1", NULL, NULL));
+}
+
 // Hides or shows the guest's own cursor, at once.
 static void apply_guest_cursor_visible(int visible) {
     atomic_store(&cursor_hidden_at, visible ? 0 : (long long)now_ms() + 1);
@@ -537,6 +545,7 @@ static void *park_check_thread(void *arg) {
 // own cursor (while the pointer is over the strip the helper shows the
 // guest's cursor images itself).
 static void set_guest_cursor_visible(int visible) {
+    if (visible) hover_off();
     pthread_mutex_lock(&cursor_lock);
     int gen = ++cursor_gen, mode = cursor_mode();
     if (visible || mode == HOST_CURSOR_HIDES) apply_guest_cursor_visible(visible);
@@ -552,6 +561,7 @@ static void set_guest_cursor_visible(int visible) {
 // display arranged above ("up"). Without this the cursor would reappear where
 // it was hidden and jump once Parallels reports the next position.
 static void show_guest_cursor_at_exit(const char *dir, double strip_x, double depth) {
+    hover_off();
     // Fusion already puts the cursor where the Mac's pointer is; under
     // OmacVM.app it was never hidden and QEMU's next move places it (moving
     // it here would land after QEMU's newer positions: a stale jump).
@@ -1171,6 +1181,12 @@ static void handle_command(char *line) {
         free(ipc_call(0, "click", argv[1], argv[2], argv[3]));
     } else if (!strcmp(c, "wheel") && argc == 4 && is_number(argv[1]) && is_number(argv[2]) && is_number(argv[3])) {
         free(ipc_call(0, "wheel", argv[1], argv[2], argv[3]));
+    } else if (!strcmp(c, "hover") && argc == 2 && is_number(argv[1])) {
+        if (strtod(argv[1], NULL) < 0) hover_off();
+        else {
+            atomic_store(&hover_on, 1);
+            free(ipc_call(0, "hover", argv[1], NULL, NULL));
+        }
     } else if (!strcmp(c, "targets") && argc == 1) {
         char *out = ipc_call(1, "targets", NULL, NULL, NULL);
         if (out) {

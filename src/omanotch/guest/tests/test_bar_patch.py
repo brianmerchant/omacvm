@@ -133,7 +133,7 @@ class Patch(unittest.TestCase):
         self.text = patched()
 
     def test_version(self):
-        self.assertIn("// omarchy-notch-bar patch v17", self.text)
+        self.assertIn("// omarchy-notch-bar patch v18", self.text)
 
     def test_state_files_read_fresh_after_reload(self):
         # blockLoading alone: text() right after reload() gives the old content
@@ -153,7 +153,7 @@ class Patch(unittest.TestCase):
             f = d / "Bar.qml"
             f.write_text(self.text)
             out = subprocess.run([sys.executable, str(PATCH), str(f)], check=True, capture_output=True, text=True)
-            self.assertIn("already patched (v17)", out.stdout)
+            self.assertIn("already patched (v18)", out.stdout)
             self.assertEqual(f.read_text(), self.text)
         finally:
             shutil.rmtree(d)
@@ -430,6 +430,51 @@ class Behaviour(unittest.TestCase):
         for geom in ("", "646 825 33\n", "x 825 33 0\n", "825 646 33 0\n", "0 0 0 0\n"):
             r = self.run_js({"geom": geom}, self.ticks(1))
             self.assertEqual(r["root"]["notchLeft"], 918, geom)
+
+
+HOVER = r"""
+var calls = [];
+var root = {
+  notchHovering: false, barHidden: false, notchFullscreen: false,
+  setCenterSectionHovered: function(h) { calls.push("center " + h) },
+  setBarHovered: function(h) { calls.push("bar " + h) },
+  notchTargetAt: function(x, y) { return x >= 100 && x < 130 ? {} : null },
+};
+root.notchHover = function(x) { %s };
+var out = [];
+%s.forEach(function(x) { calls = []; out.push([root.notchHover(x), calls]) });
+console.log(JSON.stringify(out));
+"""
+
+
+class Hover(unittest.TestCase):
+    """#308: the strip's pointer reveals the auto-hidden indicators as the bar's own hover does."""
+
+    def run_hover(self, xs, stock=True):
+        body = function(patched(), "notchHover")
+        js = HOVER % (body, json.dumps(xs))
+        if not stock:
+            js = js.replace("setBarHovered: function", "setBarHoveredGone: function")
+        return json.loads(subprocess.run(["node", "-e", js], check=True, capture_output=True, text=True).stdout)
+
+    def test_free_space_reveals_and_holds_over_a_widget(self):
+        r = self.run_hover([40, 110, 40, -1, -1])
+        self.assertEqual(r[0], ["free", ["bar true", "center true"]])   # on the bar: hover held, peek opens
+        self.assertEqual(r[1], ["widget", ["center false"]])            # over a widget: held by the bar hover
+        self.assertEqual(r[2], ["free", ["center true"]])               # no second bar hover
+        self.assertEqual(r[3], ["off", ["center false", "bar false"]])  # left the strip: both let go once
+        self.assertEqual(r[4], ["off", []])
+
+    def test_widget_first_does_not_open_the_peek(self):
+        r = self.run_hover([110])
+        self.assertEqual(r[0], ["widget", ["bar true", "center false"]])
+
+    def test_older_omarchy_without_the_hover_functions(self):
+        r = self.run_hover([40, -1], stock=False)
+        self.assertEqual(r, [["unsupported", []], ["off", []]])
+
+    def test_ipc_entry(self):
+        self.assertIn("return root.notchHover(x)", function(patched(), "hover"))
 
 
 if __name__ == "__main__":
