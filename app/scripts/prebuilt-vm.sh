@@ -173,5 +173,8 @@ fi
 step 7 "Shutting down"
 vssh "systemctl poweroff" < /dev/null 2>/dev/null || true
 qemu_wait_exit 120 || qemu_quit
+# Off now: the disk again, and what it takes on the Mac in the log (#305).
+qemu_running || prebuilt_compact "$VM_DIR/disk.img"
+log "disk: $(( $(stat -f %b "$VM_DIR/disk.img") / 2097152 )) GB of $(( $(stat -f %z "$VM_DIR/disk.img") >> 30 )) GB on the Mac (image $PB_TAG)"
 rm -f "$SEED"
 echo "READY $NAME"

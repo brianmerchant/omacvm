@@ -57,5 +57,25 @@ expect "repack: app disk made sparse" 1 "$(grep -c 'app) sparse_disk "$stage/dis
 expect "sparse_disk stops on a disk still half allocated" 1 "$(grep -c 'kb < PREBUILT_DISK_GB \* 1048576 / 2' "$M")"
 expect "tar names root as the owner" 1 "$(grep -c 'tar --no-xattrs --uid 0 --gid 0 --uname root --gname root' "$M")"
 
+# A VM's disk.img that takes more than half its size on the Mac after the
+# unpack or the setup is made sparse there (#305: a fresh 3.0.9 setup on macOS
+# 15.8.1 took 61 of 64 GB); a sparse one is left alone.
+(
+  source "$R/src/lib/mac.sh"; source "$R/src/prebuilt/lib.sh"
+  g=$T/vm.img
+  dd if=/dev/zero of="$g" bs=1m count=32 status=none
+  printf 'data' | dd of="$g" conv=notrunc status=none
+  gsum=$(shasum -a 256 < "$g")
+  msg=$(prebuilt_compact "$g")
+  expect "compact: an allocated disk becomes sparse" 1 "$(( $(kb "$g") <= 1024 ))"
+  expect "compact: bytes unchanged" "$gsum" "$(shasum -a 256 < "$g")"
+  expect "compact: it says so" 1 "$([[ $msg == *"zeros made holes"* ]] && echo 1)"
+  msg=$(prebuilt_compact "$g")
+  expect "compact: a sparse disk is left alone" "" "$msg"
+  (( fail )) && exit 1; exit 0
+) || fail=1
+expect "unpack: the app's disk is compacted" 1 "$(grep -A3 'mv "$f" "$2"' "$R/src/prebuilt/lib.sh" | grep -c 'prebuilt_compact "$2"')"
+expect "setup: compacted once the VM is off" 1 "$(grep -c 'qemu_running || prebuilt_compact "$VM_DIR/disk.img"' "$R/app/scripts/prebuilt-vm.sh")"
+
 (( fail )) && { echo "prebuilt-sparse: FAILED"; exit 1; }
 echo "prebuilt-sparse: all passed"

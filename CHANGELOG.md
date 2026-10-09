@@ -3,6 +3,15 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.10 (unreleased)
+
+- OmacVM.app: a new VM's disk no longer stays at almost its full size on the Mac (reported by
+  @brianmerchant, #305: a fresh 3.0.9 setup on macOS 15.8.1 took 61 of 64 GB; `sparsify.py`
+  brought it to 7.9). After the image is unpacked, and again once the setup has shut the VM
+  down, a disk.img that takes more than half its size is made sparse (every zeroed MiB becomes a
+  hole, the bytes stay the same), and create.log says what the disk takes on the Mac and which
+  image it came from. The image itself unpacks sparse (prebuilt-3.0.8: 6.9 GB on macOS 15.7).
+
 ## 3.0.9
 
 - Bridge: its media-key tap can no longer hold the Mac's keyboard and clicks (reported by
