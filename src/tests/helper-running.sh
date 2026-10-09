@@ -23,7 +23,8 @@ FAKE=$!; PIDS="$PIDS $FAKE"; disown "$FAKE" 2>/dev/null || true
 sleep 1
 got=$(helper_pid bridge)
 [[ -n $got ]] && [[ $(ps -o args= -p "$got") == *OmacVMBridge.app/Contents/MacOS/omacvm-bridge* ]] &&
-  { [[ $got == "$FAKE" ]] || (( got < FAKE )); } && pass "a Bridge outside its LaunchAgent is found (pid $got)" ||
+  { [[ $got == "$FAKE" ]] || (( $(proc_started "$got") <= $(proc_started "$FAKE") )); } &&
+  pass "a Bridge outside its LaunchAgent is found (pid $got; the oldest, when this Mac runs its own)" ||
   failed "helper_pid bridge: got '$got', the stand-in is $FAKE"
 [[ -z $(helper_pid gestures test 2>/dev/null | grep -x "$FAKE") ]] && pass "not taken for the test identity's Gestures" ||
   failed "the stand-in Bridge was taken for the test Gestures"
