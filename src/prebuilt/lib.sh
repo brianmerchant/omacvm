@@ -184,6 +184,24 @@ prebuilt_unpack_disk() {
     { rm -rf "$u"; die "the image's disk.img is not a plain file: not used"; }
   mv "$f" "$2"
   rm -rf "$u"
+  prebuilt_compact "$2"
+}
+
+# prebuilt_compact FILE: a raw disk that takes more than half its size on the
+# Mac gets every zeroed MiB back as a hole (sparsify.py, bytes unchanged).
+# The images unpack sparse (prebuilt-3.0.8: 7 GB of 64, on macOS 15.7 and 26),
+# but a fresh 3.0.9 setup on macOS 15.8.1 ended with 61 GB in use, 7.9 after
+# sparsify.py (#305). Only for a disk no VM has open: sparsify reads it all
+# (about 10 s for 60 GB) and punches holes where it read zeros.
+prebuilt_compact() {
+  local f=$1 size kb out
+  size=$(stat -f %z "$f" 2>/dev/null) && kb=$(( $(stat -f %b "$f") / 2 )) || return 0
+  (( kb * 1024 > size / 2 )) || return 0
+  if out=$(python3 "$R/src/prebuilt/sparsify.py" "$f" 2>/dev/null) && [[ $out =~ ^[0-9]+\ ([0-9]+)$ ]]; then
+    info "disk.img took $((kb / 1048576)) GB of its $((size >> 30)) GB on the Mac: zeros made holes, now $((BASH_REMATCH[1] / 1048576)) GB"
+  else
+    info "disk.img takes $((kb / 1048576)) GB of its $((size >> 30)) GB on the Mac; could not make it sparse"
+  fi
 }
 
 prebuilt_cleanup() {   # the downloaded parts (kept with OMACVM_PREBUILT_KEEP=1)

@@ -17,6 +17,13 @@ in more words.
   again, as the app does for its keyboard entry since 3.0.6 (#255). `omacvm check` names the
   tccutil commands on that row and no longer suggests `omacvm apply` for scroll momentum while
   Gestures waits for its Mac permissions.
+- OmacVM.app: a new VM's disk no longer stays at almost its full size on the Mac (reported by
+  @brianmerchant, #305: a fresh 3.0.9 setup on macOS 15.8.1 took 61 of 64 GB; `sparsify.py`
+  brought it to 7.9). After the image is unpacked, and again once the setup has shut the VM
+  down, a disk.img that takes more than half its size is made sparse (every zeroed MiB becomes a
+  hole, the bytes stay the same), and create.log says what the disk takes on the Mac and which
+  image it came from. The image itself unpacks sparse (prebuilt-3.0.8: 6.9 GB on macOS 15.7).
+
 
 ## 3.0.9
 
