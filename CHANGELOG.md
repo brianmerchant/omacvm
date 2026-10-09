@@ -3,6 +3,23 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.14 (unreleased)
+
+Gestures start working as soon as you allow them, and `omacvm check` tells the truth about the Mac helpers.
+
+- OmacVM Gestures now notices when you allow Accessibility and Input Monitoring while it waits,
+  and starts listening right away. Before, it could wait for good after a fresh install, so
+  trackpad gestures and scroll momentum never connected until it was restarted (#330, reported
+  by @brianmerchant). If macOS only tells a new process about the permission, the helper starts
+  again by itself, once.
+- `omacvm check` finds the Bridge and Gestures however they were started (after "Quit & Reopen"
+  in System Settings macOS starts them itself), and reads their permissions from the running
+  helper, not from an older log. It says when Gestures runs but waits for a permission. Both
+  helpers now write their log also when macOS started them (#331, reported by @brianmerchant).
+- `omacvm check` in the VM says "not checked: vulkaninfo missing" instead of "no Venus device"
+  when vulkan-tools is not installed. Update VM now installs vulkan-tools with the Vulkan driver
+  (#332, reported by @brianmerchant).
+
 ## 3.0.13
 
 Vulkan by default on newer Macs.
