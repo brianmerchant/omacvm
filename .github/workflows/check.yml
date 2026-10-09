@@ -197,6 +197,8 @@ jobs:
         run: src/tests/media-keys-check.sh
       - name: omacvm check's Gestures line (waiting for a permission at start vs listening)
         run: src/tests/gestures-state.sh
+      - name: omacvm check finds the Bridge and Gestures by process and reads only their own log lines
+        run: src/tests/helper-running.sh
 
       - name: omacvm vms never waits on UTM's data
         run: src/tests/vms-no-container.sh < /dev/null
