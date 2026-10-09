@@ -83,9 +83,9 @@ Type `omacvm` in Omarchy (or pick it in the Omarchy menu): every feature with it
 
 ¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ a Graphics setting per VM (OpenGL, Vulkan, Automatic = OpenGL); Vulkan adds Vulkan apps next to OpenGL: on KosmicKrisp on macOS 26 or newer, on MoltenVK before; Vulkan windows reach the screen by a copy on the Mac, faster than the VM's software copy; OpenGL and browser speed are the same either way, and Vulkan gives Chromium WebGPU; OpenCL and WebGPU in Firefox opt-in ([numbers](docs/benchmarks/README.md#graphics-automatic-2026-10-05)) · ⁴ with the VM in full screen on that display
 
-<!-- 3.0.0 benchmark chart: the final round (bare macOS = 100 %, OmacVM.app first) replaces docs/images/benchmarks.svg and this alt text. -->
+<!-- Benchmark chart: the latest MacBook Pro round (macOS = 100 %, OmacVM.app first), from docs/benchmarks/chart.json with src/bench/chart.py; src/tests/bench-docs.sh checks this alt text. -->
 <p align="center">
-  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 64, 52, 71, 67. Browser graphics (WebGL Aquarium): 32, 26, 38, 25. Browser overall (Basemark Web 3.0): 76, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent with the vulkan feature on, not available in the others." width="100%">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. Web apps (Speedometer 3.1): 69, 62, 73, 71 percent. Browser graphics (WebGL Aquarium): 39, 23, 37, 25. Browser overall (Basemark Web 3.0): 77, 74, 69, 74. MacBook Pro M4 Max, 2026-10-09, each VM alone in a window, median of 3 runs." width="100%">
 </p>
 
 <a name="power-draw"></a>

@@ -7,6 +7,8 @@
 #   never longer than a released bar of another app in its group
 # - the chart's alt texts in README.md and docs/compare.md give the app's
 #   numbers the SVG gives
+# - the speed chart shows one round only (one source for every test) and
+#   plain bars (no "unreleased" tags)
 # - the power chart (docs/images/power.svg) is chart.py --panel power's output, its
 #   hours are the battery over the watts, README.md's alt text gives every
 #   number in it, and it shows one round only (the README shows only the latest
@@ -78,6 +80,11 @@ for page in ("README.md", "docs/compare.md"):
     diff = {b: (want[b], got.get(b)) for b in want if got.get(b) != want[b]}
     expect(f"{page}: chart alt text matches the SVG for OmacVM.app", not diff,
            ", ".join(f"{b}: SVG {w}, alt {g}" for b, (w, g) in diff.items()))
+
+# 3a. The README's speed chart shows the latest round only, plain bars: one source for every test, no tagged bars.
+srcs = set(data.get("sources", {}).get(t, "") for t in mac)
+expect("speed chart: every test from one round (chart.json sources)", len(srcs) == 1 and "" not in srcs, sorted(srcs))
+expect("speed chart: plain bars, no version tags (no \"unreleased\")", not data.get("unreleased"), data.get("unreleased"))
 
 # 3b. The power chart: chart.py's output, hours that follow from the watts, every number in README's alt text.
 psvg = read("docs/images/power.svg")

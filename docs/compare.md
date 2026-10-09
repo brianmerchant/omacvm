@@ -26,10 +26,10 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | **Speed** (the Mac itself = 100 %) | | | | |
 | CPU, all cores: Geekbench 7 | **99 %** | 89 % | **99 %** | 96 % |
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
-| Web apps: Speedometer 3.1 | 64 % | 52 % | **71 %** | 67 % |
+| Web apps: Speedometer 3.1 | 69 % | 62 % | **73 %** | 71 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
-| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 76 % · 32 % | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
-| 3D: glmark2 (score) | 1017 (2.9.0 RC in a window: 2856) | 964 | 1813 | **7306** |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | **77 % · 39 %** | 74 % · 23 % | 69 % · 37 % | 74 % · 25 % |
+| 3D: glmark2 (score) | 3058 | 1077 | 2785 | **8297** |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
@@ -58,7 +58,7 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | Where the VM goes | **any folder, external drives too** | **any folder, external drives too** | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
-  <img src="images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 64, 52, 71, 67. Browser graphics (WebGL Aquarium): 32, 26, 38, 25. Browser overall (Basemark Web 3.0): 76, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent with the vulkan feature on, not available in the others." width="100%">
+  <img src="images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. Web apps (Speedometer 3.1): 69, 62, 73, 71 percent. Browser graphics (WebGL Aquarium): 39, 23, 37, 25. Browser overall (Basemark Web 3.0): 77, 74, 69, 74. MacBook Pro M4 Max, 2026-10-09, each VM alone in a window, median of 3 runs." width="100%">
 </p>
 
 ## The Mac itself, and video
@@ -78,18 +78,19 @@ number above is from before, with the CPU decoding.
 
 ## How we measured
 
-A MacBook Pro 16" M4 Max (macOS 15.7, 100 Wh battery), 16 CPUs and 48 GB per
-VM, one VM at a time in full screen on the built-in display, nothing else
-open, brightness at 50 %, Google Chrome 154 on the Mac and in each VM, OmacVM
-2.3.0. Speedometer is the median of 3 runs, the rest single runs. Power is the
-whole Mac's draw from its battery telemetry, 3 minutes per load; hours are
-100 Wh over that draw, whole hours from 13 h up, one decimal below. The GPU
-row is from 2026-10-04 (OmacVM 2.6.0, median of 3, brightness at its lowest,
-an external display connected); on the Mac, Geekbench 7 GPU gives 204241 with
-Metal and 117456 with OpenCL. OmacVM.app's Speedometer and GPU row are
-3.0.0's, from 2026-10-06: run on a Mac mini M4 in the same session as
-Parallels, then scaled by Parallels' result on the MacBook
-([how](benchmarks/README.md#omacvmapp-300-2026-10-06)).
+A MacBook Pro 16" M4 Max (macOS 15.7, 100 Wh battery). Speedometer,
+Basemark, Aquarium and glmark2 are from 2026-10-09: OmacVM.app 3.0.9,
+UTM 5.0.6, VMware Fusion 26.0.1 and Parallels Desktop 27.0.2, each VM alone
+with 6 CPUs and 8 GB in a window on the built-in display, Chrome's page
+1440x900 at 2x (Parallels 1440x890), Google Chrome 155 on the Mac and in each
+VM, median of 3 runs
+([raw runs](benchmarks/README.md#macbook-pro-m4-max-every-route-2026-10-09)).
+The CPU, MotionMark and power rows are from 2026-10-03: 16 CPUs and 48 GB per
+VM, one VM at a time in full screen, brightness at 50 %, Google Chrome 154,
+OmacVM 2.3.0, single runs. Power is the whole Mac's draw from its battery
+telemetry, 3 minutes per load; hours are 100 Wh over that draw, whole hours
+from 13 h up, one decimal below. GPU compute is from 2026-10-04; on the Mac,
+Geekbench 7 GPU gives 204241 with Metal and 117456 with OpenCL.
 
 Every step, the raw numbers and how to run the same tests yourself:
 [benchmarks](benchmarks/README.md).
