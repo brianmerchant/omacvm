@@ -147,10 +147,10 @@ final class StripView: NSView {
         drawScale = place.scale
         drawLeft = place.left
         drawTop = place.top
-        let w = barWidth > 0 ? barWidth / drawScale : bounds.width
-        let h = barHeight / drawScale
-        // Layer geometry is bottom-left based even in a flipped view.
-        barLayer.frame = CGRect(x: drawLeft, y: bounds.height - drawTop - h, width: w, height: h)
+        barLayer.frame = place.frame(barWidth: barWidth > 0 ? barWidth : bounds.width * drawScale,
+                                     barHeight: barHeight, height: bounds.height,
+                                     layerFlipped: layer?.isGeometryFlipped ?? isFlipped)
+        let w = barLayer.frame.width
         lockLayer.frame = bounds
         // Pixel-exact when the guest renders at the Mac's backing scale,
         // smooth when the image has to be resampled.
