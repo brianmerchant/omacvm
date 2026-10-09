@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.14 (unreleased)
+## 3.0.14
 
 Gestures start working as soon as you allow them, and `omacvm check` tells the truth about the Mac helpers.
 
