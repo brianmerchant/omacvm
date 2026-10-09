@@ -5,6 +5,9 @@ in more words.
 
 ## 3.0.10 (unreleased)
 
+- The Mac input methods feature is named for what it is for: "Mac input (Chinese, Japanese,
+  Korean)" in the app, "Mac input: Chinese, Japanese…" in the control centre; its info text says
+  normal keyboard layouts (accents included) do not need it.
 - Gestures: a permission macOS kept for another build no longer leaves it waiting for good
   (reported by @brianmerchant, #306). macOS ties each permission entry to the signature of the
   build that asked; one from another build (e.g. a helper built on the Mac before OmacVM.app's
