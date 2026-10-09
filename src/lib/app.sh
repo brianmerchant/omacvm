@@ -240,6 +240,18 @@ app_touchid_port() {
   [[ ", $l, " == *", Touch ID port on, "* || ", $l, " == *", Touch ID on, "* ]]
 }
 
+# app_ssh_key DIR: the VM folder's own SSH key (ssh-key, ssh-key.pub; 0600),
+# made when missing. omacvm apply puts it into the VM for root and the user,
+# beside the key of the Mac (~/.ssh/omacvm), so the VM is still reached when
+# its folder is copied to another Mac, whose own key the VM does not know. It
+# adds no reach: the disk image beside it is just as readable.
+app_ssh_key() {
+  local k=$1/ssh-key
+  [[ -f $k && -f $k.pub ]] || { rm -f "$k" "$k.pub"; (umask 077; ssh-keygen -t ed25519 -N "" -C omacvm-vm -f "$k" -q) || return 1; }
+  chmod 600 "$k"
+  echo "$k"
+}
+
 app_dir() {
   local d
   while IFS= read -r d; do

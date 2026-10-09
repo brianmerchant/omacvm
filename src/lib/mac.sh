@@ -123,7 +123,11 @@ gssh() {
     hk=(-o "StrictHostKeyChecking=$([[ -s $OMA_PIN ]] && echo yes || echo accept-new)"
         -o "UserKnownHostsFile=\"$OMA_PIN\"" -o HostKeyAlias=omacvm-vm -o CheckHostIP=no)
   fi
-  ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
+  # An OmacVM.app VM's own key first (OMA_VM_KEY, vm_pin): it goes along
+  # when the VM folder is copied to another Mac; then this Mac's key.
+  local ids=()
+  [[ -n ${OMA_VM_KEY:-} && -f ${OMA_VM_KEY:-} ]] && ids=(-i "$OMA_VM_KEY")
+  ssh ${ids[@]+"${ids[@]}"} -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
     "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -p "$port" "root@$ip" "$@"
 }
 

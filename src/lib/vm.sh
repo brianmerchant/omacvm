@@ -78,12 +78,17 @@ PY
 }
 
 # vm_pin NAME TYPE: gssh checks that VM's remembered SSH host key from now on
-# (OMA_PIN_RESET=1: forget it first, once).
+# (OMA_PIN_RESET=1: forget it first, once), and offers an OmacVM.app VM's own
+# key (OMA_VM_KEY).
 vm_pin() {
   OMA_PIN="$OMA_PINS/$2-$(printf %s "$1" | tr -c 'A-Za-z0-9._-' _)-$(printf %s "$1" | cksum | cut -d' ' -f1)"
   OMA_PIN_ARGS=$(printf -- '--vm %q' "$1")
   if [[ ${OMA_PIN_RESET:-} == 1 ]]; then rm -f "$OMA_PIN"; OMA_PIN_RESET=0; fi
-  export OMA_PIN OMA_PIN_ARGS
+  # An OmacVM.app VM's own SSH key (app_ssh_key): gssh offers it first.
+  local d
+  OMA_VM_KEY=""
+  if [[ $2 == app ]] && d=$(app_dir "$1" 2>/dev/null) && [[ -f $d/ssh-key ]]; then OMA_VM_KEY=$d/ssh-key; fi
+  export OMA_PIN OMA_PIN_ARGS OMA_VM_KEY
 }
 
 # vm_marked NAME TYPE: OmacVM built this VM (its description says so) or set
