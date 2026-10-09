@@ -329,6 +329,8 @@ jobs:
 
       - name: A VM not shut down cleanly, or copied while it ran, warns before a start
         run: src/tests/app-run-marker.sh
+      - name: Update VM never waits forever (disk errors, a read-only VM, a hang)
+        run: src/tests/update-vm-watch.sh
 
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
