@@ -488,7 +488,8 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
   port 47930, settings domain `org.omacvm.test.gestures`). The test Bridge and Gestures take only OmacVM
   Test.app's VMs (and a lane's copy re-signed as `org.omacvm.app.test.<lane>`), the normal ones only the others (the Bridge reads the app a VM runs from, Gestures the VM's
   code signature `<bundle id>.qemu`; a development build's QEMU is every helper's). Its VMs reach Omanotch on 47911 only: a test Omanotch
-  (src/omanotch/mac build, `port` 47911, `bridgeDir` omacvm-test-bridge) on a Mac without the user's. Start a helper with `open` (so macOS checks its own
+  (src/omanotch/mac build, launched with `--args -port 47911 -bridgeDir omacvm-test-bridge`; never `defaults write
+  ch.gillesgoetsch.omanotch`, which is the person's Omanotch's) on a Mac without the user's. Start a helper with `open` (so macOS checks its own
   grant, not the Terminal's); small tools without a bundle run as children of your shell (the Terminal's grants).
   Never `src/mac/install.sh` from a test: that installs over the user's helpers. If one runs anyway with the test
   identity or another HOME, every helper LaunchAgent gets an `org.omacvm.test.*` label (`omacvm_label` in
