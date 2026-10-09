@@ -5,6 +5,8 @@ in more words.
 
 ## 3.0.13
 
+Vulkan by default on newer Macs.
+
 - OmacVM.app: **Automatic graphics is now Vulkan on macOS 26 and newer** (KosmicKrisp), OpenGL
   before. Measured on a Mac mini M4 and a MacBook Air M2: the OpenGL desktop, WebGL and glmark2
   stay within 1 % with Vulkan on, and Vulkan apps and WebGPU work out of the box. A VM on Automatic
