@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.10 (unreleased)
+## 3.0.10
 
 - OmacVM.app: a new VM's disk no longer stays at almost its full size on the Mac (reported by
   @brianmerchant, #305: a fresh 3.0.9 setup on macOS 15.8.1 took 61 of 64 GB; `sparsify.py`
