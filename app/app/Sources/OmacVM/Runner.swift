@@ -336,6 +336,9 @@ final class Runner {
         try? FileManager.default.removeItem(at: c.touchIDPanelSocket)
         let p = Process()
         p.executableURL = Paths.qemu
+        // The Mac's input methods switched in the app while the VM was stopped
+        // (#316): the record follows that choice, the VM's part comes below.
+        let imePending = MacIME.prepareStart(folder: c.folder)
         // What of the Mac this start may use (its features), read once.
         links = MacLinks.load(folder: c.folder)
         p.arguments = arguments()
@@ -528,6 +531,11 @@ final class Runner {
         // Grow or Compact asked for in the window (VMDisk), once the guest answers.
         let pid = p.processIdentifier
         VMDisk.runJobs(config: c, agentPath: agentPath, running: { kill(pid, 0) == 0 })
+        if let on = imePending {
+            MacIMEStart.run(config: c, on: on, agentPath: agentPath, running: { kill(pid, 0) == 0 }) { [weak self] line in
+                Task { @MainActor in self?.appendLog(line) }
+            }
+        }
     }
 
     /// What of the Mac this start of the VM may use (its features).

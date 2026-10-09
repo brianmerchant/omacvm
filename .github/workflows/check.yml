@@ -385,6 +385,9 @@ jobs:
       - name: A feature that is off is off on every route (VM side, checks, Mac side)
         run: src/tests/features-off.sh
 
+      - name: Mac input methods switched while the VM is stopped come with its next start (#316)
+        run: src/tests/mac-ime-start.sh
+
       - name: omacvm features' checklist keeps one line per row (pseudo-terminal, #292)
         run: src/tests/features-checklist.sh
 
