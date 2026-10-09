@@ -539,6 +539,8 @@ if [[ $GESTURES == on ]]; then
       g=$(grep "guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
       [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$GESTURES_LOG" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "on (trackpad only): a trackpad's scrolling goes to this VM in full screen, mice scroll one to one"
+      elif [[ $(last_line "$GESTURES_LOG" 'omacvm-gestures: permissions: ') == *MISSING* ]]; then
+        bad "scroll momentum (Mac)" "OmacVM Gestures waits for its Mac permissions (keyboard/trackpad access below); omacvm apply does not change them"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
       FEATURE=gestures
     fi
@@ -549,7 +551,9 @@ if [[ $GESTURES == on ]]; then
     p=$(last_line "$GESTURES_LOG" 'omacvm-gestures: permissions: ')
     if [[ $p == *MISSING* ]]; then
       miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
-      bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security" human
+      # On in System Settings and still refused: an entry macOS kept for an
+      # older build (#306). The helper clears its own once per build; by hand:
+      bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security. On there and still off: tccutil reset Accessibility $L_GESTURES; tccutil reset ListenEvent $L_GESTURES; launchctl kickstart -k gui/$(id -u)/$L_GESTURES, then allow it again" human
     elif [[ -n $p ]]; then ok "keyboard/trackpad access" "Accessibility + Input Monitoring"
     else
       p=$(last_line "$GESTURES_LOG" 'permission|listening on')
