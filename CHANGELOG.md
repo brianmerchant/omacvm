@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.13 (unreleased)
+## 3.0.13
 
 Vulkan by default on newer Macs.
 
