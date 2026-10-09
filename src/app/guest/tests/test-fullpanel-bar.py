@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline transformation/geometry/migration checks for FullPanel Quickbar v2.
+"""Offline transformation/geometry/migration checks for FullPanel Quickbar v4.
 
 These do not replace an on-device Quickshell render or Swift AppKit test.
 """
@@ -41,10 +41,17 @@ class FullPanelBarTests(unittest.TestCase):
         self.assertIn('readonly property bool overflow: notchAware', s)
         self.assertIn('clip: fullPanelEdge.overflow', s)
         self.assertIn('interactive: false', s)
-        self.assertIn('region: fullPanelEdge.edge', s)
+        self.assertIn('region: fullPanelEdge.widgetRegion', s)
+        self.assertIn('component FullPanelBalancedModules: Item', s)
+        self.assertIn('root.activePopout || root.barDragSource || root.barHovered', s)
+        self.assertIn('function onBarHoveredChanged() { balanced.scheduleRebalance() }', s)
+        self.assertIn('widgetRegion: "right"', s)
+        self.assertIn('region: fullPanelEdge.widgetRegion', s)
+        self.assertIn('entriesOverride: balanced.rightEntries.slice(0, balanced.borrowedCount)', s)
+        self.assertIn('entriesOverride: balanced.rightEntries.slice(balanced.borrowedCount)', s)
         self.assertEqual(s.count('component FullPanelEdgeModules: Item'), 1)
-        self.assertEqual(s.count('FullPanelEdgeModules {\n          edge: "right"'), 1)
-        self.assertEqual(s.count('FullPanelEdgeModules {\n          edge: "left"'), 1)
+        self.assertEqual(s.count('FullPanelBalancedModules {\n          targetScreen: barWindow.screen'), 1)
+        self.assertEqual(s.count('component FullPanelBalancedModules: Item'), 1)
         self.assertNotIn(mod.HORIZONTAL_OLD, s)
 
     def test_idempotent(self):
@@ -77,10 +84,105 @@ class FullPanelBarTests(unittest.TestCase):
             mod.patch_text(broken)
 
     def test_bad_v2_is_not_treated_as_success(self):
-        patched = mod.patch_text(self.source).replace('component FullPanelEdgeModules: Item',
-                                                      'component BrokenEdge: Item')
+        patched = self.make_v2().replace('component FullPanelEdgeModules: Item',
+                                         'component BrokenEdge: Item')
         with self.assertRaisesRegex(ValueError, 'v2 marker'):
             mod.patch_text(patched)
+
+    def test_bad_v3_is_not_treated_as_success(self):
+        patched = self.make_v3().replace('component FullPanelBalancedModules: Item',
+                                         'component BrokenBalanced: Item')
+        with self.assertRaisesRegex(ValueError, 'v3 marker'):
+            mod.patch_text(patched)
+
+    def make_v2(self):
+        patched = self.source.replace(mod.HOME_ANCHOR, mod.HOME_ANCHOR + mod.HOST_INFO_V2)
+        patched = patched.replace(mod.NOTCH_FLOOR, mod.NEW_NOTCH_FLOOR)
+        patched = patched.replace(mod.OLD_HEIGHT, mod.NEW_HEIGHT)
+        patched = patched.replace(mod.EDGE_ANCHOR, mod.EDGE_COMPONENT_V2 + "\n" + mod.EDGE_ANCHOR)
+        patched = patched.replace(mod.HORIZONTAL_OLD, mod.HORIZONTAL_NEW)
+        return patched
+
+    def test_migrate_live_v2_and_preserve_settings(self):
+        original = self.make_v2().replace(
+            '  id: root\n',
+            '  id: root\n  property var barConfig: ({})\n  property string omarchyPath: Quickshell.env("OMARCHY_PATH")\n'
+        ).replace('  component LeftModules: ModuleList {',
+                  '  property string localNote: "unchanged"\n  component LeftModules: ModuleList {')
+        upgraded = mod.patch_text(original)
+        self.assertNotIn(mod.V2_MARKER, upgraded)
+        self.assertIn(mod.MARKER, upgraded)
+        self.assertIn('property var barConfig: ({})', upgraded)
+        self.assertIn('localNote: "unchanged"', upgraded)
+        self.assertIn(mod.NEW_HEIGHT, upgraded)
+        self.assertIn('component FullPanelBalancedModules: Item', upgraded)
+        self.assertEqual(upgraded, mod.patch_text(upgraded))
+        self.assertEqual(upgraded.count('component FullPanelEdgeModules: Item'), 1)
+
+
+    def test_migrate_live_v3_hover_fix_only(self):
+        v3 = self.make_v3().replace('  id: root\n',
+            '  id: root\n  property string note: "user customization survives"\n')
+        updated = mod.patch_text(v3)
+        self.assertNotIn(mod.V3_MARKER, updated)
+        self.assertIn(mod.MARKER, updated)
+        self.assertIn('note: "user customization survives"', updated)
+        self.assertIn('root.activePopout || root.barDragSource || root.barHovered', updated)
+        self.assertIn('function onBarHoveredChanged() { balanced.scheduleRebalance() }', updated)
+        self.assertEqual(updated, mod.patch_text(updated))
+
+    def test_bad_v4_is_not_treated_as_success(self):
+        broken = mod.patch_text(self.source).replace(
+            'function onBarHoveredChanged() { balanced.scheduleRebalance() }',
+            'function onBarHoveredChanged() { /* broken */ }')
+        with self.assertRaisesRegex(ValueError, 'v4 marker'):
+            mod.patch_text(broken)
+
+    def test_hover_guard_is_prior_to_borrow_count_mutation(self):
+        qml = mod.BALANCED_COMPONENT
+        method = qml[qml.index('    function rebalance() {'):qml.index('    // Coalesced', qml.index('    function rebalance() {'))]
+        guard = 'if (root.activePopout || root.barDragSource || root.barHovered) return'
+        mutation = 'borrowedCount = wanted'
+        self.assertIn(guard, method)
+        self.assertIn(mutation, method)
+        self.assertLess(method.index(guard), method.index(mutation))
+
+    def make_v3(self):
+        text = self.make_v2()
+        return mod.upgrade_v2_to_v3(text)
+
+    def test_balancing_rules(self):
+        # Mimic the width-based split rule. The live QML obtains these widths
+        # from the actual ModuleSlot instances, not a hardcoded theme table.
+        def borrowed(widths, left_free, right_capacity):
+            remaining = sum(widths)
+            moved = used = 0
+            while moved < len(widths) and remaining > right_capacity + .5:
+                if used + widths[moved] > left_free + .5:
+                    break
+                used += widths[moved]
+                remaining -= widths[moved]
+                moved += 1
+            return moved, remaining, used
+
+        widgets = [43, 24, 44, 35, 34, 36, 41, 42, 41, 38, 35, 44, 35, 154]
+        for scale in (1, 1.33, 1.6, 2, 3, 4):
+            screen_width = 3600 / scale
+            margin = 34  # illustrative: source uses Style.space(8) + 6
+            left_cap = screen_width * 790 / 1800 - margin
+            right_cap = screen_width * 790 / 1800 - margin
+            left_free = max(0, left_cap - 140 - 8)
+            count, right_used, left_used = borrowed(widgets, left_free, right_cap)
+            self.assertLessEqual(left_used, left_free + .5)
+            self.assertEqual(widgets[:count] + widgets[count:], widgets)
+            if scale == 4:
+                self.assertGreater(count, 0)
+                self.assertLess(count, len(widgets))
+                self.assertGreater(right_used, right_cap)  # arrows still needed
+        self.assertEqual(borrowed([50, 60, 70], 0, 100)[0], 0)
+        self.assertEqual(borrowed([90, 10], 100, 200)[0], 0)
+        self.assertEqual(borrowed([120, 15, 15], 80, 90)[0], 0)
+        self.assertEqual(borrowed([20, 30, 40], 100, 0)[0], 3)
 
     def test_rejects_upstream_changes(self):
         with self.assertRaisesRegex(ValueError, 'notchFloor'):

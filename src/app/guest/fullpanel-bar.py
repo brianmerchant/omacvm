@@ -18,7 +18,9 @@ import pathlib
 import sys
 
 V1_MARKER = "// omacvm-fullpanel-quickbar v1"
-MARKER = "// omacvm-fullpanel-quickbar v2"
+V2_MARKER = "// omacvm-fullpanel-quickbar v2"
+V3_MARKER = "// omacvm-fullpanel-quickbar v3"
+MARKER = "// omacvm-fullpanel-quickbar v4"
 HOME_ANCHOR = '  property string home: Quickshell.env("HOME")\n'
 NOTCH_FLOOR = '''    readonly property int notchFloor: root.appleSiliconHost && root.position === "top"
       ? (Style.bar.notchHeight > 0
@@ -111,7 +113,7 @@ HOST_INFO_V1 = r'''
 
 # Do not re-implement v1 by a loose string search: the old QML block is
 # preserved verbatim above so an existing live clone can be migrated safely.
-HOST_INFO = HOST_INFO_V1.replace(
+HOST_INFO_V2 = HOST_INFO_V1.replace(
     "// omacvm-fullpanel-quickbar v1", "// omacvm-fullpanel-quickbar v2"
 ).replace(
     "enabled: false, screenWidth10: 0, barHeight10: 0",
@@ -155,11 +157,13 @@ FULLPANEL_BOUNDS = r'''
        ? bounds.left - inset : Number(s.width) - bounds.right - inset))
   }
 '''
-HOST_INFO = HOST_INFO.replace("  function fullPanelBarHeight(s) {", FULLPANEL_BOUNDS + "\n  function fullPanelBarHeight(s) {")
+HOST_INFO_V2 = HOST_INFO_V2.replace("  function fullPanelBarHeight(s) {", FULLPANEL_BOUNDS + "\n  function fullPanelBarHeight(s) {")
+HOST_INFO_V3 = HOST_INFO_V2.replace(V2_MARKER, V3_MARKER)
+HOST_INFO = HOST_INFO_V3.replace(V3_MARKER, MARKER)
 
 # Each side is a SINGLE ModuleList, not two arrangements. With no notch (or
 # with enough width), its bounds coincide with the old anchor positions.
-EDGE_COMPONENT = r'''
+EDGE_COMPONENT_V2 = r'''
   // OmacVM FullPanel v2: only the built-in top bar has a safe-width limit.
   // The same widgets stay mounted while scrolling, so IPC handlers/timers
   // are not duplicated and a long clock or larger font cannot push widgets
@@ -255,6 +259,160 @@ EDGE_COMPONENT = r'''
   }
 '''
 
+# v3 reuses the proven v2 per-side pager and measures actual widget widths.
+# The extra left-side group receives only the right-side entries that fit.
+EDGE_COMPONENT = EDGE_COMPONENT_V2.replace(
+    '    property string edge: "right"\n',
+    '    property string edge: "right"\n'
+    '    property string widgetRegion: edge\n'
+    '    property var entriesOverride: null\n'
+    '    property real widthLimit: -1\n'
+).replace(
+    'readonly property real safeWidth: root.fullPanelSafeWidth(targetScreen, edge)',
+    'readonly property real safeWidth: widthLimit >= 0 ? Math.max(1, widthLimit) : root.fullPanelSafeWidth(targetScreen, edge)'
+).replace(
+    '        entries: root.layoutEntries(fullPanelEdge.edge)\n        region: fullPanelEdge.edge',
+    '        entries: fullPanelEdge.entriesOverride !== null ? fullPanelEdge.entriesOverride : root.layoutEntries(fullPanelEdge.edge)\n'
+    '        region: fullPanelEdge.widgetRegion'
+).replace('FullPanel v2: only', 'FullPanel v3: only')
+
+# Each widget retains its region identity (right), but the first N right
+# entries can be rendered in an extra left-adjacent ModuleList. N is computed
+# from the actual ModuleSlot widths for this screen; no hardcoded icon widths.
+# Both the suffix and the prefix are disjoint at rest, and v2's arrows remain
+# on the right whenever the two usable physical screen segments are too small.
+# Moving entries can recreate those particular widget instances once on
+# reflow (e.g. a scale change); the steady state doesn't duplicate them.
+BALANCED_COMPONENT_V3 = r'''
+  component FullPanelBalancedModules: Item {
+    id: balanced
+    required property var targetScreen
+    readonly property real edgeMargin: Style.space(8)
+    readonly property real gap: Style.space(2)
+    readonly property real rightCapacity: root.fullPanelSafeWidth(targetScreen, "right")
+    readonly property real leftCapacity: root.fullPanelSafeWidth(targetScreen, "left")
+    readonly property real freeLeft: Math.max(0, leftCapacity - leftGroup.width - gap)
+    readonly property var rightEntries: root.layoutEntries("right")
+    property int borrowedCount: 0
+
+    // A slot may exist on several displays. Only sizes from this bar surface
+    // count, and only right-region slots. Unknown sizes defer redistribution;
+    // the original v2 right pager remains functional in the meantime.
+    readonly property var measured: {
+      var slots = root.moduleSlots
+      var entries = balanced.rightEntries
+      var widths = []
+      var ready = true
+      var total = 0
+      for (var i = 0; i < entries.length; i++) {
+        var wanted = root.entryId(entries[i])
+        var matched = null
+        for (var j = 0; j < slots.length; j++) {
+          var slot = slots[j]
+          if (!slot || slot.region !== "right" || slot.moduleName !== wanted) continue
+          var win = root.slotWindow(slot)
+          if (!win || !win.screen || String(win.screen.name) !== String(targetScreen.name)) continue
+          matched = slot
+          break
+        }
+        if (!matched) { ready = false; break }
+        var size = Number(matched.width)
+        if (!isFinite(size) || size < 0) { ready = false; break }
+        widths.push(size)
+        total += size
+      }
+      return { ready: ready, widths: widths, total: total }
+    }
+
+    function desiredBorrowedCount() {
+      if (!root.fullPanelBounds(targetScreen)) return 0
+      var m = measured
+      if (!m.ready) return -1
+      var remaining = m.total
+      if (remaining <= rightCapacity + 0.5) return 0
+      var leftUsed = 0
+      var count = 0
+      // Only a contiguous prefix moves: order and the right-side trailing
+      // power/clock controls are retained. Never take the existing left row.
+      while (count < m.widths.length && remaining > rightCapacity + 0.5) {
+        var nextWidth = m.widths[count]
+        if (leftUsed + nextWidth > freeLeft + 0.5) break
+        leftUsed += nextWidth
+        remaining -= nextWidth
+        count++
+      }
+      return count
+    }
+
+    function rebalance() {
+      // Don't reparent/recreate widgets while a popout is open or while the
+      // user is dragging a bar item. Defer until the next relevant change.
+      if (root.activePopout || root.barDragSource) return
+      var wanted = desiredBorrowedCount()
+      if (wanted >= 0 && wanted !== borrowedCount) borrowedCount = wanted
+    }
+    // Coalesced with the QML event loop, not a timer or resident process.
+    function scheduleRebalance() { Qt.callLater(rebalance) }
+    onMeasuredChanged: scheduleRebalance()
+    onFreeLeftChanged: scheduleRebalance()
+    onLeftCapacityChanged: scheduleRebalance()
+    onRightCapacityChanged: scheduleRebalance()
+    onRightEntriesChanged: scheduleRebalance()
+    Component.onCompleted: scheduleRebalance()
+    Connections {
+      target: root
+      function onActivePopoutChanged() { balanced.scheduleRebalance() }
+      function onBarDragSourceChanged() { balanced.scheduleRebalance() }
+    }
+
+    FullPanelEdgeModules {
+      id: leftGroup
+      targetScreen: balanced.targetScreen
+      edge: "left"
+      anchors.left: parent.left
+      anchors.leftMargin: balanced.edgeMargin
+      anchors.verticalCenter: parent.verticalCenter
+    }
+    FullPanelEdgeModules {
+      id: borrowedGroup
+      targetScreen: balanced.targetScreen
+      edge: "left"
+      widgetRegion: "right"
+      widthLimit: balanced.freeLeft
+      entriesOverride: balanced.rightEntries.slice(0, balanced.borrowedCount)
+      anchors.left: leftGroup.right
+      anchors.leftMargin: balanced.gap
+      anchors.verticalCenter: parent.verticalCenter
+      visible: balanced.borrowedCount > 0
+    }
+    FullPanelEdgeModules {
+      id: rightGroup
+      targetScreen: balanced.targetScreen
+      edge: "right"
+      widgetRegion: "right"
+      entriesOverride: balanced.rightEntries.slice(balanced.borrowedCount)
+      anchors.right: parent.right
+      anchors.rightMargin: balanced.edgeMargin
+      anchors.verticalCenter: parent.verticalCenter
+    }
+  }
+'''
+
+# Omarchy already records pointer presence across each complete bar surface.
+# Freeze the borrowed widget split while hovered. Hover-reveal widgets (notably
+# tray and indicators) can change their width, and reparenting them in response
+# can cause the pointer to leave/re-enter, recreating them in a loop at 4x.
+# The existing bar HoverHandler is an ancestor of the entire widget strip, so
+# the freeze doesn't interfere with widget clicks, drag, or popup behavior.
+BALANCED_COMPONENT = BALANCED_COMPONENT_V3.replace(
+    "if (root.activePopout || root.barDragSource) return",
+    "if (root.activePopout || root.barDragSource || root.barHovered) return"
+).replace(
+    "      function onBarDragSourceChanged() { balanced.scheduleRebalance() }",
+    "      function onBarDragSourceChanged() { balanced.scheduleRebalance() }\n"
+    "      function onBarHoveredChanged() { balanced.scheduleRebalance() }"
+)
+
 HORIZONTAL_OLD = '''        LeftModules {
           anchors.left: parent.left
           anchors.leftMargin: Style.space(8)
@@ -281,6 +439,11 @@ HORIZONTAL_NEW = '''        FullPanelEdgeModules {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
+        }
+'''
+HORIZONTAL_V3 = '''        FullPanelBalancedModules {
+          targetScreen: barWindow.screen
+          anchors.fill: parent
         }
 '''
 # Insert the component once, in the same root scope as ModuleList and LeftModules.
@@ -319,33 +482,81 @@ def upgrade_height(text: str) -> str:
     raise ValueError("FullPanel height: no supported implicitHeight anchor")
 
 
+def validate_v2(text: str) -> None:
+    if ("function fullPanelBounds(s)" not in text
+        or "component FullPanelEdgeModules: Item" not in text
+        or "root.fullPanelBarHeight(screen) > 0" not in text
+        or "OMACVM_FULLPANELRIGHT10" not in text
+        or text.count(HOST_INFO_V2) != 1
+        or text.count(EDGE_COMPONENT_V2) != 1
+        or text.count(HORIZONTAL_NEW) != 1):
+        raise ValueError("FullPanel v2 marker found without exact expected code")
+
+
+def validate_v3(text: str) -> None:
+    if (text.count(HOST_INFO_V3) != 1
+        or text.count(EDGE_COMPONENT) != 1
+        or text.count(BALANCED_COMPONENT_V3) != 1
+        or text.count(HORIZONTAL_V3) != 1
+        or "root.fullPanelBarHeight(screen) > 0" not in text):
+        raise ValueError("FullPanel v3 marker found without exact expected code")
+
+
+def validate_v4(text: str) -> None:
+    if (text.count(HOST_INFO) != 1
+        or text.count(EDGE_COMPONENT) != 1
+        or text.count(BALANCED_COMPONENT) != 1
+        or text.count(HORIZONTAL_V3) != 1
+        or "root.fullPanelBarHeight(screen) > 0" not in text):
+        raise ValueError("FullPanel v4 marker found without exact expected code")
+
+
+def upgrade_v3_to_v4(text: str) -> str:
+    validate_v3(text)
+    text = replace_exactly_once(text, HOST_INFO_V3, HOST_INFO, "FullPanel v3 metadata")
+    text = replace_exactly_once(text, BALANCED_COMPONENT_V3, BALANCED_COMPONENT,
+                                "FullPanel v3 balanced widget layout")
+    validate_v4(text)
+    return text
+
+
+def upgrade_v2_to_v3(text: str) -> str:
+    validate_v2(text)
+    text = replace_exactly_once(text, HOST_INFO_V2, HOST_INFO_V3, "FullPanel v2 metadata")
+    text = replace_exactly_once(text, EDGE_COMPONENT_V2,
+                                EDGE_COMPONENT + "\n" + BALANCED_COMPONENT_V3,
+                                "FullPanel v2 edge component")
+    text = replace_exactly_once(text, HORIZONTAL_NEW, HORIZONTAL_V3,
+                                "FullPanel v2 horizontal layout")
+    validate_v3(text)
+    return text
+
+
 def patch_text(text: str) -> str:
     if MARKER in text:
-        # Do not silently tolerate a half-installed or corrupted update.
-        if ("function fullPanelBounds(s)" not in text
-            or "component FullPanelEdgeModules: Item" not in text
-            or "root.fullPanelBarHeight(screen) > 0" not in text
-            or "OMACVM_FULLPANELRIGHT10" not in text):
-            raise ValueError("FullPanel v2 marker found without required code")
+        validate_v4(text)
         return text
+    if V3_MARKER in text:
+        return upgrade_v3_to_v4(text)
+    if V2_MARKER in text:
+        return upgrade_v3_to_v4(upgrade_v2_to_v3(text))
 
     if V1_MARKER in text:
         if text.count(HOST_INFO_V1) != 1:
             raise ValueError("FullPanel v1 metadata differs; refusing partial migration")
-        updated = text.replace(HOST_INFO_V1, HOST_INFO, 1)
+        updated = text.replace(HOST_INFO_V1, HOST_INFO_V2, 1)
     else:
         updated = replace_exactly_once(text, HOME_ANCHOR,
-                                       HOME_ANCHOR + HOST_INFO, "bar root")
+                                       HOME_ANCHOR + HOST_INFO_V2, "bar root")
         updated = replace_exactly_once(updated, NOTCH_FLOOR,
                                        NEW_NOTCH_FLOOR, "notchFloor")
 
     updated = upgrade_height(updated)
     updated = replace_exactly_once(updated, EDGE_ANCHOR,
-                                   EDGE_COMPONENT + "\n" + EDGE_ANCHOR, "edge component")
+                                   EDGE_COMPONENT_V2 + "\n" + EDGE_ANCHOR, "edge component")
     updated = replace_exactly_once(updated, HORIZONTAL_OLD, HORIZONTAL_NEW,
                                    "horizontal module layout")
-    return updated
-
+    return upgrade_v3_to_v4(upgrade_v2_to_v3(updated))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
