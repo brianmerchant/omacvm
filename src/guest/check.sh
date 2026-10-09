@@ -428,7 +428,9 @@ app)
     if ! /usr/local/share/omacvm/app/guest/venus/install.sh --venus-on; then
       skip "Vulkan (OmacVM's Mesa)" "on from the VM's next start (shut it down in OmacVM.app, then start it again)" 1
     else
-      check "Vulkan (OmacVM's Mesa)" "venus" bash -c 'VK_LOADER_DRIVERS_DISABLE=virtio_icd.json vulkaninfo --summary 2>/dev/null | grep -q "driverName *= venus"'
+      if command -v vulkaninfo >/dev/null; then
+        check "Vulkan (OmacVM's Mesa)" "venus" bash -c 'VK_LOADER_DRIVERS_DISABLE=virtio_icd.json vulkaninfo --summary 2>/dev/null | grep -q "driverName *= venus"'
+      else skip "Vulkan (OmacVM's Mesa)" "not checked: vulkaninfo missing (vulkan-tools)"; fi
       check "OpenCL (rusticl on Zink)" "a zink device" bash -c 'RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink'
       check "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)" test -x /usr/local/bin/omacvm-chromium-webgpu
     fi
@@ -493,8 +495,13 @@ app)
   # (OmacVM's Mesa above has its own Venus driver; the distro's is not used then.)
   vk=$(/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh --status 2>/dev/null)
   [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]] && vk=omacvm
+  # Without vulkaninfo (vulkan-tools) nothing was asked: not checked, not "no device" (#332).
+  case ${vk%% *} in
+    ok|update) command -v vulkaninfo >/dev/null || vk="novkinfo ${vk#* }" ;;
+  esac
   case ${vk%% *} in
     omacvm) ;;
+    novkinfo) skip "Vulkan (Venus)" "not checked: vulkaninfo missing (vulkan-tools; omacvm apply installs it); ${vk#* }" ;;
     ok) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* }"
         else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
     update) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* } (built after the VM's next start, or omacvm apply)"

@@ -216,6 +216,8 @@ jobs:
 
       - name: Vulkan (Venus) driver step for app VMs (when it builds Mesa's vulkan-virtio)
         run: src/tests/venus-driver.sh
+      - name: The guest check's Vulkan line without vulkaninfo says "not checked" (#332)
+        run: src/tests/vulkaninfo-missing.sh
 
       - name: Guest packages never update one alone (no partial update), GBM guard undoes a broken install
         run: src/tests/pkg-safe.sh

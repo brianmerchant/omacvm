@@ -108,6 +108,10 @@ install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-vid
 graphics=$(sed -n 's/^OMACVM_GRAPHICS=//p' /etc/omacvm/env 2>/dev/null | tail -1)
 want=""; [[ $graphics == vulkan ]] && want=--want
 venus/vulkan-virtio.sh $want || echo "WARN: Vulkan (Venus) is not set up; OpenGL is unaffected"
+# vulkaninfo (vulkan-tools, small) for omacvm check's Vulkan line, with the Venus driver (#332).
+if pacman -Q vulkan-virtio >/dev/null 2>&1 && ! command -v vulkaninfo >/dev/null; then
+  ../../guest/pkg-add vulkan-tools || echo "WARN: vulkaninfo not installed (vulkan-tools); omacvm check does not ask it"
+fi
 # OpenCL (GPU compute) on that Vulkan: the distro's rusticl on Zink (venus/opencl.sh says where it works).
 if [[ $graphics == vulkan ]]; then venus/opencl.sh || echo "WARN: OpenCL is not set up; Vulkan and OpenGL are unaffected"
 elif [[ $graphics == opengl ]]; then venus/opencl.sh --off; fi
