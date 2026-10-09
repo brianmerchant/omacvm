@@ -1,4 +1,5 @@
 import AppKit
+import IOKit
 import Foundation
 import OmacVMUpdate
 import OmacVMFeatures
@@ -597,6 +598,18 @@ extension Mac {
 
     /// A MacBook: its battery shows in Omarchy's bar.
     static let hasBattery: Bool = HostBatterySnapshot.capture().present
+
+    /// This Mac's hardware UUID (IOPlatformUUID), for RunMarker.
+    static let hardwareID: String = {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        defer { IOObjectRelease(service) }
+        let v = IORegistryEntryCreateCFProperty(service, "IOPlatformUUID" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? String
+        return v ?? "unknown"
+    }()
+
+    /// The Mac's name as Sharing shows it.
+    static var computerName: String { Host.current().localizedName ?? "another Mac" }
 }
 
 /// OmacVM's own version (src/VERSION in the app) and the VM's, for Update VM.
