@@ -3,13 +3,20 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.12 (unreleased)
+## 3.0.12
+
+VMs that move between Macs: copied, on an external drive, or opened on a smaller Mac.
 
 - OmacVM.app: **Open Existing VM…** in the setup and in the settings (below VMs folder) shows a
   VM that is somewhere else, copied from another Mac or on an external drive, at once. Pick the
   VM's folder (the one with vm.env) or the folder it is in. Before, the setup only offered a new
   VM, and a VMs folder set there needed a restart of the app. A VM that runs in another app or on
   another Mac is not started: the window says so instead of "QEMU exit 1".
+- OmacVM.app: a VM copied to another Mac can be reached there (Update VM, the Bridge, the control
+  centre, `omacvm`). Each VM folder now has its own SSH key (`ssh-key`), which `omacvm apply` and
+  Update VM put into the VM beside the Mac's own key; both keep working. Before, the VM knew only
+  the key of the Mac that set it up, and Update VM on the other Mac waited for SSH. A VM set up
+  before this gets the key at its next update on the Mac it came from.
 - OmacVM.app: a VM copied from a bigger Mac starts with what this Mac allows. A VM with more CPUs
   or memory than this Mac has (16 CPUs and 48 GB on an 8 GB MacBook Air, say) starts, and runs
   Update VM, at this Mac's Best tier, and the window says so under Resources. Its vm.env keeps
@@ -21,12 +28,6 @@ in more words.
   or the update shows btrfs or ext4 errors or a read-only file system, the update stops at once
   and says what to do (a VM copied while it ran: copy it again after shutting it down there). An
   update that hangs is stopped after 40 minutes.
-- OmacVM.app: a VM copied to another Mac can be reached there (Update VM, the Bridge, the control
-  centre, `omacvm`). Each VM folder now has its own SSH key (`ssh-key`), which `omacvm apply` and
-  Update VM put into the VM beside the Mac's own key; both keep working. Before, the VM knew only
-  the key of the Mac that set it up, and Update VM on the other Mac waited for SSH. A VM set up
-  before this gets the key at its next update on the Mac it came from.
-
 - Omanotch: a test can no longer leave your Omanotch on OmacVM's test port. The test port and the
   test Bridge's folder (`port`, `bridgeDir`) now come only from a test Omanotch's launch arguments;
   saved values are ignored and removed at start. On a MacBook Air a test had saved both, Omanotch
