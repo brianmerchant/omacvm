@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.11 (unreleased)
+## 3.0.11
 
 - Omanotch: the bar sits in the middle of the notch strip at every display scale, on the 14- and
   16-inch MacBook Pro and the MacBook Air. At scale 1.6 it was about 3 px too low, at scale 2 about
