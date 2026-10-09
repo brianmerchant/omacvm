@@ -108,6 +108,14 @@ vm_load() {
     mkdir -p "$(dirname "$KEY")"; chmod 700 "$(dirname "$KEY")"
     ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q
   fi
+  # The VM folder's own key (app_ssh_key in src/lib/app.sh): apply puts it
+  # into the VM, and vssh offers it first, so a VM copied from another Mac
+  # is reached here too.
+  VM_KEY=$VM_DIR/ssh-key
+  if [[ ! -f $VM_KEY || ! -f $VM_KEY.pub ]]; then
+    rm -f "$VM_KEY" "$VM_KEY.pub"
+    (umask 077; ssh-keygen -t ed25519 -N "" -C omacvm-vm -f "$VM_KEY" -q)
+  fi
 }
 
 # What a build runs on the Mac besides the app's own programs: python3 (the
@@ -300,7 +308,7 @@ disk_error() {
 }
 
 vssh() {
-  ssh -i "$KEY" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
+  ssh -i "${VM_KEY:-$KEY}" -i "$KEY" -o IdentitiesOnly=yes -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@"
 }
 wait_ssh() {   # [seconds]

@@ -4,7 +4,7 @@
 # for an Omarchy you installed by hand from omarchy-mac.
 #   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
-#                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
+#                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--vm-key PRIVATE_KEY] [--no-mac]
 #                [--reset-host-key] [--reinstall FEATURE]... [--transaction] [--yes]
 #                [--allow-downgrade]
 # Features: `omacvm features` lists them (src/features.tsv). Not given: what the
@@ -22,7 +22,7 @@
 # features switched or repaired, or for an update the parts it changes (by
 # /etc/omacvm/installed.json); other parts keep being only logged.
 # VM: the one named Omarchy, else the only running one. A stopped VM is
-# started only when named with --vm (else exit 3: it is not started). User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
+# started only when named with --vm (else exit 3: it is not started). User: the VM's desktop user. Key: ~/.ssh/omacvm, and an OmacVM.app VM's own (--vm-key, else its folder's ssh-key). Keyboard: the
 # Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
 # the notch (no built-in display: the main one). The VM's SSH host key is
 # remembered the first time; --reset-host-key forgets it (a rebuilt VM).
@@ -38,7 +38,7 @@ source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 source "$R/src/lib/graphics.sh"
 features_load
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; VMKEY=""; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
 YES=0; NEWKEY=0; REINSTALL=()
 SETN=(); SETV=()
 set_feature() {   # NAME on|off (an old name too: idle-lock=off is no-idle-lock=on)
@@ -55,6 +55,7 @@ while (( $# )); do
     --vm-type) TYPE=$2; shift 2 ;;
     --user) U=$2; shift 2 ;;
     --key) KEY=$2; shift 2 ;;
+    --vm-key) VMKEY=$2; shift 2 ;;
     --keyboard) KB=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
     --no-mac) MAC=0; shift ;;
@@ -94,6 +95,12 @@ else
   resolve_vm start
 fi
 case $TYPE in parallels|utm|fusion|app) ;; *) echo "omacvm apply: --vm-type parallels, utm, fusion or app" >&2; exit 2 ;; esac
+# OmacVM.app: the VM folder's own SSH key (app_ssh_key), made now when the
+# folder has none; put into the VM below.
+if [[ -n $VMKEY ]]; then OMA_VM_KEY=$VMKEY
+elif [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM" 2>/dev/null); then OMA_VM_KEY=$(app_ssh_key "$d") || OMA_VM_KEY=""
+fi
+export OMA_VM_KEY
 vm_network_ok "$TYPE" "$IP" || exit 3
 ssh_ok=0; (wait_ssh "$IP" 120) >/dev/null 2>&1 || ssh_ok=$?
 (( ssh_ok != 3 )) || { hostkey_error; exit 3; }
@@ -323,6 +330,18 @@ fi
 # side is there: OmacVM.app's first apply is --no-mac, and on a Mac that never
 # had the Bridge (Gestures off at setup) there was no token yet: the build
 # stopped at "Adding OmacVM to the VM". The Bridge installed later keeps it.
+# The VM folder's own SSH key, for root and the user, beside this Mac's key
+# (never into an image: --image has no token).
+if (( TOKEN )) && [[ -n ${OMA_VM_KEY:-} && -s ${OMA_VM_KEY:-}.pub ]]; then
+  log "the VM folder's SSH key -> $IP"
+  gssh "$IP" "set -e; k=\$(head -1)
+    case \$k in ssh-ed25519\ *) ;; *) echo 'not an ssh-ed25519 key' >&2; exit 1 ;; esac
+    add() { install -d -m700 -o \"\$2\" -g \"\$(id -gn \"\$2\")\" \"\$1/.ssh\"; f=\$1/.ssh/authorized_keys
+      touch \"\$f\"; grep -qxF \"\$k\" \"\$f\" || printf '%s\\n' \"\$k\" >> \"\$f\"
+      chown \"\$2:\$(id -gn \"\$2\")\" \"\$f\"; chmod 600 \"\$f\"; }
+    add /root root
+    H=\$(getent passwd '$U' | cut -d: -f6); [ -z \"\$H\" ] || add \"\$H\" '$U'" < "$OMA_VM_KEY.pub"
+fi
 if (( TOKEN )) && { on gestures || needs_bridge; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :

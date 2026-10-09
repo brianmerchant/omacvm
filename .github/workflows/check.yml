@@ -333,6 +333,9 @@ jobs:
       - name: Update VM never waits forever (disk errors, a read-only VM, a hang)
         run: src/tests/update-vm-watch.sh
 
+      - name: An app VM folder's own SSH key is made, found and offered first (a VM copied to another Mac)
+        run: src/tests/vm-ssh-key.sh
+
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
 

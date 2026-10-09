@@ -245,7 +245,9 @@ VM runs, and goes back by itself when a new version does not start
 - **The VMs**: `~/OmacVM/<VM name>/`, one folder per VM: `vm.env` (the
   settings), `disk.img` (the disk; sparse: it takes what it holds, not its
   full size; what Omarchy deletes goes back to the Mac within a minute),
-  `efi-vars.fd`, `logs/` ([disk options](../adr/0039-system-disk-options.md)).
+  `efi-vars.fd`, `logs/` ([disk options](../adr/0039-system-disk-options.md)),
+  `ssh-key` (the VM's own SSH key: `omacvm apply` puts it into the VM beside
+  the Mac's `~/.ssh/omacvm`, so the VM is reached on any Mac its folder goes to).
   To take a VM to another Mac, copy its folder into that Mac's VMs folder
   (the VM must be shut down; above: a copy made while it runs has a damaged
   disk, and the app asks before it starts one: the file `running` in the
