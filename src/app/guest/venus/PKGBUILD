@@ -6,15 +6,18 @@
 # - mesa-venus-opaque-fd-semaphores.patch: shared (OPAQUE_FD) semaphores, which
 #   Chrome needs before it gives a page a WebGPU adapter on Vulkan. Not in
 #   Mesa yet (main still has SYNC_FD only, 2026-10-06).
+# - mesa-venus-tls-after-unload.patch: Mesa main's fix (935c4ec3) for apps that
+#   unload Vulkan while a thread that used it still runs; that thread crashed
+#   when it ended (Moonlight at start).
 # Same name, files and dependencies as the distro's vulkan-virtio. The version
-# 26.2.4.omacvm1 sorts after the distro's 26.2.4-x (so a distro rebuild of the
+# 26.2.4.omacvm2 sorts after the distro's 26.2.4-x (so a distro rebuild of the
 # same Mesa does not drop the patch) and before 26.2.5 (a newer Mesa from the
 # distro still replaces it on pacman -Syu). Built and installed by
 # vulkan-virtio.sh, which rebuilds it when its libraries go missing.
 pkgname=vulkan-virtio
 epoch=1
 _mesaver=26.2.4
-pkgver=$_mesaver.omacvm1
+pkgver=$_mesaver.omacvm2
 pkgrel=1
 pkgdesc="Open-source Vulkan driver for Virtio-GPU (Venus), built by OmacVM for 16 KiB host pages and WebGPU"
 arch=(aarch64)
@@ -28,12 +31,15 @@ optdepends=("vulkan-mesa-layers: additional vulkan layers")
 provides=(vulkan-driver)
 options=(!debug)
 source=("https://archive.mesa3d.org/mesa-$_mesaver.tar.xz"
-        mesa-venus-opaque-fd-semaphores.patch)
+        mesa-venus-opaque-fd-semaphores.patch
+        mesa-venus-tls-after-unload.patch)
 sha256sums=('bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9'
-            '6a5b6a8a090ee7930548aaeb719b0b92031ae5dc80615d484a8941af1817bc79')
+            '6a5b6a8a090ee7930548aaeb719b0b92031ae5dc80615d484a8941af1817bc79'
+            '4204b3e87c3ce006494204f966c0abe91888f7e719db6a0e63864e4107edb62a')
 
 prepare() {
   patch -d "mesa-$_mesaver" -p1 < mesa-venus-opaque-fd-semaphores.patch
+  patch -d "mesa-$_mesaver" -p1 < mesa-venus-tls-after-unload.patch
 }
 
 build() {

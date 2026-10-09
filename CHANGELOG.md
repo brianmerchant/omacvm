@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.11 (unreleased)
+
+- Vulkan (Venus): apps that check for Vulkan at start and then let it go no longer crash a
+  moment later (Moonlight crashed at every start). A thread that had used the Venus driver
+  ended after the driver was unloaded and ran Mesa's cleanup from unloaded code. OmacVM's
+  Venus build now has Mesa's fix (commit 935c4ec3, not in a Mesa release yet); the VM
+  builds it again on the next `omacvm apply` (a few minutes, while Vulkan is on). If you started
+  Moonlight with `VK_ICD_FILENAMES=/nonexistent.json` (or a similar Vulkan override) to
+  get around it, remove that now.
+
 ## 3.0.10 (unreleased)
 
 - The Mac input methods feature is named for what it is for: "Mac input (Chinese, Japanese,
