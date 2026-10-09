@@ -401,6 +401,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // Not shut down cleanly, or copied while it ran (RunMarker): asked
+        // first, once per start (.decided: the same start, continued).
+        if case .ask = network, !RunMarker.confirmStart(state.config) {
+            showWindow()
+            return
+        }
         // The fast network on, and its service not for this app (after an app
         // update): asked first, never a start that cannot work.
         guard case .decided(let userNetwork) = network else {

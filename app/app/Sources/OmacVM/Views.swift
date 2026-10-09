@@ -7,6 +7,24 @@ import SwiftUI
 import OmacVMBuildProgress
 import OmacVMDesktop
 
+extension RunMarker {
+    /// Before a start or Update VM: the VM was not shut down cleanly or was
+    /// copied while it ran. Asks Cancel / Start Anyway (a hidden test run
+    /// only logs it). True: go on.
+    @MainActor static func confirmStart(_ c: VMConfig) -> Bool {
+        guard let warn = warning(folder: c.folder, thisMac: Mac.hardwareID) else { return true }
+        FileHandle.standardError.write(Data("OmacVM: \(c.name): \(warn)\n".utf8))
+        if ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil { return true }
+        let alert = NSAlert()
+        alert.messageText = "Start \(c.name)?"
+        alert.informativeText = warn + " Start it only when it runs nowhere else."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Start Anyway")
+        NSApp.activate()
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+}
+
 /// What the launcher window shows.
 enum Screen: Equatable {
     case install
@@ -398,6 +416,8 @@ struct BuildView: View {
         .onChange(of: creator.finished) { _, done in
             guard done else { return }
             let updated = creator.job == .update
+            // Update VM shut the VM down cleanly: no run marker to warn about.
+            if updated { try? FileManager.default.removeItem(at: state.config.folder.appendingPathComponent(RunMarker.fileName)) }
             state.screen = .ready
             if updated { state.reload() }   // its sizes; the VM stays the one shown
             state.message = creator.warning
@@ -735,6 +755,8 @@ struct ReadyView: View {
             Button("Update VM") {
                 // A test build never updates a VM of the installed app.
                 if let why = Paths.startProblem(state.config.folder) { state.message = why; return }
+                // Not shut down cleanly, or copied while it ran: asked first.
+                guard RunMarker.confirmStart(state.config) else { return }
                 state.message = nil
                 state.creator.update(config: state.config)
                 state.screen = .building

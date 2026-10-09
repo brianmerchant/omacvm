@@ -327,6 +327,9 @@ jobs:
       - name: A VM from a bigger Mac starts at this Mac's Best tier; vm.env keeps its size
         run: src/tests/app-start-size.sh
 
+      - name: A VM not shut down cleanly, or copied while it ran, warns before a start
+        run: src/tests/app-run-marker.sh
+
       - name: e2e harnesses put the test app's settings back and start only test VMs
         run: src/tests/e2e-test-vms.sh
 

@@ -469,6 +469,7 @@ final class Runner {
             let reason = proc.terminationReason
             Task { @MainActor in
                 self?.noteEarlyExit(status: status, reason: reason)
+                self?.unmark(status: status)
                 if globe { self?.appendLog("OmacVM: macOS's globe shortcut given back (QEMU ended without)") }
                 self?.stopObserving()
                 self?.driveWatch?.stop()
@@ -497,6 +498,7 @@ final class Runner {
         }
         try p.run()
         process = p
+        mark(pid: p.processIdentifier)
         if usbOn {
             usb = USBRun(config: c, qemuPID: p.processIdentifier) { [weak self] line in self?.appendLog(line) }
         }
@@ -773,6 +775,30 @@ final class Runner {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard let self, self.isRun(pid) else { return }
             self.forceStop(byApp: true)
+        }
+    }
+
+    // MARK: The VM's run marker (RunMarker): which Mac runs it.
+
+    /// The marker found before this start (another Mac's, after "Start Anyway"):
+    /// put back when QEMU could not take the disk.
+    private var markBefore: Data?
+
+    private func mark(pid: Int32) {
+        let url = config.folder.appendingPathComponent(RunMarker.fileName)
+        markBefore = try? Data(contentsOf: url)
+        let m = RunMarker.Mark(mac: Mac.hardwareID, name: Mac.computerName, pid: pid)
+        try? Data(RunMarker.text(m).utf8).write(to: url, options: .atomic)
+    }
+
+    /// A clean stop (the guest shut down; the app's own stop for an OpenGL
+    /// start): the marker goes. Else it stays, and the next start warns.
+    private func unmark(status: Int32) {
+        let url = config.folder.appendingPathComponent(RunMarker.fileName)
+        if diskLocked {
+            if let b = markBefore { try? b.write(to: url, options: .atomic) } else { try? FileManager.default.removeItem(at: url) }
+        } else if status == 0 || venusFallback != nil {
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
