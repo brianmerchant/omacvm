@@ -41,6 +41,9 @@
 # 8. Each Gestures takes only its own OmacVM app's VMs: the normal one
 #    OmacVM.app's, the test identity's OmacVM Test.app's, both a development
 #    build's QEMU; the combo in the other app's VM is passed on (test-identity.c).
+# 9. A permission missing at start: the helper clears its own entry for it,
+#    once per build (one macOS kept for another build's signature), never one
+#    it has (#306, test-tcc.c).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d)
@@ -246,4 +249,10 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-identity" "$HERE/test-identity.
   -framework CoreFoundation -framework AppKit -framework IOKit
 "$T/test-identity" > "$T/identity" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/identity"
+# 9. Permission entries macOS kept for another build: cleared once per build, only the missing ones (#306).
+clang -O1 -Wall -Wno-unused-function -o "$T/test-tcc" "$HERE/test-tcc.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit -framework IOKit
+"$T/test-tcc" > "$T/tcc" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/tcc"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" "$T/identity" >&2; exit 1; }

@@ -5,12 +5,22 @@ in more words.
 
 ## 3.0.10 (unreleased)
 
+- Gestures: a permission macOS kept for another build no longer leaves it waiting for good
+  (reported by @brianmerchant, #306). macOS ties each permission entry to the signature of the
+  build that asked; one from another build (e.g. a helper built on the Mac before OmacVM.app's
+  signed copy) shows as on in System Settings but is refused, and switching it off and on does
+  not replace it. When Accessibility or Input Monitoring is missing at start, Gestures now clears
+  its own entry for that permission once per build (tccutil, only the missing one), then asks
+  again, as the app does for its keyboard entry since 3.0.6 (#255). `omacvm check` names the
+  tccutil commands on that row and no longer suggests `omacvm apply` for scroll momentum while
+  Gestures waits for its Mac permissions.
 - OmacVM.app: a new VM's disk no longer stays at almost its full size on the Mac (reported by
   @brianmerchant, #305: a fresh 3.0.9 setup on macOS 15.8.1 took 61 of 64 GB; `sparsify.py`
   brought it to 7.9). After the image is unpacked, and again once the setup has shut the VM
   down, a disk.img that takes more than half its size is made sparse (every zeroed MiB becomes a
   hole, the bytes stay the same), and create.log says what the disk takes on the Mac and which
   image it came from. The image itself unpacks sparse (prebuilt-3.0.8: 6.9 GB on macOS 15.7).
+
 
 ## 3.0.9
 
