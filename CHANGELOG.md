@@ -12,6 +12,15 @@ in more words.
   flipped view's layer too). The bar also centred itself in the whole output rather than in the
   part the strip shows, in whole logical px (5 above and 6 below at scale 2). Now the strip cuts
   at the top and the bar centres in the shown part to the pixel.
+- Omanotch: switching the Omarchy theme shows Omarchy's reveal again, instead of a black flash
+  and the desktop sliding in. A theme switch reloads Hyprland's config, which dropped the rule
+  omacvm-display-sync gives the screen; the screen fell back to an "auto" place, which is to the
+  right of the hidden NOTCH output, until display-sync put it back 0.3 s later. Hyprland slid the
+  picture along and the wallpaper hid while its output moved. omacvm_app.lua now sets the rule
+  the screen shows again during the reload (display-sync keeps it in the runtime folder), so
+  nothing moves. And the reveal ran on the strip only when its new image was ready first; the
+  built-in display then switched at the end without the animation. A late output now joins the
+  running reveal (background patch v7).
 
 ## 3.0.10
 
