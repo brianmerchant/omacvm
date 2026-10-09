@@ -104,9 +104,19 @@ json_out() {   # the collected rows as JSON
   done <<<"$ROWS"
   printf '\n]}\n'
 }
-running() { launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running'; }
 # The helpers' LaunchAgent labels (org.omacvm.test.* for a test HOME: src/lib/labels.sh).
 L_BRIDGE=$(omacvm_label bridge) L_GESTURES=$(omacvm_label gestures) L_CLIP=$(omacvm_label clip-in)
+# The Bridge and Gestures by their process, whichever job started it: their
+# LaunchAgent, or macOS itself after a grant (#331); the rest by its LaunchAgent.
+HELPER_ID=""
+[[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && HELPER_ID="test"
+running() {
+  case $1 in
+    "$L_BRIDGE") [[ -n $(helper_pid bridge $HELPER_ID) ]] ;;
+    "$L_GESTURES") [[ -n $(helper_pid gestures $HELPER_ID) ]] ;;
+    *) launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running' ;;
+  esac
+}
 # The test identity (OMACVM_TEST_IDENTITY=1): its own helpers (started with open,
 # no LaunchAgent) on their own ports.
 BRIDGE_PORT=47831 GESTURES_PORT=47830
@@ -114,8 +124,8 @@ if [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]]; then
   BRIDGE_PORT=47931 GESTURES_PORT=47930
   running() {
     case $1 in
-      "$L_BRIDGE") pgrep -af "OmacVM Test Bridge.app/Contents/MacOS/" >/dev/null ;;
-      "$L_GESTURES") pgrep -af "OmacVM Test Gestures.app/Contents/MacOS/" >/dev/null ;;
+      "$L_BRIDGE") [[ -n $(helper_pid bridge test) ]] ;;
+      "$L_GESTURES") [[ -n $(helper_pid gestures test) ]] ;;
       *) return 1 ;;
     esac
   }
@@ -129,6 +139,19 @@ L=~/Library/Logs
 BRIDGE_LOG=$L/omacvm-bridge.log GESTURES_LOG=$L/omacvm-gestures.log
 # The test identity's helpers log there (src/mac/install.sh starts them so).
 [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && BRIDGE_LOG=$L/omacvm-test-bridge.log GESTURES_LOG=$L/omacvm-test-gestures.log
+# Only what the running helpers wrote: a log from a process before them (one
+# macOS started again writes nowhere, 3.0.13) says nothing about them (#331).
+LOGS_NOW=$(mktemp -d)
+trap 'rm -rf "$LOGS_NOW"' EXIT
+BRIDGE_PID=$(helper_pid bridge $HELPER_ID) GESTURES_PID=$(helper_pid gestures $HELPER_ID) BRIDGE_OLD="" GESTURES_OLD=""
+if [[ -n $BRIDGE_PID ]]; then
+  helper_log "$BRIDGE_PID" "$BRIDGE_LOG" > "$LOGS_NOW/bridge" || BRIDGE_OLD=$BRIDGE_PID
+  BRIDGE_LOG=$LOGS_NOW/bridge
+fi
+if [[ -n $GESTURES_PID ]]; then
+  helper_log "$GESTURES_PID" "$GESTURES_LOG" > "$LOGS_NOW/gestures" || GESTURES_OLD=$GESTURES_PID
+  GESTURES_LOG=$LOGS_NOW/gestures
+fi
 # The VM network's Mac address exists only while a VM of that type runs.
 if ! msg=$(vm_network_ok "$TYPE" "$IP" 2>&1); then
   bad "VM network" "$msg" human
@@ -287,14 +310,18 @@ if [[ $BRIDGE == on ]]; then
   m=$(last_line "$BRIDGE_LOG" 'media keys: (event tap|waiting|cannot)')
   if [[ $(jq -r '.capture_keys == false' "$OMA_BRIDGE_SUPPORT/config.json" 2>/dev/null) == true ]]; then
     skip "media keys" "off: macOS keeps them (capture_keys false in config.json)"
+  elif [[ -n $BRIDGE_OLD ]]; then
+    warn "media keys" "not known: the running Bridge (pid $BRIDGE_OLD, started by macOS, not its LaunchAgent) writes no log; omacvm update starts one that does"
   else
     IFS=$'\t' read -r st d <<<"$(media_keys_state "$m")"
     case $st in ok) ok "media keys" "$d" ;; warn) warn "media keys" "$d" ;; *) bad "media keys" "$d" ;; esac
   fi
   # The Bridge says which permissions it has (at start and on each change).
   pm=$(last_line "$BRIDGE_LOG" 'omacvm-bridge: permissions: ')
+  [[ -n $BRIDGE_OLD ]] && pm=old
   case $pm in
     "") ;;   # a Bridge from before it said so
+    old) warn "Bridge permissions" "not known: the running Bridge (pid $BRIDGE_OLD) writes no log (started by macOS after a grant); omacvm update starts one that does" ;;
     *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
     *"Input Monitoring MISSING"*) warn "Bridge permissions" "Input Monitoring is off for OmacVM Bridge: the brightness keys do nothing with a VM in front (System Settings > Privacy & Security > Input Monitoring)" ;;
     *) ok "Bridge permissions" "${pm#permissions: }" ;;
@@ -528,7 +555,7 @@ if [[ $GESTURES == on ]]; then
       (( ${r:-0} > ${c:-0} )) &&
         bad "Gestures for this VM" "refused: its trackpad daemon is from OmacVM 2.3 or older (omacvm update --vm \"$VM\")"
     fi
-    keysonly=$(launchctl print "gui/$(id -u)/$L_GESTURES" 2>/dev/null | grep -c -- '--keys-only')
+    keysonly=$(ps -o args= -p "$GESTURES_PID" 2>/dev/null | grep -c -- '--keys-only')
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
@@ -556,7 +583,9 @@ if [[ $GESTURES == on ]]; then
     # Gestures says which of its two permissions it has (at start and on each
     # change); one from before that: its older lines.
     p=$(last_line "$GESTURES_LOG" 'omacvm-gestures: permissions: ')
-    if [[ $p == *MISSING* ]]; then
+    if [[ -n $GESTURES_OLD ]]; then
+      warn "keyboard/trackpad access" "not known: the running Gestures (pid $GESTURES_OLD, started by macOS, not its LaunchAgent) writes no log; omacvm update starts one that does"
+    elif [[ $p == *MISSING* ]]; then
       miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
       # On in System Settings and still refused: an entry macOS kept for an
       # older build (#306). The helper clears its own once per build; by hand:
