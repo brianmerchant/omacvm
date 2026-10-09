@@ -863,6 +863,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-no-app-nap.pa
 grep -q 'beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep' "$source_dir/ui/cocoa.m" || \
   die "ui/cocoa.m: QEMU's window process must not be napped (no-app-nap patch)"
 
+# Experimental Full Panel: UTM-style native fullscreen in the camera-housing area.
+# Applied after the complete upstream Cocoa stack, including notch park, IME and App Nap.
+python3 "$native_dir/patches/apply-camera-housing-fullscreen.py" "$source_dir/ui/cocoa.m"
+"$native_dir/Tests/display/test-camera-housing-fullscreen.sh" "$source_dir/ui/cocoa.m"
+
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
 epoxy_root="$dependency_root/libepoxy/$epoxy_version"

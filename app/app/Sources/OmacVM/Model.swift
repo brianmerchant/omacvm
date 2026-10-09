@@ -493,6 +493,19 @@ enum Mac {
     }
 }
 
+/// How the direct-QEMU route uses macOS full screen.
+enum FullScreenMode: String, CaseIterable {
+    case native
+    case fullPanel
+
+    var title: String {
+        switch self {
+        case .native: return "Native"
+        case .fullPanel: return "Full Panel (Experimental)"
+        }
+    }
+}
+
 /// The launcher's own preferences.
 enum Settings {
     /// The fence and frame path of 2.6.0 (fences polled every 1 ms, frames
@@ -556,6 +569,14 @@ enum Settings {
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
+    }
+    static var fullScreenMode: FullScreenMode {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: "fullScreenMode"),
+                  let mode = FullScreenMode(rawValue: raw) else { return .native }
+            return mode
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "fullScreenMode") }
     }
     /// Full screen hides the Dock and the menu bar on every display and keeps
     /// the Mac's cursor off the screen corners and the Dock's edge, so neither

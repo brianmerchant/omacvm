@@ -516,6 +516,7 @@ struct BuildLogView: View {
 struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
+    @State private var fullScreenMode = Settings.fullScreenMode
     @State private var keepDockAway = Settings.keepDockAway
     @State private var escape = EscapeSetting.current()
     @StateObject private var mouse = MagicMouseWatch()
@@ -590,6 +591,22 @@ struct ReadyView: View {
                 Section {
                     SwitchRow("Start in full screen", isOn: $fullScreen)
                         .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
+                    LabeledContent("Full screen mode") {
+                        HStack(spacing: 8) {
+                            Picker("Full screen mode", selection: $fullScreenMode) {
+                                ForEach(FullScreenMode.allCases, id: \.self) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
+                            }
+                            .labelsHidden()
+                            .fixedSize()
+                            .onChange(of: fullScreenMode) { _, v in Settings.fullScreenMode = v }
+                            InfoButton(
+                                topic: "full screen mode",
+                                text: "Native is OmacVM's current macOS full screen. Full Panel (Experimental) keeps the VM in a genuine native full-screen Space but lets it use the physical area beside a MacBook camera housing. It uses private macOS APIs and falls back to Native if they are unavailable."
+                            )
+                        }
+                    }
                     SwitchRow("Keep the Dock and hot corners away", isOn: $keepDockAway) {
                         InfoButton(topic: "the Dock and hot corners", text: "In full screen, neither the Dock nor a hot corner comes up from inside the VM, and the menu bar stays hidden on every display. Off: macOS's own full screen.")
                     }

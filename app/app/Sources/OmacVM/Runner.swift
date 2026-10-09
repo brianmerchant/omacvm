@@ -345,8 +345,20 @@ final class Runner {
         let imePending = MacIME.prepareStart(folder: c.folder)
         // What of the Mac this start may use (its features), read once.
         links = MacLinks.load(folder: c.folder)
+        let fullScreenMode = Settings.fullScreenMode
+        if fullScreenMode == .fullPanel {
+            // Full Panel renders the guest beside the camera housing itself;
+            // Omanotch must not draw a second copy into the same strip.
+            // This changes only this start's links, never the saved features.
+            links.omanotch = false
+        }
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
+        if fullScreenMode == .fullPanel {
+            env["OMACVM_CAMERA_HOUSING"] = "1"
+        } else {
+            env.removeValue(forKey: "OMACVM_CAMERA_HOUSING")
+        }
         env["OMACVM_PRODUCT_NAME"] = Product.name
         // Named under the boot logo when the VM is slow to show anything.
         env["OMACVM_LOGS"] = c.folder.appendingPathComponent("logs").path
@@ -444,6 +456,7 @@ final class Runner {
         log.write(Data("OmacVM: Mac folder: \(macFolder)\n".utf8))
         if let n = sizeNote { log.write(Data("OmacVM: resources: \(c.cpus) CPUs, \(c.memoryMB) MB for this start: \(n)\n".utf8)) }
         if let g = graphics { log.write(Data("OmacVM: graphics: \(g.record)\n".utf8)) }
+        log.write(Data("OmacVM: full screen mode: \(fullScreenMode.rawValue)\n".utf8))
         log.write(Data("OmacVM: USB devices: \(usbRecord)\n".utf8))
         if Settings.firmwareWait > 0 {
             log.write(Data("OmacVM: the firmware waits \(Settings.firmwareWait) s for a key (firmwareWait)\n".utf8))
