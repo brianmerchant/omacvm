@@ -240,9 +240,13 @@ mac-ime  off  vm  experimental,app-only  -  Mac input methods  type Chinese, Jap
 gives the control centre's row (the app's Features… opens it), `omacvm
 features` and `omacvm enable/disable mac-ime`. One switch row "Mac input
 methods (experimental)" next to "Fast network (experimental)" in the app's
-VM window (MacIMERow.swift): it runs the app's own `omacvm enable|disable
-mac-ime --vm NAME`, so it can be switched while the VM runs (greyed out
-otherwise; the (i) says why). A check row (addon built for the running Fcitx5, port open,
+VM window (MacIMERow.swift): while the VM runs it runs the app's own
+`omacvm enable|disable mac-ime --vm NAME`. While the VM is stopped (#316:
+greyed out before, and the window is hidden while the VM runs, so a new
+install could not switch it at all) it writes mac-ime into the VM's record
+and a mac-ime-pending file; the next start has the port (or none) and runs
+`omacvm apply --feature mac-ime=on|off` once the guest agent answers (the
+pending file goes when that worked). A check row (addon built for the running Fcitx5, port open,
 next-login settings in place). An entry in docs/features.md. No prompt, no
 permission: AppKit's input context needs none.
 
