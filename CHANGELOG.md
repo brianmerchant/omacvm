@@ -5,13 +5,6 @@ in more words.
 
 ## 3.0.11 (unreleased)
 
-- Vulkan (Venus): apps that check for Vulkan at start and then let it go no longer crash a
-  moment later (Moonlight crashed at every start). A thread that had used the Venus driver
-  ended after the driver was unloaded and ran Mesa's cleanup from unloaded code. OmacVM's
-  Venus build now has Mesa's fix (commit 935c4ec3, not in a Mesa release yet); the VM
-  builds it again on the next `omacvm apply` (a few minutes, while Vulkan is on). If you started
-  Moonlight with `VK_ICD_FILENAMES=/nonexistent.json` (or a similar Vulkan override) to
-  get around it, remove that now.
 - Omanotch: the bar sits in the middle of the notch strip at every display scale, on the 14- and
   16-inch MacBook Pro and the MacBook Air. At scale 1.6 it was about 3 px too low, at scale 2 about
   1 px too high. At fractional scales the hidden NOTCH output is rounded up to whole pixels, and
@@ -19,12 +12,6 @@ in more words.
   flipped view's layer too). The bar also centred itself in the whole output rather than in the
   part the strip shows, in whole logical px (5 above and 6 below at scale 2). Now the strip cuts
   at the top and the bar centres in the shown part to the pixel.
-- OmacVM.app: the "Mac input (Chinese, Japanese, Korean)" switch in the VM's window can now be
-  used (#316). It was greyed out while the VM was stopped, and while the VM runs the window is
-  hidden. Now you switch it while the VM is stopped ("From the next start."): at the next start
-  the VM gets the input method port, and the app sets up the VM's part as soon as the VM is up,
-  so it works from that start. Switching it off works the same way. While the VM runs, the
-  control centre (or `omacvm enable|disable mac-ime`) switches it as before.
 - Omanotch: switching the Omarchy theme shows Omarchy's reveal again, instead of a black flash
   and the desktop sliding in. A theme switch reloads Hyprland's config, which dropped the rule
   omacvm-display-sync gives the screen; the screen fell back to an "auto" place, which is to the
@@ -34,6 +21,19 @@ in more words.
   nothing moves. And the reveal ran on the strip only when its new image was ready first; the
   built-in display then switched at the end without the animation. A late output now joins the
   running reveal (background patch v7).
+- Vulkan (Venus): apps that check for Vulkan at start and then let it go no longer crash a
+  moment later (Moonlight crashed at every start). A thread that had used the Venus driver
+  ended after the driver was unloaded and ran Mesa's cleanup from unloaded code. OmacVM's
+  Venus build now has Mesa's fix (commit 935c4ec3, not in a Mesa release yet); the VM
+  builds it again on the next `omacvm apply` (a few minutes, while Vulkan is on). If you started
+  Moonlight with `VK_ICD_FILENAMES=/nonexistent.json` (or a similar Vulkan override) to
+  get around it, remove that now.
+- OmacVM.app: the "Mac input (Chinese, Japanese, Korean)" switch in the VM's window can now be
+  used (#316). It was greyed out while the VM was stopped, and while the VM runs the window is
+  hidden. Now you switch it while the VM is stopped ("From the next start."): at the next start
+  the VM gets the input method port, and the app sets up the VM's part as soon as the VM is up,
+  so it works from that start. Switching it off works the same way. While the VM runs, the
+  control centre (or `omacvm enable|disable mac-ime`) switches it as before.
 
 ## 3.0.10
 
