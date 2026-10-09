@@ -20,6 +20,12 @@ static inline int notch_mode(double sw, double ss, double logical_h, int *w, int
     return lh;
 }
 
+// The strip's height (`mac_h` points on a display `mac_w` points wide) in
+// logical px of the guest's built-in display (`sw` px wide at scale `ss`).
+static inline double strip_logical(double mac_h, double mac_w, double sw, double ss) {
+    return mac_w > 0 && ss > 0 ? mac_h * (sw / ss) / mac_w : 0;
+}
+
 // Hyprland's monitor rule (Lua) for the hidden output, right above the
 // display at (sx, sy).
 static inline void notch_rule_lua(char *out, size_t size, const char *output, int w, int h, int sx, int sy,

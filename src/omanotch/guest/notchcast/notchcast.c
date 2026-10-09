@@ -1015,7 +1015,8 @@ static void apply_mac_geometry(void) {
     double k = lw / mac_w;
     snprintf(want_notch_l, sizeof want_notch_l, "%.0f", mac_l * k);
     snprintf(want_notch_r, sizeof want_notch_r, "%.0f", mac_r * k);
-    snprintf(want_strip, sizeof want_strip, "%.0f", mac_h * k);
+    // Not rounded: the bar centres itself in this part of NOTCH, to the pixel.
+    snprintf(want_strip, sizeof want_strip, "%.2f", mac_h * k);
     snprintf(want_bar, sizeof want_bar, "%.0f", mac_bar > 0 ? mac_bar * k : 0);
     int h = (int)(mac_h * k + 0.5);
     if (h >= 10 && h <= 200) atomic_store(&strip_height, h);
@@ -1773,9 +1774,10 @@ static int omacvm_app(void) {
 // at least the bar's. Returns the logical height.
 static int notch_size(double sw, double ss, int *w, int *h) {
     double bs = bar_size();
-    int sh = atomic_load(&strip_height);
+    double sh = atomic_load(&strip_height);
     if (have_geom && mac_w > 0 && ss > 0) {
-        int conv = (int)(mac_h * (sw / ss) / mac_w + 0.5);
+        // Not rounded: rounded down, NOTCH could end up shorter than the strip.
+        double conv = strip_logical(mac_h, mac_w, sw, ss);
         if (conv >= 10 && conv <= 200) sh = conv;
     }
     if (sh > bs) bs = sh;

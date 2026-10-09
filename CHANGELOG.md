@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.11 (unreleased)
+
+- Omanotch: the bar sits in the middle of the notch strip at every display scale, on the 14- and
+  16-inch MacBook Pro and the MacBook Air. At scale 1.6 it was about 3 px too low, at scale 2 about
+  1 px too high. At fractional scales the hidden NOTCH output is rounded up to whole pixels, and
+  the strip meant to cut those extra rows at the top, but cut them at the bottom (AppKit flips a
+  flipped view's layer too). The bar also centred itself in the whole output rather than in the
+  part the strip shows, in whole logical px (5 above and 6 below at scale 2). Now the strip cuts
+  at the top and the bar centres in the shown part to the pixel.
+
 ## 3.0.10 (unreleased)
 
 - The Mac input methods feature is named for what it is for: "Mac input (Chinese, Japanese,
