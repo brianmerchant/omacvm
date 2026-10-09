@@ -290,6 +290,15 @@ qemu_wait_exit() {   # [seconds]
 qmp() { printf '{"execute":"qmp_capabilities"}\n{"execute":"%s"}\n' "$1" | nc -U -w 2 "$QMP" >/dev/null 2>&1; }
 qemu_quit() { qmp quit || true; qemu_wait_exit 10 || kill "$(cat "$PIDFILE")" 2>/dev/null || true; }
 
+# The first line of FILE... that says the VM's disk failed: btrfs or ext4
+# errors, or a file system that went read-only (2026-10-09: a VM copied while
+# it ran came up with "BTRFS error ... bad tree block start", then "Read-only
+# file system", and Update VM waited forever). Exit 1 without one.
+disk_error() {
+  LC_ALL=C grep -h -m 1 -a -E 'BTRFS (error|critical)|EXT4-fs error|Read-only file system|[Rr]emounting filesystem read-only|forced readonly' \
+    "$@" 2>/dev/null | printable | head -1 | grep .
+}
+
 vssh() {
   ssh -i "$KEY" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@127.0.0.1 "$@"
