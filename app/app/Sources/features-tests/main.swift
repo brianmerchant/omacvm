@@ -75,5 +75,33 @@ if let text = try? String(contentsOf: tsv, encoding: .utf8),
     expect(false, "mac-ime in src/features.tsv")
 }
 
+// #316: the row switches while the VM is stopped: the record and a pending
+// file for the next start, which runs apply for the VM's part.
+let rec = "bridge=on mac-ime=off vulkan=off\n"
+let s1 = MacIME.switchStopped(record: rec, pending: nil, on: true)
+expect(s1.record == "bridge=on mac-ime=on vulkan=off\n" && s1.pending == "on\n", "stopped, on: record mac-ime=on, pending on")
+expect(MacIME.isOn(features: s1.record), "stopped, on: the next start reads on (its port)")
+let s2 = MacIME.switchStopped(record: s1.record, pending: s1.pending, on: false)
+expect(s2.record == rec && s2.pending == nil, "stopped, on then off: back to the record, nothing pending")
+let s3 = MacIME.switchStopped(record: "bridge=on\n", pending: nil, on: true)
+expect(s3.record == "bridge=on mac-ime=on\n" && s3.pending == "on\n", "stopped, a record without mac-ime: added")
+let s4 = MacIME.switchStopped(record: nil, pending: nil, on: false)
+expect(s4.record == "mac-ime=off\n" && s4.pending == "off\n", "stopped, no record: one with mac-ime")
+expect(MacIME.pending(nil) == nil && MacIME.pending("") == nil && MacIME.pending("onn") == nil &&
+       MacIME.pending("on\n") == true && MacIME.pending("off") == false, "pending: on, off or none")
+expect(MacIME.applyArguments(vm: "My VM", on: true) ==
+       ["apply", "--vm", "My VM", "--vm-type", "app", "--feature", "mac-ime=on", "--yes", "--transaction"],
+       "start: apply switches only mac-ime for the VM")
+let stopped = MacIME.row(record: "mac-ime=off", pending: nil, running: false, busy: false, cli: true)
+expect(stopped == MacIME.Row(on: false, enabled: true, note: nil), "row stopped: switchable (was greyed out, #316)")
+expect(MacIME.row(record: "mac-ime=on", pending: "on", running: false, busy: false, cli: false) ==
+       MacIME.Row(on: true, enabled: true, note: "From the next start."), "row stopped, pending: on, from the next start")
+expect(MacIME.row(record: "mac-ime=off", pending: "off", running: false, busy: false, cli: true).on == false,
+       "row stopped, pending off: off")
+expect(MacIME.row(record: "mac-ime=on", pending: nil, running: true, busy: false, cli: true) ==
+       MacIME.Row(on: true, enabled: true, note: nil), "row running: switchable through omacvm, as before")
+expect(!MacIME.row(record: nil, pending: nil, running: true, busy: false, cli: false).enabled, "row running: needs the app's omacvm")
+expect(!MacIME.row(record: nil, pending: nil, running: false, busy: true, cli: true).enabled, "row busy: not switchable")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
