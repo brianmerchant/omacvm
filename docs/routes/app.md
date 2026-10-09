@@ -257,7 +257,8 @@ VM runs, and goes back by itself when a new version does not start
   `vm.env`) or the folder it is in; that folder becomes the VMs folder, and
   the VMs of the old one are still found. Nothing is copied. A VM that runs
   in another app or on another Mac (its disk is locked) is not started: the
-  window says so.
+  window says so. A VM from a bigger Mac (more CPUs or memory than this Mac
+  allows) starts at this Mac's Best tier; its `vm.env` keeps its size.
 - **Another VMs folder** (an external drive, say): in the setup, or in the
   settings under Storage › Change. With VMs there already, the app asks:
   **Move** (on the same drive a rename; to another drive copied, read back
