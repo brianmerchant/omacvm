@@ -45,7 +45,7 @@ fi
 for rt in "$HERE/../runtime/.build/qemu-gpu-runtime" "$HERE/../runtime"; do   # a dev tree, the app
   [[ -d $rt/lib ]] && { OMACVM_APP_RUNTIME=$(cd "$rt" && pwd); export OMACVM_APP_RUNTIME; break; }
 done
-args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
+args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD" --vm-key "$VM_KEY")
 # The VM's features: its record (the features file) once the first apply wrote
 # it, else the setup's choice (vm.env FEATURES). The fast network is the
 # app's own switch (its fast-network file), which apply reads itself.
