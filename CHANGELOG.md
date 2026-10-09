@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 3.0.15
+## 3.0.15 (unreleased)
 
 - OmacVM.app: the control centre showed **OmacVM Bridge and Touch ID as failing** ("OmacVM Bridge
   is not running") while both worked. 3.0.14's check finds the Bridge by its process, and macOS's
