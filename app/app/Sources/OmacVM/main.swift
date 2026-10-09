@@ -499,12 +499,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window?.orderOut(nil)
         centring?.taken()
         NSApp.setActivationPolicy(.accessory)
+        // Set before the start: r.start() waits on small helper processes,
+        // which runs the main loop, so a QEMU that ends at once (its disk
+        // locked elsewhere) has its exit handled before start() returns, and
+        // that says why in the window.
+        state.message = nil
+        runner = r
         do {
             try r.start()
-            runner = r
-            state.message = nil
             if let pid = r.process?.processIdentifier { handFocus(to: pid, wasActive: wasActive) }
         } catch {
+            runner = nil
             state.message = "Could not start the VM: \(error.localizedDescription)"
             showWindow()
         }
