@@ -23,7 +23,13 @@ in more words.
   down, a disk.img that takes more than half its size is made sparse (every zeroed MiB becomes a
   hole, the bytes stay the same), and create.log says what the disk takes on the Mac and which
   image it came from. The image itself unpacks sparse (prebuilt-3.0.8: 6.9 GB on macOS 15.7).
-
+- Omanotch: the pointer on the strip shows Omarchy's auto-hidden indicators as on the bar itself
+  (reported by @brianmerchant, #308). The guest's pointer is not on the bar while the Mac's is
+  on the strip, so the bar's hover never fired there and the indicators (Dictation, Screen
+  Recording, Do Not Disturb, ...) could not be reached with `alwaysShow` off. Omanotch now tells
+  the VM when the pointer moves between a widget and the bar's free space, and the bar (patch v18)
+  does what its hover does: the indicators show from the free space and stay until the pointer
+  leaves the strip. Needs Omanotch and the VM's OmacVM from this version (Update VM).
 
 ## 3.0.9
 

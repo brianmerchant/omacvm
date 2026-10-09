@@ -40,6 +40,8 @@ protocol StripInputDelegate: AnyObject {
     /// `exit`: where the pointer left the strip ("down" into the built-in
     /// display, "up" towards the display above) and at which x, if known.
     func stripHoverChanged(_ inside: Bool, exit: (direction: String, x: CGFloat)?)
+    /// The pointer over the strip at bar x (StripHover says when).
+    func stripPointer(x: CGFloat)
 }
 
 /// Draws the mirrored bar and turns mouse events into bar coordinates.
@@ -64,7 +66,8 @@ final class StripView: NSView {
     private var drawLeft: CGFloat = 0
     private var imagePixelWidth: CGFloat = 0
     /// Clickable rectangles in bar coordinates, reported by the guest.
-    var targets: [CGRect] = []
+    var targets: [CGRect] = [] { didSet { hover.targetsChanged() } }
+    private var hover = StripHover()
     /// The guest's cursors, so the strip shows the same cursor as the VM.
     var arrowCursor: NSCursor = .arrow
     var pointerCursor: NSCursor = .pointingHand
@@ -179,6 +182,7 @@ final class StripView: NSView {
     private func updateCursor(_ event: NSEvent) {
         guard !locked else { arrowCursor.set(); return }
         let p = barPoint(event)
+        if isHovered, hover.moved(to: p, targets: targets) { input?.stripPointer(x: p.x) }
         if targets.contains(where: { $0.contains(p) }) {
             pointerCursor.set()
         } else {
@@ -197,6 +201,7 @@ final class StripView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
+        hover.left()
         let p = convert(event.locationInWindow, from: nil)  // flipped: y grows downwards
         let direction = p.y >= bounds.height / 2 ? "down" : "up"
         input?.stripHoverChanged(false, exit: (direction, min(max(p.x, 0), bounds.width - 1) * guestPerPoint))
@@ -258,6 +263,7 @@ final class StripView: NSView {
     func resetHover() {
         guard isHovered else { return }
         isHovered = false
+        hover.left()
         input?.stripHoverChanged(false, exit: nil)
     }
 

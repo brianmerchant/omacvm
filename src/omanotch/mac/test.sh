@@ -7,3 +7,5 @@ swiftc -swift-version 5 -target arm64-apple-macos14.0 Sources/GuestPicker.swift 
 build/tests
 swiftc -swift-version 5 -target arm64-apple-macos14.0 Sources/StripLayout.swift Tests/StripLayout/main.swift -o build/strip-layout-tests
 build/strip-layout-tests
+swiftc -swift-version 5 -target arm64-apple-macos14.0 Sources/StripHover.swift Tests/StripHover/main.swift -o build/strip-hover-tests
+build/strip-hover-tests
