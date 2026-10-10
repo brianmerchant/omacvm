@@ -601,6 +601,10 @@ struct ReadyView: View {
                             .labelsHidden()
                             .fixedSize()
                             .onChange(of: fullScreenMode) { _, v in Settings.fullScreenMode = v }
+                            .onAppear { fullScreenMode = Settings.fullScreenMode }
+                            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                                fullScreenMode = Settings.fullScreenMode
+                            }
                             InfoButton(
                                 topic: "full screen mode",
                                 text: "Native is OmacVM's current macOS full screen. Full Panel (Experimental) keeps the VM in a genuine native full-screen Space but lets it use the physical area beside a MacBook camera housing. It uses private macOS APIs and falls back to Native if they are unavailable."

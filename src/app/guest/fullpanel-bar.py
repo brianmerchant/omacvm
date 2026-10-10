@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """FullPanel-only, scale-aware Omarchy top-bar clearance.
 
-Apply to an Omarchy bar clone (including the existing Omanotch clone). The
-change is additive and idempotent. It doesn't alter shell.toml, other display
-bars, or the native fullscreen route. Run as the *desktop user*::
-
-    python3 fullpanel-bar.py --install ~/.config/omarchy/plugins/$USER.bar/Bar.qml
-
-Omanotch's own QML patch also calls patch_text() after applying its changes,
-so a future Omanotch reinstall retains this rule.
+The managed FullPanel plugin opts in with dedicated=True. The legacy
+Omanotch composition entry point leaves its input unchanged. Neither the
+installer nor this command patches a native/user bar.
 """
 
 from __future__ import annotations
@@ -535,7 +530,11 @@ def upgrade_v2_to_v3(text: str) -> str:
     return text
 
 
-def patch_text(text: str) -> str:
+def patch_text(text: str, *, dedicated: bool = False) -> str:
+    # Older Omanotch installers import this function. Keep that call inert;
+    # only FullPanel's independently managed copy receives the v4 layout.
+    if not dedicated:
+        return text
     if MARKER in text:
         validate_v4(text)
         return text
@@ -615,8 +614,12 @@ def main() -> int:
     parser.add_argument("--install", action="store_true", help="rewrite an existing clone only if patchable")
     parser.add_argument("bar", type=pathlib.Path)
     args = parser.parse_args()
+    if (args.bar.is_symlink() or args.bar.parent.is_symlink()
+        or args.bar.parent.name != "omacvm.fullpanel.bar"
+        or not (args.bar.parent / ".omacvm-fullpanel").is_file()):
+        raise ValueError("only the managed omacvm.fullpanel.bar plugin may be patched")
     original = args.bar.read_text(encoding="utf-8")
-    changed = patch_text(original)
+    changed = patch_text(original, dedicated=True)
     if original == changed:
         print("fullpanel-bar: already patched")
         return 0

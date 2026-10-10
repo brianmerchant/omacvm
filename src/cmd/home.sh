@@ -67,8 +67,9 @@ say "    4  Update OmacVM everywhere (this checkout, the Mac, your running VMs)"
 say "    5  Check a VM"
 say "    6  Change the CPUs and memory of a VM"
 say "    7  Open the control centre in a VM (on its desktop)"
+say "    8  Change OmacVM.app's Full screen mode (Native or Full Panel)"
 while :; do
-  read -r -p "  Choose 1-7, q quits [$DEF]: " a < "$TTY" || exit 1
+  read -r -p "  Choose 1-8, q quits [$DEF]: " a < "$TTY" || exit 1
   case ${a:-$DEF} in
     1) exec "$R/src/cmd/build.sh" ;;
     2) choose_vm "Which VM?"; exec "$R/src/cmd/features.sh" features --vm "$PICK" --vm-type "$PICKT" ;;
@@ -77,6 +78,7 @@ while :; do
     5) choose_vm "Which VM?"; exec "$R/src/cmd/check.sh" --vm "$PICK" --vm-type "$PICKT" ;;
     6) choose_vm "Which VM?"; exec "$R/src/cmd/resources.sh" --vm "$PICK" --vm-type "$PICKT" ;;
     7) choose_vm "Which VM?"; exec "$R/src/cmd/features.sh" features --vm "$PICK" --vm-type "$PICKT" --in-vm ;;
+    8) exec "$R/src/cmd/fullscreen.sh" --configure ;;
     q) exit 0 ;;
   esac
 done

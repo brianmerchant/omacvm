@@ -129,6 +129,15 @@ elif compgen -G "$kd/*.keyring" >/dev/null; then
   bad "keyring" "none is the default: apps like Chromium ask for a keyring password (pick one in Passwords and Keys)" human
 else bad "keyring" "none: Chromium asks for a keyring password at its first start; omacvm apply makes Omarchy's default keyring"; fi
 if [[ $TYPE == app ]]; then
+  # FullPanel components are always provisioned for app VMs. The actual boot
+  # signal decides which bar should be active, independently of feature flags.
+  if [[ ! -x /usr/local/bin/omacvm-fullpanel ]]; then
+    bad "Full screen mode" "FullPanel guest components missing: omacvm apply/update"
+  elif fp=$(as_user /usr/local/bin/omacvm-fullpanel status 2>&1); then
+    ok "Full screen mode" "$fp"
+  else
+    bad "Full screen mode" "$fp"
+  fi
   # Which UEFI firmware OmacVM.app started the VM with (SMBIOS BIOS version).
   fw=$(cat /sys/class/dmi/id/bios_version 2>/dev/null)
   if [[ $fw == *-omacvm ]]; then ok "firmware" "$fw (Omarchy boot logo)"
@@ -675,7 +684,11 @@ FEATURE=""
 
 section "Omanotch"
 FEATURE=omanotch
-if [[ $OMANOTCH == off ]]; then
+if [[ $TYPE == app ]] && grep -qx 'OMACVM_FULLPANEL=1' /run/omacvm/host.env 2>/dev/null; then
+  # The mode check above verifies suppression and rejects conflicting units,
+  # processes and bars. Streaming and parking are intentionally inactive.
+  skip "Omanotch" "suppressed for Full Panel (Experimental); checked with Full screen mode"
+elif [[ $OMANOTCH == off ]]; then
   if user_active notchcast.service || pgrep -u "$U" -x notchcast >/dev/null || connected_to "$HOST" 47811; then
     bad "Omanotch" "off, but notchcast runs and talks to the Mac: omacvm apply"
   elif [[ $(systemctl --global is-enabled omacvm-omanotch.service 2>/dev/null) == enabled ]]; then

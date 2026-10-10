@@ -193,6 +193,8 @@ fi
 [[ -n $U ]] || U=$(vm_probe "$IP" | sed -n 's/^OMACVM_USER=//p')
 # What was chosen at setup for this VM (defaults for VMs from before the choices).
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
+FULLPANEL=0
+if [[ $TYPE == app ]] && gssh "$IP" "grep -qx 'OMACVM_FULLPANEL=1' /run/omacvm/host.env" >/dev/null 2>&1; then FULLPANEL=1; fi
 feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
 BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "$(feat glide off)")
 # OmacVM.app's fast network: its fast-network file is the switch (the app's
@@ -657,7 +659,9 @@ utm)
   esac ;;
 esac
 FEATURE=omanotch
-if [[ $(feat omanotch off) == off ]]; then
+if (( FULLPANEL )); then
+  skip "Omanotch (Mac)" "suppressed for this Full Panel start; guest mode check verifies the bar"
+elif [[ $(feat omanotch off) == off ]]; then
   skip "Omanotch" "off for this VM (chosen at setup)"
 elif pgrep -xq omanotch; then
   # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
@@ -665,7 +669,7 @@ elif pgrep -xq omanotch; then
   ok "Omanotch (Mac)" "running, bar height: $h"
 elif [[ ${notch:=$(mac_tool mac-notch 2>/dev/null || echo none)} != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
 else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
-if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
+if [[ $TYPE == app && $(feat omanotch off) == on ]] && (( ! FULLPANEL )); then
   rc=0; omanotch_serves_app || rc=$?
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
   if (( rc == 0 )) && [[ $FAST_NET == on ]]; then
@@ -706,7 +710,14 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
   if [[ -z $l ]]; then
     skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
   else
-    fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
+    # Runner also closes this link for its Full Panel startup choice, even if
+    # missing host geometry leaves the guest's FullPanel signal unset.
+    links_mode=$(sed -n 's/^OmacVM: full screen mode: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+    fs=$(for k in omanotch gestures bridge battery camera; do
+      v=$(feat "$k" on)
+      if [[ $k == omanotch ]] && { (( FULLPANEL )) || [[ $links_mode == fullPanel ]]; }; then v=off; fi
+      printf '%s=%s ' "$k" "$v"
+    done)
     open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
     m=""
     [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
@@ -749,7 +760,8 @@ FEATURE=""
 if [[ $TYPE == app ]]; then
   # OmacVM.app's full screen is macOS's own, in its own Space, below the notch;
   # Omanotch fills the strip beside it.
-  if [[ ${notch:=$(mac_tool mac-notch 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  if (( FULLPANEL )); then skip "notch strip (app)" "Full Panel uses the guest Quickbar; Omanotch streaming is suppressed"
+  elif [[ ${notch:=$(mac_tool mac-notch 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
   elif [[ $(feat omanotch off) == on ]]; then skip "notch strip (app)" "full screen in its own Space; Omanotch fills the strip"
   else skip "notch strip (app)" "full screen in its own Space; the strip stays black (Omanotch is off for this VM: omacvm enable omanotch)"; fi
 fi

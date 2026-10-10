@@ -96,8 +96,8 @@ Item {
 '''
 
 
-# Model the current Omarchy clone anchors used by the composed FullPanel
-# patch, rather than the former size-only bar fixture.
+# Model current Omarchy clone anchors. Even with FullPanel available, its
+# legacy composition call must leave Omanotch's native bar independent.
 import runpy
 FULLPANEL = runpy.run_path(str(ROOT / "src/app/guest/fullpanel-bar.py"))
 BAR = BAR.replace("    implicitHeight: root.vertical ? 0 : root.barSize\n",
@@ -147,13 +147,15 @@ class Patch(unittest.TestCase):
     def setUp(self):
         self.text = patched()
 
-    def test_fullpanel_composition_is_atomic_and_backs_up_user_clone(self):
+    def test_native_bar_stays_independent_and_backup_safe_with_fullpanel_installed(self):
         with tempfile.TemporaryDirectory() as directory:
             bar = pathlib.Path(directory) / "Bar.qml"
             original = BAR + "// user content\n"
             bar.write_text(original)
             subprocess.run([sys.executable, str(PATCH), str(bar)], check=True, capture_output=True)
-            self.assertIn(FULLPANEL["MARKER"], bar.read_text())
+            self.assertNotIn(FULLPANEL["MARKER"], bar.read_text())
+            self.assertNotIn("function fullPanelBounds", bar.read_text())
+            self.assertIn("// omarchy-notch-bar patch v20", bar.read_text())
             self.assertIn("// user content", bar.read_text())
             backups = list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))
             self.assertEqual(len(backups), 1)

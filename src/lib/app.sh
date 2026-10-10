@@ -50,6 +50,22 @@ else APP_ID=${OMACVM_APP_ID:-org.omacvm.app}; fi
 APP_BUNDLE_ID=org.omacvm.app
 [[ ${OMACVM_TEST_IDENTITY:-} == 1 ]] && APP_BUNDLE_ID=org.omacvm.app.test
 
+# The same global preference as Settings.fullScreenMode in the app. This is
+# a fullscreen mode, not a VM feature; existing choices survive updates.
+app_fullscreen_choice() {
+  local mode; mode=$(defaults read "$APP_ID" fullScreenMode 2>/dev/null) || mode=native
+  case $mode in fullPanel) echo fullpanel ;; *) echo native ;; esac
+}
+app_fullscreen_title() {
+  case $1 in fullpanel) echo "Full Panel (Experimental)" ;; *) echo Native ;; esac
+}
+app_fullscreen_set() {
+  local raw
+  case $1 in native) raw=native ;; fullpanel) raw=fullPanel ;; *) return 2 ;; esac
+  defaults write "$APP_ID" fullScreenMode -string "$raw" &&
+    [[ $(app_fullscreen_choice) == "$1" ]]
+}
+
 # Where new VMs go, as the app decides (app/app/Sources/OmacVM/VMsFolder.swift;
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,
 # else ~/OmacVM (the app makes it on first use), unless that name is taken by

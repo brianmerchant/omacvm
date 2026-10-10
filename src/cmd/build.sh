@@ -16,6 +16,7 @@
 #   --vm-dir PATH   where the VM goes, an external drive for example (Parallels, UTM, Fusion;
 #                   default: the app's own folder or library)
 #   --graphics-gb N   VMware Fusion: graphics memory, part of the VM's memory (1-8)
+#   --fullscreen-mode native|fullpanel   OmacVM.app's existing Full screen mode
 #   --user NAME   --full-name "NAME"
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
@@ -60,6 +61,7 @@ TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$
 [[ -n $U ]] || U=omarchy
 BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=1; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; EXT_BRIGHTNESS=1; CHROMIUM_VIDEO=1; NO_IDLE_LOCK=0; AUTOLOGIN=0; THP=0; CONTROL=1; X86=0
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0; IMAGE=0; SOURCE=""
+FULLSCREEN=""
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
 feature_flag() {   # NAME on|off
@@ -92,7 +94,7 @@ feature_flag() {   # NAME on|off
 while (( $# )); do
   # A missing value is a usage error, not a set -u abort.
   case $1 in
-    --vm-type|--vm-name|--vm-dir|--graphics-gb|--resources|--cpus|--memory-gb|--disk-gb|--user|--full-name|--hostname|--feature|--parallels-edition|--channel)
+    --vm-type|--vm-name|--vm-dir|--graphics-gb|--fullscreen-mode|--resources|--cpus|--memory-gb|--disk-gb|--user|--full-name|--hostname|--feature|--parallels-edition|--channel)
       [[ $# -ge 2 ]] || usage "$1 needs a value" ;;
   esac
   case $1 in
@@ -100,6 +102,8 @@ while (( $# )); do
     --vm-name) VM=$2; NAME_GIVEN=1; shift 2 ;;
     --vm-dir) VM_DIR=$2; shift 2 ;;
     --graphics-gb) GFX_GB=$2; shift 2 ;;
+    --fullscreen-mode) FULLSCREEN=$2; shift 2
+      [[ $FULLSCREEN == native || $FULLSCREEN == fullpanel ]] || usage "--fullscreen-mode native or fullpanel" ;;
     --resources) RES=$2; shift 2 ;;
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
@@ -119,7 +123,7 @@ while (( $# )); do
     --dry-run) DRY=1; shift ;;
     --plan) PLAN=1; DRY=1; shift ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,29s/^# \{0,1\}//p' "$0"; DONE=1; exit 0 ;;
+    -h|--help) sed -n '2,30s/^# \{0,1\}//p' "$0"; DONE=1; exit 0 ;;
     --no-*) feature_flag "${1#--no-}" off; shift ;;
     --*) feature_flag "${1#--}" on; shift ;;
     *) usage "unknown option $1 (see --help)" ;;
@@ -156,6 +160,8 @@ if [[ -z $TYPE ]]; then
   case $pick in 0) TYPE=app ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=parallels ;; esac
   say "    Comparison: $README_ROUTES"
 fi
+# Reject this app-only option before checking/installing another route's app.
+[[ -z $FULLSCREEN || $TYPE == app ]] || usage "--fullscreen-mode is OmacVM.app's setting (--vm-type app)"
 # What the build needs: Xcode's command line tools (installed after asking),
 # except for OmacVM.app run from the app's own omacvm ("omacvm in Terminal",
 # the control centre): the app carries python3, the Swift answers and its Mac
@@ -206,6 +212,18 @@ case $TYPE in
     fi ;;
   *) usage "--vm-type parallels, utm, fusion or app" ;;
 esac
+# The app and CLI share one preference. A fresh setup defaults to Native;
+# an existing app's choice is retained unless the user selects another mode.
+if [[ $TYPE == app ]]; then
+  [[ -n $FULLSCREEN ]] || FULLSCREEN=$(app_fullscreen_choice)
+  if (( ! YES && ! IMAGE )); then
+    pick=0; [[ $FULLSCREEN == fullpanel ]] && pick=1
+    ui_select pick "Full screen mode (OmacVM.app Settings, all app VMs)" "$pick" \
+      "Native|default · macOS full screen" \
+      "Full Panel (Experimental)|use the physical area beside the MacBook camera housing"
+    (( pick )) && FULLSCREEN=fullpanel || FULLSCREEN=native
+  fi
+fi
 # The Mac's battery: on with one, except on Parallels (it shows it itself).
 i=$(feature_index battery)
 if [[ -z $BATTERY ]]; then [[ $(feature_default "$i") == on ]] && BATTERY=1 || BATTERY=0
@@ -524,6 +542,7 @@ if (( PLAN && JSON )); then
   [[ -n ${P_PLANNED:-} ]] && cmd+=" --parallels-edition $P_EDITION"
   [[ -n ${VM_DIR:-} && $VM_DIR != "$(default_dir)" ]] && cmd+=" --vm-dir $(printf %q "$VM_DIR")"
   [[ -n ${GFX_GB:-} ]] && cmd+=" --graphics-gb $GFX_GB"
+  [[ $TYPE != app ]] || cmd+=" --fullscreen-mode $FULLSCREEN"
   printf '{\n  "omacvm": %s,\n' "$(json_str "$(cat "$R/src/VERSION")")"
   printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s, "dir": %s},\n' \
     "$(json_str "$VM")" "$TYPE" "$(json_str "$(case $TYPE in
@@ -535,6 +554,7 @@ if (( PLAN && JSON )); then
     "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")" "$(json_str "${VM_DIR:-UTM library}")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
   [[ -n ${GFX_GB:-} ]] && printf '  "graphics_gb": %s,\n' "$GFX_GB"
+  [[ $TYPE != app ]] || printf '  "fullscreen_mode": "%s",\n' "$FULLSCREEN"
   printf '  "resource_tiers": {'   # what --resources gives on this Mac
   for t in 0 1 2 3; do
     tier_values "$t"
@@ -591,6 +611,7 @@ box=("OmacVM will build this VM" ""
      "timezone   $TZ_MAC, language $LANG_VM"
      "Omarchy    $( [[ $SOURCE == prebuilt ]] && echo "prebuilt VM: Omarchy $PB_OMARCHY ($(pb_gb "$PB_SIZE") GB download, release $PB_TAG)" || echo "omarchy-mac, $CHANNEL packages, built here")" "")
 while IFS= read -r l; do box+=("${l#    }"); done < <(explain_features)
+[[ $TYPE != app ]] || box+=("Full screen mode  $(app_fullscreen_title "$FULLSCREEN") (OmacVM.app Settings)")
 if (( UI_FANCY )) && ! (( YES )); then ui_box "${box[@]}"
 else printf '\n'; for l in "${box[@]}"; do printf '  %s\n' "$l"; done; fi
 echo
@@ -606,6 +627,11 @@ else
   read -r -s -p "  Password for $U in Omarchy: " PW < "$TTY"; echo
   read -r -s -p "  Again: " PW2 < "$TTY"; echo
   [[ $PW == "$PW2" && -n $PW ]] || die "passwords differ or are empty"
+fi
+# Before any app VM is started, including the app's build/apply workflow.
+# Image creation and dry runs never write the person's app preferences.
+if [[ $TYPE == app ]] && (( ! IMAGE )) && [[ $FULLSCREEN != "$(app_fullscreen_choice)" ]]; then
+  app_fullscreen_set "$FULLSCREEN" || die "could not save OmacVM.app's Full screen mode"
 fi
 # OmacVM.app's script takes the password itself and hashes it in the VM.
 if [[ $TYPE != app ]]; then

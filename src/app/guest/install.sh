@@ -31,17 +31,13 @@ H=$(getent passwd "$U" | cut -d: -f6)
 systemctl enable qemu-guest-agent >/dev/null 2>&1 || true
 systemctl start --no-block qemu-guest-agent >/dev/null 2>&1 || true
 install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays omacvm-desktop-recover /usr/local/bin/
-# An additive patch to the existing user-owned Omarchy bar clone. Omanotch's
-# own installer also composes this patch after its clone upgrades, so they
-# cannot overwrite each other. The patcher backs up and atomically replaces
-# a supported clone; failures leave it intact. No plugin is created or selected.
-install -Dm755 fullpanel-bar.py /usr/local/lib/omacvm/fullpanel-bar.py
-bar_clone="$H/.config/omarchy/plugins/$U.bar/Bar.qml"
-if [[ -f $bar_clone ]]; then
-  if ! runuser -u "$U" -- python3 /usr/local/lib/omacvm/fullpanel-bar.py --install "$bar_clone"; then
-    echo "WARN: FullPanel Quickbar could not patch the existing bar clone (left unchanged)" >&2
-  fi
-fi
+# FullPanel owns a separate, initially inactive bar. The synchronous config
+# hook selects it from host.env at the next session, before the shell loads.
+# An unsupported Omarchy bar leaves the native selection and plugin intact.
+bash fullpanel-install.sh "$U" || {
+  echo "guest/install.sh: failed during: FullPanel guest installation; current bar left unchanged" >&2
+  exit 1
+}
 # HDR (off until the user runs omacvm-virtio-gpu-build): the 10-bit virtio-gpu
 # module's builder, and a pacman hook that rebuilds it for new kernels.
 install -Dm755 virtio-gpu/omacvm-virtio-gpu-build /usr/local/lib/omacvm/virtio-gpu/omacvm-virtio-gpu-build

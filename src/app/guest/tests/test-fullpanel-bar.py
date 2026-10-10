@@ -5,6 +5,7 @@ These do not replace an on-device Quickshell render or Swift AppKit test.
 """
 import importlib.util
 from math import ceil
+from functools import partial
 from pathlib import Path
 import unittest
 import stat
@@ -15,6 +16,7 @@ MODULE = Path(__file__).resolve().parent.parent / "fullpanel-bar.py"
 spec = importlib.util.spec_from_file_location("fullpanel_bar", MODULE)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+patch_bar = partial(mod.patch_text, dedicated=True)
 
 
 class FullPanelBarTests(unittest.TestCase):
@@ -31,6 +33,10 @@ class FullPanelBarTests(unittest.TestCase):
             + '    entries: root.layoutEntries("left")\n  }\n}\n'
         )
 
+    def test_legacy_omanotch_composition_is_inert(self):
+        self.assertEqual(mod.patch_text(self.source), self.source)
+        self.assertEqual(mod.patch_text("// customized native bar"), "// customized native bar")
+
     def test_atomic_install_backup_mode_owner_and_idempotence(self):
         with tempfile.TemporaryDirectory() as directory:
             bar = Path(directory) / "Bar.qml"
@@ -38,14 +44,14 @@ class FullPanelBarTests(unittest.TestCase):
             bar.write_text(original)
             bar.chmod(0o640)
             before = bar.stat()
-            changed = mod.patch_text(original)
+            changed = patch_bar(original)
             backup = mod.install_text(bar, original, changed)
             self.assertEqual(backup.read_text(), original)
             self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o640)
             self.assertEqual(bar.read_text(), changed)
             self.assertEqual(stat.S_IMODE(bar.stat().st_mode), 0o640)
             self.assertEqual((bar.stat().st_uid, bar.stat().st_gid), (before.st_uid, before.st_gid))
-            self.assertIsNone(mod.install_text(bar, changed, mod.patch_text(changed)))
+            self.assertIsNone(mod.install_text(bar, changed, patch_bar(changed)))
             self.assertEqual(len(list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))), 1)
             second = mod.install_text(bar, changed, changed + "// extra\n")
             self.assertNotEqual(backup, second)
@@ -58,7 +64,7 @@ class FullPanelBarTests(unittest.TestCase):
             bar.write_text(self.source)
             with patch.object(mod.os, "replace", side_effect=OSError("replace failed")):
                 with self.assertRaisesRegex(OSError, "replace failed"):
-                    mod.install_text(bar, self.source, mod.patch_text(self.source))
+                    mod.install_text(bar, self.source, patch_bar(self.source))
             self.assertEqual(bar.read_text(), self.source)
             backups = list(bar.parent.glob("Bar.qml.fullpanel-backup-*"))
             self.assertEqual(len(backups), 1)
@@ -71,7 +77,7 @@ class FullPanelBarTests(unittest.TestCase):
             bar.write_text(self.source)
             with patch.object(mod.os, "fsync", side_effect=OSError("write failed")):
                 with self.assertRaisesRegex(OSError, "write failed"):
-                    mod.install_text(bar, self.source, mod.patch_text(self.source))
+                    mod.install_text(bar, self.source, patch_bar(self.source))
             self.assertEqual(bar.read_text(), self.source)
             self.assertEqual(list(bar.parent.iterdir()), [bar])
 
@@ -80,10 +86,10 @@ class FullPanelBarTests(unittest.TestCase):
             bar = Path(directory) / "Bar.qml"
             bar.write_text("// concurrent user edit\n")
             with self.assertRaisesRegex(ValueError, "changed during patching"):
-                mod.install_text(bar, self.source, mod.patch_text(self.source))
+                mod.install_text(bar, self.source, patch_bar(self.source))
             self.assertEqual(bar.read_text(), "// concurrent user edit\n")
             with self.assertRaises(ValueError):
-                mod.patch_text(bar.read_text())
+                patch_bar(bar.read_text())
             self.assertEqual(list(bar.parent.iterdir()), [bar])
 
     def test_symlink_clone_preserves_link(self):
@@ -92,12 +98,12 @@ class FullPanelBarTests(unittest.TestCase):
             target.write_text(self.source)
             link = Path(directory) / "Bar.qml"
             link.symlink_to(target.name)
-            mod.install_text(link, self.source, mod.patch_text(self.source))
+            mod.install_text(link, self.source, patch_bar(self.source))
             self.assertTrue(link.is_symlink())
-            self.assertEqual(target.read_text(), mod.patch_text(self.source))
+            self.assertEqual(target.read_text(), patch_bar(self.source))
 
     def test_adds_dynamic_height_bounds_and_single_widget_instance_per_side(self):
-        s = mod.patch_text(self.source)
+        s = patch_bar(self.source)
         self.assertIn(mod.MARKER, s)
         self.assertIn('function fullPanelBarHeight(s)', s)
         self.assertIn('function fullPanelBounds(s)', s)
@@ -123,8 +129,8 @@ class FullPanelBarTests(unittest.TestCase):
         self.assertNotIn(mod.HORIZONTAL_OLD, s)
 
     def test_idempotent(self):
-        once = mod.patch_text(self.source)
-        self.assertEqual(once, mod.patch_text(once))
+        once = patch_bar(self.source)
+        self.assertEqual(once, patch_bar(once))
 
     def test_migrate_v1_without_losing_user_content_or_height_fix(self):
         orig = self.source.replace(mod.HOME_ANCHOR,
@@ -132,16 +138,16 @@ class FullPanelBarTests(unittest.TestCase):
         orig = orig.replace(mod.NOTCH_FLOOR, mod.NEW_NOTCH_FLOOR)
         orig = orig.replace(mod.OLD_HEIGHT, mod.OLD_MANUAL_HEIGHT)
         orig = orig.replace('  id: root\n', '  id: root\n  property string ownerNote: "keep"\n')
-        updated = mod.patch_text(orig)
+        updated = patch_bar(orig)
         self.assertIn('ownerNote: "keep"', updated)
         self.assertIn(mod.MARKER, updated)
         self.assertNotIn(mod.V1_MARKER, updated)
         self.assertIn(mod.NEW_HEIGHT, updated)
-        self.assertEqual(updated, mod.patch_text(updated))
+        self.assertEqual(updated, patch_bar(updated))
 
     def test_migrate_omanotch_wrapped_height(self):
         src = self.source.replace(mod.OLD_HEIGHT, mod.OLD_OMANOTCH_HEIGHT)
-        updated = mod.patch_text(src)
+        updated = patch_bar(src)
         self.assertIn(mod.NEW_OMANOTCH_HEIGHT, updated)
         self.assertIn('barWindow.parkedSize', updated)
 
@@ -149,19 +155,19 @@ class FullPanelBarTests(unittest.TestCase):
         broken = self.source.replace(mod.HOME_ANCHOR,
                                      mod.HOME_ANCHOR + mod.HOST_INFO_V1[:-3])
         with self.assertRaisesRegex(ValueError, 'metadata differs'):
-            mod.patch_text(broken)
+            patch_bar(broken)
 
     def test_bad_v2_is_not_treated_as_success(self):
         patched = self.make_v2().replace('component FullPanelEdgeModules: Item',
                                          'component BrokenEdge: Item')
         with self.assertRaisesRegex(ValueError, 'v2 marker'):
-            mod.patch_text(patched)
+            patch_bar(patched)
 
     def test_bad_v3_is_not_treated_as_success(self):
         patched = self.make_v3().replace('component FullPanelBalancedModules: Item',
                                          'component BrokenBalanced: Item')
         with self.assertRaisesRegex(ValueError, 'v3 marker'):
-            mod.patch_text(patched)
+            patch_bar(patched)
 
     def make_v2(self):
         patched = self.source.replace(mod.HOME_ANCHOR, mod.HOME_ANCHOR + mod.HOST_INFO_V2)
@@ -177,34 +183,34 @@ class FullPanelBarTests(unittest.TestCase):
             '  id: root\n  property var barConfig: ({})\n  property string omarchyPath: Quickshell.env("OMARCHY_PATH")\n'
         ).replace('  component LeftModules: ModuleList {',
                   '  property string localNote: "unchanged"\n  component LeftModules: ModuleList {')
-        upgraded = mod.patch_text(original)
+        upgraded = patch_bar(original)
         self.assertNotIn(mod.V2_MARKER, upgraded)
         self.assertIn(mod.MARKER, upgraded)
         self.assertIn('property var barConfig: ({})', upgraded)
         self.assertIn('localNote: "unchanged"', upgraded)
         self.assertIn(mod.NEW_HEIGHT, upgraded)
         self.assertIn('component FullPanelBalancedModules: Item', upgraded)
-        self.assertEqual(upgraded, mod.patch_text(upgraded))
+        self.assertEqual(upgraded, patch_bar(upgraded))
         self.assertEqual(upgraded.count('component FullPanelEdgeModules: Item'), 1)
 
 
     def test_migrate_live_v3_hover_fix_only(self):
         v3 = self.make_v3().replace('  id: root\n',
             '  id: root\n  property string note: "user customization survives"\n')
-        updated = mod.patch_text(v3)
+        updated = patch_bar(v3)
         self.assertNotIn(mod.V3_MARKER, updated)
         self.assertIn(mod.MARKER, updated)
         self.assertIn('note: "user customization survives"', updated)
         self.assertIn('root.activePopout || root.barDragSource || root.barHovered', updated)
         self.assertIn('function onBarHoveredChanged() { balanced.scheduleRebalance() }', updated)
-        self.assertEqual(updated, mod.patch_text(updated))
+        self.assertEqual(updated, patch_bar(updated))
 
     def test_bad_v4_is_not_treated_as_success(self):
-        broken = mod.patch_text(self.source).replace(
+        broken = patch_bar(self.source).replace(
             'function onBarHoveredChanged() { balanced.scheduleRebalance() }',
             'function onBarHoveredChanged() { /* broken */ }')
         with self.assertRaisesRegex(ValueError, 'v4 marker'):
-            mod.patch_text(broken)
+            patch_bar(broken)
 
     def test_hover_guard_is_prior_to_borrow_count_mutation(self):
         qml = mod.BALANCED_COMPONENT
@@ -254,12 +260,12 @@ class FullPanelBarTests(unittest.TestCase):
 
     def test_rejects_upstream_changes(self):
         with self.assertRaisesRegex(ValueError, 'notchFloor'):
-            mod.patch_text(self.source.replace('readonly property int notchFloor',
+            patch_bar(self.source.replace('readonly property int notchFloor',
                                                'readonly property int notchArea'))
         with self.assertRaisesRegex(ValueError, 'bar root'):
-            mod.patch_text(self.source.replace(mod.HOME_ANCHOR, ''))
+            patch_bar(self.source.replace(mod.HOME_ANCHOR, ''))
         with self.assertRaisesRegex(ValueError, 'horizontal module layout'):
-            mod.patch_text(self.source.replace('RightModules {', 'NewRightModules {'))
+            patch_bar(self.source.replace('RightModules {', 'NewRightModules {'))
 
     def test_scale_geometry_and_overflow(self):
         # Host: width 1800 points, camera [790,1010], height 40 points.
@@ -285,7 +291,7 @@ class FullPanelBarTests(unittest.TestCase):
                 self.assertLess(right_safe, 530)
 
     def test_native_external_and_missing_bounds_guards(self):
-        new = mod.patch_text(self.source)
+        new = patch_bar(self.source)
         self.assertIn('env.OMACVM_FULLPANEL === 1', new)
         self.assertIn('String(s.name) !== fullPanelBuiltin', new)
         self.assertIn('strip > 1 && strip < h * 0.06', new)
