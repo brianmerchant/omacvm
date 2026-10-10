@@ -2,11 +2,23 @@
 
 <h3 align="center">Omarchy in a VM on your Mac, feeling native</h3>
 
+> **Experimental development fork:** this is Brian Merchant's
+> [FullPanel branch](https://github.com/brianmerchant/omacvm/tree/fullpanel) of
+> [OmacVM by Gilles Goetsch](https://github.com/gillesgoetsch/OmacVM), not an
+> official OmacVM release. FullPanel adds an optional **Full Panel
+> (Experimental)** fullscreen mode; Native remains the default. For the
+> experimental source, behavior and validation limits, see the
+> [FullPanel notes](docs/experiments/camera-housing-fullscreen.md).
+
 <p align="center">One command builds the VM, in its own app OmacVM.app, UTM, VMware Fusion or Parallels Desktop. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
   <b>With <a href="src/omanotch/README.md">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
 </p>
+
+The command below installs **official upstream OmacVM**, not this fork's
+FullPanel implementation. Obtain experimental development source from the
+branch linked above; no separate verified FullPanel installer is documented.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash

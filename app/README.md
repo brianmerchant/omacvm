@@ -1,11 +1,19 @@
 # OmacVM.app
 
+This checkout is Brian Merchant's experimental
+[FullPanel fork](https://github.com/brianmerchant/omacvm/tree/fullpanel) of
+[OmacVM by Gilles Goetsch](https://github.com/gillesgoetsch/OmacVM).
+It is not an official release. See the
+[FullPanel notes](../docs/experiments/camera-housing-fullscreen.md) for the
+optional fullscreen mode and its verification limits.
+
 Omarchy in a VM on an Apple Silicon Mac, in one app. No Parallels, UTM or
 VMware Fusion: the app brings its own QEMU (Apple's Hypervisor framework,
 GPU through VirGL).
 
 Part of [OmacVM](../README.md): this folder is the app, `../src` is OmacVM's
-VM side the app carries. Get the app with `omacvm build --vm-type app`, or
+VM side the app carries. Get the official upstream app with
+`omacvm build --vm-type app`, or
 as `OmacVM-<version>.zip` from OmacVM's
 [releases](https://github.com/gillesgoetsch/omacvm/releases).
 
@@ -13,11 +21,22 @@ as `OmacVM-<version>.zip` from OmacVM's
 
 Needs macOS 15 and Xcode's Command Line Tools.
 
+The existing example below obtains and builds **official upstream source**:
+
 ```sh
 git clone https://github.com/gillesgoetsch/omacvm && cd omacvm/app
 scripts/build-app.sh          # dist/OmacVM.app
 open dist/OmacVM.app
 ```
+
+For FullPanel development, obtain the `fullpanel` fork checkout instead and
+use the same `app/scripts/build-app.sh` entry point from that checkout's
+`app` directory (`scripts/build-app.sh`). Keep its committed `src/` and
+runtime changes together. A future binary recipient needs the exact fork
+commit matching that binary, not just the moving branch. This audit did not
+build or validate a fork binary. The release and update workflow below
+describes upstream; its existing download/feed defaults were not redirected
+to this fork, and are not a verified FullPanel distribution channel.
 
 The first build compiles QEMU (about 70 seconds) and the UEFI firmware (about
 2 minutes, 800 MB of downloads, kept in `runtime/.build/edk2`). The app takes
@@ -163,6 +182,9 @@ The VM is a normal install: `omarchy update` and snapshots work.
 | `app/Sources/OmacVMUpdate` | the update's checks (feed, signatures, schedule), tested by `update-tests` |
 | `../src` | OmacVM: the installers and the VM side, `app` route |
 
-Licences: `THIRD_PARTY_NOTICES.md`. QEMU is GPL-2.0: its build scripts and
-every patch the app's QEMU is built with are in `runtime/` of this public
-repo, which is the source offer for the QEMU in the app.
+Licences and source references: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+QEMU is GPL-2.0 with other licences per file. Its build scripts, patches and
+source transformers are in `runtime/`; the exact upstream source is pinned
+there. For any future FullPanel binary, distribute matching complete source
+and notices as described in the [distribution notes](THIRD_PARTY_NOTICES.md#source-and-future-binary-distribution).
+The repository link alone is not a completed binary-distribution source offer.

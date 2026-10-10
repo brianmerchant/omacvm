@@ -1,13 +1,35 @@
 # Third-party notices
 
+Original OmacVM: [Gilles Goetsch's project](https://github.com/gillesgoetsch/OmacVM).
+Experimental FullPanel integration: Brian Merchant's contributions in the
+[FullPanel fork](https://github.com/brianmerchant/omacvm/tree/fullpanel).
+The existing MIT licence and Gilles Goetsch's copyright are preserved;
+this attribution does not replace the notices of reused components.
+
 OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
 
 - **QEMU** 11.1.1 (commit c3d48b7d), GPL-2.0 and other licences per file.
   Built from source by `runtime/build-qemu-gpu-runtime.sh` with the patches in
-  `runtime/patches/`. Whoever gets the app can get that source and those
-  patches: the build scripts and patches are in `app/runtime/` of the public
-  repository github.com/gillesgoetsch/omacvm, at the release's tag, and QEMU's
-  own source is at gitlab.com/qemu-project/qemu (commit c3d48b7d).
+  `runtime/patches/`. The exact pin in that script is
+  [`c3d48b7d1e89604920e5b81b91140c2ad39a1943`](https://gitlab.com/qemu-project/qemu/-/tree/c3d48b7d1e89604920e5b81b91140c2ad39a1943)
+  in [upstream QEMU](https://gitlab.com/qemu-project/qemu).
+  Original OmacVM build scripts and patches are in
+  [Gilles Goetsch's repository](https://github.com/gillesgoetsch/OmacVM), at
+  the source revision for its binary. FullPanel's additional modifications
+  are in this fork's [app/runtime](https://github.com/brianmerchant/omacvm/tree/fullpanel/app/runtime),
+  especially `patches/apply-camera-housing-fullscreen.py`, which transforms
+  QEMU's `ui/cocoa.m`. An upstream OmacVM release tag does not include these
+  fork modifications. The Cocoa driver's
+  [MIT notice, copyright (c) 2008 Mike Kronenberg](https://gitlab.com/qemu-project/qemu/-/blob/c3d48b7d1e89604920e5b81b91140c2ad39a1943/ui/cocoa.m)
+  remains applicable to that file; the modified driver is part of the wider
+  QEMU executable, whose [GPL-2.0 and per-file licensing](https://www.qemu.org/docs/master/about/license.html)
+  remain applicable.
+- **UTM** (Turing Software, LLC), Apache-2.0: camera-housing fullscreen
+  [PR #7885](https://github.com/utmapp/UTM/pull/7885) and
+  [PR #7910](https://github.com/utmapp/UTM/pull/7910) are architectural prior
+  art. The FullPanel transformer documents an independent Objective-C
+  implementation; UTM's Swift implementation was not copied. This credit
+  does not assert that UTM's code is bundled or relicense the QEMU driver.
 - **try-omarchy** (github.com/omacom/try-omarchy), MIT: the runtime build
   scripts and patches, `QMPConnection.swift`, `VMHostSleepController.swift`,
   `NativeBridgeSocket.swift`, the clipboard and battery bridges
@@ -48,8 +70,10 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   licence texts and the copyright lines of their headers. virglrenderer's
   macOS and Venus-on-Metal patches come from
   github.com/startergo/homebrew-virglrenderer (MIT).
-- **OmacVM** (github.com/gillesgoetsch/omacvm, the repository the app is
-  part of), MIT: the VM side, the base and Omarchy installers, the icon.
+- **OmacVM** ([original source](https://github.com/gillesgoetsch/OmacVM)),
+  MIT: the VM side, the base and Omarchy installers, the icon. The FullPanel
+  fork's app and guest changes are in
+  [brianmerchant/omacvm, branch fullpanel](https://github.com/brianmerchant/omacvm/tree/fullpanel).
 - **Python** 3.13.16 (CPython), PSF-2.0, in `Contents/Resources/python`: the
   interpreter for OmacVM's Mac-side scripts on Macs without Xcode's Command
   Line Tools. As built by python-build-standalone
@@ -74,3 +98,31 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   Font License 1.1, (c) 2020 The JetBrains Mono Project Authors: the Touch
   ID panel's font, in Contents/Resources/fonts unchanged with its licence
   (`OFL.txt`).
+
+## Source and future binary distribution
+
+A future modified QEMU binary needs complete corresponding source supplied
+through a method allowed by [GPL version 2, section 3](https://raw.githubusercontent.com/qemu/qemu/master/COPYING).
+For a downloadable binary, arrange matching source access with the binary:
+the full pinned QEMU source, all applicable fork patches and source
+transformers, and the scripts controlling compilation and installation.
+Preserve QEMU's `COPYING`, `LICENSE` and per-file notices, including the Cocoa
+driver's notice. A mutable branch link or a link to upstream source alone
+does not identify the complete source for a particular modified binary.
+
+Record the exact fork commit for each binary and retain the pinned dependency
+sources, notices and build inputs for that build. The runtime scripts record
+archive URLs, checksums, dependency pins and patch order. Build entry points
+and prerequisites are documented in [README.md](README.md#build) and
+[runtime/README.md](runtime/README.md). Reproduction requires the fork checkout
+matching the binary, rather than the official upstream checkout shown in the
+upstream build example.
+
+The app build copies this notice and several licence files into
+`Contents/Resources/licenses`; the runtime's libraries are staged separately.
+No FullPanel binary release or binary-distribution compliance is established
+by this documentation audit. Before distributing one, inspect the complete
+bundle for required QEMU and library licence texts, applicable source access,
+and LGPL library replacement/relinking requirements. Replaceable `.dylib`
+files alone are not a completed LGPL compliance review. Release-specific
+source availability, notices and reproducibility remain unverified.

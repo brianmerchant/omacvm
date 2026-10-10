@@ -1,5 +1,12 @@
 # Third-party notices
 
+The original [OmacVM project](https://github.com/gillesgoetsch/OmacVM) is by
+Gilles Goetsch. Brian Merchant contributed the experimental FullPanel
+integration in the [FullPanel fork](https://github.com/brianmerchant/omacvm/tree/fullpanel).
+The existing MIT licence and upstream copyright remain unchanged. Component
+licences, including QEMU's, continue to apply as described here and in the
+[app notices](app/THIRD_PARTY_NOTICES.md).
+
 OmacVM's own code is MIT (`LICENSE`). It reuses, with credit at the top of
 each file taken from them:
 
@@ -33,7 +40,16 @@ each file taken from them:
   installed Omarchy's own display panel, with its `LICENSE`; the icon
   (`src/icon/omacvm.svg`) uses Omarchy's mark; OmacVM.app's boot logo (the
   firmware's, and the window's while the VM starts) and the start animation
-  are Omarchy's `logo.svg`.
+  are Omarchy's `logo.svg`. The dedicated `omacvm.fullpanel.bar` plugin is
+  copied from the guest's installed Omarchy stock bar, including its existing
+  files and notices; FullPanel modifies only that managed copy.
+- **UTM** (Turing Software, LLC), Apache-2.0: its camera-housing fullscreen
+  work in [PR #7885](https://github.com/utmapp/UTM/pull/7885) and
+  [PR #7910](https://github.com/utmapp/UTM/pull/7910) provided architectural
+  prior art. As documented in the Cocoa transformer, FullPanel's Objective-C
+  implementation was developed independently; UTM's Swift source was not
+  copied. This is attribution of prior art, not a claim that UTM code is
+  bundled in FullPanel. See the [provenance notes](docs/experiments/camera-housing-fullscreen.md#provenance-and-licensing).
 - **JetBrains Mono** 2.305 (github.com/JetBrains/JetBrainsMono), SIL Open
   Font License 1.1, (c) 2020 The JetBrains Mono Project Authors,
   `app/fonts/OFL.txt`: the font of the Touch ID panel (`app/fonts`, bundled

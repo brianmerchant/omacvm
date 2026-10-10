@@ -237,5 +237,10 @@ Build: `./build-qemu-gpu-runtime.sh` (about 70 seconds, needs only the Command
 Line Tools; the firmware about 2 minutes more the first time, then kept in
 `.build/edk2`). Output: `.build/qemu-gpu-runtime` and `.build/firmware`.
 
-QEMU is GPL-2.0. Anyone who gets a built app must also be able to get this
-source and the patches.
+QEMU is GPL-2.0 with other licences per file. FullPanel's additional Cocoa
+source transformer is `patches/apply-camera-housing-fullscreen.py`; the
+build script applies it to the pinned QEMU source alongside the other
+runtime patches. See the [FullPanel notes](../../docs/experiments/camera-housing-fullscreen.md)
+for provenance and behavior, and the [app notices](../THIRD_PARTY_NOTICES.md#source-and-future-binary-distribution)
+for exact source references and future binary-distribution requirements.
+This source checkout is not itself verification of a binary's compliance.
