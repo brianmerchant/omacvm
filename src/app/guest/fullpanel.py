@@ -302,7 +302,7 @@ class FullPanel:
             raise ValueError("invalid runtime mask record")
         return owned, active
 
-    def unsuppress(self, rollback=False):
+    def unsuppress(self, rollback=False, native=False):
         if read(self.masks) is None:
             return
         owned, active = self.mask_record()
@@ -315,8 +315,22 @@ class FullPanel:
             for unit in owned:
                 (self.mask_dir / unit).unlink(missing_ok=True)
             self.command("systemctl", "--user", "daemon-reload")
-        if rollback and active:
-            self.command("systemctl", "--user", "start", "--no-block", *active)
+        resume = active if rollback else []
+        if native:
+            # The graphical target may already have attempted these starts
+            # while masked. After committing the native bar, resume enabled
+            # units even if this boot's journal captured no active processes.
+            resume = []
+            for unit in owned:
+                enabled = self.command("systemctl", "--user", "is-enabled", unit, required=False)
+                if enabled.returncode == 0 and enabled.stdout.strip() in ("enabled", "enabled-runtime"):
+                    resume.append(unit)
+        resume = [unit for unit in resume
+                  if self.command("systemctl", "--user", "is-active", "--quiet", unit, required=False).returncode != 0]
+        if resume:
+            # start is idempotent, and --no-block leaves Hyprland free to
+            # answer the original units' IPC hooks once config loading ends.
+            self.command("systemctl", "--user", "start", "--no-block", *resume)
         self.masks.unlink()
 
     def prepare(self):
@@ -328,8 +342,8 @@ class FullPanel:
             raise ValueError("unsupported shell.json; retaining the current bar")
         selected = bar.get("id") == PLUGIN
         if not fullpanel and not selected:
-            self.unsuppress(rollback=True)
-            return  # Disabled: no plugin install, config write or unit changes.
+            self.unsuppress(native=True)
+            return  # Native without a pending mask journal remains inert.
         # Never write behind a shell's in-memory config or launch another shell.
         if self.shell_running():
             if fullpanel and selected:
@@ -397,8 +411,8 @@ class FullPanel:
                     self.config.unlink()
                 else:
                     atomic(self.config, restored.encode(), original)
-                # Commit native selection before restarting any native service.
-                self.unsuppress(rollback=True)
+                # Commit native selection before starting any native service.
+                self.unsuppress(native=True)
             except (OSError, ValueError):
                 # Never put the FullPanel selection back before its display
                 # services have been suppressed again. If that fails, the

@@ -40,6 +40,18 @@ class Guest(mod.FullPanel):
         self.defer_stop = False
         self.unmanaged = False
         self.active_bar = None
+        self.graphical_session_active = False
+        self.activate_session_on_reload = False
+
+    def activate_graphical_session(self):
+        # Target wants are started once. Reloading/unmasking afterwards does
+        # not retry a service whose startup opportunity passed while masked.
+        if self.graphical_session_active:
+            return
+        self.graphical_session_active = True
+        for unit in mod.UNITS:
+            if self.units[unit] in ("enabled", "enabled-runtime"):
+                self.command("systemctl", "--user", "start", "--no-block", unit)
 
     def command(self, *args, required=True):
         self.commands.append(args)
@@ -60,6 +72,7 @@ class Guest(mod.FullPanel):
             verb = args[2]
             if verb == "is-enabled":
                 output = self.units[args[-1]]
+                result = 1 if output in ("disabled", "missing", "masked", "masked-runtime") else 0
             elif verb == "is-active":
                 result = 0 if args[-1] in self.active else 3
             elif verb == "show":
@@ -80,8 +93,10 @@ class Guest(mod.FullPanel):
                         if self.units[unit] != "masked-runtime":
                             self.before_masks[unit] = self.units[unit]
                         self.units[unit] = "masked-runtime"
-                    elif self.units[unit] == "masked-runtime":
-                        self.units[unit] = self.before_masks.pop(unit, "enabled")
+                    elif self.units[unit] == "masked-runtime" and unit in self.before_masks:
+                        self.units[unit] = self.before_masks.pop(unit)
+                if self.activate_session_on_reload:
+                    self.activate_graphical_session()
             else:
                 for unit in (a for a in args[3:] if a in mod.UNITS):
                     if verb == "stop":
@@ -98,7 +113,12 @@ class Guest(mod.FullPanel):
                         if self.fail != "kill":
                             self.active.discard(unit)
                     elif verb == "start":
-                        self.active.add(unit)
+                        if self.units[unit] in ("missing", "masked", "masked-runtime"):
+                            result = 1
+                        elif unit == "notchcast.service":
+                            self.active.add(unit)
+                        # The install unit is oneshot/conditional; a normal
+                        # start completes without a persistent process.
                     else:
                         raise AssertionError(args)
         elif args[0] == "pgrep":
@@ -513,6 +533,128 @@ mod.FullPanel(pathlib.Path(os.environ["FIX_HOME"]), root / "omarchy", root / "ru
         service_ops = [c for c in self.g.commands if c[0] == "systemctl" and c[2] in ("stop", "start")]
         self.assertTrue(service_ops)
         self.assertTrue(all("--no-block" in c for c in service_ops))
+        self.assert_protected()
+
+    def test_first_native_boot_starts_enabled_services_after_session_target(self):
+        self.g.install()
+        self.g.activate_graphical_session()
+        self.g.prepare()  # Working Native before entering FullPanel.
+        self.mode(True)
+        self.g.prepare()
+        self.assertFalse(self.g.active)
+        self.assertEqual(self.selected(), mod.PLUGIN)
+        # A fresh boot loses /run and active PIDs, but retains the selected
+        # FullPanel bar. The target starts while prepare's masks are present.
+        self.g.masks.unlink()
+        for unit in mod.UNITS:
+            (self.g.mask_dir / unit).unlink()
+        self.g.command("systemctl", "--user", "daemon-reload")
+        self.g.graphical_session_active = False
+        self.g.activate_session_on_reload = True
+        self.g.commands.clear()
+        self.mode(False)
+        command = self.g.command
+        def checked(*args, **kwargs):
+            if "start" in args:
+                self.assertTrue(self.g.graphical_session_active)
+                self.assertEqual(self.g.config.read_bytes(), self.original)
+                self.assertFalse(any((self.g.mask_dir / u).is_symlink() for u in mod.UNITS))
+                self.assertIn("--no-block", args)
+            return command(*args, **kwargs)
+        with patch.object(self.g, "command", side_effect=checked):
+            self.g.prepare()
+        self.assertTrue(self.g.graphical_session_active)
+        self.assertIn("notchcast.service", self.g.active)
+        starts = [c for c in self.g.commands if "start" in c]
+        self.assertEqual({u for c in starts for u in c if u in mod.UNITS}, set(mod.UNITS))
+        self.assertIn("Native", self.g.status())
+        self.assertFalse(self.g.masks.exists())
+        self.g.commands.clear()
+        self.g.prepare()  # Repeated Native does not restart the streamer.
+        self.assertFalse(any("stop" in c or "start" in c for c in self.g.commands))
+        self.assertIn("notchcast.service", self.g.active)
+        self.g.active.clear()
+        self.g.graphical_session_active = False
+        self.g.activate_graphical_session()  # A subsequent ordinary Native boot.
+        self.g.commands.clear()
+        self.g.prepare()
+        self.assertFalse(any("stop" in c or "start" in c for c in self.g.commands))
+        self.assertIn("notchcast.service", self.g.active)
+        self.assertEqual(self.g.config.read_bytes(), self.original)
+        self.assert_protected()
+
+    def test_native_restore_respects_service_enablement_and_external_masks(self):
+        for status in ("disabled", "missing", "masked", "masked-runtime", "static", "enabled-runtime"):
+            with self.subTest(status=status):
+                self.g.units["notchcast.service"] = status
+                self.g.active.clear()
+                self.g.graphical_session_active = False
+                self.g.activate_session_on_reload = True
+                self.mode(True)
+                self.g.prepare()
+                write(self.g.runtime / "systemd/user/unrelated.service", "[Service]\n# custom override\n")
+                self.g.commands.clear()
+                self.mode(False)
+                self.g.prepare()
+                self.assertEqual(self.g.units["notchcast.service"], status)
+                self.assertEqual("notchcast.service" in self.g.active, status == "enabled-runtime")
+                starts = [c for c in self.g.commands if "start" in c]
+                self.assertEqual(any("notchcast.service" in c for c in starts), status == "enabled-runtime")
+                self.assertEqual((self.g.runtime / "systemd/user/unrelated.service").read_text(), "[Service]\n# custom override\n")
+                self.assertEqual(self.g.config.read_bytes(), self.original)
+                self.assert_protected()
+
+    def test_interrupted_native_restore_does_not_restart_running_services(self):
+        self.mode(True)
+        self.g.prepare()
+        write(self.g.config, self.original)  # Native commit succeeded before interruption.
+        for unit in mod.UNITS:
+            (self.g.mask_dir / unit).unlink()
+        self.g.command("systemctl", "--user", "daemon-reload")
+        self.g.active.update(mod.UNITS)
+        self.g.commands.clear()
+        self.mode(False)
+        self.g.prepare()
+        self.assertFalse(any("start" in c or "stop" in c for c in self.g.commands))
+        self.assertEqual(self.g.active, set(mod.UNITS))
+        self.assertFalse(self.g.masks.exists())
+        self.assert_protected()
+
+    def test_native_restore_keeps_independent_runtime_mask(self):
+        unit = "notchcast.service"
+        self.g.mask_dir.mkdir(parents=True)
+        external = self.g.mask_dir / unit
+        external.symlink_to("/dev/null")
+        self.g.units[unit] = "masked-runtime"
+        self.mode(True)
+        self.g.prepare()
+        self.assertNotIn(unit, self.g.mask_record()[0])
+        self.g.commands.clear()
+        self.mode(False)
+        self.g.prepare()
+        self.assertTrue(external.is_symlink())
+        self.assertEqual(os.readlink(external), "/dev/null")
+        self.assertEqual(self.g.units[unit], "masked-runtime")
+        self.assertFalse(any("start" in c and unit in c for c in self.g.commands))
+        self.assertEqual(self.g.config.read_bytes(), self.original)
+        self.assert_protected()
+
+    def test_native_service_start_failure_retains_safe_bar_and_recovers(self):
+        self.mode(True)
+        self.g.prepare()
+        fullpanel = self.g.config.read_bytes()
+        self.mode(False)
+        self.g.fail = "start"
+        with self.assertRaisesRegex(ValueError, "command failed.*start"):
+            self.g.prepare()
+        self.assertEqual(self.g.config.read_bytes(), fullpanel)
+        self.assertEqual(set(self.g.units.values()), {"masked-runtime"})
+        self.assertFalse(self.g.active)
+        self.g.fail = None
+        self.g.prepare()
+        self.assertEqual(self.g.config.read_bytes(), self.original)
+        self.assertIn("notchcast.service", self.g.active)
+        self.assertFalse(self.g.masks.exists())
         self.assert_protected()
 
     def test_unusable_runtime_mask_is_detected_before_changing_selection(self):

@@ -73,10 +73,12 @@ Only masks created by FullPanel are undone. These masks also expire on reboot.
 The dedicated bar excludes NOTCH outputs and contains no Omanotch parking or
 notchbar IPC code. The existing Omanotch compositor configuration remains
 loaded and unchanged; FullPanel does not create another display component.
-Native startup commits the saved bar before removing masks or restarting
-previously active services. The normal graphical session starts Omanotch
-through its original enabled services. Disabled or externally masked units
-retain their prior settings. The owned journal repairs an interrupted mask
+Native startup commits the saved bar before removing masks, then queues
+nonblocking starts for the original enabled, inactive services whose masks
+FullPanel removed. This also recovers a graphical-session startup attempt
+that passed while they were masked. Running services are not restarted.
+Disabled, absent or externally masked units retain their prior settings.
+The owned journal repairs an interrupted mask
 transition on the next attempt. If unmasking fails, the valid native selection
 is kept until suppression can safely be re-established; checks report it.
 
