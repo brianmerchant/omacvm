@@ -106,8 +106,9 @@ For additional Omarchy scaling choices, launch OmacVM.app with
 This reuses the existing CleanSize calculation to select a slightly
 shorter guest resolution, leaving a few black rows at the bottom.
 For example, on a 14-inch M1 Pro MacBook Pro, 3600x2338 becomes
-3600x2328, allowing 1.6x scaling. Not every scale is guaranteed
-on every display. Without the flag, FullPanel uses the full
+3600x2328, restoring all six Omarchy scaling choices:
+1x, 1.33x, 1.6x, 2x, 3x and 4x.
+Other displays may offer different scaling choices. Without the flag, FullPanel uses the full
 physical resolution as before. The setting applies only to that
 app launch.
 
