@@ -8,8 +8,8 @@ AppKit's full-screen frame becomes (the whole display, kept over AppKit's
 camera-safe re-ask, or AppKit's own: Split View, a smaller tile, an
 external display), when a frame change is refused, when the strip is lost
 for the rest of a full screen, whether the guest may be a few rows
-shorter (never over the whole panel), when macOS's menu bar may come down
-from the top row and the app's presentation options for it. Used by
+shorter (over the whole panel only with an explicit opt-in), when macOS's
+menu bar may come down from the top row and the app's presentation options for it. Used by
 omacvm-cocoa-fullpanel.patch (which explains the why).
 
 Why its own file: so the rules are tested on the sizes of every notched
@@ -24,7 +24,7 @@ diff --git a/ui/omacvm-fullpanel.h b/ui/omacvm-fullpanel.h
 new file mode 100644
 --- /dev/null
 +++ b/ui/omacvm-fullpanel.h
-@@ -0,0 +1,222 @@
+@@ -0,0 +1,224 @@
 +/*
 + * OmacVM: FullPanel, the VM's full-screen window over the whole notched
 + * display, the strip beside the camera housing included (experimental,
@@ -141,16 +141,18 @@ new file mode 100644
 +/*
 + * Whether the guest may be a few rows shorter than the full-screen area
 + * (ui/omacvm-clean-size.h: so Omarchy's scale presets fit, the rows left
-+ * over black at the bottom). Only below a notch, with the IOSurface layer
-+ * that draws the guest at the top. A window over the whole display has the
-+ * strip at the top and the panel's bottom edge below it: the guest is the
-+ * whole panel (2940x1912 on a 13-inch MacBook Air), never cut, or the
-+ * left-over rows show as a black band at the bottom.
++ * over black at the bottom). Only on a notched display, with the IOSurface layer
++ * that draws the guest at the top. FullPanel keeps the whole panel by
++ * default. OMACVM_FULLPANEL_CLEAN_SIZE=1 explicitly opts into the same
++ * selection and top-aligned rendering, leaving black rows at the bottom.
++ * This switch does not enable trimming on unnotched displays or without
++ * the IOSurface layer, and does not change native full-screen selection.
 + */
 +static inline bool omacvm_fp_cut_rows(bool full_screen, bool layer,
-+                                      double notch_inset, bool usable)
++                                      double notch_inset, bool usable,
++                                      bool clean_size)
 +{
-+    return full_screen && layer && notch_inset > 0 && !usable;
++    return full_screen && layer && notch_inset > 0 && (!usable || clean_size);
 +}
 +
 +/*

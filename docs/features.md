@@ -99,6 +99,18 @@ one this start is, and when it includes the notch whether the strip is
 covered ("strip covered") and that Omanotch is idle. Changing the Mac's
 display resolution while the VM runs: restart the VM.
 
+**Optional scale-compatible guest resolution (experimental):**
+FullPanel normally gives the VM the entire physical display resolution.
+For additional Omarchy scaling choices, launch OmacVM.app with
+`open -n --env OMACVM_FULLPANEL_CLEAN_SIZE=1 "/path/to/OmacVM.app"`.
+This reuses the existing CleanSize calculation to select a slightly
+shorter guest resolution, leaving a few black rows at the bottom.
+For example, on a 14-inch M1 Pro MacBook Pro, 3600x2338 becomes
+3600x2328, allowing 1.6x scaling. Not every scale is guaranteed
+on every display. Without the flag, FullPanel uses the full
+physical resolution as before. The setting applies only to that
+app launch.
+
 Why it is an addition and not a replacement: [ADR 0044](adr/0044-fullpanel.md).
 
 ## Full screen and the escape keys

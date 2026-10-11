@@ -234,7 +234,7 @@ static void test_guest_size(void)
         double backing = 2;
         double pw = d->frame.w * backing, ph = d->frame.h * backing;
         bool usable = omacvm_fp_display_ok(true, d->notch, false);
-        bool cut = omacvm_fp_cut_rows(true, true, d->notch, usable);
+        bool cut = omacvm_fp_cut_rows(true, true, d->notch, usable, false);
         OmacVMSize s = omacvm_clean_size(pw, ph, backing, cut);
 
         CHECK(!cut, "%s FullPanel: no rows cut", d->name);
@@ -244,7 +244,7 @@ static void test_guest_size(void)
 
         /* Native: the area below the notch, a few rows cut for the presets. */
         double nh = (d->frame.h - d->notch) * backing;
-        cut = omacvm_fp_cut_rows(true, true, d->notch, false);
+        cut = omacvm_fp_cut_rows(true, true, d->notch, false, false);
         s = omacvm_clean_size(pw, nh, backing, cut);
         CHECK(cut, "%s native: rows may be cut", d->name);
         CHECK(s.w == (uint32_t)pw && s.h <= (uint32_t)nh &&
@@ -256,13 +256,59 @@ static void test_guest_size(void)
     OmacVMSize old = omacvm_clean_size(2940, 1912, 2, true);
     CHECK(old.h == 1900, "Air panel with the cut: %u rows (the black band)", old.h);
     OmacVMSize air = omacvm_clean_size(2940, 1912, 2,
-                                       omacvm_fp_cut_rows(true, true, 32, true));
+                                       omacvm_fp_cut_rows(true, true, 32, true, false));
     CHECK(air.w == 2940 && air.h == 1912, "Air FullPanel: %ux%u", air.w, air.h);
 
+    /* Explicit FullPanel opt-in: the existing selector, not a fixed mode. */
+    for (size_t i = 0; i < sizeof builtins / sizeof builtins[0]; i++) {
+        const Display *d = &builtins[i];
+        double pw = d->frame.w * 2, ph = d->frame.h * 2;
+        bool cut = omacvm_fp_cut_rows(true, true, d->notch, true, true);
+        OmacVMSize s = omacvm_clean_size(pw, ph, 2, cut);
+        OmacVMSize want = omacvm_clean_size(pw, ph, 2, true);
+        CHECK(cut && s.w == want.w && s.h == want.h,
+              "%s opt-in: existing clean-size selection", d->name);
+        CHECK(omacvm_top_band(pw, ph, s.w, s.h, 2) == ph - s.h,
+              "%s opt-in: shown band matches selected cut", d->name);
+    }
+
+    /* The requested framebuffer: disabled/unset vs explicitly enabled. */
+    const char *values[] = { NULL, "0", "", "yes", "1" };
+    for (size_t i = 0; i < sizeof values / sizeof values[0]; i++) {
+        bool on = omacvm_fp_requested(values[i]);
+        bool cut = omacvm_fp_cut_rows(true, true, 32, true, on);
+        OmacVMSize s = omacvm_clean_size(3600, 2338, 2, cut);
+        CHECK(s.w == 3600 && s.h == (on ? 2328u : 2338u),
+              "FullPanel opt-in %s: %ux%u", values[i] ? values[i] : "unset", s.w, s.h);
+        CHECK(omacvm_top_band(3600, 2338, s.w, s.h, 2) == (on ? 10u : 0u),
+              "FullPanel opt-in: ten black pixels (five points) only when enabled");
+    }
+    CHECK(omacvm_top_band(3600, 2338, 3600, 2338, 2) == 0,
+          "old full-height surface during mode change: fills view");
+    CHECK(omacvm_top_band(3600, 2338, 1280, 720, 2) == 0,
+          "boot surface: fills view");
+
+    /* Opt-in cannot cut a window, an unnotched display, or a missing layer. */
+    for (int full = 0; full <= 1; full++) {
+        for (int layer = 0; layer <= 1; layer++) {
+            for (int notch = 0; notch <= 1; notch++) {
+                bool cut = omacvm_fp_cut_rows(full, layer, notch * 32, true, true);
+                OmacVMSize s = omacvm_clean_size(3600, 2338, 2, cut);
+                CHECK(cut == (full && layer && notch) &&
+                      s.h == (cut ? 2328u : 2338u),
+                      "opt-in gate: fullscreen=%d layer=%d notch=%d", full, layer, notch);
+            }
+        }
+    }
+
+    /* Native selection is unaffected by the FullPanel opt-in. */
+    CHECK(omacvm_fp_cut_rows(true, true, 32, false, true),
+          "native full screen still trims with the switch set");
+
     /* No cut without the layer (GPU safe mode), in a window, or without a notch. */
-    CHECK(!omacvm_fp_cut_rows(true, false, 32, false), "no layer: nothing cut");
-    CHECK(!omacvm_fp_cut_rows(false, true, 32, false), "window: nothing cut");
-    CHECK(!omacvm_fp_cut_rows(true, true, 0, false), "no notch: nothing cut");
+    CHECK(!omacvm_fp_cut_rows(true, false, 32, false, false), "no layer: nothing cut");
+    CHECK(!omacvm_fp_cut_rows(false, true, 32, false, false), "window: nothing cut");
+    CHECK(!omacvm_fp_cut_rows(true, true, 0, false, false), "no notch: nothing cut");
 }
 
 static void test_reveal(void)
