@@ -1,5 +1,6 @@
 import AppKit
 import OmacVMUpdate
+import OmacVMFeatures
 import SwiftUI
 
 /// The launcher: sets up the VM, starts it and steps aside. QEMU shows the VM
@@ -10,6 +11,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow?
     private var centring: CentredWindow?
     var runner: Runner?
+    private let fullPanelMenuWarning = FullPanelMenuWarning()
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        fullPanelMenuWarning.reactivated()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // M1/M2: read QEMU's binary for the small PCI window now, off the
@@ -265,6 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var quitting = false
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        fullPanelMenuWarning.cancel()
         if state.storage.moving != nil {
             // A copy to another drive stops at once; its half copy is deleted
             // (at the next launch if that takes longer than the 10 s wait) and
@@ -367,7 +374,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// as FastNetwork.choose says).
     enum NetworkStart { case ask, decided(String?) }
 
-    private func startVM(openGLOnce: String? = nil, network: NetworkStart = .ask) {
+    private func startVM(openGLOnce: String? = nil, network: NetworkStart = .ask,
+                         withoutNotch: Bool = false) {
+        // An explicit new request replaces any start waiting in Settings.
+        fullPanelMenuWarning.cancel()
+        guard runner == nil else { Self.qemuApp?.activate(); return }
         // A build or an update runs the VM without a window: a second QEMU on
         // its disk (a start from the Dock or `omacvm start`) would corrupt it.
         if state.screen == .building {
@@ -401,6 +412,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showWindow()
             return
         }
+        // Stop before any QEMU startup or network prompt. Resuming re-enters
+        // these safety checks for exactly the requested folder, even if the
+        // person selected another VM while visiting System Settings.
+        let folder = state.config.folder
+        if fullPanelMenuWarning.intercept(
+            wantsFullPanel: Runner.notchPlan(folder: folder, withoutNotch: withoutNotch).start.fullPanel,
+            resume: { [weak self] standard in
+                guard let self, self.runner == nil, self.state.screen != .building,
+                      let config = VMConfig.load(from: folder), config.isReady else { return }
+                self.state.config = config
+                self.state.screen = .ready
+                self.startVM(openGLOnce: openGLOnce, network: network, withoutNotch: standard)
+            }) { return }
         // Not shut down cleanly, or copied while it ran (RunMarker): asked
         // first, once per start (.decided: the same start, continued).
         if case .ask = network, !RunMarker.confirmStart(state.config) {
@@ -411,9 +435,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // update): asked first, never a start that cannot work.
         guard case .decided(let userNetwork) = network else {
             if FastNetwork.isOn(state.config) {
-                askFastNetwork { [weak self] why in self?.startVM(openGLOnce: openGLOnce, network: .decided(why)) }
+                askFastNetwork { [weak self] why in self?.startVM(openGLOnce: openGLOnce, network: .decided(why), withoutNotch: withoutNotch) }
             } else {
-                startVM(openGLOnce: openGLOnce, network: .decided(nil))
+                startVM(openGLOnce: openGLOnce, network: .decided(nil), withoutNotch: withoutNotch)
             }
             return
         }
@@ -428,6 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         r.sizeNote = state.config.startSizeNote
         r.openGLOnce = openGLOnce
         r.userNetwork = userNetwork
+        r.withoutNotchOnce = withoutNotch
         r.onExit = { [weak self, weak r] status in
             guard let self else { return }
             let fellBack = r?.venusFallback, driveGone = r?.driveGone, diskLocked = r?.diskLocked == true
@@ -456,7 +481,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? FileManager.default.copyItem(at: logs.appendingPathComponent("qemu.log"),
                                                   to: logs.appendingPathComponent("qemu-vulkan-fallback.log"))
                 if !self.quitting {
-                    self.startVM(openGLOnce: fb.keep ? nil : fb.why, network: .decided(userNetwork))
+                    self.startVM(openGLOnce: fb.keep ? nil : fb.why, network: .decided(userNetwork), withoutNotch: withoutNotch)
                     if self.runner != nil {
                         self.state.message = fb.keep
                             ? "\(Graphics.didNotStart) (\(fb.why)). \"Try Vulkan again\" under Graphics tries it once more."
@@ -471,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The guest shrank btrfs and shut down for the cut: start again
             // (startVM cuts first, then the guest checks the disk).
             if !self.quitting, VMDisk.resize(self.state.config)?.step == .cut {
-                self.startVM()
+                self.startVM(withoutNotch: withoutNotch)
                 return
             }
             if self.quitting {

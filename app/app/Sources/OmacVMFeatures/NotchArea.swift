@@ -184,7 +184,11 @@ public enum NotchArea {
     /// notched built-in display now (its geometry valid) and the VM's side
     /// ready; else native, and the record says why. Native also means
     /// Omanotch as the VM's features say (on by default with a notch).
-    public static func start(mode: NotchMode, fullScreen: Bool, notch: NotchGeometry?, guestReady: Bool) -> NotchStart {
+    public static func start(mode: NotchMode, fullScreen: Bool, notch: NotchGeometry?, guestReady: Bool,
+                             withoutNotch: Bool = false) -> NotchStart {
+        if withoutNotch {
+            return NotchStart(fullPanel: false, record: "native (full screen without notch for this start; Omanotch off)")
+        }
         guard mode == .fullpanel else { return NotchStart(fullPanel: false, record: "native") }
         guard guestReady else {
             return NotchStart(fullPanel: false, record: "native (including notch is set, but the VM is not ready for it: Omanotch on, then Update VM or omacvm apply)")

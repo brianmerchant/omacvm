@@ -19,6 +19,8 @@ final class Runner {
     private var featuresRoute: ControlCentreRoute?
     private var observers: [NSObjectProtocol] = []
     var onExit: ((Int32) -> Void)?
+    /// The conflict dialog's one-start choice, never a VM or global setting.
+    var withoutNotchOnce = false
 
     init(config: VMConfig) { self.config = config }
 
@@ -64,7 +66,7 @@ final class Runner {
             // Venus (Vulkan: the VM's Graphics setting, see Graphics.swift)
             // needs blobs and a host memory window for them.
             "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(g.venus ? ",blob=true,venus=true,hostmem=\(g.hostmemMB)M" : "")",
-            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
+            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\((Settings.startFullScreen || withoutNotchOnce) ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
             "-object", "rng-random,id=rng0,filename=/dev/urandom",
@@ -90,7 +92,9 @@ final class Runner {
         // This runtime moves the guest's pointer up into Omanotch's hidden NOTCH
         // output when the Mac's pointer leaves for the strip (omacvm-cocoa-notch-park):
         // notchcast then never hides the guest's cursor (that lagged by Hyprland's tick).
-        a += ["-smbios", "type=11,value=omacvm.notchpointer=1"]
+        if !withoutNotchOnce {
+            a += ["-smbios", "type=11,value=omacvm.notchpointer=1"]
+        }
         // FullPanel (NotchArea): the camera housing for the guest's bar, which
         // then sits in the strip beside the notch (omacvm-app-host -> host.env;
         // the bar and notchcast read it). Native starts send nothing.
@@ -355,14 +359,10 @@ final class Runner {
         // VM's setting, a full-screen start and a notch now. Then QEMU covers
         // the strip and the guest's bar sits in it: no Omanotch link for this
         // start (the VM's features keep it; the next native start has it again).
-        // A test build on a Mac without a notch may be given one (OMACVM_TEST_NOTCH_GEOMETRY).
-        notchGeometry = NotchArea.geometry(test: TestHooks.value("OMACVM_TEST_NOTCH_GEOMETRY",
-                                                                 bundleID: Bundle.main.bundleIdentifier)) ?? Mac.notchGeometry
-        notchStart = NotchArea.start(mode: NotchArea.read(folder: c.folder),
-                                     fullScreen: Settings.startFullScreen, notch: notchGeometry,
-                                     guestReady: NotchArea.guestReady(folder: c.folder, features: try? String(
-                                        contentsOf: c.folder.appendingPathComponent("features"), encoding: .utf8)))
-        if notchStart.fullPanel { links.omanotch = false }
+        let notchPlan = Self.notchPlan(folder: c.folder, withoutNotch: withoutNotchOnce)
+        notchGeometry = notchPlan.geometry
+        notchStart = notchPlan.start
+        if notchStart.fullPanel || withoutNotchOnce { links.omanotch = false }
         p.arguments = arguments()
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
@@ -564,6 +564,20 @@ final class Runner {
                 Task { @MainActor in self?.appendLog(line) }
             }
         }
+    }
+
+    /// Shared FullPanel eligibility, evaluated afresh before warning and before
+    /// QEMU starts. Test builds use the same made-up notch at both sites.
+    static func notchPlan(folder: URL, withoutNotch: Bool = false)
+        -> (geometry: NotchGeometry?, start: NotchStart) {
+        let geometry = NotchArea.geometry(test: TestHooks.value("OMACVM_TEST_NOTCH_GEOMETRY",
+                                                         bundleID: Bundle.main.bundleIdentifier)) ?? Mac.notchGeometry
+        let start = NotchArea.start(mode: NotchArea.read(folder: folder),
+                                    fullScreen: Settings.startFullScreen, notch: geometry,
+                                    guestReady: NotchArea.guestReady(folder: folder, features: try? String(
+                                        contentsOf: folder.appendingPathComponent("features"), encoding: .utf8)),
+                                    withoutNotch: withoutNotch)
+        return (geometry, start)
     }
 
     /// What of the Mac this start of the VM may use (its features).
